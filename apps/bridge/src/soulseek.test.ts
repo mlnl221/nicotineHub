@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { deflateSync } from "node:zlib";
 import {
   buildLogin,
   buildSetWaitPort,
+  buildFileSearch,
+  buildPeerInit,
   parseLoginResponse,
+  parsePeerInit,
+  parseFileSearchResponse,
   tryParseMessage,
   packString,
   packUint32,
@@ -160,5 +165,108 @@ describe("constants", () => {
   test("experimental client version is used", () => {
     expect(MAJOR_VERSION).toBe(177);
     expect(MINOR_VERSION).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("buildFileSearch", () => {
+  test("frames code 26 with token and query", () => {
+    const raw = buildFileSearch(42, "hello world");
+    const parsed = tryParseMessage(raw);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.code).toBe(SERVER_MESSAGE_CODES.fileSearch);
+    let offset = 0;
+    const token = parsed!.payload.readUInt32LE(offset);
+    offset += 4;
+    const len = parsed!.payload.readUInt32LE(offset);
+    offset += 4;
+    const query = parsed!.payload.subarray(offset, offset + len).toString("utf8");
+    expect(token).toBe(42);
+    expect(query).toBe("hello world");
+  });
+});
+
+describe("buildPeerInit / parsePeerInit", () => {
+  test("round-trips user and connection type", () => {
+    const raw = buildPeerInit("alice", "P");
+    const parsed = tryParseMessage(raw);
+    expect(parsed!.code).toBe(1);
+    const init = parsePeerInit(parsed!.payload);
+    expect(init.targetUser).toBe("alice");
+    expect(init.connType).toBe("P");
+  });
+});
+
+describe("parseFileSearchResponse", () => {
+  function buildPayload(opts: {
+    username: string;
+    token: number;
+    freeUploadSlots: boolean;
+    uploadSpeed: number;
+    inQueue: number;
+    files: Array<{ name: string; size: number; attrs: Array<[number, number]> }>;
+  }): Buffer {
+    const parts: Buffer[] = [];
+    parts.push(packString(opts.username));
+    parts.push(packUint32(opts.token));
+    parts.push(packUint32(opts.files.length));
+    for (const f of opts.files) {
+      parts.push(Buffer.from([1])); // result code
+      parts.push(packString(f.name));
+      parts.push(Buffer.concat([packUint32(f.size >>> 0), packUint32(0)])); // uint64 (low + high)
+      parts.push(packUint32(0)); // obsolete ext length
+      parts.push(packUint32(f.attrs.length));
+      for (const [type, value] of f.attrs) {
+        parts.push(packUint32(type));
+        parts.push(packUint32(value));
+      }
+    }
+    parts.push(Buffer.from([opts.freeUploadSlots ? 1 : 0]));
+    parts.push(packUint32(opts.uploadSpeed));
+    parts.push(packUint32(opts.inQueue));
+    return Buffer.concat(parts);
+  }
+
+  test("parses zlib-compressed results with attributes", () => {
+    const payload = buildPayload({
+      username: "bob",
+      token: 7,
+      freeUploadSlots: true,
+      uploadSpeed: 1234,
+      inQueue: 0,
+      files: [
+        {
+          name: "song.mp3",
+          size: 5_000_000,
+          attrs: [
+            [0, 320], // bitrate
+            [1, 210], // length (seconds)
+            [2, 0], // vbr
+          ],
+        },
+        {
+          name: "track.flac",
+          size: 40_000_000,
+          attrs: [
+            [1, 300], // length
+            [4, 44100], // sample rate
+            [5, 16], // bit depth
+          ],
+        },
+      ],
+    });
+
+    const result = parseFileSearchResponse(deflateSync(payload));
+    expect(result.token).toBe(7);
+    expect(result.username).toBe("bob");
+    expect(result.freeUploadSlots).toBe(true);
+    expect(result.uploadSpeed).toBe(1234);
+    expect(result.inQueue).toBe(0);
+    expect(result.results).toHaveLength(2);
+    expect(result.results[0].name).toBe("song.mp3");
+    expect(result.results[0].size).toBe(5_000_000);
+    expect(result.results[0].attrs.bitrate).toBe(320);
+    expect(result.results[0].attrs.length).toBe(210);
+    expect(result.results[1].attrs.sampleRate).toBe(44100);
+    expect(result.results[1].attrs.bitDepth).toBe(16);
   });
 });

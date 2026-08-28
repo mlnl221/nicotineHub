@@ -31,7 +31,7 @@ Bridge URL override: `NEXT_PUBLIC_BRIDGE_URL` (build-time) or `localStorage.nico
 ## Conventions
 
 - **Bun only** — use `bun`, not `npm`/`yarn`/`npx`. `bun.lock` is committed.
-- Keep login MVP minimal: no password persistence (`README` security note), placeholder `SetWaitPort` (no inbound listener).
+- Keep login MVP minimal: no password persistence (`README` security note). Search results require a reachable inbound peer listener; `LISTEN_PORT` (default 2242/2234) must be port-forwarded on the homelab.
 - Client version is experimental `177/1` — do not reuse reserved major versions.
 - Mobile-first UI: touch targets, safe-area insets, PWA `manifest.webmanifest`.
 - Verify after changes: `bun test && bun run build`.
@@ -39,8 +39,8 @@ Bridge URL override: `NEXT_PUBLIC_BRIDGE_URL` (build-time) or `localStorage.nico
 ## Repo layout
 
 ```
-apps/bridge/src/{soulseek.ts,login.ts,server.ts,soulseek.test.ts}
-apps/web/src/{app/{layout.tsx,page.tsx},components/LoginForm.tsx,lib/{useLogin.ts,protocol.ts}}
+apps/bridge/src/{soulseek.ts,session.ts,server.ts,soulseek.test.ts}
+apps/web/src/{app/{layout.tsx,page.tsx,search/page.tsx},components/{LoginForm.tsx,Sidebar.tsx,SearchHeader.tsx,SearchBar.tsx,ResultCard.tsx},lib/{session.tsx,protocol.ts}}
 compose.yaml  .dockerignore  README.md
 ```
 
