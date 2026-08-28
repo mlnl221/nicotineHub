@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   applicationName: "Nicotine Mobile",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "default",
     title: "Nicotine Mobile",
   },
 };
@@ -19,7 +19,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
-  themeColor: "#0b0e13",
+  themeColor: "#faf9fa",
 };
 
 export default function RootLayout({
@@ -27,7 +27,19 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className="min-h-dvh bg-[#0b0e13] text-white antialiased selection:bg-indigo-500/40">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Serif:ital,wght@0,400;0,600;0,700;1,400&family=Public+Sans:wght@400;500;600&display=swap"
+          rel="stylesheet"
+        />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="min-h-dvh bg-surface-container-low font-body text-on-surface antialiased selection:bg-primary/30">
         {children}
       </body>
     </html>
