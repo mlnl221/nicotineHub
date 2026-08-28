@@ -16,7 +16,7 @@ function humanSpeed(bps: number): string {
 }
 
 function DownloadsInner() {
-  const { downloads, uploads, stats, cancelDownload, pauseDownload, resumeDownload, clearTransfer } = useTransfers();
+  const { downloads, uploads, stats, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer } = useTransfers();
   const totalDown = stats?.downloadSpeed ?? downloads.filter(d => d.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const totalUp = stats?.uploadSpeed ?? uploads.filter(u=>u.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const activeCount = downloads.length + uploads.length;
@@ -104,6 +104,7 @@ function DownloadsInner() {
                       onPause={() => pauseDownload(t.id)}
                       onCancel={() => cancelDownload(t.id)}
                       onResume={() => resumeDownload(t.id)}
+                      onRetry={() => retryDownload(t.id)}
                       onClear={() => clearTransfer(t.id, false)}
                     />
                   ))}
