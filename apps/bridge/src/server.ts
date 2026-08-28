@@ -339,6 +339,16 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         return;
       }
 
+      if (data.type === "peer:connect") {
+        const session = requireLogin(); if (!session) return;
+        const { username, connType = "P" } = parsed as { username?: string; connType?: string };
+        if (!username) { ws.send(errorMessage("username required")); return; }
+        session.connectPeer(username, connType)
+          .then(() => ws.send(JSON.stringify({ type: "peer:connect", ok: true, username, connType })))
+          .catch((e: Error) => ws.send(JSON.stringify({ type: "peer:connect", ok: false, username, error: e.message })));
+        return;
+      }
+
       if (data.type === "userinfo") {
         const result = UserInfoRequestSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid userinfo message.")); return; }

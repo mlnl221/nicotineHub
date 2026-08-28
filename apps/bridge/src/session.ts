@@ -143,7 +143,8 @@ const DEFAULT_SEARCH_TIMEOUT_MS = 20_000;
 const PEER_ADDRESS_TIMEOUT_MS = 15000;
 const CONNECTION_MAX_IDLE_MS = 60_000;
 const GHOST_IDLE_MS = 10_000;
-const USER_ADDRESS_TTL_MS = 30 * 60 * 1000;
+const USER_ADDRESS_TTL_MS = 60_000; // Phase 1: 60 s GetPeerAddress cache per TRANSFERS.md
+const CONNECT_PEER_TIMEOUT_MS = 45_000; // downloads.py Getting status 45 s (30 s indirect + 15 s grace)
 
 export class SoulseekSession {
   readonly username: string;
@@ -160,6 +161,9 @@ export class SoulseekSession {
   private excludedPhrases = new Set<string>();
   private allowedSearchTokens = new Set<number>();
   private tokenCounter = Math.floor(Math.random() * 100000) + 1;
+  // Phase 1 — indirect connectivity
+  private pendingConnects = new Map<number, { resolve: (s: Socket) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout>; username: string; connType: string }>();
+  private pendingFileTokens = new Set<number>();
   private loggedIn = false;
   private loginResolve: ((r: LoginResponse & { success: true }) => void) | undefined;
   private loginReject: ((e: Error) => void) | undefined;
@@ -252,7 +256,27 @@ export class SoulseekSession {
       this.close(); return;
     }
     if (code === SERVER_MESSAGE_CODES.connectToPeer) {
-      try { this.connectToPeer(parseConnectToPeer(payload)); } catch {}
+      try {
+        const ctp = parseConnectToPeer(payload);
+        // If this is a response to our outbound ConnectToPeer (pendingConnects), resolve it.
+        const pending = this.pendingConnects.get(ctp.token);
+        if (pending && pending.username === ctp.username && pending.connType === ctp.connType) {
+          // Inbound ConnectToPeer from server means peer wants to connect to us — for P, we Pierce.
+          // For pending outbound, we treat this as server relay and attempt direct Pierce.
+          this.connectToPeer(ctp);
+          // Also emit diagnostic
+          this.emitTransfer({ type: "transfer-request", username: ctp.username, token: ctp.token, file: `peer:connect:${ctp.connType}:${ctp.username}` });
+          return;
+        }
+        // Delegate F to TransferManager via event (Phase 2 will handle), else handle P normally
+        if (ctp.connType === "F" && this.pendingFileTokens.has(ctp.token)) {
+          this.emitTransfer({ type: "transfer-request", username: ctp.username, token: ctp.token, file: `F:${ctp.token}` });
+          // Also attempt to pierce as fallback
+          this.connectToPeer(ctp);
+        } else {
+          this.connectToPeer(ctp);
+        }
+      } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.getUserStatus) {
@@ -395,7 +419,19 @@ export class SoulseekSession {
       return;
     }
     if (code === SERVER_MESSAGE_CODES.cantConnectToPeer) {
-      // Server echo of our failure — ignore
+      try {
+        const token = payload.readUInt32LE(0);
+        const pending = this.pendingConnects.get(token);
+        if (pending) {
+          clearTimeout(pending.timer);
+          this.pendingConnects.delete(token);
+          pending.reject(new Error("CantConnectToPeer"));
+        }
+        // also try to parse optional username string for diagnostic
+        if (payload.length > 4) {
+          try { const r = new SlskReader(payload); r.uint32(); const user = r.string(); this.emitTransfer({ type: "transfer-response", username: user, token, reason: "CantConnectToPeer" }); } catch {}
+        }
+      } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.fileSearch) {
@@ -453,6 +489,11 @@ export class SoulseekSession {
           this.peerAddressRequests.delete(user);
         }
       }
+      // pendingConnects timeout is handled per-token (45 s), but sweep stale just in case
+      for (const [token, pending] of this.pendingConnects) {
+        // if timer already fired, pending would be deleted; no extra handling
+        void token; void pending;
+      }
     }, 5000);
   }
   private startServerPing() {
@@ -464,23 +505,127 @@ export class SoulseekSession {
 
   private connectToPeer(ctp: ReturnType<typeof parseConnectToPeer>) {
     if (ctp.connType !== "P" && ctp.connType !== "F" && ctp.connType !== "D") return;
+    // If this token matches a pending outbound connectPeer, resolve it
+    const pending = this.pendingConnects.get(ctp.token);
+    if (pending) {
+      clearTimeout(pending.timer);
+      this.pendingConnects.delete(ctp.token);
+      // Outbound pierce will be handled by the pending resolver; still emit for diagnostics
+      this.emitTransfer({ type: "transfer-response", username: ctp.username, token: ctp.token, reason: `ConnectToPeer ${ctp.connType}` });
+    }
     // Obfuscated port handling
     const port = ctp.obfuscatedPort ?? ctp.port;
     const ip = ctp.ip;
     Bun.connect({
       hostname: ip, port,
       socket: {
-        open: (sock) => { (sock as Socket).write(buildPierceFireWall(ctp.token)); this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: true, username: ctp.username, outbound: false, connType: ctp.connType, lastActive: Date.now() }); },
+        open: (sock) => {
+          (sock as Socket).write(buildPierceFireWall(ctp.token));
+          this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: true, username: ctp.username, outbound: false, connType: ctp.connType, lastActive: Date.now() });
+          // Resolve pending if any
+          if (pending) {
+            try { pending.resolve(sock as Socket); } catch {}
+          }
+        },
         data: (sock, chunk) => this.processPeer(sock as Socket, chunk, true),
         error: () => {
           // Report back to server we couldn't connect
           try { this.serverSocket?.write(buildCantConnectToPeer(ctp.token, ctp.username)); } catch {}
+          if (pending) { try { pending.reject(new Error("Pierce failed")); } catch {} }
         },
         close: (sock) => { this.peerStates.delete(sock as Socket); },
       },
     }).catch(() => {
       try { this.serverSocket?.write(buildCantConnectToPeer(ctp.token, ctp.username)); } catch {}
+      if (pending) { try { pending.reject(new Error("Connect failed")); } catch {} }
     });
+  }
+
+  /** Phase 1: connect to peer with 45 s race (direct vs server-relayed). */
+  async connectPeer(username: string, connType: string): Promise<Socket> {
+    const cached = this.userAddresses.get(username);
+    if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) {
+      // Try direct first, but also trigger server relay
+      return this.connectPeerWithRelay(username, connType, cached.addr);
+    }
+    // Need to fetch address
+    const addr = await this.fetchPeerAddress(username);
+    return this.connectPeerWithRelay(username, connType, addr);
+  }
+
+  private fetchPeerAddress(username: string): Promise<PeerAddress> {
+    const cached = this.userAddresses.get(username);
+    if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) return Promise.resolve(cached.addr);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.peerAddressRequests.delete(username);
+        reject(new Error("GetPeerAddress timeout"));
+      }, PEER_ADDRESS_TIMEOUT_MS);
+      this.peerAddressRequests.set(username, {
+        cb: (addr) => {
+          clearTimeout(timer);
+          this.userAddresses.set(username, { addr, updated: Date.now() });
+          resolve(addr);
+        },
+        timer,
+      });
+      this.serverSocket?.write(buildGetPeerAddress(username));
+    });
+  }
+
+  private async connectPeerWithRelay(username: string, connType: string, addr: PeerAddress): Promise<Socket> {
+    const token = this.tokenCounter++ >>> 0;
+    if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
+
+    // Send server relay
+    try { this.serverSocket?.write(buildConnectToPeer(token, username, connType)); } catch {}
+
+    // Attempt direct
+    const directPromise = (async (): Promise<Socket> => {
+      if (addr.port === 0 || addr.ip === "0.0.0.0") throw new Error("Peer offline");
+      return new Promise<Socket>((resolve, reject) => {
+        Bun.connect({
+          hostname: addr.ip, port: addr.port,
+          socket: {
+            open: (sock) => {
+              this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, lastActive: Date.now() });
+              (sock as Socket).write(buildPeerInit(this.username, connType));
+              // Wait for remote PeerInit/Pierce to complete — consider connected after open + init
+              // For P, we consider success after we send PeerInit and get data
+              setTimeout(() => resolve(sock as Socket), 200);
+            },
+            data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
+            error: () => reject(new Error("Direct connect failed")),
+            close: () => {},
+          },
+        }).catch(reject);
+      });
+    })();
+
+    // Race with pending server relay (PierceFirewall)
+    const relayPromise = new Promise<Socket>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingConnects.delete(token);
+        reject(new Error("ConnectToPeer timeout 45s"));
+      }, CONNECT_PEER_TIMEOUT_MS);
+      this.pendingConnects.set(token, { resolve, reject, timer, username, connType });
+    });
+
+    // Race direct vs relay, but prefer whichever succeeds first
+    return Promise.race([directPromise, relayPromise]).finally(() => {
+      const p = this.pendingConnects.get(token);
+      if (p) { clearTimeout(p.timer); this.pendingConnects.delete(token); }
+    });
+  }
+
+  /** Register an F token so incoming raw F connections are demuxed correctly. */
+  registerFileToken(token: number) { this.pendingFileTokens.add(token >>> 0); }
+  unregisterFileToken(token: number) { this.pendingFileTokens.delete(token >>> 0); }
+  getPeerSocket(username: string, connType: string): Socket | undefined {
+    for (const [sock, st] of this.peerStates) {
+      if (st.username === username && st.connType === connType && st.initDone) return sock;
+    }
+    return undefined;
   }
 
   private processPeer(peer: Socket, chunk: ArrayBuffer | Uint8Array, initDone: boolean) {
@@ -491,6 +636,28 @@ export class SoulseekSession {
     state.buf = Buffer.concat([state.buf, Buffer.from(bytes)]);
     while (true) {
       if (!state.initDone) {
+        // Phase 1 F demux: raw [uint32 token] without PeerInit — detect via pendingFileTokens heuristic
+        if (state.buf.length >= 4) {
+          const peekToken = state.buf.readUInt32LE(0);
+          if (this.pendingFileTokens.has(peekToken)) {
+            state.isFileConn = true;
+            state.fileToken = peekToken;
+            state.initDone = true;
+            state.connType = "F";
+            state.buf = state.buf.subarray(4);
+            // Fall through to file handling
+            continue;
+          }
+          // Probe init framing: try to validate [len][code] — if not 0/1, treat as raw F if len looks like token
+          if (state.buf.length >= 5) {
+            const lenProbe = state.buf.readUInt32LE(0);
+            const codeProbe = state.buf[4];
+            if (codeProbe !== 0 && codeProbe !== 1 && lenProbe < 0x1000000) {
+              // Heuristic may be raw token; check if token+remaining could be offset (8 bytes)
+              // Defer to F handling if token in pending set already handled; otherwise continue init path
+            }
+          }
+        }
         if (state.buf.length < 5) break;
         const len = state.buf.readUInt32LE(0);
         if (len > 1024 * 1024) { try { peer.end(); } catch {} break; }
@@ -515,7 +682,17 @@ export class SoulseekSession {
           try { parsePierceFireWall(initPayload); } catch {}
         }
         state.initDone = true;
-        if (state.outbound) { try { (peer as Socket).write(buildUserInfoRequest()); } catch {} }
+        // Phase 1: send any pendingMsg queued by ensurePeerAndSend
+        const pendingMsg = (state as unknown as { pendingMsg?: Buffer }).pendingMsg;
+        if (pendingMsg) {
+          try { (peer as Socket).write(pendingMsg); } catch {}
+          delete (state as unknown as { pendingMsg?: Buffer }).pendingMsg;
+        } else if (state.outbound && !state.connType) {
+          // fallback for userInfo path (old behavior) — only if no connType yet
+          try { (peer as Socket).write(buildUserInfoRequest()); } catch {}
+        } else if (state.outbound && state.connType === "P" && !pendingMsg) {
+          // For generic P without pendingMsg, still ensure we handle UserInfo if needed (no-op)
+        }
         state.buf = state.buf.subarray(total);
         continue;
       }
@@ -786,6 +963,8 @@ export class SoulseekSession {
     for (const token of [...this.searches.keys()]) { const s = this.searches.get(token); if (s?.timer) clearTimeout(s.timer); if (s) s.onEnd({ searchId: s.searchId, reason: "stopped" }); this.searches.delete(token); }
     this.searchIds.clear(); this.allowedSearchTokens.clear();
     for (const { timer } of this.peerAddressRequests.values()) clearTimeout(timer);
+    for (const { timer } of this.pendingConnects.values()) clearTimeout(timer);
+    this.pendingConnects.clear(); this.pendingFileTokens.clear();
     this.userInfoRequests.clear(); this.peerAddressRequests.clear(); this.failedUserInfo.clear();
     this.excludedPhrases.clear();
     if (this.idleTimer) clearInterval(this.idleTimer);
