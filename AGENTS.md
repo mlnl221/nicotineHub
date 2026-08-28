@@ -58,18 +58,4 @@ Every `git worktree` must run on its own ports so it never collides with `main` 
   #   bridge: { ports: ["8788:8788"], environment: { PORT: "8788", LISTEN_PORT: "2235" } }
   #   web: { ports: ["3001:3000"], environment: { PORT: "3000", NEXT_PUBLIC_BRIDGE_URL: "ws://localhost:8788/ws" } }
   ```
-- **Verify before starting worktree services:** `ps aux | grep -E "next|bun"` + `curl -sf http://localhost:<bridge-port>/health` should hit *your* worktree, not `main`.
-
-## Repo layout
-
-```
-apps/bridge/src/{soulseek.ts,session.ts,server.ts,soulseek.test.ts}
-apps/web/src/{app/{layout.tsx,page.tsx,search/page.tsx},components/{LoginForm.tsx,Sidebar.tsx,SearchHeader.tsx,SearchBar.tsx,ResultCard.tsx},lib/{session.tsx,protocol.ts}}
-compose.yaml  .dockerignore  README.md
-```
-
-## Mistakes Log
-
-- Every agent must read `mistakes.md` before starting work (see header). It separates historical failures from base rules in this file.
-- After any error, failed tool call, or user correction, append to `mistakes.md` within 30 seconds using its `What happened / Why / How to avoid` format. Keep entries messy and chronological — do not try to be perfect.
-- Monthly: review `mistakes.md` and prune fixed items.
+- **Verify before starting worktree services:** `ps aux | grep -E "next|bun"` + `curl -sf http://localho

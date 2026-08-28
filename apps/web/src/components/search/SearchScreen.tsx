@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useSearches } from "@/lib/search";
 import { applyFilters } from "@/lib/filter";
+import { useTransfers } from "@/lib/transfers";
 import type { SearchRow } from "@/lib/protocol";
 import { SearchBar } from "./SearchBar";
 import { SearchTabs } from "./SearchTabs";
@@ -11,6 +12,7 @@ import { ResultsList } from "./ResultsList";
 
 export function SearchScreen() {
   const { activeTab, activeId, startSearch, stopSearch, setFilters, clearFilters } = useSearches();
+  const { requestDownload } = useTransfers();
   const [showFilters, setShowFilters] = useState(false);
   const [sheetRow, setSheetRow] = useState<SearchRow | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -59,7 +61,7 @@ export function SearchScreen() {
           onSearch={startSearch}
           onToggleFilters={() => setShowFilters((v) => !v)}
           activeFilterCount={activeFilterCount}
-          searching={activeTab != null && activeTab.status === "searching"}
+          searching={activeTab?.status === "searching"}
           onStop={() => activeId && stopSearch(activeId)}
         />
         <SearchTabs />
@@ -94,6 +96,7 @@ export function SearchScreen() {
         </div>
       )}
 
+      {/* Action sheet */}
       {sheetRow ? (
         <div
           className="fixed inset-0 z-30 flex items-end bg-black/40"
@@ -116,7 +119,10 @@ export function SearchScreen() {
               icon="download"
               label="Download"
               onClick={() => {
-                flash(`Queued "${sheetRow.filename}" (transfers not implemented yet)`);
+                if (sheetRow) {
+                  requestDownload({ username: sheetRow.user, virtualPath: sheetRow.path, size: sheetRow.size, fileName: sheetRow.filename });
+                  flash(`Queued "${sheetRow.filename}" — see Downloads`);
+                }
                 setSheetRow(null);
               }}
             />
@@ -149,6 +155,7 @@ export function SearchScreen() {
         </div>
       ) : null}
 
+      {/* Toast */}
       {toast ? (
         <div className="fixed bottom-6 left-1/2 z-40 -translate-x-1/2 rounded-full bg-inverse-surface px-4 py-2 font-label text-xs text-inverse-on-surface shadow-lg">
           {toast}

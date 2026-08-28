@@ -1,94 +1,81 @@
-# Search — Implementation Spec (nicotine_mobile)
+# Search Feature — Workflow & Implementation Spec
 
-Scope decided with the user:
+This folder documents **how Soulseek search works in nicotine+**, distilled so we can
+implement a search page that behaves *exactly* like nicotine. It is the single source
+of truth for the search feature. The implementation target (confirmed) is:
 
-- **Global search only.** No wishlist/buddies rooms, no per-user browse.
-- **Full P2P in the bridge.** The bridge is a real Soulseek peer: it opens an inbound
-  peer listener, joins the distributed network, sends `FileSearch` (1) to distributed
-  and direct peers, and decodes `FileSearchResponse` (9) results that come back over
-  peer connections (including `ConnectToPeer` (18) relayed connections from the server).
-- **Full filter parity** with nicotine-plus (regex include/exclude, size/bitrate/length
-  operators, file-type tokens, country, free-slot, public-only).
+- **Mode:** Global file search only (server code 26). The architecture leaves room for
+  Buddies / Rooms / User search later.
+- **Backend:** The bridge does **full P2P** — it listens for inbound peer connections,
+  performs the peer handshake, zlib-decodes `FileSearchResponse` (peer code 9), and
+  forwards parsed results to the web client over WebSocket. Real results, not mocks.
+- **Filters:** Full nicotine parity (regex include/exclude, size / bitrate / length
+  operator expressions, file-type, country, free-slot, public-only).
 
-The web app is a thin client: it opens one WS to the bridge, owns the search UI state
-(tabs, streaming rows, filters), and never speaks Soulseek directly.
+A design mockup exists at `docs/search.html` (the "Alexandria" editorial style from
+`docs/DESIGN.md`). **It is a suggestion/guideline, not a requirement.** Several elements
+in it are fabricated marketing (e.g. "Trending Network Shares", "encrypted, limitless",
+a "Verified" badge) and do not exist in Soulseek — see `ui.md` for the mapping and what
+to keep vs. drop.
 
-## Client ↔ Bridge contract (JSON over `ws://host:8787/ws`)
+## Documents in this folder
 
-### Client → Bridge
-```jsonc
-// start a global search; user assigns searchId (monotonic per tab)
-{ "type": "search", "searchId": 1, "query": "daft punk" }
+| File | What it covers |
+|------|----------------|
+| `protocol.md`  | Wire-level message layouts: `FileSearch` (26), `FileSearchResponse` (9, zlib), peer handshake (`PeerInit` 1 / `PierceFireWall` 0), `ConnectToPeer` (18) relay, token mechanism, distributed flood (informational). |
+| `workflow.md`  | End-to-end runtime flow: issue → token routing → P2P connect-back → aggregation → display. Plus the canonical **result row data model**. |
+| `filters.md`   | Full filter reference with nicotine's exact syntax and examples (the filter bar parity spec). |
+| `ui.md`        | UI/workflow: search bar, per-search tabs, the 12 result columns, grouping, sorting, context actions, download handoff, mobile/touch adaptation, and the `search.html` mockup mapping (real vs. suggestion-only). |
 
-// stop a search in progress (bridge tears down distributed ticket + pending peers)
-{ "type": "search:stop", "searchId": 1 }
+## Architecture & Browser ↔ Bridge contract
+
+The browser cannot open raw TCP. The Bun bridge owns the Soulseek TCP connection (server
++ inbound peer listener) and speaks JSON over WebSocket to the web app.
+
+```
+[ Web (Next.js PWA) ]  -- WebSocket JSON --  [ Bun bridge :8787 ]
+                                                |  server TCP  --> server.slsknet.org:2242  (FileSearch 26)
+                                                |  peer listener --> inbound peers (FileSearchResponse 9, zlib)
 ```
 
-### Bridge → Client
-```jsonc
-// emitted when the distributed ticket is registered
-{ "type": "search:start", "searchId": 1, "token": 481241 }
+### Messages: Web → Bridge
+- `search:start` — `{ type, query, searchId, mode? }`. `mode` is `"global"` for now
+  (reserved: `"buddies" | "rooms" | "user"`). The bridge allocates a `uint32` token,
+  registers it, and sends `FileSearch` (26) to the server. Replies with `search:started`.
+- `search:stop` — `{ searchId }`. Deregisters the token so late results are ignored.
 
-// streamed zero or more times; each message is a batch of rows
-{ "type": "search:result", "searchId": 1, "token": 481241, "rows": [ <SearchRow>, ... ] }
+### Messages: Bridge → Web
+- `search:started` — `{ searchId, token }`. Confirms the search is live.
+- `search:result` — `{ searchId, token, batch: Result[] }`. Streamed; each batch is one
+  peer's response (nicotine sends one response per matching user). `Result` shape is the
+  row model in `workflow.md`.
+- `search:end` — `{ searchId, reason }`. `reason` ∈ `max_results | stopped | timeout`.
+- `search:error` — `{ searchId, message }`.
 
-// emitted once the search is finished or aborted
-{ "type": "search:end", "searchId": 1, "reason": "max_results" | "connection_closed" | "aborted" | "timeout" }
-```
-
-`reason: "max_results"` fires when the bridge caps a single search at 2500 rows
-(`MAX_RESULTS_PER_SEARCH`) to match nicotine's practical limit.
-
-### SearchRow
+### Result shape (one row)
 ```ts
-interface SearchRow {
-  user: string;       // peer username
-  folder: string;     // parent folder shown in results tree
-  path: string;       // full path (used for slsk:// link + download)
-  filename: string;   // basename
-  fileType: string;   // file extension without dot, lowercased
-  size: number;       // bytes
-  slotFree: boolean;  // true if peer has a free upload slot
-  inQueue: number;    // upload queue length (0 when slotFree)
-  speed: number;      // peer upload speed in bytes/s (0 if unknown)
-  attributes: { type: number; value: number }[]; // bitrate(0), length(1), vbr(2), sampleRate(4), bitDepth(5)
-  private: boolean;   // true if result came from a private/locked share
-}
+type SearchResult = {
+  user: string;
+  country?: string;        // ISO code, if known
+  speed: number;           // avg upload speed (B/s), 0 if unknown
+  inQueue: number;         // files queued at peer; 0 == free slot
+  slotFree: boolean;       // msg.freeulslots
+  folder: string;          // directory portion of the virtual path (\-separated)
+  filename: string;        // basename
+  path: string;            // full virtual path (folder + "\" + filename)
+  size: number;            // bytes (uint64)
+  quality: number;         // bitrate kbps (0 if lossless-only)
+  length: number;          // duration seconds (0 if unknown)
+  fileType: string;        // extension or generic type
+  private: boolean;        // from a private share
+  attributes: { bitrate?: number; length?: number; vbr?: number; sampleRate?: number; bitDepth?: number };
+};
 ```
 
-## Result flow (why P2P is required)
-
-1. On `search`, bridge sends `FileSearch` (1) with a random token to the server. The
-   server registers the token → distributed ticket and fans it out.
-2. Other peers respond with `FileSearchResponse` (9). Two cases:
-   - **Direct:** the peer already has our `ConnectToPeer` info, so it connects to our
-     inbound listener. First bytes are `PeerInit` framed as `[uint32 len][uint8 code=1]`.
-   - **Relayed:** the peer sends `ConnectToPeer` (18) *via the server*; bridge replies
-     with `PierceFireWall` (0) using the given token (if we are the recipient) and then
-     the peer finishes the handshake and sends `FileSearchResponse` over that socket.
-3. Bridge parses the `FileSearchResponse`, groups rows by `user`, de-dupes per user,
-   maps to `SearchRow`, and emits `search:result` batches keyed by `searchId`.
-
-> The bridge advertises its listen port to the server via `SetWaitPort` (2) using
-> `LISTEN_PORT` (default `2234`). For real results the port must be reachable from the
-> internet — see `compose.yaml` (published `2234/tcp` + `2234/udp`).
-
-## Files
-
-- `apps/bridge/src/soulseek.ts` — wire builders/parsers (`buildFileSearch`,
-  `frameInitMessage`, `buildPierceFireWall`, `parseConnectToPeer`,
-  `parseFileSearchResponse` incl. zlib + private results).
-- `apps/bridge/src/session.ts` — `SoulseekSession.search(query, searchId, handlers)`,
-  per-user dedup, ConnectToPeer relay, `cancelSearch(searchId)`, `toRow`.
-- `apps/bridge/src/server.ts` — WS protocol above.
-- `apps/bridge/src/soulseek.test.ts` — byte-level tests vs nicotine wire format.
-- `apps/web/src/lib/protocol.ts` — `SearchRow`, `FilterState`, message types.
-- `apps/web/src/lib/session.tsx` — shared WS; exposes `send` + `subscribe`.
-- `apps/web/src/lib/search.tsx` — `SearchProvider` / `useSearches` (tabs, streaming, filters).
-- `apps/web/src/lib/filter.ts` — `applyFilters` (full nicotine filter syntax).
-- `apps/web/src/lib/format.ts` — `humanSize` / `humanSpeed` / `humanLength` / `humanQuality`.
-- `apps/web/src/components/search/*` — `SearchBar`, `SearchTabs`, `FilterBar`,
-  `ResultsList`, `SearchScreen`.
-- `apps/web/src/app/search/page.tsx` — route; redirects to `/` when not connected.
-
-See `protocol.md`, `filters.md`, `ui.md`, `workflow.md` for detail.
+## Out of scope (documented for later)
+- Buddies / Rooms / User search, Wishlist (periodic re-search), Browse-user
+  (`SharedFileListRequest` peer 4), `ExcludedSearchPhrases` (160, only matters when we
+  *answer* searches), and the distributed parent/child network (not needed to *issue*
+  our own global search — the server floods it for us).
+- Actual file transfers (download/upload P2P). The search page records a download intent
+  and hands off to a not-yet-built transfers subsystem (see `ui.md`).

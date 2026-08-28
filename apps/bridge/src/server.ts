@@ -18,6 +18,7 @@
  */
 import { z } from "zod";
 import { SoulseekSession } from "./session.ts";
+import { TransferManager } from "./transfers.ts";
 
 const LoginMessageSchema = z.object({
   type: z.literal("login"),
@@ -65,6 +66,26 @@ const UserInfoMessageSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("setStatus"), status: z.number().int().min(0).max(2) }),
   z.object({ action: z.literal("setProfile"), profile: ProfileSchema }),
 ]);
+
+const DownloadRequestSchema = z.object({
+  type: z.literal("download:request"),
+  username: z.string().min(1).max(64),
+  virtualPath: z.string().min(1).max(1024),
+  size: z.number().min(0).max(1e13),
+  fileName: z.string().max(512).optional(),
+});
+
+const DownloadControlSchema = z.object({
+  type: z.literal("download:control"),
+  id: z.string().min(1).max(1024),
+  action: z.enum(["cancel", "pause", "resume", "retry", "clear"]),
+});
+
+const UploadControlSchema = z.object({
+  type: z.literal("upload:control"),
+  id: z.string().min(1).max(1024),
+  action: z.enum(["cancel", "clear"]),
+});
 const UserInfoRequestSchema = z.object({ type: z.literal("userinfo") }).and(UserInfoMessageSchema);
 
 /** Default profile served when peers browse us (before the client overrides it). */
@@ -87,7 +108,7 @@ function errorMessage(error: string): string {
   return JSON.stringify({ type: "error", error });
 }
 
-export const server = Bun.serve<{ session?: SoulseekSession }>({
+export const server = Bun.serve<{ session?: SoulseekSession; transfers?: TransferManager }>({
   port: PORT,
   fetch(req, server) {
     const url = new URL(req.url);
@@ -107,6 +128,33 @@ export const server = Bun.serve<{ session?: SoulseekSession }>({
   websocket: {
     open(ws) {
       ws.data = {};
+      // Attach a per-connection transfer manager that pushes updates to this socket.
+      const tm = new TransferManager({
+        onUpdate: (transfer) => {
+          try {
+            ws.send(JSON.stringify({ type: "transfer:update", transfer }));
+          } catch {}
+        },
+        onRemoved: (id) => {
+          try {
+            ws.send(JSON.stringify({ type: "transfer:removed", id }));
+          } catch {}
+        },
+        onStats: (stats) => {
+          try {
+            ws.send(JSON.stringify({ type: "transfer:stats", ...stats }));
+          } catch {}
+        },
+      });
+      ws.data.transfers = tm;
+      // Push initial demo uploads and stats on next tick so client can subscribe first.
+      setTimeout(() => {
+        for (const t of tm.list()) {
+          try {
+            ws.send(JSON.stringify({ type: "transfer:update", transfer: t }));
+          } catch {}
+        }
+      }, 50);
     },
     message(ws, raw) {
       let parsed: unknown;
@@ -182,6 +230,35 @@ export const server = Bun.serve<{ session?: SoulseekSession }>({
           return;
         }
         ws.data.session?.cancelSearch(result.data.searchId);
+        return;
+      }
+
+      // Transfers
+      if (data.type === "download:request") {
+        const result = DownloadRequestSchema.safeParse(parsed);
+        if (!result.success) {
+          ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid download request."));
+          return;
+        }
+        ws.data.transfers?.requestDownload(result.data.username, result.data.virtualPath, result.data.size, result.data.fileName);
+        return;
+      }
+      if (data.type === "download:control") {
+        const result = DownloadControlSchema.safeParse(parsed);
+        if (!result.success) {
+          ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid download control."));
+          return;
+        }
+        ws.data.transfers?.controlDownload(result.data.id, result.data.action);
+        return;
+      }
+      if (data.type === "upload:control") {
+        const result = UploadControlSchema.safeParse(parsed);
+        if (!result.success) {
+          ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid upload control."));
+          return;
+        }
+        ws.data.transfers?.controlUpload(result.data.id, result.data.action);
         return;
       }
 
@@ -265,7 +342,7 @@ export const server = Bun.serve<{ session?: SoulseekSession }>({
             break;
           case "setProfile":
             session.setProfile({
-              username,
+              username: session.username,
               descr: msg.profile.descr,
               pic: msg.profile.pic ? Buffer.from(msg.profile.pic, "base64") : null,
               totalupl: msg.profile.totalupl,
@@ -282,6 +359,7 @@ export const server = Bun.serve<{ session?: SoulseekSession }>({
     },
     close(ws) {
       ws.data.session?.close();
+      ws.data.transfers?.close();
       ws.data = {};
     },
   },

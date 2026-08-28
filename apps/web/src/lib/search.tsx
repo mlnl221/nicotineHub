@@ -5,176 +5,130 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-import type { SearchRow, FilterState } from "@/lib/protocol";
-import { emptyFilters } from "@/lib/protocol";
 import { useSession } from "@/lib/session";
-import { applyFilters } from "@/lib/filter";
+import {
+  emptyFilters,
+  type FilterState,
+  type SearchRow,
+} from "@/lib/protocol";
+
+export type SearchMode = "global";
 
 export interface SearchTab {
-  id: number;
+  id: string;
   query: string;
+  mode: SearchMode;
+  status: "searching" | "ended";
+  reason?: string;
   rows: SearchRow[];
   total: number;
   filters: FilterState;
-  status: "searching" | "ended";
-  reason: string | null;
 }
 
-interface SearchesApi {
+interface SearchApi {
   tabs: SearchTab[];
-  activeId: number | null;
+  activeId: string | null;
   activeTab: SearchTab | null;
-  startSearch: (query: string) => void;
-  stopSearch: (id: number) => void;
-  setActive: (id: number) => void;
-  closeTab: (id: number) => void;
-  setFilters: (id: number, partial: Partial<FilterState>) => void;
-  clearFilters: (id: number) => void;
+  startSearch: (query: string, mode?: SearchMode) => void;
+  stopSearch: (id: string) => void;
+  closeTab: (id: string) => void;
+  setActive: (id: string) => void;
+  setFilters: (id: string, partial: Partial<FilterState>) => void;
+  clearFilters: (id: string) => void;
 }
 
-const SearchesContext = createContext<SearchesApi | null>(null);
+const SearchContext = createContext<SearchApi | null>(null);
 
 export function SearchProvider({ children }: { children: ReactNode }) {
   const { send, subscribe } = useSession();
   const [tabs, setTabs] = useState<SearchTab[]>([]);
-  const [activeId, setActiveId] = useState<number | null>(null);
-  const nextId = useRef(1);
-  const byId = useRef(new Map<number, SearchTab>());
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const counter = useRef(0);
   const tabsRef = useRef<SearchTab[]>([]);
   tabsRef.current = tabs;
 
-  const sync = useCallback((next: SearchTab[]) => {
-    const map = new Map(next.map((t) => [t.id, t]));
-    byId.current = map;
-    setTabs(next);
-  }, []);
-
-  const appendRows = useCallback(
-    (id: number, rows: SearchRow[]) => {
-      const tab = byId.current.get(id);
-      if (!tab) return;
-      sync(
-        tabsRef.current.map((t) =>
-          t.id === id
-            ? { ...t, rows: [...t.rows, ...rows].slice(0, 5000), total: t.total + rows.length }
-            : t,
-        ),
-      );
-    },
-    [sync],
-  );
-
-  const endTab = useCallback(
-    (id: number, reason: string) => {
-      const tab = byId.current.get(id);
-      if (!tab) return;
-      sync(tabsRef.current.map((t) => (t.id === id ? { ...t, status: "ended", reason } : t)));
-    },
-    [sync],
-  );
+  useEffect(() => {
+    const unsub = subscribe((msg) => {
+      if (msg.type === "search:result") {
+        setTabs((prev) =>
+          prev.map((t) =>
+            t.id === msg.searchId ? { ...t, rows: [...t.rows, ...msg.rows], total: t.total + msg.rows.length } : t,
+          ),
+        );
+      } else if (msg.type === "search:end") {
+        setTabs((prev) =>
+          prev.map((t) =>
+            t.id === msg.searchId ? { ...t, status: "ended", reason: msg.reason } : t,
+          ),
+        );
+      }
+    });
+    return unsub;
+  }, [subscribe]);
 
   const startSearch = useCallback(
-    (query: string) => {
-      const id = nextId.current++;
-      const tab: SearchTab = {
-        id,
-        query,
-        rows: [],
-        total: 0,
-        filters: emptyFilters(),
-        status: "searching",
-        reason: null,
-      };
-      byId.current.set(id, tab);
-      sync([...tabsRef.current, tab]);
+    (query: string, mode: SearchMode = "global") => {
+      const id = `s${++counter.current}`;
+      setTabs((prev) => [
+        ...prev,
+        { id, query, mode, status: "searching", rows: [], total: 0, filters: emptyFilters() },
+      ]);
       setActiveId(id);
-      send({ type: "search", searchId: String(id), query });
+      send({ type: "search", searchId: id, query });
     },
-    [send, sync],
+    [send],
   );
 
   const stopSearch = useCallback(
-    (id: number) => {
-      send({ type: "search:stop", searchId: String(id) });
-      endTab(id, "aborted");
-    },
-    [send, endTab],
-  );
-
-  const setActive = useCallback((id: number) => setActiveId(id), []);
-
-  const closeTab = useCallback(
-    (id: number) => {
-      const wasActive = activeId === id;
-      const remaining = tabsRef.current.filter((t) => t.id !== id);
-      byId.current.delete(id);
-      sync(remaining);
-      if (wasActive) {
-        const nextActive = remaining[remaining.length - 1];
-        setActiveId(nextActive ? nextActive.id : null);
-      }
-    },
-    [activeId, sync],
-  );
-
-  const setFilters = useCallback(
-    (id: number, partial: Partial<FilterState>) => {
-      sync(
-        tabsRef.current.map((t) =>
-          t.id === id ? { ...t, filters: { ...t.filters, ...partial } } : t,
-        ),
+    (id: string) => {
+      send({ type: "search:stop", searchId: id });
+      setTabs((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, status: "ended", reason: "stopped" } : t)),
       );
     },
-    [sync],
+    [send],
   );
 
-  const clearFilters = useCallback(
-    (id: number) => {
-      sync(tabsRef.current.map((t) => (t.id === id ? { ...t, filters: emptyFilters() } : t)));
+  const closeTab = useCallback(
+    (id: string) => {
+      send({ type: "search:stop", searchId: id });
+      const next = tabsRef.current.filter((t) => t.id !== id);
+      setTabs(next);
+      setActiveId((curr) => (curr === id ? (next[next.length - 1]?.id ?? null) : curr));
     },
-    [sync],
+    [send],
   );
 
-  // Wire bridge search messages into tabs.
-  useEffect(
-    () =>
-      subscribe((msg) => {
-        if (msg.type === "search:result") {
-          const id = Number(msg.searchId);
-          if (!Number.isNaN(id)) appendRows(id, msg.rows);
-        } else if (msg.type === "search:end") {
-          const id = Number(msg.searchId);
-          if (!Number.isNaN(id)) endTab(id, msg.reason);
-        }
-      }),
-    [subscribe, appendRows, endTab],
+  const setFilters = useCallback((id: string, partial: Partial<FilterState>) => {
+    setTabs((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, filters: { ...t.filters, ...partial } } : t)),
+    );
+  }, []);
+
+  const clearFilters = useCallback((id: string) => {
+    setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, filters: emptyFilters() } : t)));
+  }, []);
+
+  const activeTab = useMemo(
+    () => tabs.find((t) => t.id === activeId) ?? null,
+    [tabs, activeId],
   );
 
-  const activeTab = activeId == null ? null : byId.current.get(activeId) ?? null;
+  const api = useMemo<SearchApi>(
+    () => ({ tabs, activeId, activeTab, startSearch, stopSearch, closeTab, setActive: setActiveId, setFilters, clearFilters }),
+    [tabs, activeId, activeTab, startSearch, stopSearch, closeTab, setFilters, clearFilters],
+  );
 
-  const api: SearchesApi = {
-    tabs,
-    activeId,
-    activeTab,
-    startSearch,
-    stopSearch,
-    setActive,
-    closeTab,
-    setFilters,
-    clearFilters,
-  };
-
-  return <SearchesContext.Provider value={api}>{children}</SearchesContext.Provider>;
+  return <SearchContext.Provider value={api}>{children}</SearchContext.Provider>;
 }
 
-export function useSearches(): SearchesApi {
-  const ctx = useContext(SearchesContext);
+export function useSearches(): SearchApi {
+  const ctx = useContext(SearchContext);
   if (!ctx) throw new Error("useSearches must be used within SearchProvider");
   return ctx;
 }
-
-export { applyFilters };

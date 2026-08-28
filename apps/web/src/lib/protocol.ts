@@ -52,6 +52,20 @@ export interface SearchStopRequest {
   searchId: string;
 }
 
+/** Legacy SearchFile shape (used by ResultCard hybrid). */
+export interface SearchFile {
+  name: string;
+  size: number;
+  attrs: {
+    bitrate?: number;
+    length?: number;
+    vbr?: number;
+    sampleRate?: number;
+    bitDepth?: number;
+  };
+  private?: boolean;
+}
+
 /** A single result row, transformed from a peer FileSearchResponse. */
 export interface SearchRow {
   user: string;
@@ -123,6 +137,85 @@ export function emptyFilters(): FilterState {
   };
 }
 
+/* ------------------------------------------------------------------ *
+ * Transfers
+ * ------------------------------------------------------------------ */
+
+export type TransferStatus =
+  | "Queued"
+  | "Getting status"
+  | "Transferring"
+  | "Paused"
+  | "Cancelled"
+  | "Filtered"
+  | "Finished"
+  | "User logged off"
+  | "Connection closed"
+  | "Connection timeout"
+  | "Download folder error"
+  | "Local file error"
+  | "Banned"
+  | "File not shared."
+  | "File read error."
+  | "Pending shutdown."
+  | "Too many files"
+  | "Too many megabytes";
+
+export interface Transfer {
+  id: string;
+  username: string;
+  virtualPath: string;
+  fileName: string;
+  size: number;
+  current: number;
+  speed: number;
+  avgSpeed: number;
+  timeLeft: number | null;
+  status: TransferStatus;
+  queuePosition: number | null;
+  isUpload: boolean;
+}
+
+export interface TransferUpdateMessage {
+  type: "transfer:update";
+  transfer: Transfer;
+}
+
+export interface TransferRemovedMessage {
+  type: "transfer:removed";
+  id: string;
+}
+
+export interface TransferStatsMessage {
+  type: "transfer:stats";
+  downloadSpeed: number;
+  uploadSpeed: number;
+  activeDownloads: number;
+  activeUploads: number;
+  queuedDownloads: number;
+  queuedUploads: number;
+}
+
+export interface DownloadRequest {
+  type: "download:request";
+  username: string;
+  virtualPath: string;
+  size: number;
+  fileName?: string;
+}
+
+export interface DownloadControlRequest {
+  type: "download:control";
+  id: string;
+  action: "cancel" | "pause" | "resume" | "retry" | "clear";
+}
+
+export interface UploadControlRequest {
+  type: "upload:control";
+  id: string;
+  action: "cancel" | "clear";
+}
+
 export type BridgeOutboundMessage =
   | LoginStartMessage
   | LoginResultSuccess
@@ -130,6 +223,15 @@ export type BridgeOutboundMessage =
   | ErrorMessage
   | SearchStartMessage
   | SearchResultMessage
-  | SearchEndMessage;
+  | SearchEndMessage
+  | TransferUpdateMessage
+  | TransferRemovedMessage
+  | TransferStatsMessage;
 
-export type BridgeInboundMessage = LoginRequest | SearchRequest | SearchStopRequest;
+export type BridgeInboundMessage =
+  | LoginRequest
+  | SearchRequest
+  | SearchStopRequest
+  | DownloadRequest
+  | DownloadControlRequest
+  | UploadControlRequest;

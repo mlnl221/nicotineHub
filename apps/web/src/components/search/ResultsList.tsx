@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { SearchRow } from "@/lib/protocol";
-import { humanLength, humanQuality, humanSize, rowLengthSeconds } from "@/lib/format";
+import { humanLength, humanQuality, humanSize } from "@/lib/format";
 
 function fileTypeIcon(ext: string): string {
   const e = ext.toLowerCase();
@@ -97,9 +97,7 @@ export function ResultsList({ rows, onRowTap }: ResultsListProps) {
                           </span>
                           <span>{humanSize(row.size)}</span>
                           {humanQuality(row.attributes) ? <span>{humanQuality(row.attributes)}</span> : null}
-                          {rowLengthSeconds(row.attributes) != null ? (
-                            <span>{humanLength(rowLengthSeconds(row.attributes)!)}</span>
-                          ) : null}
+                          {humanLength(row.length) ? <span>{humanLength(row.length)}</span> : null}
                           {row.slotFree ? (
                             <span className="rounded-full bg-tertiary-container px-1.5 py-0.5 font-semibold text-on-tertiary-container">
                               free

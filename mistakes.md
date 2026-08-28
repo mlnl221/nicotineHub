@@ -64,3 +64,16 @@ How to avoid: Before `Write`, `mkdir -p` any parent directory that doesn't exist
 What happened: Initially `apps/web/.env` missing; `AGENTS.md` in search worktree explicitly says `cp apps/web/.env.example apps/web/.env` before driving UI (provides `NEXT_PUBLIC_BRIDGE_URL` etc for Playwright MCP browser session). Tested without it and got inconsistent `bridgeUrl()` fallback to `ws://localhost:8787/ws` which worked by luck.
 Why: Didn't read worktree `AGENTS.md` fully before starting.
 How to avoid: First step after `git worktree list` is `cat apps/web/.env.example && cp apps/web/.env.example apps/web/.env` per worktree AGENTS.md.
+
+## 2026-08-28 — Playwright headless needs explicit executablePath (browser build mismatch)
+
+What happened: `chromium.launch()` in a script failed `Executable doesn't exist at .../chromium_headless_shell-1237`. npx-cache playwright (1.62.1 and 1.63.0-alpha) expected browser build 1237, but `~/.cache/ms-playwright` only had `chromium-1234`/`chromium_headless_shell-1234`. Also `import { chromium } from "playwright"` in an ESM script failed `MODULE_NOT_FOUND` unless resolved via absolute path into an npx cache (`/home/magnus/.npm/_npx/<hash>/node_modules/playwright/index.mjs`).
+Why: Playwright CLI (`npx playwright install`) and any given `bun`/`node` project resolve different browser builds; the `playwright` package isn't a project dependency, so plain `import` can't find it.
+How to avoid: Either run `npx playwright install chromium` to align the build, or launch with an explicit path: `chromium.launch({ executablePath: "/home/magnus/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome" })` and import via the absolute npx-cache path. Verify `lsof -i :3000 -i :8787` and `curl /health` first.
+
+## 2026-08-28 — Running `bun run build` while `next dev` is live corrupts .next
+
+What happened: Had `bun run dev` (next dev --turbopack + bridge) running in the worktree, then ran `bun run build` to verify before PR. Both write to `apps/web/.next`, so the build clobbered the running dev server's state → dev log ENOENT on `_buildManifest.js.tmp.*`, `/settings` returned 500, bridge went down.
+Why: Ran prod build in the same `.next` directory a dev server was actively using, without stopping dev first.
+How to avoid: Stop `bun run dev` (`pkill -f "next dev"`) before `bun run build`/`bun test`, or verify on a separate port/build dir. Restart dev + re-run the browser test after any build.
+
