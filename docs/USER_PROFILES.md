@@ -352,3 +352,97 @@ These features exist in nicotine-plus but are deferred or skipped for this mobil
 | Keyboard shortcuts | Mobile-first, touch gestures instead |
 | Tab management (close all) | Not applicable to mobile routing model |
 | IP address display | Privacy concern on mobile, lower priority |
+
+---
+
+## 8. Implementation Status — 2026-08-28 (feat/profile-view)
+
+> Built on `main@a57378c`. PR #7 `feat/profile-view` (commits `96ca142`, `77899e1`).
+
+### What shipped (MVP — display-only per design decision)
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Phase 1 Protocol | ✅ Done | All server codes 3/5/6/7/28/35/36/51/52/54/56/57/110/111/112/117/118 + peer 15/16 in `soulseek.ts:20-42`; `SlskReader` + `pack*` helpers; parsers `parseUserStatus/Stats/Interests/Recommendations/SimilarUsers/Item* /PeerAddress/UserInfoResponse`; builders `buildWatchUser/UnwatchUser/GetUserStats/UserInterests/GetPeerAddress/SetStatus/SharedFoldersFiles/AddThing* /GivePrivileges/UserInfo*`; WS relay `server.ts:51-89` `userinfo` union (13 actions) + `server.ts:185` `userinfo:event`; peer manager `session.ts:373-442` for `UserInfoRequest/Response`. **Fix:** `session.ts:300` corrected `itemRecommendations` to use `parseItemRecommendations` (was swapped with `parseRecommendations`). |
+| Phase 2 Core View | ✅ Done (MVP) | `protocol.ts:237-350` types `UserInfoStatus/Stats/Interests/Profile/Recommendation/SimilarUser/UserInfoEvent` + `UserInfoResponseOutbound/Failed`; `lib/userinfo.tsx:26` `useUserInfo` hook (watch + interests + get, handle both `user-info-response` direct and `userinfo:event`, unwatch on unmount); `app/profile/page.tsx` lookup + `app/profile/[username]/page.tsx` detail (header with avatar/privileged star, status, 2×2 stats grid `Files Shared/Shared Folders/Avg Speed/Upload Slots`, description, likes/dislikes chips, loading/error). Uses `DESIGN.md` tokens (`font-headline Noto Serif`, `font-label Public Sans`, `surface-container-low rounded-xl`, `primary→primary-container` CTA). |
+| Picture (Phase 3) | ✅ Display only | Bridge base64 `server.ts:295`, web `profilePicSrc` SVG-vs-PNG detect, `rounded-full`. Copy/save/share deferred per MVP decision (user chose display-only). |
+| Navigation | ✅ Done | `Sidebar.tsx:14` `User Profiles` → `/profile`; `SearchScreen.tsx` “View Profile” sheet → `router.push(/profile/:user)`; `profile/page.tsx` recent list. |
+| Recent profiles | ✅ Done (localStorage) | User decision #3: `localStorage nicotine.recentProfiles` (max 20, dedup, LRU). `profile/[username]/page.tsx:saveRecent` on view; `profile/page.tsx:loadRecent` renders clickable `rounded-xl ghost-border` rows + Clear. |
+| Verification | ✅ | `bun test` (bridge 30 pass) + `bun run build` (routes `/profile 3.75kB` + `/profile/[username] 5.22kB`) both green. |
+
+### What was intentionally deferred for MVP
+
+- Picture copy/save/share, show/hide toggle (Phase 3 full), own profile editing (Phase 4), buddy/ban/ignore/gift privileges (Phase 5 full — buttons show “coming soon” toast), interests page (Phase 6), file browser (Phase 7), mobile swipe/pull-to-refresh (Phase 8).
+
+---
+
+## 9. Next Phases — after MVP (roadmap)
+
+Prioritized for incremental delivery; each phase is a small PR against `main`.
+
+### 9.1 Phase 3.1 — Picture polish (Low effort, nice visual)
+
+| Task | Detail | Protocol |
+|------|--------|----------|
+| Copy picture | `navigator.clipboard.write([ClipboardItem])` — guard `has_pic` | — |
+| Save picture | Blob URL + `<a download="${username}.png">` | — |
+| Mobile share | `navigator.share({files:[File]})` fallback to save | — |
+| Show/hide toggle | `localStorage nicotine.showPictures` bool | — |
+
+**Verify:** picture renders on offline user; save produces correct MIME (SVG vs PNG).
+
+### 9.2 Phase 5.1 — User Actions (Low effort, high usability)
+
+| Task | Detail | Depends |
+|------|--------|---------|
+| Send Message | `router.push(/chat/:username)` (stub → real `/chat` page) | Phase 2 |
+| Browse Files | `router.push(/browse/:username)` (peer `SharedFileListRequest` 4/5) | Peer 4/5 |
+| Add Buddy / Remove Buddy | `localStorage nicotine.buddies: string[]` + toggle label | — |
+| Ban / Ignore | `localStorage nicotine.banned/ignored` + filter search results | — |
+| Gift Privileges | Modal days 1-3650 → `userinfo givePrivileges` → `GivePrivileges(123)` | Bridge already wired |
+| Own vs other | `username === useSession().state.user` → hide ban/ignore, show Edit link | — |
+
+**Verify:** own profile shows “Edit Profile” not ban/ignore; buddy persists across reload.
+
+### 9.3 Phase 4 — Own Profile Editing (Medium)
+
+| Task | Detail |
+|------|--------|
+| `/settings/profile` page | Textarea `descr` + file input `pic` (read File → base64) |
+| Save | `send {type:"userinfo",action:"setProfile",profile}` → `session.setProfile` → peers see update via `UserInfoResponse` |
+| Clear picture | Button → `pic:null` |
+| Validation | `descr≤10000`, `pic≤5M` (zod `ProfileSchema 42-49`) |
+
+**Depends:** Phase 3.1 peer serve already via `buildUserInfoResponse`.
+
+### 9.4 Phase 6 — Interests Page (Medium, full parity)
+
+| Task | Detail |
+|------|--------|
+| `/interests` route | Two editable lists (likes/dislikes) + chips |
+| Add/remove | Inputs → `AddThingILike(51)/RemoveThingILike(52)/AddThingIHate(117)/RemoveThingIHate(118)` |
+| Recommendations | Panels `Recommendations(54)` + `GlobalRecommendations(56)` (rating + item) |
+| Similar Users | `SimilarUsers(110)` table (username, status dot, speed, files) |
+| Item drill-down | Tap item → `ItemRecommendations(111)` + `ItemSimilarUsers(112)` |
+| Context menu | “I Like This”, “I Dislike This”, “Search for Item” (→ `FileSearch`) |
+
+**Depends:** Phase 1 (parsers already fixed).
+
+### 9.5 Phase 7 — User File Browser (High effort, high value)
+
+Requires peer `SharedFileList` (codes 4/5, zlib, folder tree) — separate from profile P2P. Reuse `session.ts` peer manager pattern. Route `/browse/[username]` with breadcrumbs, search/filter, download via `TransferManager`/peer `TransferRequest(40)`.
+
+### 9.6 Phase 8 — Mobile polish (Final pass)
+
+- 44px touch targets already via `min-h-11`; add swipe between profile sections, pull-to-refresh `watch+get+interests`, bottom-sheet actions, stale cache indicator from `localStorage` profile snapshot, PWA `manifest.webmanifest` includes `/profile` routes, desktop `xl:grid-cols-3` two-column (recent list left, detail right) matching `user_profiles.html:163-294` hero styling.
+
+### Build order summary
+
+| Next | Phase | PR size |
+|------|-------|---------|
+| 1 | 3.1 Picture polish | Small |
+| 2 | 5.1 User Actions | Small |
+| 3 | 4 Own Profile Edit | Medium |
+| 4 | 6 Interests | Medium |
+| 5 | 7 File Browser | Large |
+| 6 | 8 Mobile polish | Medium |
