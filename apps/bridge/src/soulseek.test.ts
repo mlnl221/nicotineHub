@@ -19,6 +19,19 @@ import {
   MAJOR_VERSION,
   MINOR_VERSION,
   SERVER_MESSAGE_CODES,
+  buildWatchUser,
+  buildUserInterests,
+  buildGetPeerAddress,
+  parseUserStatus,
+  parseUserStats,
+  parseUserInterests,
+  parseRecommendations,
+  parseSimilarUsers,
+  parseItemRecommendations,
+  parseItemSimilarUsers,
+  parsePeerAddress,
+  buildUserInfoResponse,
+  parseUserInfoResponse,
 } from "./soulseek.ts";
 
 describe("packing primitives", () => {
@@ -186,11 +199,11 @@ describe("buildFileSearch", () => {
 });
 
 describe("buildPeerInit / parsePeerInit", () => {
-  test("round-trips user and connection type", () => {
+  test("frames init code 1 as uint8 and round-trips user/type", () => {
     const raw = buildPeerInit("alice", "P");
-    const parsed = tryParseMessage(raw);
-    expect(parsed!.code).toBe(1);
-    const init = parsePeerInit(parsed!.payload);
+    // [uint32 len][uint8 code=1][payload...]
+    expect(raw[4]).toBe(1);
+    const init = parsePeerInit(raw.subarray(5));
     expect(init.targetUser).toBe("alice");
     expect(init.connType).toBe("P");
   });
@@ -268,5 +281,156 @@ describe("parseFileSearchResponse", () => {
     expect(result.results[0].attrs.length).toBe(210);
     expect(result.results[1].attrs.sampleRate).toBe(44100);
     expect(result.results[1].attrs.bitDepth).toBe(16);
+  });
+});
+
+describe("user info — server message builders", () => {
+  test("buildWatchUser frames code 5", () => {
+    const raw = buildWatchUser("alice");
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(SERVER_MESSAGE_CODES.watchUser);
+    expect(p.payload.subarray(4).toString("utf8")).toBe("alice");
+  });
+
+  test("buildUserInterests frames code 57", () => {
+    const raw = buildUserInterests("bob");
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(SERVER_MESSAGE_CODES.userInterests);
+    expect(p.payload.subarray(4).toString("utf8")).toBe("bob");
+  });
+
+  test("buildGetPeerAddress frames code 3", () => {
+    const raw = buildGetPeerAddress("carol");
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(SERVER_MESSAGE_CODES.getPeerAddress);
+    expect(p.payload.subarray(4).toString("utf8")).toBe("carol");
+  });
+});
+
+describe("user info — server message parsers", () => {
+  test("parseUserStatus", () => {
+    const payload = Buffer.concat([
+      packString("alice"),
+      packUint32(2), // online
+      packBool(true), // privileged
+    ]);
+    const s = parseUserStatus(payload);
+    expect(s.username).toBe("alice");
+    expect(s.status).toBe(2);
+    expect(s.privileged).toBe(true);
+  });
+
+  test("parseUserStats", () => {
+    const payload = Buffer.concat([
+      packString("bob"),
+      packUint32(1234), // avgspeed
+      packUint32(5), // uploadnum
+      packUint32(0), // unknown
+      packUint32(100), // files
+      packUint32(7), // dirs
+    ]);
+    const s = parseUserStats(payload);
+    expect(s.avgspeed).toBe(1234);
+    expect(s.files).toBe(100);
+    expect(s.dirs).toBe(7);
+  });
+
+  test("parseUserInterests", () => {
+    const parts = [
+      packString("carol"),
+      packUint32(2),
+      packString("jazz"),
+      packString("soul"),
+      packUint32(1),
+      packString("pop"),
+    ];
+    const i = parseUserInterests(Buffer.concat(parts));
+    expect(i.likes).toEqual(["jazz", "soul"]);
+    expect(i.hates).toEqual(["pop"]);
+  });
+
+  test("parseRecommendations", () => {
+    const parts = [
+      packUint32(1),
+      packString("rock"),
+      Buffer.from([5, 0, 0, 0]), // int32 rating = 5 (little-endian)
+      packUint32(0),
+    ];
+    const { recommendations, unrecommendations } = parseRecommendations(Buffer.concat(parts));
+    expect(recommendations).toEqual([{ thing: "rock", rating: 5 }]);
+    expect(unrecommendations).toHaveLength(0);
+  });
+
+  test("parseSimilarUsers", () => {
+    const parts = [
+      packUint32(1),
+      packString("dave"),
+      packUint32(3), // rating
+    ];
+    const users = parseSimilarUsers(Buffer.concat(parts));
+    expect(users).toEqual([{ username: "dave", rating: 3 }]);
+  });
+
+  test("parseItemRecommendations and parseItemSimilarUsers", () => {
+    const recParts = [packString("rock"), packUint32(1), packString("alt"), packUint32(2)];
+    const rec = parseItemRecommendations(Buffer.concat(recParts));
+    expect(rec.thing).toBe("rock");
+    expect(rec.recommendations).toEqual([{ thing: "alt", rating: 2 }]);
+
+    const simParts = [packString("rock"), packUint32(1), packString("eve"), packUint32(4)];
+    const sim = parseItemSimilarUsers(Buffer.concat(simParts));
+    expect(sim.thing).toBe("rock");
+    expect(sim.users).toEqual([{ username: "eve", rating: 4 }]);
+  });
+
+  test("parsePeerAddress", () => {
+    const payload = Buffer.concat([
+      packString("frank"),
+      packIp("10.0.0.5"),
+      packUint32(2234),
+    ]);
+    const addr = parsePeerAddress(payload);
+    expect(addr.username).toBe("frank");
+    expect(addr.ip).toBe("10.0.0.5");
+    expect(addr.port).toBe(2234);
+  });
+});
+
+describe("user info — peer UserInfoResponse", () => {
+  test("round-trips description, picture and upload fields", () => {
+    const pic = Buffer.from([0x89, 0x50, 0x4e, 0x47]); // fake PNG header
+    const raw = buildUserInfoResponse({
+      descr: "hello world",
+      pic,
+      totalupl: 3,
+      queuesize: 2,
+      slotsavail: true,
+      uploadallowed: 1,
+    });
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(16);
+    const msg = parseUserInfoResponse(p.payload, "grace");
+    expect(msg.username).toBe("grace");
+    expect(msg.descr).toBe("hello world");
+    expect(msg.pic?.equals(pic)).toBe(true);
+    expect(msg.totalupl).toBe(3);
+    expect(msg.queuesize).toBe(2);
+    expect(msg.slotsavail).toBe(true);
+    expect(msg.uploadallowed).toBe(1);
+  });
+
+  test("handles missing picture", () => {
+    const raw = buildUserInfoResponse({
+      descr: "no pic",
+      pic: null,
+      totalupl: 0,
+      queuesize: 0,
+      slotsavail: false,
+      uploadallowed: 0,
+    });
+    const p = tryParseMessage(raw)!;
+    const msg = parseUserInfoResponse(p.payload, "heidi");
+    expect(msg.pic).toBeNull();
+    expect(msg.descr).toBe("no pic");
   });
 });

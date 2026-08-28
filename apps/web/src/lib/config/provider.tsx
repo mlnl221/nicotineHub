@@ -13,7 +13,6 @@ import { defaults, type Settings } from "@/lib/config/defaults";
 import { deepMerge } from "@/lib/config/merge";
 
 const STORAGE_KEY = "nicotine.settings";
-
 function readStored(): Settings {
   if (typeof window === "undefined") return defaults;
   try {

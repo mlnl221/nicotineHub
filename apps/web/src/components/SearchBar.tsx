@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { useSession } from "@/lib/session";
+import { useSearches } from "@/lib/search";
 
 const FILTERS = ["Any Type", "Audio", "Video", "Software"] as const;
 
 export function SearchBar() {
-  const { search, state } = useSession();
+  const { startSearch, activeTab } = useSearches();
+  const state = { searching: activeTab?.status === "searching" };
+  const search = startSearch;
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<(typeof FILTERS)[number]>("Any Type");
 
