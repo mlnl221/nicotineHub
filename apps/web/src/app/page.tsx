@@ -1,6 +1,20 @@
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useSession } from "@/lib/session";
 import { LoginForm } from "@/components/LoginForm";
 
 export default function Home() {
+  const { state } = useSession();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (state.status === "connected") router.replace("/search");
+  }, [state.status, router]);
+
+  if (state.status === "connected") return null;
+
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-surface-container-low font-body text-on-surface">
       {/* Abstract background pattern */}

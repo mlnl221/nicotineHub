@@ -37,4 +37,50 @@ export interface ErrorMessage {
   error: string;
 }
 
-export type BridgeOutboundMessage = LoginStartMessage | LoginResultSuccess | LoginResultFailure | ErrorMessage;
+export interface SearchRequest {
+  type: "search";
+  query: string;
+}
+
+export interface SearchFile {
+  name: string;
+  size: number;
+  attrs: {
+    bitrate?: number;
+    length?: number;
+    vbr?: number;
+    sampleRate?: number;
+    bitDepth?: number;
+  };
+}
+
+export interface SearchStartMessage {
+  type: "search:start";
+  token: number;
+}
+
+export interface SearchResultMessage {
+  type: "search:result";
+  token: number;
+  username: string;
+  freeUploadSlots: boolean;
+  uploadSpeed: number;
+  inQueue: number;
+  results: SearchFile[];
+}
+
+export interface SearchDoneMessage {
+  type: "search:done";
+  token: number;
+}
+
+export type BridgeOutboundMessage =
+  | LoginStartMessage
+  | LoginResultSuccess
+  | LoginResultFailure
+  | ErrorMessage
+  | SearchStartMessage
+  | SearchResultMessage
+  | SearchDoneMessage;
+
+export type BridgeInboundMessage = LoginRequest | SearchRequest;

@@ -1,19 +1,35 @@
 /**
- * Minimal Soulseek (SLSK) protocol implementation for server login.
+ * Minimal Soulseek (SLSK) protocol implementation for server login and search.
  *
  * Based on Nicotine+'s protocol documentation (doc/SLSKPROTOCOL.md) and the
  * reference implementation in pynicotine/slskmessages.py and slskproto.py.
  *
- * We only implement what's needed to authenticate with the server:
- *   - message framing  [uint32 len][uint32 code][payload]
- *   - Login (code 1)   send + parse response
+ * We implement what's needed to authenticate with the server and receive real
+ * search results over inbound peer connections:
+ *   - message framing            [uint32 len][uint32 code][payload]
+ *   - Login (code 1)             send + parse response
  *   - SetWaitPort (code 2)
+ *   - FileSearch (code 26)       send to the server
+ *   - PeerInit (peer code 1)     handshake on inbound peer connections
+ *   - FileSearchResponse (peer code 9, zlib)  parse results
  */
+
+import { inflateSync } from "node:zlib";
 
 /** Server message codes (subset). */
 export const SERVER_MESSAGE_CODES = {
   login: 1,
   setWaitPort: 2,
+  fileSearch: 26,
+} as const;
+
+/** File attribute types returned inside search results. */
+export const FILE_ATTRIBUTE = {
+  BITRATE: 0,
+  LENGTH: 1,
+  VBR: 2,
+  SAMPLE_RATE: 4,
+  BIT_DEPTH: 5,
 } as const;
 
 /** Login rejection reasons returned by the server. */
@@ -118,9 +134,48 @@ export function buildLogin(username: string, password: string): Buffer {
 }
 
 export function buildSetWaitPort(port: number): Buffer {
-  // We don't expose inbound peers in the MVP; a placeholder port satisfies
-  // the server handshake. SetWaitPort is required immediately after Login.
+  // Tells the server the TCP port we listen on for inbound peer connections
+  // (used to receive search results). SetWaitPort is required immediately
+  // after Login.
   return frameMessage(SERVER_MESSAGE_CODES.setWaitPort, packUint32(port));
+}
+
+export function buildFileSearch(token: number, query: string): Buffer {
+  // Server code 26: FileSearch. The token is echoed back by peers in their
+  // FileSearchResponse so we can correlate results to a request.
+  return frameMessage(
+    SERVER_MESSAGE_CODES.fileSearch,
+    Buffer.concat([packUint32(token >>> 0), packString(query)]),
+  );
+}
+
+export function buildPeerInit(ownUser: string, connType = "P"): Buffer {
+  // Peer init code 1. Sent/received on a fresh peer TCP connection to identify
+  // the remote user and the connection type ("P" peer, "F" file, "D" distrib).
+  // The token is always zero in the modern handshake.
+  return frameMessage(
+    1,
+    Buffer.concat([packString(ownUser), packString(connType), packUint32(0)]),
+  );
+}
+
+export interface PeerInit {
+  targetUser: string;
+  connType: string;
+}
+
+export function parsePeerInit(payload: Buffer): PeerInit {
+  let offset = 0;
+  const readString = (): string => {
+    const len = payload.readUInt32LE(offset);
+    offset += 4;
+    const v = payload.subarray(offset, offset + len).toString("utf8");
+    offset += len;
+    return v;
+  };
+  const targetUser = readString();
+  const connType = readString();
+  return { targetUser, connType };
 }
 
 /* ------------------------------------------------------------------ *
@@ -205,4 +260,105 @@ export function describeRejection(reason: string): string {
     default:
       return `Login rejected by server (${reason}).`;
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Search result parsing (peer FileSearchResponse, code 9)
+ * ------------------------------------------------------------------ */
+
+export interface SearchFileAttributes {
+  bitrate?: number;
+  length?: number;
+  vbr?: number;
+  sampleRate?: number;
+  bitDepth?: number;
+}
+
+export interface SearchFile {
+  name: string;
+  size: number;
+  attrs: SearchFileAttributes;
+}
+
+export interface FileSearchResult {
+  token: number;
+  username: string;
+  freeUploadSlots: boolean;
+  uploadSpeed: number;
+  inQueue: number;
+  results: SearchFile[];
+}
+
+/**
+ * Parse a FileSearchResponse (peer code 9) payload. The entire payload is
+ * zlib-compressed; after inflation the layout is:
+ *   string username | uint32 token | uint32 nfiles
+ *   repeated nfiles: uint8(1) | string name | uint64 size | uint32 extLen (ignored)
+ *                    | uint32 numAttrs (uint32 type + uint32 value)*
+ *   bool freeUploadSlots | uint32 uploadSpeed | uint32 inQueue
+ * Mirrors nicotine-plus pynicotine/slskmessages.py FileSearchResponse.
+ */
+export function parseFileSearchResponse(payload: Buffer): FileSearchResult {
+  const buf = inflateSync(payload);
+  let offset = 0;
+
+  const readString = (): string => {
+    const len = buf.readUInt32LE(offset);
+    offset += 4;
+    const v = buf.subarray(offset, offset + len).toString("utf8");
+    offset += len;
+    return v;
+  };
+  const readUint32 = (): number => {
+    const v = buf.readUInt32LE(offset);
+    offset += 4;
+    return v;
+  };
+  const readUint64 = (): number => {
+    const lo = buf.readUInt32LE(offset);
+    const hi = buf.readUInt32LE(offset + 4);
+    offset += 8;
+    return lo + hi * 2 ** 32;
+  };
+  const readBool = (): boolean => {
+    const v = buf[offset] !== 0;
+    offset += 1;
+    return v;
+  };
+  const readUint8 = (): number => {
+    const v = buf[offset];
+    offset += 1;
+    return v;
+  };
+
+  const username = readString();
+  const token = readUint32();
+  const nfiles = readUint32();
+
+  const results: SearchFile[] = [];
+  for (let i = 0; i < nfiles; i++) {
+    readUint8(); // result code, always 1
+    const name = readString().replace("/", "\\");
+    const size = readUint64();
+    const extLen = readUint32();
+    offset += extLen; // extension is obsolete; skip its bytes
+    const numAttrs = readUint32();
+    const attrs: SearchFileAttributes = {};
+    for (let j = 0; j < numAttrs; j++) {
+      const type = readUint32();
+      const value = readUint32();
+      if (type === FILE_ATTRIBUTE.BITRATE) attrs.bitrate = value;
+      else if (type === FILE_ATTRIBUTE.LENGTH) attrs.length = value;
+      else if (type === FILE_ATTRIBUTE.VBR) attrs.vbr = value;
+      else if (type === FILE_ATTRIBUTE.SAMPLE_RATE) attrs.sampleRate = value;
+      else if (type === FILE_ATTRIBUTE.BIT_DEPTH) attrs.bitDepth = value;
+    }
+    results.push({ name, size, attrs });
+  }
+
+  const freeUploadSlots = readBool();
+  const uploadSpeed = readUint32();
+  const inQueue = readUint32();
+
+  return { token, username, freeUploadSlots, uploadSpeed, inQueue, results };
 }

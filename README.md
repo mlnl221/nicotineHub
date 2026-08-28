@@ -57,14 +57,14 @@ against the protocol doc's literal hex example.
 apps/
   bridge/    # Bun WebSocket + Soulseek login (Node-free JSON protocol)
     src/
-      soulseek.ts     # framing, packing, Login/SetWaitPort, response parsing
-      login.ts        # TCP handshake via Bun.connect
+      soulseek.ts     # framing, packing, Login/SetWaitPort/FileSearch, peer + result parsing
+      session.ts      # persistent session: server conn + inbound peer listener + search
       server.ts       # /ws WebSocket endpoint + /health
       soulseek.test.ts
   web/       # Next.js 15 (App Router) + Tailwind v4, mobile-first PWA
-    src/app/          # layout (viewport/PWA metas) + page
-    src/components/   # LoginForm (mobile-first UI)
-    src/lib/          # useLogin (WS client) + protocol types
+    src/app/          # layout (viewport/PWA metas), login + /search pages
+    src/components/   # LoginForm, Sidebar, SearchHeader, SearchBar, ResultCard
+    src/lib/          # session (WS client/context) + protocol types
 compose.yaml          # bridge (8787) + web (3000)
 ```
 
@@ -98,7 +98,7 @@ bun run build           # typecheck + production builds
 ```
 
 In development the web app connects directly to the bridge at `ws://localhost:8787/ws`
-(its `useLogin` hook handles this automatically). Override with the localStorage key
+(its `SessionProvider` context handles login + search automatically). Override with the localStorage key
 `nicotine.bridgeUrl` or the `NEXT_PUBLIC_BRIDGE_URL` build-time env var.
 
 ---
