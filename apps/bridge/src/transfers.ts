@@ -72,6 +72,8 @@ export class TransferManager {
   private onStats: TransferStatsCb;
   private statsTimer: Timer | null = null;
   private dataDir: string;
+  private incompleteDir: string;
+  private downloadsDir: string;
 
   constructor(opts: {
     dataDir?: string;
@@ -83,6 +85,8 @@ export class TransferManager {
     this.onRemoved = opts.onRemoved;
     this.onStats = opts.onStats;
     this.dataDir = opts.dataDir || process.env.DATA_DIR || "/data";
+    this.incompleteDir = `${this.dataDir}/incomplete`;
+    this.downloadsDir = `${this.dataDir}/downloads`;
 
     // Ensure volume directories exist (best-effort)
     try {
@@ -103,10 +107,57 @@ export class TransferManager {
     this.statsTimer = setInterval(() => this.emitStats(), 2000);
   }
 
+  private incompletePath(id: string): string {
+    try {
+      const { createHash } = require("node:crypto");
+      const h = createHash("md5").update(id).digest("hex");
+      return `${this.incompleteDir}/INCOMPLETE${h}`;
+    } catch { return `${this.incompleteDir}/INCOMPLETE${id.replace(/[^a-zA-Z0-9]/g,"_")}`; }
+  }
+
+  private writeIncompleteChunk(id: string, bytes: number) {
+    try {
+      const { openSync, writeSync, closeSync, existsSync, statSync } = require("node:fs");
+      const p = this.incompletePath(id);
+      // append dummy bytes to simulate ab+ (we just track size via transfer.current, but ensure file exists)
+      const fd = openSync(p, "a");
+      // write zeros to reach current size (sparse simulation)
+      const cur = this.transfers.get(id)?.current || 0;
+      const st = existsSync(p) ? statSync(p) : { size: 0 } as unknown as { size:number };
+      const needed = cur - st.size;
+      if (needed > 0) {
+        const buf = Buffer.alloc(Math.min(needed, 1024*1024));
+        let remaining = needed;
+        while (remaining > 0) {
+          const chunk = Math.min(buf.length, remaining);
+          writeSync(fd, buf.subarray(0, chunk));
+          remaining -= chunk;
+        }
+      }
+      closeSync(fd);
+    } catch {}
+  }
+
+  private finalizeDownload(id: string) {
+    try {
+      const { renameSync, existsSync, mkdirSync, unlinkSync } = require("node:fs");
+      const { basename } = require("node:path");
+      const t = this.transfers.get(id);
+      if (!t) return;
+      const src = this.incompletePath(id);
+      if (!existsSync(src)) return;
+      mkdirSync(this.downloadsDir, { recursive: true });
+      const dest = `${this.downloadsDir}/${basename(t.fileName)}`;
+      try { renameSync(src, dest); } catch { unlinkSync(src); }
+    } catch {}
+  }
+
   private persist() {
     try {
       const { writeFileSync } = require("node:fs");
       const serial = [...this.transfers.values()].map(({ _timer: _t, _startTime: _s, _transferredAtStart: _a, ...rest }) => rest);
+      writeFileSync(`${this.dataDir}/downloads.json`, JSON.stringify(serial.filter(s=>!s.isUpload), null, 2));
+      writeFileSync(`${this.dataDir}/uploads.json`, JSON.stringify(serial.filter(s=>s.isUpload), null, 2));
       writeFileSync(`${this.dataDir}/transfers.json`, JSON.stringify(serial, null, 2));
     } catch {}
   }
@@ -240,16 +291,19 @@ export class TransferManager {
     const t = this.transfers.get(id);
     if (!t) return;
     if (t._timer) clearInterval(t._timer);
+    // ensure incomplete file exists at start
+    this.writeIncompleteChunk(id, 0);
     t._timer = setInterval(() => {
       const cur = this.transfers.get(id);
       if (!cur || cur.status !== "Transferring") {
         if (cur?._timer) clearInterval(cur._timer);
         return;
       }
-      // Simulated chunk: 2–5 MB/s varied
+      // Simulated chunk: 2–5 MB/s varied, throttle 500ms per spec
       const chunk = 2_000_000 + Math.random() * 3_000_000;
       const step = Math.min(chunk * 0.5, cur.size - cur.current);
       cur.current += step;
+      this.writeIncompleteChunk(id, step);
       const elapsed = (Date.now() - (cur._startTime ?? Date.now())) / 1000;
       cur.speed = step * 2; // per 0.5s
       cur.avgSpeed = elapsed > 0 ? cur.current / elapsed : cur.speed;
@@ -261,6 +315,8 @@ export class TransferManager {
         cur.timeLeft = null;
         clearInterval(cur._timer!);
         cur._timer = undefined;
+        this.finalizeDownload(id);
+        // Banner SendUploadSpeed 121 after upload success — handled via session emit if needed
       }
       this.emit(cur);
       this.emitStats();

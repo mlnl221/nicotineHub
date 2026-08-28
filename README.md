@@ -99,7 +99,15 @@ bun run build           # typecheck + production builds
 
 In development the web app connects directly to the bridge at `ws://localhost:8787/ws`
 (its `SessionProvider` context handles login + search automatically). Override with the localStorage key
-`nicotine.bridgeUrl` or the `NEXT_PUBLIC_BRIDGE_URL` build-time env var.
+`nicotine.bridgeUrl` or the `NEXT_PUBLIC_BRIDGE_URL` build-time env var. If `BRIDGE_TOKEN` is set on the bridge,
+also set `NEXT_PUBLIC_BRIDGE_TOKEN` or `localStorage.nicotine.bridgeToken` — the web will append `?token=` and
+`Sec-WebSocket-Protocol: bearer, <token>`.
+
+| Env | Default | Purpose |
+|-----|---------|---------|
+| `BRIDGE_TOKEN` | *(open)* | If set, `GET /ws?token=` or `Authorization: Bearer` or `Sec-WebSocket-Protocol` must match else `401` |
+| `DATA_DIR` | `/data` | Docker volume for `downloads/`, `incomplete/` (`INCOMPLETE<md5>`), `uploads/`, `shares.json` (`bridge-data:/data`) |
+| `LISTEN_PORT` | `2234` | Peer inbound listener (port-forward on homelab) |
 
 ---
 

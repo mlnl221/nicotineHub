@@ -206,7 +206,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         // Close previous session if any
         ws.data.session?.close();
         const session = new SoulseekSession({
-          username, password, host, port, listenPort: LISTEN_PORT, profile: defaultProfile(username),
+          username, password, host, port, listenPort: LISTEN_PORT, profile: defaultProfile(username), dataDir: DATA_DIR,
           onUserEvent: (event) => { try { ws.send(JSON.stringify({ type: "userinfo:event", event })); } catch {} },
           onChatEvent: (event) => { try { ws.send(JSON.stringify({ type: "chat:event", event })); } catch {} },
           onRoomEvent: (event) => { try { ws.send(JSON.stringify({ type: "room:event", event })); } catch {} },

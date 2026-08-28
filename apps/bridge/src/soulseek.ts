@@ -737,6 +737,46 @@ export function parsePlaceInQueueResponse(payload: Buffer): { file: string; plac
   const r = new SlskReader(payload); const file = r.string(); const place = r.uint32(); return { file, place };
 }
 
+export function parseMessageUsers(payload: Buffer): PrivateMessage[] {
+  const r = new SlskReader(payload);
+  const n = r.uint32(); const out: PrivateMessage[] = [];
+  for (let i=0;i<n;i++) {
+    const id = r.uint32(); const ts = r.uint32(); const user = r.string(); const msg = r.string();
+    out.push({ id, timestamp: ts, username: user, message: msg, isNew: false });
+  }
+  return out;
+}
+export function parseRoomMembers(payload: Buffer): { room: string; members: string[] } {
+  const r = new SlskReader(payload);
+  const room = r.string(); const n = r.uint32(); const members: string[] = [];
+  for(let i=0;i<n;i++) members.push(r.string());
+  return { room, members };
+}
+export function parseRoomMember(payload: Buffer): { room: string; username: string } {
+  const r = new SlskReader(payload);
+  return { room: r.string(), username: r.string() };
+}
+export function parseGlobalRoomMessage(payload: Buffer): ChatMessage {
+  const r = new SlskReader(payload);
+  return { room: r.string(), username: r.string(), message: r.string() };
+}
+export function parseCantCreateRoom(payload: Buffer): string {
+  const r = new SlskReader(payload);
+  return r.string();
+}
+export function parsePrivileges(payload: Buffer): { username: string; timeLeft?: number } {
+  const r = new SlskReader(payload);
+  if (!r.remaining) return { username: "" };
+  // 122 userPrivileged: string username
+  // 92 checkPrivileges handled elsewhere; fallback generic
+  try { const u = r.string(); if(r.remaining) return { username: u, timeLeft: r.uint32() }; return { username: u }; } catch { return { username: "" }; }
+}
+export interface RoomTickerEvent { room: string; username: string; msg: string; }
+export function parseRoomTickerEvent(payload: Buffer): RoomTickerEvent {
+  const r = new SlskReader(payload);
+  return { room: r.string(), username: r.string(), msg: r.string() };
+}
+
 /* Distrib */
 
 export function parseDistribSearch(payload: Buffer): { username: string; token: number; query: string } {
@@ -746,6 +786,9 @@ export function parseDistribSearch(payload: Buffer): { username: string; token: 
   const username = r.string(); const token = r.uint32(); const query = r.string();
   return { username, token, query };
 }
+export function parseBranchLevel(payload: Buffer): number { return new SlskReader(payload).uint32(); }
+export function parseBranchRoot(payload: Buffer): string { return new SlskReader(payload).string(); }
+export function parseChildDepth(payload: Buffer): number { return new SlskReader(payload).uint32(); }
 
 /* File — F conn helpers */
 export function parseFileTransferInit(buf: Buffer): number { return buf.readUInt32LE(0); }

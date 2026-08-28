@@ -35,16 +35,44 @@ interface SessionApi {
 
 const SessionContext = createContext<SessionApi | null>(null);
 
+function bridgeToken(): string | null {
+  if (typeof window === "undefined") return null;
+  const ls = window.localStorage.getItem("nicotine.bridgeToken");
+  if (ls) return ls;
+  const env = process.env.NEXT_PUBLIC_BRIDGE_TOKEN;
+  if (env) return env;
+  return null;
+}
+
 function bridgeUrl(): string {
   if (typeof window === "undefined") return "";
   const override = window.localStorage.getItem("nicotine.bridgeUrl");
-  if (override) return override;
+  if (override) {
+    const tok = bridgeToken();
+    if (tok && !override.includes("token=")) return override.includes("?") ? `${override}&token=${encodeURIComponent(tok)}` : `${override}?token=${encodeURIComponent(tok)}`;
+    return override;
+  }
 
   const configured = process.env.NEXT_PUBLIC_BRIDGE_URL;
-  if (configured) return configured;
+  if (configured) {
+    const tok = bridgeToken();
+    if (tok && !configured.includes("token=")) return configured.includes("?") ? `${configured}&token=${encodeURIComponent(tok)}` : `${configured}?token=${encodeURIComponent(tok)}`;
+    return configured;
+  }
 
   const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${scheme}//${window.location.hostname}:8787/ws`;
+  const base = `${scheme}//${window.location.hostname}:8787/ws`;
+  const tok = bridgeToken();
+  if (tok) return `${base}?token=${encodeURIComponent(tok)}`;
+  return base;
+}
+
+function bridgeProtocols(): string[] | undefined {
+  const tok = bridgeToken();
+  if (!tok) return undefined;
+  // Also send via Sec-WebSocket-Protocol as fallback for bridge's token check
+  // Use "bearer, <token>" pattern expected by server.ts extractToken
+  return ["bearer", tok];
 }
 
 export function SessionProvider({ children }: { children: ReactNode }) {
@@ -78,7 +106,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       socketRef.current?.close();
       setState({ status: "connecting" });
 
-      const ws = new WebSocket(bridgeUrl());
+      const protocols = bridgeProtocols();
+      const ws = protocols ? new WebSocket(bridgeUrl(), protocols) : new WebSocket(bridgeUrl());
       socketRef.current = ws;
 
       ws.onopen = () => {

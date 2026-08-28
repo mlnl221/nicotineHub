@@ -20,7 +20,9 @@ RUN bun run build
 # The bundled output is self-contained (deps bundled), so no node_modules needed.
 FROM base AS runner
 ENV NODE_ENV=production
+ENV DATA_DIR=/data
 WORKDIR /app
 COPY --from=builder /app/apps/bridge/dist ./dist
-EXPOSE 8787
+RUN mkdir -p $DATA_DIR $DATA_DIR/incomplete $DATA_DIR/downloads $DATA_DIR/uploads && chown -R bun:bun $DATA_DIR || chown -R 1000:1000 $DATA_DIR || true
+EXPOSE 8787 2234
 CMD ["bun", "run", "dist/server.js"]
