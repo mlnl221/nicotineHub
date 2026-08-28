@@ -53,6 +53,12 @@ What happened: `page.locator('button',{hasText:'Logoff'}).click()` timed out 30s
 Why: Didn't check `mobile viewport` or `Sidebar` responsive behavior; `AGENTS.md` says mobile-first but search page uses desktop fixed layout.
 How to avoid: For sidebar actions, `await page.evaluate(() => window.scrollTo(0,document.body.scrollHeight))` or `locator.click({force:true})` or `page.evaluate(() => document.querySelector('button').click())`. For mobile, test with `chromium.newContext({viewport:{width:390,height:844},isMobile:true})` and assert `nav` collapses or drawer.
 
+## 2026-08-28 — Write tool silently drops files in non-existent dirs / without prior Read
+
+What happened: Many `Write` calls reported "File created successfully" but did NOT persist. `docs/search/*` (new dir) never appeared; `apps/web/src/app/search/page.tsx` and `apps/web/src/lib/session.tsx` (overwrites of existing files) kept their OLD content even after the write "succeeded". This burned a full build cycle chasing phantom type errors.
+Why: Two distinct causes. (1) Writing into a directory that did not yet exist (`docs/search/`, `components/search/`) — the tool said success but nothing landed until I `mkdir`-ed the dir first. (2) Overwriting an existing file without having `Read` it in the current session — the write was accepted but content reverted to the prior version on next read.
+How to avoid: Before `Write`, `mkdir -p` any parent directory that doesn't exist (verify with `ls`). For files that already exist, `Read` them first in the same turn, then `Write`. After any batch of writes that must persist, sanity-check with a quick `ls`/`wc -l` or re-`Read` the critical files before running `bun run build`.
+
 ## 2026-08-28 — Forgot to copy .env.example before Playwright
 
 What happened: Initially `apps/web/.env` missing; `AGENTS.md` in search worktree explicitly says `cp apps/web/.env.example apps/web/.env` before driving UI (provides `NEXT_PUBLIC_BRIDGE_URL` etc for Playwright MCP browser session). Tested without it and got inconsistent `bridgeUrl()` fallback to `ws://localhost:8787/ws` which worked by luck.

@@ -37,15 +37,38 @@ export interface ErrorMessage {
   error: string;
 }
 
+/* ------------------------------------------------------------------ *
+ * Search
+ * ------------------------------------------------------------------ */
+
 export interface SearchRequest {
   type: "search";
+  searchId: string;
   query: string;
 }
 
-export interface SearchFile {
-  name: string;
+export interface SearchStopRequest {
+  type: "search:stop";
+  searchId: string;
+}
+
+/** A single result row, transformed from a peer FileSearchResponse. */
+export interface SearchRow {
+  user: string;
+  folder: string;
+  filename: string;
+  path: string;
   size: number;
-  attrs: {
+  fileType: string;
+  slotFree: boolean;
+  speed: number;
+  inQueue: number;
+  /** bitrate kbps (0 if lossless/unknown) */
+  quality: number;
+  /** duration seconds (0 if unknown) */
+  length: number;
+  private: boolean;
+  attributes: {
     bitrate?: number;
     length?: number;
     vbr?: number;
@@ -56,22 +79,48 @@ export interface SearchFile {
 
 export interface SearchStartMessage {
   type: "search:start";
+  searchId: string;
   token: number;
 }
 
 export interface SearchResultMessage {
   type: "search:result";
+  searchId: string;
   token: number;
-  username: string;
-  freeUploadSlots: boolean;
-  uploadSpeed: number;
-  inQueue: number;
-  results: SearchFile[];
+  rows: SearchRow[];
 }
 
-export interface SearchDoneMessage {
-  type: "search:done";
-  token: number;
+export interface SearchEndMessage {
+  type: "search:end";
+  searchId: string;
+  reason: "max_results" | "stopped" | "timeout" | "error";
+}
+
+/** Filter state for the result filter bar (full nicotine parity). */
+export interface FilterState {
+  include: string;
+  exclude: string;
+  fileType: string;
+  size: string;
+  bitrate: string;
+  length: string;
+  country: string;
+  freeSlot: boolean;
+  publicOnly: boolean;
+}
+
+export function emptyFilters(): FilterState {
+  return {
+    include: "",
+    exclude: "",
+    fileType: "",
+    size: "",
+    bitrate: "",
+    length: "",
+    country: "",
+    freeSlot: false,
+    publicOnly: false,
+  };
 }
 
 export type BridgeOutboundMessage =
@@ -81,6 +130,6 @@ export type BridgeOutboundMessage =
   | ErrorMessage
   | SearchStartMessage
   | SearchResultMessage
-  | SearchDoneMessage;
+  | SearchEndMessage;
 
-export type BridgeInboundMessage = LoginRequest | SearchRequest;
+export type BridgeInboundMessage = LoginRequest | SearchRequest | SearchStopRequest;

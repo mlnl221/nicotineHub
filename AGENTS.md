@@ -37,6 +37,29 @@ Bridge URL override: `NEXT_PUBLIC_BRIDGE_URL` (build-time) or `localStorage.nico
 - Verify after changes: `bun test && bun run build`.
 - Browser/UI testing uses the Playwright MCP server (configured in opencode). Before driving the UI, always copy the env file into place (e.g. `cp apps/web/.env.example apps/web/.env`) so the `PLAYWRIGHT_MCP_EXTENSION_TOKEN` and other vars are present for the Playwright MCP browser session.
 
+## Git Worktrees — per-worktree ports (avoid overlap)
+
+Every `git worktree` must run on its own ports so it never collides with `main` or other worktrees (see `mistakes.md 2026-08-28 — Port conflict`). Do not commit port changes.
+
+- **Defaults (main):** `web:3000`, `bridge:8787` (`PORT`), peer `LISTEN_PORT:2234` — see `compose.yaml:8` / `apps/bridge/src/server.ts:83` / `apps/web/package.json:6`.
+- **On `git worktree add`:** pick the next free triplet (e.g. `3001/8788/2235`, `3002/8789/2236`, …). Check availability first: `ss -tlnp | grep -E '3000|8787|2234'` or `lsof -i :3000 -i :8787 -i :2234` and `curl -sf http://localhost:<port>/health`.
+- **Override locally only (gitignored, never commit `compose.yaml`/`package.json` port edits):**
+  ```bash
+  # bridge (Bun) — PORT and LISTEN_PORT are read from env in apps/bridge/src/server.ts:83
+  PORT=8788 LISTEN_PORT=2235 bun run --cwd apps/bridge dev   # -> ws://localhost:8788/ws
+
+  # web (Next.js) — PORT env overrides the -p 3000 in apps/web/package.json:6
+  PORT=3001 NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws bun run --cwd apps/web dev  # -> http://localhost:3001
+  # or: echo "NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws" > apps/web/.env  (.env is gitignored)
+
+  # docker — use an untracked compose.override.yaml instead of editing compose.yaml
+  # compose.override.yaml (gitignored):
+  # services:
+  #   bridge: { ports: ["8788:8788"], environment: { PORT: "8788", LISTEN_PORT: "2235" } }
+  #   web: { ports: ["3001:3000"], environment: { PORT: "3000", NEXT_PUBLIC_BRIDGE_URL: "ws://localhost:8788/ws" } }
+  ```
+- **Verify before starting worktree services:** `ps aux | grep -E "next|bun"` + `curl -sf http://localhost:<bridge-port>/health` should hit *your* worktree, not `main`.
+
 ## Repo layout
 
 ```

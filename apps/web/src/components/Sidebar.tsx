@@ -65,6 +65,13 @@ export function Sidebar() {
 
       <div className="space-y-2 border-t border-surface-container-high/20 pt-8">
         <a
+          href="/settings"
+          className="flex items-center space-x-3 rounded-xl px-4 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant"
+        >
+          <span className="material-symbols-outlined">settings</span>
+          <span className="font-label text-xs uppercase tracking-widest">Settings</span>
+        </a>
+        <a
           href="#"
           className="flex items-center space-x-3 rounded-xl px-4 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant"
         >

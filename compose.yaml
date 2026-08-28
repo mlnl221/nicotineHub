@@ -6,8 +6,11 @@ services:
     restart: unless-stopped
     environment:
       PORT: "8787"
+      LISTEN_PORT: "2234"
     ports:
       - "8787:8787"
+      - "2234:2234"
+      - "2234:2234/udp"
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://localhost:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
