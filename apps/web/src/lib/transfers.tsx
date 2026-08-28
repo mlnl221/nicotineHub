@@ -68,6 +68,18 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
           }
           return [...prev, msg.transfer];
         });
+      } else if (msg.type === "transfer:queue") {
+        setTransfers((prev) => prev.map((t) => (t.id === msg.id ? { ...t, queuePosition: msg.place, status: "Queued" as const } : t)));
+      } else if (msg.type === "transfer:finished") {
+        setTransfers((prev) =>
+          prev.map((t) =>
+            t.id === msg.id
+              ? { ...t, status: "Finished" as const, current: t.size, speed: 0, timeLeft: null, queuePosition: null }
+              : t,
+          ),
+        );
+        // Optionally trigger browser download via hidden link (Phase 5 OPFS handling deferred)
+        // We keep it non-intrusive: UI will show Finished with downloadUrl available
       } else if (msg.type === "transfer:removed") {
         setTransfers((prev) => prev.filter((t) => t.id !== msg.id));
       } else if (msg.type === "transfer:stats") {
