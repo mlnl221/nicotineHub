@@ -5,7 +5,7 @@
 > **what has shipped, what is in-progress, and what remains** — updated after
 > each phase.
 
-Last updated: 2026-08-28 · Branch `feat/transfers-real` · Base `bfda886` (profile merge PR #7).
+Last updated: 2026-08-28 · Branch `feat/transfers-real` · Base `88a1d8c` (bridge 1:1 parity PR #8, rebased).
 
 ---
 
@@ -50,7 +50,7 @@ The worktree `../nicotine_mobile-feat_profile-view` was pruned after PR #7 merge
 - New imports cover all shim builders/parsers.
 - 8 new tests in `transfers — protocol shims (Phase 0)`: `packUint64LE` round-trip including `4_294_967_296`, `buildQueueUpload` exact hex `100000002b0000000800000066696c652e6d7033`, `TransferRequest` direction/size, `TransferResponse` allowed/denied, `PlaceInQueue/UploadFailed/Denied`, server relay codes (`18/1001/121`), `FileTransferInit`/`FileOffset`.
 
-Current verify in this worktree: `bun test` 38 pass. `bun run build` **not yet green** — web protocol types for `transfer:queue`/`transfer:finished` and the `transfers.ts` engine are still stub.
+Current verify in this worktree (post-rebase): `bun test` 38 pass (soulseek.test) · `bun run build` green (both apps, downloads/upload routes emitted). Phase 0 web, Phase 1 indirect, Phase 2 engine, Phase 3 web hardening shipped (see commits e390cec/86a9c79/0234ba6/4966e08).
 
 ---
 
