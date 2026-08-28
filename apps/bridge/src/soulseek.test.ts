@@ -32,6 +32,28 @@ import {
   parsePeerAddress,
   buildUserInfoResponse,
   parseUserInfoResponse,
+  buildQueueUpload,
+  buildTransferRequest,
+  buildTransferResponse,
+  buildPlaceInQueueRequest,
+  buildPlaceInQueueResponse,
+  buildUploadFailed,
+  buildUploadDenied,
+  buildConnectToPeer,
+  buildCantConnectToPeer,
+  buildSendUploadSpeed,
+  packUint64LE,
+  unpackUint64LE,
+  parseTransferRequest,
+  parseTransferResponse,
+  parseQueueUpload,
+  parsePlaceInQueueResponse,
+  parseUploadFailed,
+  parseUploadDenied,
+  parsePlaceInQueueRequest,
+  parseFileTransferInit,
+  parseFileOffset,
+  PEER_MESSAGE_CODES,
 } from "./soulseek.ts";
 
 describe("packing primitives", () => {
@@ -432,5 +454,71 @@ describe("user info — peer UserInfoResponse", () => {
     const msg = parseUserInfoResponse(p.payload, "heidi");
     expect(msg.pic).toBeNull();
     expect(msg.descr).toBe("no pic");
+  });
+});
+
+describe("transfers — protocol shims (Phase 0)", () => {
+  test("packUint64LE / unpackUint64LE round-trips, incl. 2^32", () => {
+    expect(unpackUint64LE(packUint64LE(1024))).toBe(1024);
+    expect(unpackUint64LE(packUint64LE(4_294_967_296))).toBe(4_294_967_296);
+    expect(packUint64LE(4_294_967_296).toString("hex")).toBe("0000000001000000");
+  });
+
+  test("buildQueueUpload frames peer code 43 and round-trips", () => {
+    const raw = buildQueueUpload("file.mp3");
+    expect(raw.toString("hex")).toBe("100000002b0000000800000066696c652e6d7033");
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(PEER_MESSAGE_CODES.queueUpload);
+    expect(parseQueueUpload(p.payload).file).toBe("file.mp3");
+  });
+
+  test("buildTransferRequest (upload) carries direction/token/file/size", () => {
+    const raw = buildTransferRequest(1, 5, "a.mp3", 1024);
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(PEER_MESSAGE_CODES.transferRequest);
+    const msg = parseTransferRequest(p.payload);
+    expect(msg.direction).toBe(1);
+    expect(msg.token).toBe(5);
+    expect(msg.file).toBe("a.mp3");
+    expect(msg.size).toBe(1024);
+  });
+
+  test("buildTransferRequest (download) omits size", () => {
+    const raw = buildTransferRequest(0, 9, "b.mp3");
+    const msg = parseTransferRequest(tryParseMessage(raw)!.payload);
+    expect(msg.direction).toBe(0);
+    expect(msg.token).toBe(9);
+    expect(msg.file).toBe("b.mp3");
+    expect(msg.size).toBeUndefined();
+  });
+
+  test("buildTransferResponse allowed carries size, denied carries reason", () => {
+    const ok = tryParseMessage(buildTransferResponse(7, true, 2048))!;
+    expect(ok.code).toBe(PEER_MESSAGE_CODES.transferResponse);
+    expect(parseTransferResponse(ok.payload)).toEqual({ token: 7, allowed: true, size: 2048 });
+    const no = tryParseMessage(buildTransferResponse(7, false, "File not shared."))!;
+    expect(parseTransferResponse(no.payload)).toEqual({ token: 7, allowed: false, reason: "File not shared." });
+  });
+
+  test("PlaceInQueue / UploadFailed / UploadDenied round-trip", () => {
+    const q = tryParseMessage(buildPlaceInQueueResponse("x.flac", 3))!;
+    expect(q.code).toBe(PEER_MESSAGE_CODES.placeInQueueResponse);
+    expect(parsePlaceInQueueResponse(q.payload)).toEqual({ file: "x.flac", place: 3 });
+    expect(parseUploadFailed(tryParseMessage(buildUploadFailed("y.wav"))!.payload).file).toBe("y.wav");
+    expect(parseUploadDenied(tryParseMessage(buildUploadDenied("z.mp3", "Banned"))!.payload)).toEqual({ file: "z.mp3", reason: "Banned" });
+    expect(parsePlaceInQueueRequest(tryParseMessage(buildPlaceInQueueRequest("q.ogg"))!.payload).file).toBe("q.ogg");
+  });
+
+  test("server relays frame correct codes", () => {
+    expect(tryParseMessage(buildConnectToPeer(11, "bob", "F"))!.code).toBe(SERVER_MESSAGE_CODES.connectToPeer);
+    expect(tryParseMessage(buildCantConnectToPeer(11))!.code).toBe(SERVER_MESSAGE_CODES.cantConnectToPeer);
+    expect(tryParseMessage(buildSendUploadSpeed(500_000))!.code).toBe(SERVER_MESSAGE_CODES.sendUploadSpeed);
+  });
+
+  test("FileTransferInit / FileOffset parse raw F bytes", () => {
+    const init = Buffer.alloc(4);
+    init.writeUInt32LE(42, 0);
+    expect(parseFileTransferInit(init).token).toBe(42);
+    expect(parseFileOffset(packUint64LE(8192))).toBe(8192);
   });
 });

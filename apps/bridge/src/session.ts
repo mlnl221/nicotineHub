@@ -584,7 +584,7 @@ export class SoulseekSession {
       } else if (msg.code === PEER_MESSAGE_CODES.transferResponse) {
         try { const tr = parseTransferResponse(msg.payload); this.emitTransfer({ type: "transfer-response", username: state.username, token: tr.token, reason: tr.reason }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.queueUpload) {
-        try { const file = parseQueueUpload(msg.payload); this.emitTransfer({ type: "queue-upload", username: state.username, file }); } catch {}
+        try { const q = parseQueueUpload(msg.payload); const file = typeof q === "string" ? q : (q as { file: string }).file; this.emitTransfer({ type: "queue-upload", username: state.username, file }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.placeInQueueRequest) {
         try { const file = msg.payload.length >= 4 ? (() => { const l = msg.payload.readUInt32LE(0); return msg.payload.subarray(4, 4 + l).toString("utf8"); })() : ""; try { (peer as Socket).write(buildPlaceInQueueRequest(file)); } catch {} } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.placeInQueueResponse) {
