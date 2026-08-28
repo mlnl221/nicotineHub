@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { SearchProvider } from "@/lib/search";
 import { SearchScreen } from "@/components/search/SearchScreen";
+import { Sidebar } from "@/components/Sidebar";
 
 export default function SearchPage() {
   const { state } = useSession();
@@ -17,8 +18,13 @@ export default function SearchPage() {
   if (state.status !== "connected") return null;
 
   return (
-    <SearchProvider>
-      <SearchScreen />
-    </SearchProvider>
+    <div className="flex min-h-screen bg-surface-container-low">
+      <Sidebar />
+      <main className="ml-72 flex min-h-screen flex-1 flex-col">
+        <SearchProvider>
+          <SearchScreen />
+        </SearchProvider>
+      </main>
+    </div>
   );
 }

@@ -59,9 +59,9 @@ export function TransferCard({
       : "bg-primary";
 
   const speedLabel =
-    isFinished ? "Finished" : isQueued ? "Queued" : isPaused ? "Paused" : humanSpeed(transfer.speed);
+    isFinished ? "Finished" : isQueued ? "Queued" : isPaused ? "Paused" : isCancelled ? "Cancelled" : humanSpeed(transfer.speed);
   const etaLabel =
-    isFinished ? "Complete" : isQueued ? `Place ${transfer.queuePosition ?? "—"}` : isPaused ? "Paused" : `ETA: ${humanETA(transfer.timeLeft)}`;
+    isFinished ? "Complete" : isQueued ? `Place ${transfer.queuePosition ?? "—"}` : isPaused ? "Paused" : isCancelled ? "Cancelled" : `ETA: ${humanETA(transfer.timeLeft)}`;
 
   const speedColor = transfer.isUpload ? "text-tertiary" : "text-primary";
 
