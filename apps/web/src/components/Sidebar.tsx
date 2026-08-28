@@ -1,22 +1,34 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useSession } from "@/lib/session";
-import { useTheme } from "@/components/ThemeProvider";
+import { useTransfers } from "@/lib/transfers";
 
 const NAV = [
-  { icon: "search_check", label: "Search Files", active: true },
-  { icon: "downloading", label: "Downloads" },
-  { icon: "upload", label: "Uploads" },
-  { icon: "forum", label: "Private Chat" },
-  { icon: "folder_managed", label: "Browse Shares" },
-  { icon: "account_circle", label: "User Profiles" },
-  { icon: "group", label: "Buddies" },
-  { icon: "groups", label: "Chat Rooms" },
-  { icon: "interests", label: "Interests" },
+  { icon: "search_check", label: "Search Files", href: "/search" },
+  { icon: "downloading", label: "Downloads", href: "/downloads" },
+  { icon: "upload", label: "Uploads", href: "/uploads" },
+  { icon: "forum", label: "Private Chat", href: "#" },
+  { icon: "folder_managed", label: "Browse Shares", href: "#" },
+  { icon: "account_circle", label: "User Profiles", href: "#" },
+  { icon: "group", label: "Buddies", href: "#" },
+  { icon: "groups", label: "Chat Rooms", href: "#" },
+  { icon: "interests", label: "Interests", href: "#" },
 ];
 
 export function Sidebar() {
   const { logout, state } = useSession();
+  const pathname = usePathname();
+  let downloadsCount = 0;
+  let uploadsCount = 0;
+  try {
+    const t = useTransfers();
+    downloadsCount = t.downloads.length;
+    uploadsCount = t.uploads.length;
+  } catch {
+    // TransfersProvider not mounted on login page
+  }
 
   return (
     <nav className="fixed left-0 top-0 z-50 flex h-full w-72 flex-col space-y-8 bg-surface-container-low/90 p-6 backdrop-blur-md dark:bg-surface-container-highest/90">
@@ -44,23 +56,34 @@ export function Sidebar() {
       </button>
 
       <ul className="mt-8 flex-1 space-y-2">
-        {NAV.map((item) => (
-          <li key={item.label} className="scale-105 cursor-pointer duration-200 active:scale-95">
-            <a
-              href="#"
-              className={
-                item.active
-                  ? "flex items-center space-x-3 rounded-xl bg-primary-fixed/30 px-4 py-3 font-bold text-primary dark:bg-primary-container/20 dark:text-inverse-primary"
-                  : "flex items-center space-x-3 rounded-xl px-4 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant"
-              }
-            >
-              <span className="material-symbols-outlined">
-                {item.icon}
-              </span>
-              <span className="font-label text-xs uppercase tracking-widest">{item.label}</span>
-            </a>
-          </li>
-        ))}
+        {NAV.map((item) => {
+          const isActive = pathname === item.href || (item.href !== "#" && pathname.startsWith(item.href));
+          const badge =
+            item.label === "Downloads" && downloadsCount > 0 ? ` (${downloadsCount})`
+            : item.label === "Uploads" && uploadsCount > 0 ? ` (${uploadsCount})`
+            : "";
+          return (
+            <li key={item.label} className="scale-105 cursor-pointer duration-200 active:scale-95">
+              <Link
+                href={item.href}
+                className={
+                  isActive
+                    ? "flex items-center space-x-3 rounded-xl bg-primary-fixed/30 px-4 py-3 font-bold text-primary dark:bg-primary-container/20 dark:text-inverse-primary"
+                    : "flex items-center space-x-3 rounded-xl px-4 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant"
+                }
+                style={isActive ? ({ fontVariationSettings: "'FILL' 1" } as React.CSSProperties) : undefined}
+              >
+                <span className="material-symbols-outlined" style={isActive ? { fontVariationSettings: "'FILL' 1" } : undefined}>
+                  {item.icon}
+                </span>
+                <span className="font-label text-xs uppercase tracking-widest">
+                  {item.label}
+                  {badge}
+                </span>
+              </Link>
+            </li>
+          );
+        })}
       </ul>
 
       <div className="space-y-2 border-t border-surface-container-high/20 pt-8">

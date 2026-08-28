@@ -1,0 +1,312 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>User Profiles - Nicotine+ Network</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@300;400;700;900&amp;family=Inter:wght@400;500;600&amp;family=Public+Sans:wght@500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-background": "#1b1c1d",
+                        "inverse-primary": "#b1c5ff",
+                        "on-tertiary": "#ffffff",
+                        "secondary-fixed": "#dfe3e8",
+                        "tertiary-fixed-dim": "#dcc661",
+                        "primary-fixed-dim": "#b1c5ff",
+                        "tertiary-fixed": "#f9e37a",
+                        "on-error-container": "#93000a",
+                        "on-error": "#ffffff",
+                        "surface-container-lowest": "#ffffff",
+                        "on-primary-fixed-variant": "#00419d",
+                        "surface-bright": "#faf9fa",
+                        "secondary": "#5a5f63",
+                        "tertiary-container": "#bfab49",
+                        "surface-container-low": "#f5f3f4",
+                        "on-tertiary-container": "#4a3f00",
+                        "inverse-on-surface": "#f2f0f1",
+                        "surface": "#faf9fa",
+                        "on-primary-container": "#e7ebff",
+                        "inverse-surface": "#303031",
+                        "primary": "#094cb2",
+                        "on-surface": "#1b1c1d",
+                        "primary-container": "#3366cc",
+                        "on-surface-variant": "#434653",
+                        "background": "#faf9fa",
+                        "on-secondary-container": "#606569",
+                        "on-tertiary-fixed": "#211b00",
+                        "surface-container-high": "#e9e8e9",
+                        "tertiary": "#6d5e00",
+                        "surface-tint": "#2259bf",
+                        "on-secondary": "#ffffff",
+                        "outline": "#737784",
+                        "on-primary": "#ffffff",
+                        "secondary-container": "#dfe3e8",
+                        "error": "#ba1a1a",
+                        "on-primary-fixed": "#001946",
+                        "primary-fixed": "#d9e2ff",
+                        "on-tertiary-fixed-variant": "#524600",
+                        "surface-variant": "#e3e2e3",
+                        "surface-container-highest": "#e3e2e3",
+                        "on-secondary-fixed-variant": "#42474b",
+                        "error-container": "#ffdad6",
+                        "surface-dim": "#dbdadb",
+                        "outline-variant": "#c3c6d5",
+                        "surface-container": "#efedee",
+                        "secondary-fixed-dim": "#c2c7cc",
+                        "on-secondary-fixed": "#171c20"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Noto Serif", "serif"],
+                        "display": ["Noto Serif", "serif"],
+                        "body": ["Inter", "sans-serif"],
+                        "label": ["Public Sans", "sans-serif"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body { background-color: theme('colors.background'); color: theme('colors.on-background'); font-family: theme('fontFamily.body'); }
+        h1, h2, h3, h4, h5, h6 { font-family: theme('fontFamily.headline'); }
+        .label-text { font-family: theme('fontFamily.label'); }
+    </style>
+</head>
+<body class="flex min-h-screen bg-background">
+<!-- SideNavBar (JSON Component) -->
+<nav class="h-screen w-72 left-0 top-0 fixed bg-surface-container-low/90 backdrop-blur-md flex flex-col p-6 space-y-8 z-50">
+<!-- Brand -->
+<div class="flex items-center space-x-3 mb-4">
+<div class="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-on-primary font-headline font-bold text-xl">N</div>
+<div>
+<h1 class="font-headline text-lg font-black text-on-surface tracking-tight">NICOTINE+ HUB</h1>
+<p class="font-label text-[10px] uppercase tracking-widest text-on-surface-variant">Secure Homelab Node</p>
+</div>
+</div>
+<!-- Primary CTA -->
+<button class="w-full bg-gradient-to-r from-primary to-primary-container text-on-primary py-3 px-4 rounded-xl font-label text-xs uppercase tracking-widest flex items-center justify-center space-x-2 shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all">
+<span class="material-symbols-outlined text-sm">add</span>
+<span class="">New Transfer</span>
+</button>
+<!-- Main Navigation -->
+<div class="flex-1 flex flex-col space-y-2 mt-8">
+<a class="text-on-surface-variant flex items-center px-4 py-3 hover:bg-surface-container-high rounded-xl transition-all font-label text-xs uppercase tracking-widest group" href="#"><span class="material-symbols-outlined mr-4 opacity-70 group-hover:opacity-100">search_check</span>Search Files</a>
+<a class="text-on-surface-variant flex items-center px-4 py-3 hover:bg-surface-container-high rounded-xl transition-all font-label text-xs uppercase tracking-widest group" href="#"><span class="material-symbols-outlined mr-4 opacity-70 group-hover:opacity-100">downloading</span>Downloads</a>
+<a class="text-on-surface-variant flex items-center px-4 py-3 hover:bg-surface-container-high rounded-xl transition-all font-label text-xs uppercase tracking-widest group" href="#"><span class="material-symbols-outlined mr-4 opacity-70 group-hover:opacity-100">folder_managed</span>Uploads</a>
+<a class="text-primary font-bold bg-primary-fixed/30 rounded-xl px-4 py-3 font-label text-xs uppercase tracking-widest flex items-center" href="#"><span class="material-symbols-outlined mr-4" style="font-variation-settings: &quot;FILL&quot; 1;">hub</span>User Profiles</a>
+<a class="text-on-surface-variant flex items-center px-4 py-3 hover:bg-surface-container-high rounded-xl transition-all font-label text-xs uppercase tracking-widest group" href="#"><span class="material-symbols-outlined mr-4 opacity-70 group-hover:opacity-100">forum</span>Private Chat</a>
+<a class="text-on-surface-variant flex items-center px-4 py-3 hover:bg-surface-container-high rounded-xl transition-all font-label text-xs uppercase tracking-widest group" href="#"><span class="material-symbols-outlined mr-4 opacity-70 group-hover:opacity-100">share</span>Browse Shares</a><a class="text-on-surface-variant flex items-center px-4 py-3 hover:bg-surface-container-high rounded-xl transition-all font-label text-xs uppercase tracking-widest group" href="#"><span class="material-symbols-outlined mr-4 opacity-70 group-hover:opacity-100">group</span>Buddies</a><a class="text-on-surface-variant flex items-center px-4 py-3 hover:bg-surface-container-high rounded-xl transition-all font-label text-xs uppercase tracking-widest group" href="#"><span class="material-symbols-outlined mr-4 opacity-70 group-hover:opacity-100">chat</span>Chat Rooms</a><a class="text-on-surface-variant flex items-center px-4 py-3 hover:bg-surface-container-high rounded-xl transition-all font-label text-xs uppercase tracking-widest group" href="#"><span class="material-symbols-outlined mr-4 opacity-70 group-hover:opacity-100">interests</span>Interests</a></div>
+<!-- Footer Navigation -->
+<div class="flex flex-col space-y-2 pt-6 bg-surface-dim -mx-6 px-6 -mb-6 pb-6">
+<a class="text-on-surface-variant flex items-center px-4 py-3 hover:bg-surface-container-high rounded-xl transition-all font-label text-xs uppercase tracking-widest group" href="#">
+<span class="material-symbols-outlined mr-4 opacity-70 group-hover:opacity-100">monitoring</span>
+                Diagnostics
+            </a>
+<a class="text-on-surface-variant flex items-center px-4 py-3 hover:bg-surface-container-high rounded-xl transition-all font-label text-xs uppercase tracking-widest group" href="#">
+<span class="material-symbols-outlined mr-4 opacity-70 group-hover:opacity-100">logout</span>
+                Logoff
+            </a>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="ml-72 flex-1 flex flex-col min-h-screen">
+<!-- Top App Bar - Contextual -->
+<header class="bg-surface-container-lowest/80 backdrop-blur-xl sticky top-0 z-40 flex justify-between items-center px-10 py-6">
+<div>
+<h2 class="font-headline text-3xl font-light tracking-tight text-on-surface">User Profiles</h2>
+<p class="text-on-surface-variant text-sm mt-1">2,419 Connected Peers • 18 High-Trust Nodes</p>
+</div>
+<div class="flex items-center space-x-4">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline">search</span>
+<input class="pl-10 pr-4 py-2 bg-surface rounded-full outline outline-1 outline-outline-variant/30 focus:outline-primary focus:bg-surface-container-lowest transition-all text-sm w-64 text-on-surface placeholder:text-outline-variant" placeholder="Search users or IP..." type="text">
+</div>
+<button class="w-10 h-10 rounded-full bg-surface-container hover:bg-surface-container-high flex items-center justify-center transition-colors text-on-surface-variant">
+<span class="material-symbols-outlined">filter_list</span>
+</button>
+<button class="w-10 h-10 rounded-full bg-surface-container hover:bg-surface-container-high flex items-center justify-center transition-colors text-on-surface-variant"><span class="material-symbols-outlined">settings</span></button></div>
+</header>
+<!-- Content Canvas -->
+<div class="p-10 max-w-[1600px] mx-auto w-full flex-1 flex flex-col space-y-10">
+<!-- Hero: Network Visualization Concept -->
+<section class="w-full h-80 rounded-2xl bg-surface-container-highest relative overflow-hidden group">
+<!-- Decorative abstract background representing a network -->
+<div class="absolute inset-0 bg-cover bg-center opacity-60 mix-blend-multiply" data-alt="A stylized, high-end editorial abstract background representing a digital network. Thin, elegant intersecting lines connecting glowing geometric nodes on a soft, light-mode background. The color palette features whites, subtle grays (surface-container), and primary blue accents. Serene, clean, and highly organized visual structure." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBUAufrso6mMSUi_Eu0XMWg-kAgsGR2XQ_mb42DDPiimAee3gxm40ck8Sm_S0npIts90KRzqlxw_0ZVIb3jOokpaHrBgHVNXs1DQDXwnkgln62WB9GmbndDNlsUuPXsAViE5qq4mcI-0ZWOOmRSvLA3wbgnYg0AdIB9urSdRL51hI9PMH6uqi_WVnxldc8dr3DCsLoUrYY0Pz6Mnd8KNo6S93D-8R_96Hk_IVVotQozSkdegKjXDg')"></div>
+<div class="absolute inset-0 bg-gradient-to-t from-surface-container-highest to-transparent"></div>
+<div class="absolute bottom-6 left-8 flex items-end space-x-6">
+<div class="bg-surface-container-lowest p-4 rounded-xl shadow-lg shadow-on-surface/5">
+<p class="font-label text-[10px] uppercase tracking-widest text-outline mb-1">Network Health</p>
+<div class="flex items-baseline space-x-2">
+<span class="font-headline text-3xl text-primary font-bold">98.4%</span>
+<span class="text-sm text-tertiary-container font-medium flex items-center"><span class="material-symbols-outlined text-[16px] mr-1">arrow_upward</span> Optimal</span>
+</div>
+</div>
+<div class="bg-surface-container-lowest p-4 rounded-xl shadow-lg shadow-on-surface/5">
+<p class="font-label text-[10px] uppercase tracking-widest text-outline mb-1">Global Bandwidth</p>
+<div class="flex items-baseline space-x-2">
+<span class="font-headline text-3xl text-on-surface font-bold">4.2</span>
+<span class="text-sm text-on-surface-variant">TB/s</span>
+</div>
+</div>
+</div>
+</section>
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-10">
+<!-- Left Column: Peer List -->
+<div class="xl:col-span-2 space-y-6">
+<h3 class="font-headline text-xl text-on-surface">Active Connections</h3>
+<div class="bg-surface-container-lowest rounded-2xl p-2 shadow-sm shadow-on-surface/5 flex flex-col space-y-2">
+<!-- Peer Row 1 -->
+<div class="flex items-center justify-between p-4 hover:bg-surface-container-low rounded-xl transition-colors cursor-pointer group">
+<div class="flex items-center space-x-4">
+<div class="relative">
+<div class="w-12 h-12 rounded-xl bg-primary-container text-on-primary-container flex items-center justify-center font-headline font-bold text-lg">
+                                        AE
+                                    </div>
+<div class="absolute -bottom-1 -right-1 w-4 h-4 bg-tertiary-container rounded-full border-2 border-surface-container-lowest flex items-center justify-center">
+<span class="material-symbols-outlined text-[10px] text-on-tertiary-container" style="font-variation-settings: 'FILL' 1;">verified</span>
+</div>
+</div>
+<div>
+<h4 class="font-headline text-base font-semibold text-on-surface group-hover:text-primary transition-colors">Archivist_Elite</h4>
+<p class="text-xs text-on-surface-variant mt-0.5 font-label tracking-wide">Paris, FR • 14ms Latency</p>
+</div>
+</div>
+<div class="flex items-center space-x-8 text-right">
+<div>
+<p class="font-label text-[10px] uppercase tracking-widest text-outline mb-1">Shared</p>
+<p class="text-sm font-medium text-on-surface">1.2 TB</p>
+</div>
+<div>
+<p class="font-label text-[10px] uppercase tracking-widest text-outline mb-1">Trust Score</p>
+<div class="flex space-x-0.5">
+<span class="material-symbols-outlined text-[16px] text-tertiary" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-[16px] text-tertiary" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-[16px] text-tertiary" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-[16px] text-tertiary" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-[16px] text-surface-variant" style="font-variation-settings: 'FILL' 1;">star</span>
+</div>
+</div>
+<button class="w-8 h-8 rounded-full bg-surface hover:bg-surface-variant flex items-center justify-center text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined text-sm">more_horiz</span>
+</button>
+</div>
+</div>
+<!-- Peer Row 2 -->
+<div class="flex items-center justify-between p-4 bg-surface-container-low rounded-xl transition-colors cursor-pointer group">
+<div class="flex items-center space-x-4">
+<div class="relative">
+<img class="w-12 h-12 rounded-xl object-cover" data-alt="A small, stylized profile avatar for a user named 'DataMage'. The avatar is a crisp, high-contrast, minimalist abstract geometric composition in primary blue and crisp white, evoking a sense of digital curation and high-end editorial aesthetics." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAO2rKLMbfxE1B6m2gDmx3f7UIVluK8UGguxTvXDmiwNa2U5v-ks2xaDJy64i4ZlCY9VbUR2scmFXSs5ctbj0E18yCGvFltstED37sAVVLxeSkbAUH6GsvEurgUHT2K2j7JzQSt0O54Ju_ajrmpeR6urgkaX_3aOmeFg2hjELBdt4uA6y96jbqPpjx0lA030xwVRvLJCMyCg33LJBcHCXSNfk9J8ulqzNJbviITiVSxKC5X5sx8Rg">
+<div class="absolute -bottom-1 -right-1 w-3 h-3 bg-[#4ade80] rounded-full border-2 border-surface-container-low"></div>
+</div>
+<div>
+<h4 class="font-headline text-base font-semibold text-primary group-hover:text-primary transition-colors">DataMage_99</h4>
+<p class="text-xs text-on-surface-variant mt-0.5 font-label tracking-wide">Berlin, DE • 22ms Latency</p>
+</div>
+</div>
+<div class="flex items-center space-x-8 text-right">
+<div>
+<p class="font-label text-[10px] uppercase tracking-widest text-outline mb-1">Shared</p>
+<p class="text-sm font-medium text-on-surface">850 GB</p>
+</div>
+<div>
+<p class="font-label text-[10px] uppercase tracking-widest text-outline mb-1">Trust Score</p>
+<div class="flex space-x-0.5">
+<span class="material-symbols-outlined text-[16px] text-tertiary" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-[16px] text-tertiary" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-[16px] text-tertiary" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-[16px] text-surface-variant" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-[16px] text-surface-variant" style="font-variation-settings: 'FILL' 1;">star</span>
+</div>
+</div>
+<button class="w-8 h-8 rounded-full bg-surface hover:bg-surface-variant flex items-center justify-center text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined text-sm">more_horiz</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Column: Profile Detail View (Contextual Panel) -->
+<div class="xl:col-span-1">
+<div class="bg-surface-container-lowest rounded-2xl shadow-xl shadow-on-surface/5 p-6 h-full flex flex-col sticky top-28">
+<div class="flex justify-between items-start mb-6">
+<h3 class="font-headline text-xl text-on-surface">Node Details</h3>
+<button class="text-outline hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+<!-- Profile Header -->
+<div class="flex flex-col items-center text-center mb-8">
+<img class="w-24 h-24 rounded-full object-cover mb-4 shadow-md" data-alt="A high-end, detailed profile avatar for the user 'DataMage_99'. It features a modern, clean, light-mode illustration of a digital landscape or architectural structure, utilizing a palette of deep primary blues, soft surface whites, and subtle archival gold (tertiary) highlights. Professional and sophisticated." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD0SosVgxSkmtIPM-2YMVhplhv3qd8AGsp4b0YNhrZ3KnzVm39jEUrSQO8rZM2UwIp64Wl52wwlw5twMpkoCaSxx8pTtmZ8VgprjBe_hXEKisaTW8-gRwJdRS76AoO92jcR5SeMeTyhE8bH6yIbS1lT4BwrxUZiChVhxagXBIc2Mzb1Tb0qt0qnCj_8DkCUJ7Nz_eL54QmrK51RxcApNBB9LmbsH2DCT0znGpHo_bz9t7bM-t671Q">
+<h2 class="font-headline text-2xl font-bold text-on-surface">DataMage_99</h2>
+<p class="font-label text-xs tracking-widest text-primary uppercase mt-1">Direct Connect</p>
+</div>
+<!-- Stats Grid -->
+<div class="grid grid-cols-2 gap-4 mb-8">
+<div class="bg-surface-container-low p-4 rounded-xl text-center">
+<p class="font-label text-[10px] uppercase tracking-widest text-outline mb-1">Files Shared</p>
+<p class="font-headline text-xl font-semibold text-on-surface">14,204</p>
+</div>
+<div class="bg-surface-container-low p-4 rounded-xl text-center">
+<p class="font-label text-[10px] uppercase tracking-widest text-outline mb-1">Avg Speed</p>
+<p class="font-headline text-xl font-semibold text-on-surface">45 MB/s</p>
+</div>
+</div>
+<!-- Shared Folders Preview -->
+<div class="mb-6 flex-1">
+<h4 class="font-label text-xs uppercase tracking-widest text-outline mb-4">Top Directories</h4>
+<div class="space-y-3">
+<div class="flex items-center p-3 rounded-lg hover:bg-surface-container-low transition-colors group cursor-pointer">
+<span class="material-symbols-outlined text-primary-container mr-3 group-hover:text-primary">folder</span>
+<div class="flex-1">
+<p class="text-sm font-medium text-on-surface">FLAC_Archives_Vol1</p>
+<p class="text-xs text-on-surface-variant">420 GB • Audio</p>
+</div>
+</div>
+<div class="flex items-center p-3 rounded-lg hover:bg-surface-container-low transition-colors group cursor-pointer">
+<span class="material-symbols-outlined text-primary-container mr-3 group-hover:text-primary">folder</span>
+<div class="flex-1">
+<p class="text-sm font-medium text-on-surface">Ebooks_SciFi_Collection</p>
+<p class="text-xs text-on-surface-variant">12 GB • Documents</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Actions -->
+<div class="mt-auto space-y-3">
+<button class="w-full bg-primary hover:bg-primary-container text-on-primary py-3 rounded-xl font-label text-sm font-medium transition-colors">
+                                Browse Files
+                            </button>
+<button class="w-full bg-surface-container hover:bg-surface-container-high text-on-surface py-3 rounded-xl font-label text-sm font-medium transition-colors border border-outline-variant/15">
+                                Send Message
+                            </button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Footer (JSON Component) -->
+<footer class="bg-surface-dim w-full mt-auto flex justify-between items-center px-12 py-6 border-t border-surface-container-high">
+<p class="font-label text-[10px] tracking-tight text-tertiary">© 2024 Alexandria High-End Editorial — Homelab Edition</p>
+<div class="flex space-x-6">
+<a class="font-label text-[10px] tracking-tight text-on-secondary-fixed-variant hover:text-tertiary hover:underline transition-all opacity-80 hover:opacity-100" href="#">Protocol Stats</a>
+<a class="font-label text-[10px] tracking-tight text-on-secondary-fixed-variant hover:text-tertiary hover:underline transition-all opacity-80 hover:opacity-100" href="#">Node Security</a>
+<a class="font-label text-[10px] tracking-tight text-on-secondary-fixed-variant hover:text-tertiary hover:underline transition-all opacity-80 hover:opacity-100" href="#">Peer Graph</a>
+<a class="font-label text-[10px] tracking-tight text-on-secondary-fixed-variant hover:text-tertiary hover:underline transition-all opacity-80 hover:opacity-100" href="#">System Health</a>
+</div>
+</footer>
+</main>
+
+
+
+
+</body></html>

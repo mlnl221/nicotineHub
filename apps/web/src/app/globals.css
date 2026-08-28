@@ -85,3 +85,7 @@
 .ghost-border {
   border: 1px solid rgba(195, 198, 213, 0.15); /* outline-variant at 15% */
 }
+
+.progress-glow {
+  box-shadow: 0 0 10px rgba(9, 76, 178, 0.5);
+}

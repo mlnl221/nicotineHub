@@ -37,11 +37,22 @@ export interface ErrorMessage {
   error: string;
 }
 
+/* ------------------------------------------------------------------ *
+ * Search
+ * ------------------------------------------------------------------ */
+
 export interface SearchRequest {
   type: "search";
+  searchId: string;
   query: string;
 }
 
+export interface SearchStopRequest {
+  type: "search:stop";
+  searchId: string;
+}
+
+/** Legacy SearchFile shape (used by ResultCard hybrid). */
 export interface SearchFile {
   name: string;
   size: number;
@@ -52,26 +63,157 @@ export interface SearchFile {
     sampleRate?: number;
     bitDepth?: number;
   };
+  private?: boolean;
+}
+
+/** A single result row, transformed from a peer FileSearchResponse. */
+export interface SearchRow {
+  user: string;
+  folder: string;
+  filename: string;
+  path: string;
+  size: number;
+  fileType: string;
+  slotFree: boolean;
+  speed: number;
+  inQueue: number;
+  /** bitrate kbps (0 if lossless/unknown) */
+  quality: number;
+  /** duration seconds (0 if unknown) */
+  length: number;
+  private: boolean;
+  attributes: {
+    bitrate?: number;
+    length?: number;
+    vbr?: number;
+    sampleRate?: number;
+    bitDepth?: number;
+  };
 }
 
 export interface SearchStartMessage {
   type: "search:start";
+  searchId: string;
   token: number;
 }
 
 export interface SearchResultMessage {
   type: "search:result";
+  searchId: string;
   token: number;
-  username: string;
-  freeUploadSlots: boolean;
-  uploadSpeed: number;
-  inQueue: number;
-  results: SearchFile[];
+  rows: SearchRow[];
 }
 
-export interface SearchDoneMessage {
-  type: "search:done";
-  token: number;
+export interface SearchEndMessage {
+  type: "search:end";
+  searchId: string;
+  reason: "max_results" | "stopped" | "timeout" | "error";
+}
+
+/** Filter state for the result filter bar (full nicotine parity). */
+export interface FilterState {
+  include: string;
+  exclude: string;
+  fileType: string;
+  size: string;
+  bitrate: string;
+  length: string;
+  country: string;
+  freeSlot: boolean;
+  publicOnly: boolean;
+}
+
+export function emptyFilters(): FilterState {
+  return {
+    include: "",
+    exclude: "",
+    fileType: "",
+    size: "",
+    bitrate: "",
+    length: "",
+    country: "",
+    freeSlot: false,
+    publicOnly: false,
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Transfers
+ * ------------------------------------------------------------------ */
+
+export type TransferStatus =
+  | "Queued"
+  | "Getting status"
+  | "Transferring"
+  | "Paused"
+  | "Cancelled"
+  | "Filtered"
+  | "Finished"
+  | "User logged off"
+  | "Connection closed"
+  | "Connection timeout"
+  | "Download folder error"
+  | "Local file error"
+  | "Banned"
+  | "File not shared."
+  | "File read error."
+  | "Pending shutdown."
+  | "Too many files"
+  | "Too many megabytes";
+
+export interface Transfer {
+  id: string;
+  username: string;
+  virtualPath: string;
+  fileName: string;
+  size: number;
+  current: number;
+  speed: number;
+  avgSpeed: number;
+  timeLeft: number | null;
+  status: TransferStatus;
+  queuePosition: number | null;
+  isUpload: boolean;
+}
+
+export interface TransferUpdateMessage {
+  type: "transfer:update";
+  transfer: Transfer;
+}
+
+export interface TransferRemovedMessage {
+  type: "transfer:removed";
+  id: string;
+}
+
+export interface TransferStatsMessage {
+  type: "transfer:stats";
+  downloadSpeed: number;
+  uploadSpeed: number;
+  activeDownloads: number;
+  activeUploads: number;
+  queuedDownloads: number;
+  queuedUploads: number;
+}
+
+export interface DownloadRequest {
+  type: "download:request";
+  username: string;
+  virtualPath: string;
+  size: number;
+  fileName?: string;
+}
+
+export interface DownloadControlRequest {
+  type: "download:control";
+  id: string;
+  action: "cancel" | "pause" | "resume" | "retry" | "clear";
+}
+
+export interface UploadControlRequest {
+  type: "upload:control";
+  id: string;
+  action: "cancel" | "clear";
 }
 
 export type BridgeOutboundMessage =
@@ -81,6 +223,15 @@ export type BridgeOutboundMessage =
   | ErrorMessage
   | SearchStartMessage
   | SearchResultMessage
-  | SearchDoneMessage;
+  | SearchEndMessage
+  | TransferUpdateMessage
+  | TransferRemovedMessage
+  | TransferStatsMessage;
 
-export type BridgeInboundMessage = LoginRequest | SearchRequest;
+export type BridgeInboundMessage =
+  | LoginRequest
+  | SearchRequest
+  | SearchStopRequest
+  | DownloadRequest
+  | DownloadControlRequest
+  | UploadControlRequest;

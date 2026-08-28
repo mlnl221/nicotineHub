@@ -13,7 +13,6 @@ import type {
   BridgeInboundMessage,
   BridgeOutboundMessage,
   LoginRequest,
-  SearchResultMessage,
 } from "@/lib/protocol";
 
 export type SessionStatus = "idle" | "connecting" | "connected" | "failed";
@@ -22,14 +21,15 @@ export interface SessionState {
   status: SessionStatus;
   error?: string;
   user?: string;
-  searching: boolean;
-  results: SearchResultMessage[];
 }
 
 interface SessionApi {
   login: (req: Omit<LoginRequest, "type">) => void;
   logout: () => void;
-  search: (query: string) => void;
+  /** Send a raw message over the open bridge socket. */
+  send: (msg: BridgeInboundMessage) => void;
+  /** Subscribe to all inbound bridge messages (including search messages). */
+  subscribe: (cb: (msg: BridgeOutboundMessage) => void) => () => void;
   state: SessionState;
 }
 
@@ -48,13 +48,10 @@ function bridgeUrl(): string {
 }
 
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<SessionState>({
-    status: "idle",
-    searching: false,
-    results: [],
-  });
+  const [state, setState] = useState<SessionState>({ status: "idle" });
   const socketRef = useRef<WebSocket | null>(null);
   const generation = useRef(0);
+  const listeners = useRef<Set<(msg: BridgeOutboundMessage) => void>>(new Set());
 
   const teardown = useCallback(() => {
     generation.current += 1;
@@ -64,14 +61,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     teardown();
-    setState({ status: "idle", searching: false, results: [] });
+    setState({ status: "idle" });
   }, [teardown]);
 
   const login = useCallback(
     (req: Omit<LoginRequest, "type">) => {
       const gen = ++generation.current;
       socketRef.current?.close();
-      setState({ status: "connecting", searching: false, results: [] });
+      setState({ status: "connecting" });
 
       const ws = new WebSocket(bridgeUrl());
       socketRef.current = ws;
@@ -100,18 +97,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             }
             break;
           case "error":
-            setState((s) => ({ ...s, status: "failed", error: data.error }));
-            break;
-          case "search:start":
-            setState((s) => ({ ...s, searching: true }));
-            break;
-          case "search:result":
-            setState((s) => ({ ...s, results: [...s.results, data] }));
-            break;
-          case "search:done":
-            setState((s) => ({ ...s, searching: false }));
+            // Only treat as a fatal login error if we aren't connected yet.
+            if (state.status !== "connected") {
+              setState((s) => ({ ...s, status: "failed", error: data.error }));
+            }
             break;
         }
+
+        // Forward every message to subscribers (e.g. the search provider).
+        listeners.current.forEach((cb) => cb(data));
       };
 
       ws.onerror = () => {
@@ -132,20 +126,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         );
       };
     },
-    [],
+    [state.status],
   );
 
-  const search = useCallback((query: string) => {
+  const send = useCallback((msg: BridgeInboundMessage) => {
     const ws = socketRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    setState((s) => ({ ...s, searching: true, results: [] }));
-    const msg: BridgeInboundMessage = { type: "search", query };
     ws.send(JSON.stringify(msg));
   }, []);
 
+  const subscribe = useCallback((cb: (msg: BridgeOutboundMessage) => void) => {
+    listeners.current.add(cb);
+    return () => {
+      listeners.current.delete(cb);
+    };
+  }, []);
+
   const api = useMemo<SessionApi>(
-    () => ({ login, logout, search, state }),
-    [login, logout, search, state],
+    () => ({ login, logout, send, subscribe, state }),
+    [login, logout, send, subscribe, state],
   );
 
   return <SessionContext.Provider value={api}>{children}</SessionContext.Provider>;
