@@ -2,14 +2,17 @@
 
 import { useMemo, useState } from "react";
 import { useSession } from "@/lib/session";
+import { useConfig } from "@/lib/config/provider";
+import { DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT } from "@/lib/config/defaults";
 
 export function LoginForm() {
   const { login, logout, state } = useSession();
+  const { settings, setOption } = useConfig();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showServer, setShowServer] = useState(false);
-  const [host, setHost] = useState("server.slsknet.org");
-  const [port, setPort] = useState("2242");
+  const [host, setHost] = useState(settings.server.server.host);
+  const [port, setPort] = useState(String(settings.server.server.port));
 
   const busy = state.status === "connecting";
   const succeeded = state.status === "connected";
@@ -22,12 +25,13 @@ export function LoginForm() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
+    const hostValue = host.trim() || DEFAULT_SERVER_HOST;
+    const portValue = Number(port) || DEFAULT_SERVER_PORT;
+    setOption("server", "server", { host: hostValue, port: portValue });
     login({
       username: username.trim(),
       password,
-      ...(showServer
-        ? { host: host.trim() || undefined, port: Number(port) || undefined }
-        : {}),
+      ...(showServer ? { host: hostValue, port: portValue } : {}),
     });
   };
 
