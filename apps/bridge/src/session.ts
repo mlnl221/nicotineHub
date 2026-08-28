@@ -301,7 +301,7 @@ export class SoulseekSession {
         try {
           this.emit({
             type: "item-recommendations",
-            recommendations: parseRecommendations(msg.payload).recommendations,
+            recommendations: parseItemRecommendations(msg.payload).recommendations,
           });
         } catch {
           /* ignore */

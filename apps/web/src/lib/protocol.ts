@@ -290,6 +290,22 @@ export interface UserInfoEventMessage {
   event: UserInfoEvent;
 }
 
+export interface UserInfoResponseOutbound {
+  type: "user-info-response";
+  username: string;
+  descr: string;
+  pic: string | null;
+  totalupl: number;
+  queuesize: number;
+  slotsavail: boolean;
+  uploadallowed: number;
+}
+
+export interface UserInfoFailedOutbound {
+  type: "user-info-failed";
+  username: string;
+}
+
 export type UserinfoRequestMessage =
   | { type: "userinfo"; action: "watch" | "unwatch" | "get" | "interests"; username: string }
   | { type: "userinfo"; action: "recommendations" | "globalRecommendations" | "similarUsers" }
@@ -322,7 +338,9 @@ export type BridgeOutboundMessage =
   | TransferUpdateMessage
   | TransferRemovedMessage
   | TransferStatsMessage
-  | UserInfoEventMessage;
+  | UserInfoEventMessage
+  | UserInfoResponseOutbound
+  | UserInfoFailedOutbound;
 
 export type BridgeInboundMessage =
   | LoginRequest

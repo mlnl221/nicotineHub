@@ -37,6 +37,30 @@ export function useUserInfo(username: string) {
     setError(null);
 
     const unsub = subscribe((msg) => {
+      // Direct profile response (sent by server.ts for action:"get")
+      if (msg.type === "user-info-response") {
+        if (msg.username !== username) return;
+        setProfile((p) => ({
+          ...p,
+          info: {
+            username: msg.username,
+            descr: msg.descr,
+            pic: msg.pic,
+            totalupl: msg.totalupl,
+            queuesize: msg.queuesize,
+            slotsavail: msg.slotsavail,
+            uploadallowed: msg.uploadallowed,
+          },
+        }));
+        setLoading(false);
+        return;
+      }
+      if (msg.type === "user-info-failed") {
+        if (msg.username !== username) return;
+        setError("Could not load this user's profile.");
+        setLoading(false);
+        return;
+      }
       if (msg.type !== "userinfo:event") return;
       const ev: UserInfoEvent = msg.event;
       if (ev.username && ev.username !== username) return;

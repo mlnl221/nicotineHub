@@ -189,6 +189,17 @@ function ProfileInner({ username }: { username: string }) {
   );
 }
 
+const RECENT_KEY = "nicotine.recentProfiles";
+
+function saveRecent(username: string) {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    const list: string[] = raw ? JSON.parse(raw) : [];
+    const filtered = [username, ...list.filter((x: string) => x !== username)].slice(0, 20);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(filtered));
+  } catch {}
+}
+
 export default function ProfilePage() {
   const params = useParams<{ username: string }>();
   const username = decodeURIComponent(params.username ?? "");
@@ -198,6 +209,10 @@ export default function ProfilePage() {
   useEffect(() => {
     if (state.status !== "connected") router.replace("/");
   }, [state.status, router]);
+
+  useEffect(() => {
+    if (username) saveRecent(username);
+  }, [username]);
 
   if (state.status !== "connected" || !username) return null;
   return <ProfileInner username={username} />;
