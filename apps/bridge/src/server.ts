@@ -280,8 +280,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                 // treat as denied
                 const f = event.file || "";
                 (tm as unknown as { handleUploadDenied: (f: string, r: string) => void }).handleUploadDenied(f, event.reason);
-              } else if (event.type === "queue-upload" && event.file) {
-                // Incoming upload request — for now ignore (Phase 4)
+              } else if (event.type === "queue-upload" && event.file && event.username) {
+                (tm as unknown as { handleQueueUpload: (u: string, f: string) => void }).handleQueueUpload(event.username, event.file);
               } else if (event.type === "upload-denied" && event.file) {
                 (tm as unknown as { handleUploadDenied: (f: string, r: string) => void }).handleUploadDenied(event.file, event.reason || "Cancelled");
               } else if (event.type === "upload-failed" && event.file) {

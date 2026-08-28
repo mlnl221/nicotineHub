@@ -435,6 +435,88 @@ export class TransferManager {
     }
   }
 
+  // ---- Phase 4: upload serving (minimal FIFO) ----
+
+  /** Handle incoming QueueUpload from peer (they want to download from us). */
+  handleQueueUpload(username: string, virtualPath: string) {
+    const id = `${username}::${virtualPath}`;
+    // 1. already queued?
+    if (this.transfers.has(id)) {
+      const existing = this.transfers.get(id)!;
+      if (existing.isUpload) {
+        this.emit(existing);
+        return existing;
+      }
+    }
+    // 2. queue limit check (filelimit 100 / queuelimit 10000 MB)
+    const queuedUploads = [...this.transfers.values()].filter((t) => t.isUpload && t.status === "Queued").length;
+    const totalQueuedMB = [...this.transfers.values()].filter((t) => t.isUpload && t.status === "Queued").reduce((s, t) => s + t.size, 0) / (1024 * 1024);
+    if (queuedUploads >= 100) {
+      const t: BridgeTransfer = {
+        id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Too many files", queuePosition: null, isUpload: true,
+      };
+      this.transfers.set(id, t);
+      this.emit(t);
+      return t;
+    }
+    if (totalQueuedMB >= 10000) {
+      const t: BridgeTransfer = {
+        id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Too many megabytes", queuePosition: null, isUpload: true,
+      };
+      this.transfers.set(id, t);
+      this.emit(t);
+      return t;
+    }
+    // 3. file_is_shared stub: check data/shares.json if exists
+    let shared = true;
+    try {
+      const sharesPath = join(this.dataDir, "shares.json");
+      if (existsSync(sharesPath)) {
+        const shares = JSON.parse(readFileSync(sharesPath, "utf8")) as Record<string, string> | Array<string>;
+        if (Array.isArray(shares)) shared = shares.includes(virtualPath);
+        else shared = Object.keys(shares).some((k) => virtualPath.startsWith(k));
+      }
+    } catch { shared = true; }
+    if (!shared) {
+      const t: BridgeTransfer = {
+        id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "File not shared.", queuePosition: null, isUpload: true,
+      };
+      this.transfers.set(id, t);
+      this.emit(t);
+      return t;
+    }
+    // 4. enqueue
+    const t: BridgeTransfer = {
+      id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Queued", queuePosition: queuedUploads + 1, isUpload: true,
+    };
+    this.transfers.set(id, t);
+    this.emit(t);
+    this.emitStats();
+    this.persist();
+    // schedule upload queue check (FIFO) after 100ms
+    setTimeout(() => this.checkUploadQueue(), 100);
+    return t;
+  }
+
+  private checkUploadQueue() {
+    // Guard: is_new_upload_accepted — uploadslots 2, useupslots true
+    const activeUploads = [...this.transfers.values()].filter((t) => t.isUpload && t.status === "Transferring").length;
+    if (activeUploads >= 2) return;
+    // Pick earliest queued upload (FIFO)
+    const candidate = [...this.transfers.values()].find((t) => t.isUpload && t.status === "Queued");
+    if (!candidate) return;
+    // Validate online (stub assume online)
+    candidate.status = "Transferring";
+    candidate._startTime = Date.now();
+    this.emit(candidate);
+    this.emitStats();
+    // In real nicotine+ we'd send TransferRequest(UPLOAD, token, file, size) and wait for TransferResponse
+    // For Phase 4 minimal, we simulate TransferRequest emission via session
+    const token = this.tokenCounter++ >>> 0;
+    candidate.token = token;
+    try { this.session?.transferRequest?.(candidate.username, 1, token, candidate.virtualPath, BigInt(candidate.size || 0)); } catch {}
+  }
+
   handlePlaceInQueueResponse(file: string, place: number) {
     for (const t of this.transfers.values()) {
       if (t.virtualPath === file) {
