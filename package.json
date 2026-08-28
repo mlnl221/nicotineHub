@@ -15,8 +15,8 @@
     "typecheck": "bun run --cwd apps/bridge typecheck && bun run --cwd apps/web typecheck"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1",
+    "@playwright/test": "1.62.1",
     "concurrently": "^9.1.2",
-    "playwright": "1.54"
+    "playwright": "1.62.1"
   }
 }

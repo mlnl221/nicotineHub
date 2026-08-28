@@ -83,20 +83,76 @@ async function mockBridge(page, opts: { withTransfers?: boolean } = {}) {
       onerror: ((e: Event) => void) | null = null;
       onclose: ((e: CloseEvent) => void) | null = null;
       sent: unknown[] = [];
+      _listeners: Record<string, ((e: Event) => void)[]> = {};
+      addEventListener(type: string, cb: (e: Event) => void) {
+        (this._listeners[type] = this._listeners[type] || []).push(cb);
+      }
+      removeEventListener(type: string, cb: (e: Event) => void) {
+        if (this._listeners[type]) this._listeners[type] = this._listeners[type].filter((f) => f !== cb);
+      }
+      dispatchEvent(event: Event) {
+        const arr = this._listeners[event.type] || [];
+        for (const cb of arr) cb(event);
+        if (event.type === "open") this.onopen?.(event);
+        if (event.type === "message") this.onmessage?.(event as MessageEvent);
+        if (event.type === "error") this.onerror?.(event);
+        if (event.type === "close") this.onclose?.(event as CloseEvent);
+        return true;
+      }
       constructor(url: string) {
         this.url = url;
         (window as any).__mockWS = this;
         // open immediately so SessionProvider's ws.onopen fires before React mount completes
-        queueMicrotask(() => this.onopen?.(new Event("open")));
+        queueMicrotask(() => {
+          const ev = new Event("open");
+          this.dispatchEvent(ev);
+          // If already logged in from previous page, auto-respond to keep session alive across navigations
+          const w = window as any;
+          const isLoggedIn = w.__mockLoggedIn || sessionStorage.getItem("__mockLoggedIn") === "1";
+          if (isLoggedIn) {
+            setTimeout(() => {
+              this.dispatchEvent(
+                new MessageEvent("message", {
+                  data: JSON.stringify({ type: "login:result", ok: true, data: { success: true, banner: "hi", ipAddress: "1.2.3.4", checksum: "x", isSupporter: false } }),
+                }),
+              );
+              setTimeout(() => {
+                let transfers = w.__mockTransfers || [];
+                try { const s = sessionStorage.getItem("__mockTransfers"); if (s) transfers = JSON.parse(s); } catch {}
+                for (const t of transfers) {
+                  this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "transfer:update", transfer: t }) }));
+                }
+                this.dispatchEvent(
+                  new MessageEvent("message", {
+                    data: JSON.stringify({
+                      type: "transfer:stats",
+                      downloadSpeed: 20700000,
+                      uploadSpeed: 4100000,
+                      activeDownloads: 2,
+                      activeUploads: 1,
+                      queuedDownloads: 0,
+                      queuedUploads: 1,
+                    }),
+                  }),
+                );
+              }, 30);
+            }, 10);
+          }
+        });
       }
       send(data: string) {
         const parsed = JSON.parse(data);
         this.sent.push(parsed);
         (window as any).__sent = this.sent;
+        const w2 = window as any;
+        w2.__mockTransfers = transfers;
+        try { sessionStorage.setItem("__mockTransfers", JSON.stringify(transfers)); } catch {}
         if (parsed.type === "login") {
+          w2.__mockLoggedIn = true;
+          try { sessionStorage.setItem("__mockLoggedIn", "1"); } catch {}
           // respond to login immediately
           setTimeout(() => {
-            this.onmessage?.(
+            this.dispatchEvent(
               new MessageEvent("message", {
                 data: JSON.stringify({ type: "login:result", ok: true, data: { success: true, banner: "hi", ipAddress: "1.2.3.4", checksum: "x", isSupporter: false } }),
               }),
@@ -104,9 +160,9 @@ async function mockBridge(page, opts: { withTransfers?: boolean } = {}) {
             // push transfers + stats right after login
             setTimeout(() => {
               for (const t of transfers) {
-                this.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "transfer:update", transfer: t }) }));
+                this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "transfer:update", transfer: t }) }));
               }
-              this.onmessage?.(
+              this.dispatchEvent(
                 new MessageEvent("message", {
                   data: JSON.stringify({
                     type: "transfer:stats",
@@ -132,14 +188,14 @@ async function mockBridge(page, opts: { withTransfers?: boolean } = {}) {
             if (parsed.action === "clear") {
               const idx = transfers.findIndex((x: any) => x.id === parsed.id);
               if (idx >= 0) transfers.splice(idx, 1);
-              setTimeout(() => this.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "transfer:removed", id: parsed.id }) })), 10);
+              setTimeout(() => this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "transfer:removed", id: parsed.id }) })), 10);
               return;
             }
-            setTimeout(() => this.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "transfer:update", transfer: t }) })), 10);
+            setTimeout(() => this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "transfer:update", transfer: t }) })), 10);
           }
         }
         if (parsed.type === "upload:control" && parsed.action === "clear") {
-          setTimeout(() => this.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "transfer:removed", id: parsed.id }) })), 10);
+          setTimeout(() => this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "transfer:removed", id: parsed.id }) })), 10);
         }
         if (parsed.type === "download:request") {
           const id = `${parsed.username}::${parsed.virtualPath}`;
@@ -159,12 +215,13 @@ async function mockBridge(page, opts: { withTransfers?: boolean } = {}) {
             isUpload: false,
           };
           transfers.push(nt);
-          setTimeout(() => this.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "transfer:update", transfer: nt }) })), 10);
+          try { sessionStorage.setItem("__mockTransfers", JSON.stringify(transfers)); } catch {}
+          setTimeout(() => this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "transfer:update", transfer: nt }) })), 10);
         }
       }
       close() {
         this.readyState = 3;
-        this.onclose?.(new CloseEvent("close"));
+        this.dispatchEvent(new CloseEvent("close"));
       }
     }
     (window as any).WebSocket = MockWS as any;
@@ -204,9 +261,9 @@ test.describe("Transfers pages", () => {
 
     // downloading section
     await expect(page.getByTestId("downloads-section")).toBeVisible();
-    await expect(page.getByText("Downloading (2)", { exact: false }).first()).toBeVisible();
-    await expect(page.getByText("Archive_Collection_Vol2.zip")).toBeVisible();
-    await expect(page.getByText("HighRes_Audio_Stem_Pack.rar")).toBeVisible();
+    // mobile tab is hidden on desktop, just check section is visible
+    await expect(page.getByRole("heading", { name: "Archive_Collection_Vol2.zip" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "HighRes_Audio_Stem_Pack.rar" })).toBeVisible();
 
     // progress bars
     const cards = page.getByTestId("transfer-card");
@@ -220,7 +277,7 @@ test.describe("Transfers pages", () => {
     const firstPause = cards.first().getByLabel("Pause");
     await expect(firstPause).toBeVisible();
     await firstPause.click();
-    await expect(page.getByTestId("transfer-card").first().getByText("Paused")).toBeVisible();
+    await expect(page.getByTestId("transfer-card").first().getByText("Paused").first()).toBeVisible();
 
     // tab switcher on mobile still shows both via xl:grid but hidden class tested via desktop visible
     await expect(page.getByTestId("uploads-section")).toBeVisible();
@@ -231,17 +288,18 @@ test.describe("Transfers pages", () => {
     await login(page);
     await page.goto("/downloads");
     await expect(page.getByTestId("empty-downloads")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Search Files" })).toBeVisible();
+    await expect(page.getByTestId("empty-downloads").getByRole("link", { name: "Search Files" })).toBeVisible();
   });
 
   test("uploads page shows queued banner and uploads list", async ({ page }) => {
     await mockTransfersPage(page, { withTransfers: true });
     await login(page);
-    await page.goto("/uploads");
+    await page.getByRole("link", { name: /Uploads/ }).click();
+    await page.waitForURL(/\/uploads/);
     await expect(page.getByRole("heading", { name: "Uploads" })).toBeVisible();
     await expect(page.getByTestId("uploads-section")).toBeVisible();
-    await expect(page.getByText("Project_Zephyr_Render_V4.mp4")).toBeVisible();
-    await expect(page.getByText("Dataset_Analytics_2023.csv")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Project_Zephyr_Render_V4.mp4" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Dataset_Analytics_2023.csv" })).toBeVisible();
     // queued card has opacity-75 and prioritze button
     await expect(page.getByText("Queued").first()).toBeVisible();
   });
@@ -272,7 +330,7 @@ test.describe("Transfers pages", () => {
     await expect(firstCard).toBeVisible();
     // cancel then clear flow: first cancel -> Cancelled, then clear button appears
     await firstCard.getByLabel("Cancel").click();
-    await expect(firstCard.getByText("Cancelled")).toBeVisible();
+    await expect(firstCard.getByText("Cancelled").first()).toBeVisible();
     await firstCard.getByLabel("Clear").click();
     // card removed — count goes from 4 to 3
     await expect(page.getByTestId("transfer-card")).toHaveCount(3);

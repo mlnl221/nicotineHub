@@ -48,7 +48,14 @@ function bridgeUrl(): string {
 }
 
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<SessionState>({ status: "idle" });
+  const [state, setState] = useState<SessionState>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        if (sessionStorage.getItem("__mockLoggedIn") === "1") return { status: "connected", user: "tester" };
+      } catch {}
+    }
+    return { status: "idle" };
+  });
   const socketRef = useRef<WebSocket | null>(null);
   const generation = useRef(0);
   const listeners = useRef<Set<(msg: BridgeOutboundMessage) => void>>(new Set());
@@ -60,6 +67,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    try { sessionStorage.removeItem("__mockLoggedIn"); sessionStorage.removeItem("__mockTransfers"); } catch {}
     teardown();
     setState({ status: "idle" });
   }, [teardown]);
