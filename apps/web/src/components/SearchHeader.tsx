@@ -1,9 +1,17 @@
 "use client";
 
 import { useTheme } from "@/components/ThemeProvider";
+import { useConfig } from "@/lib/config/provider";
 
 export function SearchHeader() {
   const { theme, toggle } = useTheme();
+  const { setOption } = useConfig();
+
+  const handleToggle = () => {
+    const nextDark = theme !== "dark";
+    toggle();
+    setOption("ui", "dark_mode", nextDark);
+  };
 
   return (
     <header className="relative z-10 flex w-full items-center justify-end px-10 py-6">
@@ -12,7 +20,7 @@ export function SearchHeader() {
           <span className="material-symbols-outlined">notifications</span>
         </button>
         <button
-          onClick={toggle}
+          onClick={handleToggle}
           title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
           className="glass-card flex h-10 w-10 items-center justify-center rounded-full border-primary/30 bg-primary-container/10 text-on-surface-variant transition-colors hover:text-primary dark:border-primary/30 dark:bg-primary-container/10 dark:text-inverse-primary dark:hover:text-primary-fixed"
         >

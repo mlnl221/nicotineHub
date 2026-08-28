@@ -31,9 +31,10 @@ export function UiSection() {
         label="Dark mode"
         description="Switch between light and dark surfaces."
         checked={theme === "dark"}
-        onChange={() => {
-          toggle();
-          setOption("ui", "dark_mode", theme === "light");
+        onChange={(v) => {
+          // v is the intended next checked state from ToggleControl (!checked)
+          if (v !== (theme === "dark")) toggle();
+          setOption("ui", "dark_mode", v);
         }}
       />
       <SelectControl

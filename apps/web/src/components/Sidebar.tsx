@@ -34,7 +34,7 @@ export function Sidebar() {
     <nav className="fixed left-0 top-0 z-50 flex h-full w-72 flex-col space-y-8 bg-surface-container-low/90 p-6 backdrop-blur-md dark:bg-surface-container-highest/90">
       <div>
         <div className="mb-1 font-headline text-lg font-black text-on-surface dark:text-inverse-primary">
-          NICOTINE+ HUB
+          NICOTINE HUB
         </div>
         <div className="font-label text-xs uppercase tracking-widest text-on-surface-variant dark:text-outline">
           Secure Homelab Node

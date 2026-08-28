@@ -1,6 +1,6 @@
 {
-  "name": "Nicotine Mobile",
-  "short_name": "Nicotine",
+  "name": "Nicotine Hub",
+  "short_name": "Nicotine Hub",
   "description": "A mobile-first, browser-first Soulseek client.",
   "start_url": "/",
   "display": "standalone",
