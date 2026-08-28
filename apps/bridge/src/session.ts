@@ -279,15 +279,15 @@ export class SoulseekSession {
       } else if (msg.code === SERVER_MESSAGE_CODES.recommendations) {
         try {
           this.emit({
-            type: "item-recommendations",
-            recommendations: parseItemRecommendations(msg.payload).recommendations,
+            type: "recommendations",
+            recommendations: parseRecommendations(msg.payload).recommendations,
           });
         } catch {
           /* ignore */
         }
       } else if (msg.code === SERVER_MESSAGE_CODES.globalRecommendations) {
         try {
-          this.emit({ type: "global-recommendations", recommendations: parseRecommendations(msg.payload) });
+          this.emit({ type: "global-recommendations", recommendations: parseRecommendations(msg.payload).recommendations });
         } catch {
           /* ignore */
         }
@@ -300,8 +300,8 @@ export class SoulseekSession {
       } else if (msg.code === SERVER_MESSAGE_CODES.itemRecommendations) {
         try {
           this.emit({
-            type: "global-recommendations",
-            recommendations: parseRecommendations(msg.payload).recommendations,
+            type: "item-recommendations",
+            recommendations: parseItemRecommendations(msg.payload).recommendations,
           });
         } catch {
           /* ignore */
@@ -442,7 +442,14 @@ export class SoulseekSession {
     else this.peerStates.set(peer, state);
   }
 
-  private routeResult(resp: { token: number; username: string; freeUploadSlots: boolean; results: SearchFile[] }) {
+  private routeResult(resp: {
+    token: number;
+    username: string;
+    freeUploadSlots: boolean;
+    inQueue: number;
+    uploadSpeed: number;
+    results: SearchFile[];
+  }) {
     const search = this.searches.get(resp.token);
     if (!search) return;
 

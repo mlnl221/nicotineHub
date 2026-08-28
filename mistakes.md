@@ -77,3 +77,9 @@ What happened: Had `bun run dev` (next dev --turbopack + bridge) running in the 
 Why: Ran prod build in the same `.next` directory a dev server was actively using, without stopping dev first.
 How to avoid: Stop `bun run dev` (`pkill -f "next dev"`) before `bun run build`/`bun test`, or verify on a separate port/build dir. Restart dev + re-run the browser test after any build.
 
+
+## 2026-08-28 — Write/Edit tools resolve worktree path to main repo
+
+What happened: In a git worktree (`apps/...` under `…/nicotine_mobile-feat_profile-view`), the `write`/`edit` tools silently wrote files to the **main** repo (`…/nicotine_mobile/...`) instead of the worktree, while `node` scripts using relative paths wrote to the worktree correctly. Result: main got contaminated with the feature changes and the worktree had none of them. The `read` tool also showed stale content (apparently cached) that didn't match disk.
+Why: Path resolution for the worktree absolute path collapsed to the main checkout for the file tools; only `node` `fs` reads/writes via the shell `cd` reflected true on-disk state.
+How to avoid: After any `write`/`edit` in a worktree, verify with `node -e "require('fs').existsSync(...)"` / `grep` from the shell (not the `read` tool). When in doubt, apply file changes via a `node` script writing to the worktree absolute path, and `git checkout -- . && git clean -fd` the main repo to discard contamination. Trust `node`+`grep` over the `read`/`edit` tools for presence checks.

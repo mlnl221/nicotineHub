@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useSearches } from "@/lib/search";
 import { applyFilters } from "@/lib/filter";
 import { useTransfers } from "@/lib/transfers";
@@ -13,6 +14,7 @@ import { ResultsList } from "./ResultsList";
 export function SearchScreen() {
   const { activeTab, activeId, startSearch, stopSearch, setFilters, clearFilters } = useSearches();
   const { requestDownload } = useTransfers();
+  const router = useRouter();
   const [showFilters, setShowFilters] = useState(false);
   const [sheetRow, setSheetRow] = useState<SearchRow | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -147,6 +149,14 @@ export function SearchScreen() {
               label="Browse user's files"
               onClick={() => {
                 flash(`Browse ${sheetRow.user} (not implemented yet)`);
+                setSheetRow(null);
+              }}
+            />
+            <SheetAction
+              icon="account_circle"
+              label="View Profile"
+              onClick={() => {
+                if (sheetRow) router.push(`/profile/${encodeURIComponent(sheetRow.user)}`);
                 setSheetRow(null);
               }}
             />

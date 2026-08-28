@@ -11,7 +11,7 @@ const NAV = [
   { icon: "upload", label: "Uploads", href: "/uploads" },
   { icon: "forum", label: "Private Chat", href: "#" },
   { icon: "folder_managed", label: "Browse Shares", href: "#" },
-  { icon: "account_circle", label: "User Profiles", href: "#" },
+  { icon: "account_circle", label: "User Profiles", href: "/profile" },
   { icon: "group", label: "Buddies", href: "#" },
   { icon: "groups", label: "Chat Rooms", href: "#" },
   { icon: "interests", label: "Interests", href: "#" },

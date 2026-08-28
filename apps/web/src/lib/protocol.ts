@@ -216,6 +216,117 @@ export interface UploadControlRequest {
   action: "cancel" | "clear";
 }
 
+/* ------------------------------------------------------------------ *
+ * User info / profiles
+ * ------------------------------------------------------------------ */
+
+export interface UserInfoStatus {
+  username: string;
+  /** 0 offline, 1 away, 2 online */
+  status: number;
+  privileged: boolean;
+}
+
+export interface UserInfoStats {
+  username: string;
+  /** average upload speed, bytes/sec */
+  avgspeed: number;
+  uploadnum: number;
+  files: number;
+  dirs: number;
+}
+
+export interface UserInfoInterests {
+  username: string;
+  likes: string[];
+  hates: string[];
+}
+
+export interface UserInfoProfile {
+  username: string;
+  descr: string;
+  /** base64-encoded picture, or null when the user has none */
+  pic: string | null;
+  totalupl: number;
+  queuesize: number;
+  slotsavail: boolean;
+  uploadallowed: number;
+}
+
+export interface Recommendation {
+  thing: string;
+  rating: number;
+}
+
+export interface SimilarUser {
+  username: string;
+  rating: number;
+}
+
+export interface UserInfoEvent {
+  type:
+    | "user-status"
+    | "user-stats"
+    | "user-interests"
+    | "recommendations"
+    | "global-recommendations"
+    | "similar-users"
+    | "item-recommendations"
+    | "item-similar-users"
+    | "peer-address"
+    | "user-info-response"
+    | "user-info-failed";
+  username?: string;
+  status?: UserInfoStatus;
+  stats?: UserInfoStats;
+  interests?: UserInfoInterests;
+  recommendations?: Recommendation[];
+  similarUsers?: SimilarUser[];
+  info?: UserInfoProfile;
+}
+
+export interface UserInfoEventMessage {
+  type: "userinfo:event";
+  event: UserInfoEvent;
+}
+
+export interface UserInfoResponseOutbound {
+  type: "user-info-response";
+  username: string;
+  descr: string;
+  pic: string | null;
+  totalupl: number;
+  queuesize: number;
+  slotsavail: boolean;
+  uploadallowed: number;
+}
+
+export interface UserInfoFailedOutbound {
+  type: "user-info-failed";
+  username: string;
+}
+
+export type UserinfoRequestMessage =
+  | { type: "userinfo"; action: "watch" | "unwatch" | "get" | "interests"; username: string }
+  | { type: "userinfo"; action: "recommendations" | "globalRecommendations" | "similarUsers" }
+  | { type: "userinfo"; action: "itemRecommendations" | "itemSimilarUsers"; item: string }
+  | { type: "userinfo"; action: "addLike" | "removeLike" | "addHate" | "removeHate"; thing: string }
+  | { type: "userinfo"; action: "givePrivileges"; username: string; days: number }
+  | { type: "userinfo"; action: "setStatus"; status: number }
+  | {
+      type: "userinfo";
+      action: "setProfile";
+      profile: {
+        descr: string;
+        pic?: string | null;
+        totalupl: number;
+        queuesize: number;
+        slotsavail: boolean;
+        uploadallowed: number;
+      };
+    };
+
+
 export type BridgeOutboundMessage =
   | LoginStartMessage
   | LoginResultSuccess
@@ -226,7 +337,10 @@ export type BridgeOutboundMessage =
   | SearchEndMessage
   | TransferUpdateMessage
   | TransferRemovedMessage
-  | TransferStatsMessage;
+  | TransferStatsMessage
+  | UserInfoEventMessage
+  | UserInfoResponseOutbound
+  | UserInfoFailedOutbound;
 
 export type BridgeInboundMessage =
   | LoginRequest
@@ -234,4 +348,5 @@ export type BridgeInboundMessage =
   | SearchStopRequest
   | DownloadRequest
   | DownloadControlRequest
-  | UploadControlRequest;
+  | UploadControlRequest
+  | UserinfoRequestMessage;
