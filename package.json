@@ -1,0 +1,20 @@
+{
+  "name": "nicotine-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mobile-first/browser-first Soulseek client (MVP: login).",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n bridge,web -c blue,green \"bun run --cwd apps/bridge dev\" \"bun run --cwd apps/web dev\"",
+    "dev:bridge": "bun run --cwd apps/bridge dev",
+    "dev:web": "bun run --cwd apps/web dev",
+    "build": "bun run --cwd apps/bridge build && bun run --cwd apps/web build",
+    "test": "bun run --cwd apps/bridge test",
+    "typecheck": "bun run --cwd apps/bridge typecheck && bun run --cwd apps/web typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

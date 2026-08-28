@@ -1,0 +1,2 @@
+Read the development guidelines here:
+https://nicotine-plus.org/doc/DEVELOPING.html

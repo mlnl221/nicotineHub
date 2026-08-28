@@ -1,0 +1,20 @@
+{
+  "name": "@nicotine/bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WebSocket bridge that speaks the Soulseek (SLSK) protocol for login.",
+  "scripts": {
+    "dev": "bun --watch src/server.ts",
+    "build": "bun build src/server.ts --target=bun --outdir dist --format=esm",
+    "start": "bun run dist/server.js",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
