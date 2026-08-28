@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { SessionProvider } from "@/lib/session";
+import { ConfigProvider } from "@/lib/config/provider";
 
 export const metadata: Metadata = {
   title: "Nicotine Mobile",
@@ -49,7 +50,9 @@ export default function RootLayout({
       </head>
       <body className="min-h-dvh bg-surface-container-low font-body text-on-surface antialiased selection:bg-primary/30">
         <ThemeProvider>
-          <SessionProvider>{children}</SessionProvider>
+          <ConfigProvider>
+            <SessionProvider>{children}</SessionProvider>
+          </ConfigProvider>
         </ThemeProvider>
       </body>
     </html>
