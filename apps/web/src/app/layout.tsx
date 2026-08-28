@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { ThemeProvider } from "@/components/ThemeProvider";
+import { SessionProvider } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "Nicotine Mobile",
@@ -38,9 +40,17 @@ export default function RootLayout({
           href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
           rel="stylesheet"
         />
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{var t=localStorage.getItem('nicotine.theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}",
+          }}
+        />
       </head>
       <body className="min-h-dvh bg-surface-container-low font-body text-on-surface antialiased selection:bg-primary/30">
-        {children}
+        <ThemeProvider>
+          <SessionProvider>{children}</SessionProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

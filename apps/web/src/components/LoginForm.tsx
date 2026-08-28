@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useLogin } from "@/lib/useLogin";
+import { useSession } from "@/lib/session";
 
 export function LoginForm() {
-  const { login, reset, state } = useLogin();
+  const { login, logout, state } = useSession();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showServer, setShowServer] = useState(false);
@@ -12,7 +12,7 @@ export function LoginForm() {
   const [port, setPort] = useState("2242");
 
   const busy = state.status === "connecting";
-  const succeeded = state.status === "succeeded";
+  const succeeded = state.status === "connected";
 
   const canSubmit = useMemo(
     () => username.trim().length > 0 && password.length > 0 && !busy && !succeeded,
@@ -42,19 +42,11 @@ export function LoginForm() {
             <h2 className="text-lg font-semibold text-on-surface">Logged in</h2>
             <p className="text-sm text-on-surface-variant">Signed in as {username}</p>
           </div>
-          {state.result?.banner ? (
-            <p className="rounded-xl bg-surface-container-high px-4 py-3 text-sm italic text-on-surface-variant">
-              {state.result.banner}
-            </p>
-          ) : null}
         </div>
 
         <button
           type="button"
-          onClick={() => {
-            reset();
-            setPassword("");
-          }}
+          onClick={() => logout()}
           className="w-full rounded-xl border border-outline-variant bg-surface-container-lowest py-3 font-label text-sm font-semibold text-on-surface transition-all active:scale-[0.98] hover:bg-surface-container"
         >
           Sign out

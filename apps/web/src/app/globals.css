@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Class-based dark mode: add `.dark` to <html> to switch themes. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-inverse-surface: #303031;
   --color-surface-dim: #dbdadb;
@@ -65,6 +68,18 @@
   background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(195, 198, 213, 0.15); /* outline-variant at 15% */
+}
+
+.dark .glass-card {
+  background: rgba(227, 226, 227, 0.05);
+  border: 1px solid rgba(195, 198, 213, 0.15);
 }
 
 .ghost-border {
