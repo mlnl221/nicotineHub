@@ -35,6 +35,7 @@ Bridge URL override: `NEXT_PUBLIC_BRIDGE_URL` (build-time) or `localStorage.nico
 - Client version is experimental `177/1` — do not reuse reserved major versions.
 - Mobile-first UI: touch targets, safe-area insets, PWA `manifest.webmanifest`.
 - Verify after changes: `bun test && bun run build`.
+- Browser/UI testing uses the Playwright MCP server (configured in opencode). Before driving the UI, always copy the env file into place (e.g. `cp apps/web/.env.example apps/web/.env`) so the `PLAYWRIGHT_MCP_EXTENSION_TOKEN` and other vars are present for the Playwright MCP browser session.
 
 ## Repo layout
 
