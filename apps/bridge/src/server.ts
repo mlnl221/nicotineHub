@@ -211,6 +211,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           onChatEvent: (event) => { try { ws.send(JSON.stringify({ type: "chat:event", event })); } catch {} },
           onRoomEvent: (event) => { try { ws.send(JSON.stringify({ type: "room:event", event })); } catch {} },
           onTransferEvent: (event) => { try { ws.send(JSON.stringify({ type: "peer:transfer", event })); } catch {} },
+          onServerEvent: (event) => { try { ws.send(JSON.stringify({ type: "server:reconnect", ...event })); } catch {} },
         });
         ws.data.session = session;
         ws.send(JSON.stringify({ type: "login:start" }));

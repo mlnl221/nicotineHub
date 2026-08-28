@@ -104,12 +104,13 @@ export interface SearchResultPayload { searchId: string; token: number; rows: Se
 export interface SearchEndPayload { searchId: string; reason: "max_results" | "stopped" | "timeout" | "error"; }
 export interface SearchHandlers { onResult: (p: SearchResultPayload) => void; onEnd: (p: SearchEndPayload) => void; timeoutMs?: number; }
 interface ActiveSearch extends SearchHandlers { searchId: string; timer?: ReturnType<typeof setTimeout>; users: Set<string>; count: number; maxResults: number; }
-interface PeerState { buf: Buffer; initDone: boolean; username?: string; outbound?: boolean; connType?: string; lastActive: number; isFileConn?: boolean; fileToken?: number; }
+interface PeerState { buf: Buffer; initDone: boolean; username?: string; outbound?: boolean; connType?: string; lastActive: number; isFileConn?: boolean; fileToken?: number; createdAt: number; }
+export type ServerEvent = { type: "reconnect"; attempt: number; delay: number } | { type: "reconnect-failed"; error: string };
 export interface SessionOptions {
   username: string; password: string; host?: string; port?: number; listenPort: number;
   profile: UserInfoResponseMessage; onUserEvent?: (event: UserInfoEvent) => void;
   onChatEvent?: (event: ChatEvent) => void; onRoomEvent?: (event: RoomEvent) => void;
-  onTransferEvent?: (event: TransferEvent) => void; signal?: AbortSignal;
+  onTransferEvent?: (event: TransferEvent) => void; onServerEvent?: (event: ServerEvent) => void; signal?: AbortSignal;
 }
 export interface UserInfoEvent {
   type: "user-status" | "user-stats" | "user-interests" | "recommendations" | "global-recommendations"
@@ -140,10 +141,13 @@ export interface TransferEvent {
 
 const MAX_DISPLAYED_RESULTS = 2500;
 const DEFAULT_SEARCH_TIMEOUT_MS = 20_000;
-const PEER_ADDRESS_TIMEOUT_MS = 15000;
+const PEER_ADDRESS_TIMEOUT_MS = 20_000; // INDIRECT_REQUEST_TIMEOUT
 const CONNECTION_MAX_IDLE_MS = 60_000;
 const GHOST_IDLE_MS = 10_000;
+const CONNECTION_INIT_TIMEOUT_MS = 2_000;
 const USER_ADDRESS_TTL_MS = 30 * 60 * 1000;
+const RECONNECT_BASE_MS = 5_000;
+const RECONNECT_MAX_MS = 300_000;
 
 export class SoulseekSession {
   readonly username: string;
@@ -155,7 +159,7 @@ export class SoulseekSession {
   private searchIds = new Map<string, number>();
   private userInfoRequests = new Map<string, (info: UserInfoResponseMessage) => void>();
   private failedUserInfo = new Set<string>();
-  private peerAddressRequests = new Map<string, { cb: (addr: PeerAddress) => void; timer: ReturnType<typeof setTimeout> }>();
+  private peerAddressRequests = new Map<string, { cbs: Array<(addr: PeerAddress) => void>; timer: ReturnType<typeof setTimeout>; createdAt: number }>();
   private userAddresses = new Map<string, { addr: PeerAddress; updated: number }>();
   private excludedPhrases = new Set<string>();
   private allowedSearchTokens = new Set<number>();
@@ -166,6 +170,9 @@ export class SoulseekSession {
   private idleTimer: ReturnType<typeof setInterval> | undefined;
   private wishlistTimer: ReturnType<typeof setInterval> | undefined;
   private serverPingTimer: ReturnType<typeof setInterval> | undefined;
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  private reconnectAttempts = 0;
+  private shouldReconnect = true;
   private branchLevel = 0;
   private branchRoot: string | undefined;
   private parentCandidate: string | undefined;
@@ -177,6 +184,7 @@ export class SoulseekSession {
   private emitChat(event: ChatEvent) { this.opts.onChatEvent?.(event); }
   private emitRoom(event: RoomEvent) { this.opts.onRoomEvent?.(event); }
   private emitTransfer(event: TransferEvent) { this.opts.onTransferEvent?.(event); }
+  private emitServer(event: ServerEvent) { this.opts.onServerEvent?.(event); }
 
   setProfile(profile: UserInfoResponseMessage) { this.profile = { ...this.profile, ...profile }; }
   private profile: UserInfoResponseMessage;
@@ -187,43 +195,98 @@ export class SoulseekSession {
   }
 
   login(): Promise<LoginResponse & { success: true }> {
+    this.shouldReconnect = true;
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
     const promise = new Promise<LoginResponse & { success: true }>((resolve, reject) => {
       this.loginResolve = resolve;
       this.loginReject = reject;
     });
-    this.opts.signal?.addEventListener("abort", () => { this.loginReject?.(new Error("Login request was cancelled.")); this.close(); }, { once: true });
+    this.opts.signal?.addEventListener("abort", () => { this.loginReject?.(new Error("Login request was cancelled.")); this.shouldReconnect = false; this.close(); }, { once: true });
+    this.connectServer();
+    return promise;
+  }
+
+  private connectServer() {
     Bun.connect({
       hostname: this.opts.host || "server.slsknet.org",
       port: this.opts.port || 2242,
       socket: {
         open: (sock) => {
+          try { (sock as unknown as { setKeepAlive?: (b: boolean) => void }).setKeepAlive?.(true); } catch {}
           this.serverSocket = sock as Socket;
           // Send Login only; SetWaitPort after success (nicotine parity)
           sock.write(buildLogin(this.opts.username, this.opts.password));
         },
         data: (_sock, chunk) => this.handleServerData(chunk),
-        error: (_sock, err) => this.loginReject?.(new Error(`Connection error: ${err.message}`)),
+        error: (_sock, err) => {
+          if (!this.loggedIn) this.loginReject?.(new Error(`Connection error: ${err.message}`));
+          this.scheduleReconnect(`Connection error: ${err.message}`);
+        },
         close: () => {
-          if (!this.loggedIn) this.loginReject?.(new Error("Connection closed before login completed."));
-          this.close();
+          if (!this.loggedIn && this.loginReject) {
+            const err = new Error("Connection closed before login completed.");
+            this.loginReject(err);
+            this.loginReject = undefined;
+            this.loginResolve = undefined;
+          }
+          const wasLoggedIn = this.loggedIn;
+          // keep loggedIn false; schedule reconnect if we were logged in or still trying
+          if (wasLoggedIn) this.loggedIn = false;
+          this.cleanupServerTimers();
+          if (this.shouldReconnect) this.scheduleReconnect("Server closed");
+          else this.close();
         },
       },
-    }).catch((err) => this.loginReject?.(new Error(`Unable to connect: ${err.message}`)));
-    return promise;
+    }).catch((err) => {
+      if (!this.loggedIn) this.loginReject?.(new Error(`Unable to connect: ${err.message}`));
+      this.scheduleReconnect(`Unable to connect: ${err.message}`);
+    });
+  }
+
+  private scheduleReconnect(reason: string) {
+    if (!this.shouldReconnect || this.opts.signal?.aborted) return;
+    if (this.reconnectTimer) return;
+    const base = RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempts);
+    const jitter = base * 0.2 * (Math.random() * 2 - 1);
+    const delay = Math.min(RECONNECT_MAX_MS, Math.max(RECONNECT_BASE_MS, base + jitter));
+    this.reconnectAttempts += 1;
+    this.emitServer({ type: "reconnect", attempt: this.reconnectAttempts, delay: Math.round(delay) });
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      if (!this.shouldReconnect || this.opts.signal?.aborted) return;
+      this.connectServer();
+    }, delay);
+    if (this.reconnectAttempts > 15) {
+      this.emitServer({ type: "reconnect-failed", error: reason });
+    }
+  }
+
+  private cleanupServerTimers() {
+    if (this.serverPingTimer) { clearInterval(this.serverPingTimer); this.serverPingTimer = undefined; }
   }
 
   private handleServerData(chunk: ArrayBuffer | Uint8Array) {
     const bytes = chunk instanceof Uint8Array ? Uint8Array.from(chunk) : new Uint8Array(chunk);
+    // Per spec: server generic 1M, but we allow 16M for search/shares; close on overflow
     if (this.serverBuffer.length + bytes.length > MAX_INCOMING.server16M) {
-      // overflow guard — drop connection
-      this.serverSocket?.end();
+      try { this.serverSocket?.end(); } catch {}
+      this.scheduleReconnect("Server overflow");
       return;
     }
     this.serverBuffer = Buffer.concat([this.serverBuffer, Buffer.from(bytes)]);
     while (true) {
-      const msg = tryParseMessage(this.serverBuffer);
-      if (!msg) break;
-      if (msg.payload.length > MAX_INCOMING.server16M) { this.serverSocket?.end(); break; }
+      const msg = tryParseMessage(this.serverBuffer, MAX_INCOMING.server16M);
+      if (!msg) {
+        // check if next len exceeds cap -> overflow
+        if (this.serverBuffer.length >= 4) {
+          const len = this.serverBuffer.readUInt32LE(0);
+          if (len > MAX_INCOMING.server16M) { try { this.serverSocket?.end(); } catch {} this.scheduleReconnect("Server msg too large"); break; }
+        }
+        break;
+      }
+      // Additional per-code overflow guard (shares etc could be larger but server caps at 16M)
+      if (msg.payload.length > MAX_INCOMING.server16M) { try { this.serverSocket?.end(); } catch {} break; }
       this.serverBuffer = this.serverBuffer.subarray(8 + msg.payload.length);
       this.dispatchServerMessage(msg.code, msg.payload);
     }
@@ -234,6 +297,8 @@ export class SoulseekSession {
       const resp = parseLoginResponse(payload);
       if (resp.success) {
         this.loggedIn = true;
+        this.reconnectAttempts = 0;
+        if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
         // Now advertise listen port (after success)
         this.serverSocket?.write(buildSetWaitPort(this.opts.listenPort));
         this.startListener();
@@ -242,8 +307,13 @@ export class SoulseekSession {
         // Distrib bootstrap
         this.serverSocket?.write(buildHaveNoParent());
         this.loginResolve?.(resp);
+        this.loginResolve = undefined;
+        this.loginReject = undefined;
       } else {
+        this.shouldReconnect = false;
         this.loginReject?.(new Error(`Login rejected: ${resp.rejectionReason}`));
+        this.loginReject = undefined;
+        this.loginResolve = undefined;
       }
       return;
     }
@@ -290,14 +360,16 @@ export class SoulseekSession {
     if (code === SERVER_MESSAGE_CODES.getPeerAddress) {
       try {
         const addr = parsePeerAddress(payload);
-        // cache
+        // cache 30m TTL
         this.userAddresses.set(addr.username, { addr, updated: Date.now() });
         const pending = this.peerAddressRequests.get(addr.username);
         if (pending) {
           clearTimeout(pending.timer);
           this.peerAddressRequests.delete(addr.username);
           this.emit({ type: "peer-address", username: addr.username, peerAddress: addr });
-          pending.cb(addr);
+          for (const cb of pending.cbs) try { cb(addr); } catch {}
+        } else {
+          this.emit({ type: "peer-address", username: addr.username, peerAddress: addr });
         }
       } catch {}
       return;
@@ -430,15 +502,22 @@ export class SoulseekSession {
         close: (peer) => { this.peerStates.delete(peer as Socket); },
       },
     });
+    // Bun.listen keepalive is implicit via OS; ServerPing is fallback
   }
   private startIdleSweep() {
     this.idleTimer = setInterval(() => {
       const now = Date.now();
       for (const [sock, st] of this.peerStates) {
         const idle = now - st.lastActive;
+        const initTimeout = !st.initDone && (now - st.createdAt) > CONNECTION_INIT_TIMEOUT_MS;
         const ghost = !st.username && idle > GHOST_IDLE_MS;
         const dead = idle > CONNECTION_MAX_IDLE_MS;
-        if (ghost || dead) {
+        if (initTimeout || ghost || dead) {
+          try { sock.end(); } catch {}
+          this.peerStates.delete(sock);
+        }
+        // leak fix: partial init buf without progress -> evict after timeout (2s)
+        if (!st.initDone && st.buf.length > 0 && (now - st.createdAt) > CONNECTION_INIT_TIMEOUT_MS) {
           try { sock.end(); } catch {}
           this.peerStates.delete(sock);
         }
@@ -448,7 +527,9 @@ export class SoulseekSession {
         if (now - entry.updated > USER_ADDRESS_TTL_MS) this.userAddresses.delete(user);
       }
       for (const [user, pending] of this.peerAddressRequests) {
-        if (now - (pending as unknown as { updated?: number }).updated! > PEER_ADDRESS_TIMEOUT_MS) {
+        // Pending GetPeerAddress timeout is INDIRECT_REQUEST_TIMEOUT (20s) — we store createdAt
+        const created = (pending as unknown as { createdAt?: number }).createdAt ?? 0;
+        if (created && now - created > PEER_ADDRESS_TIMEOUT_MS) {
           clearTimeout(pending.timer);
           this.peerAddressRequests.delete(user);
         }
@@ -456,10 +537,10 @@ export class SoulseekSession {
     }, 5000);
   }
   private startServerPing() {
-    // nicotine uses TCP keepalive; we send ServerPing 32 every 55s as fallback
+    // nicotine uses TCP keepalive; we send ServerPing 32 every 60s as fallback (TODO spec 60s)
     this.serverPingTimer = setInterval(() => {
       try { this.serverSocket?.write(Buffer.concat([Buffer.from([4, 0, 0, 0]), Buffer.from([32, 0, 0, 0])])); } catch {}
-    }, 55000);
+    }, 60000);
   }
 
   private connectToPeer(ctp: ReturnType<typeof parseConnectToPeer>) {
@@ -470,7 +551,7 @@ export class SoulseekSession {
     Bun.connect({
       hostname: ip, port,
       socket: {
-        open: (sock) => { (sock as Socket).write(buildPierceFireWall(ctp.token)); this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: true, username: ctp.username, outbound: false, connType: ctp.connType, lastActive: Date.now() }); },
+        open: (sock) => { (sock as Socket).write(buildPierceFireWall(ctp.token)); this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: true, username: ctp.username, outbound: false, connType: ctp.connType, lastActive: Date.now(), createdAt: Date.now() }); },
         data: (sock, chunk) => this.processPeer(sock as Socket, chunk, true),
         error: () => {
           // Report back to server we couldn't connect
@@ -485,9 +566,12 @@ export class SoulseekSession {
 
   private processPeer(peer: Socket, chunk: ArrayBuffer | Uint8Array, initDone: boolean) {
     const bytes = chunk instanceof Uint8Array ? Uint8Array.from(chunk) : new Uint8Array(chunk);
-    const state = this.peerStates.get(peer) ?? { buf: Buffer.alloc(0), initDone, lastActive: Date.now() };
+    const state = this.peerStates.get(peer) ?? { buf: Buffer.alloc(0), initDone, lastActive: Date.now(), createdAt: Date.now() };
+    if (!state.createdAt) state.createdAt = Date.now();
     state.lastActive = Date.now();
-    if (state.buf.length + bytes.length > MAX_INCOMING.server1M) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
+    // Enforce per-conn max before appending
+    const maxForState = state.connType === "D" ? MAX_INCOMING.server16K : (state.isFileConn ? MAX_INCOMING.server16M : MAX_INCOMING.server1M);
+    if (state.buf.length + bytes.length > maxForState) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
     state.buf = Buffer.concat([state.buf, Buffer.from(bytes)]);
     while (true) {
       if (!state.initDone) {
@@ -515,7 +599,12 @@ export class SoulseekSession {
           try { parsePierceFireWall(initPayload); } catch {}
         }
         state.initDone = true;
-        if (state.outbound) { try { (peer as Socket).write(buildUserInfoRequest()); } catch {} }
+        // Send queued pending message if any, else default UserInfoRequest for outbound
+        const pending = (state as unknown as { pendingMsg?: Buffer }).pendingMsg as Buffer | undefined;
+        if (pending) {
+          try { (peer as Socket).write(pending); } catch {}
+          (state as unknown as { pendingMsg?: Buffer }).pendingMsg = undefined;
+        } else if (state.outbound) { try { (peer as Socket).write(buildUserInfoRequest()); } catch {} }
         state.buf = state.buf.subarray(total);
         continue;
       }
@@ -541,7 +630,7 @@ export class SoulseekSession {
       if (state.connType === "D") {
         if (state.buf.length < 5) break;
         const len = state.buf.readUInt32LE(0);
-        if (len > MAX_INCOMING.server16K) { try { peer.end(); } catch {} break; }
+        if (len > MAX_INCOMING.server16K) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
         const total = 5 + len; if (state.buf.length < total) break;
         const code = state.buf[4];
         const payload = state.buf.subarray(5, total);
@@ -552,9 +641,25 @@ export class SoulseekSession {
         }
         continue;
       }
-      const msg = tryParseMessage(state.buf);
-      if (!msg) break;
-      if (msg.payload.length > MAX_INCOMING.server1M) { try { peer.end(); } catch {} break; }
+      // Determine max per expected message type (peek len)
+      if (state.buf.length >= 4) {
+        const peekLen = state.buf.readUInt32LE(0);
+        // Quick overflow check against max generic; detailed per-code check after parse
+        if (peekLen > MAX_INCOMING.server448M) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+      }
+      // Use appropriate max for tryParse (shares need 448M)
+      const msg = tryParseMessage(state.buf, MAX_INCOMING.server448M);
+      if (!msg) {
+        if (state.buf.length >= 4) {
+          const len = state.buf.readUInt32LE(0);
+          if (len > MAX_INCOMING.server448M) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+        }
+        break;
+      }
+      // Per-code enforcement: close on overflow for non-shares
+      const maxForCode = (msg.code === PEER_MESSAGE_CODES.sharedFileListResponse || msg.code === PEER_MESSAGE_CODES.folderContentsResponse) ? MAX_INCOMING.server448M
+        : (msg.code === PEER_MESSAGE_CODES.fileSearchResponse ? MAX_INCOMING.server16M : MAX_INCOMING.server1M);
+      if (msg.payload.length > maxForCode) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
       state.buf = state.buf.subarray(8 + msg.payload.length);
       if (msg.code === 9) {
         // Gate on allowed token to prevent zlib bomb from unsolicited peers
@@ -715,8 +820,14 @@ export class SoulseekSession {
       this.connectToPeerViaAddress(username, cached.addr, connType, msg);
       return;
     }
+    const existing = this.peerAddressRequests.get(username);
+    if (existing) {
+      existing.cbs.push((addr) => this.connectToPeerViaAddress(username, addr, connType, msg));
+      return;
+    }
     const timer = setTimeout(() => { this.peerAddressRequests.delete(username); }, PEER_ADDRESS_TIMEOUT_MS);
-    this.peerAddressRequests.set(username, { cb: (addr) => { clearTimeout(timer); this.connectToPeerViaAddress(username, addr, connType, msg); }, timer });
+    const entry = { cbs: [(addr: PeerAddress) => { clearTimeout(timer); this.connectToPeerViaAddress(username, addr, connType, msg); }], timer, createdAt: Date.now() };
+    this.peerAddressRequests.set(username, entry);
     this.serverSocket?.write(buildGetPeerAddress(username));
   }
   private connectToPeerViaAddress(username: string, addr: PeerAddress, connType: string, msg: Buffer) {
@@ -725,7 +836,7 @@ export class SoulseekSession {
       hostname: addr.ip, port: addr.port,
       socket: {
         open: (sock) => {
-          this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, lastActive: Date.now() });
+          this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, lastActive: Date.now(), createdAt: Date.now() });
           (sock as Socket).write(buildPeerInit(this.username, connType));
           // queue msg via state — will be sent after initDone in processPeer
           const st = this.peerStates.get(sock as Socket);
@@ -754,7 +865,7 @@ export class SoulseekSession {
           hostname: addr.ip, port: addr.port,
           socket: {
             open: (sock) => {
-              this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType: "P", lastActive: Date.now() });
+              this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType: "P", lastActive: Date.now(), createdAt: Date.now() });
               (sock as Socket).write(buildPeerInit(this.username, "P"));
             },
             data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
@@ -772,17 +883,24 @@ export class SoulseekSession {
         });
       };
       if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) { doConnect(cached.addr); return; }
+      const existing = this.peerAddressRequests.get(username);
+      if (existing) {
+        existing.cbs.push((addr) => { this.userAddresses.set(username, { addr, updated: Date.now() }); doConnect(addr); });
+        return;
+      }
       const timer = setTimeout(() => {
         this.peerAddressRequests.delete(username); this.userInfoRequests.delete(username);
         this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username });
         reject(new Error("Peer address request timed out."));
       }, PEER_ADDRESS_TIMEOUT_MS);
-      this.peerAddressRequests.set(username, { cb: (addr) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); doConnect(addr); }, timer });
+      this.peerAddressRequests.set(username, { cbs: [(addr) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); doConnect(addr); }], timer, createdAt: Date.now() });
       this.serverSocket?.write(buildGetPeerAddress(username));
     });
   }
 
   close() {
+    this.shouldReconnect = false;
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
     for (const token of [...this.searches.keys()]) { const s = this.searches.get(token); if (s?.timer) clearTimeout(s.timer); if (s) s.onEnd({ searchId: s.searchId, reason: "stopped" }); this.searches.delete(token); }
     this.searchIds.clear(); this.allowedSearchTokens.clear();
     for (const { timer } of this.peerAddressRequests.values()) clearTimeout(timer);
@@ -796,6 +914,7 @@ export class SoulseekSession {
     try { this.serverSocket?.end(); } catch {}
     try { this.listener?.stop(); } catch {}
     this.serverSocket = undefined; this.listener = undefined; this.loggedIn = false;
+    this.reconnectAttempts = 0;
   }
 }
 
