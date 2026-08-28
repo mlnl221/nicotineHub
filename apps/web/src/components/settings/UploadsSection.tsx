@@ -108,6 +108,40 @@ export function UploadsSection() {
           checked={t.preferfriends}
           onChange={(v) => setOption("transfers", "preferfriends", v)}
         />
+        <SelectControl
+          label="Grouping"
+          value={t.groupuploads}
+          onChange={(v) => setOption("transfers", "groupuploads", v)}
+          options={[
+            { value: "ungrouped", label: "Ungrouped" },
+            { value: "folder_grouping", label: "By folder" },
+            { value: "user_grouping", label: "By user" },
+          ]}
+        />
+        <SelectControl
+          label="Expand state"
+          value={t.expand_uploads}
+          onChange={(v) => setOption("transfers", "expand_uploads", v)}
+          options={[
+            { value: "all", label: "Expand all" },
+            { value: "none", label: "Collapse all" },
+          ]}
+        />
+        <SelectControl
+          label="Double-click action"
+          value={t.upload_doubleclick}
+          onChange={(v) => setOption("transfers", "upload_doubleclick", v)}
+          options={[
+            { value: 0, label: "Nothing" },
+            { value: 1, label: "Open file" },
+            { value: 2, label: "Open in file manager" },
+            { value: 3, label: "Search" },
+            { value: 4, label: "Abort" },
+            { value: 5, label: "Remove" },
+            { value: 6, label: "Retry" },
+            { value: 7, label: "Browse folder" },
+          ]}
+        />
       </SectionCard>
     </div>
   );

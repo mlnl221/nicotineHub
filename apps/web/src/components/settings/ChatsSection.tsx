@@ -16,8 +16,12 @@ export function ChatsSection() {
   return (
     <div className="flex flex-col gap-6">
       <SectionCard title="Chat — General">
+        <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs leading-relaxed text-on-surface-variant dark:bg-surface-container-highest/40">
+          Mirrors <span className="font-mono">chats.ui</span> (preferences.py:1734). Private rooms require server support; timestamps use Python strftime.
+        </div>
         <ToggleControl
           label="Allow private room invitations"
+          description="Accept invites to private chatrooms (server.private_chatrooms)."
           checked={server.private_chatrooms}
           onChange={(v) => setOption("server", "private_chatrooms", v)}
         />

@@ -55,6 +55,42 @@ export function DownloadsSection() {
           checked={t.usernamesubfolders}
           onChange={(v) => setOption("transfers", "usernamesubfolders", v)}
         />
+        <SelectControl
+          label="Grouping"
+          description="How downloads are grouped in the UI (mirrors pynicotine transfers groupdownloads)."
+          value={t.groupdownloads}
+          onChange={(v) => setOption("transfers", "groupdownloads", v)}
+          options={[
+            { value: "ungrouped", label: "Ungrouped" },
+            { value: "folder_grouping", label: "By folder" },
+            { value: "user_grouping", label: "By user" },
+          ]}
+        />
+        <SelectControl
+          label="Expand state"
+          value={t.expand_downloads}
+          onChange={(v) => setOption("transfers", "expand_downloads", v)}
+          options={[
+            { value: "all", label: "Expand all" },
+            { value: "none", label: "Collapse all" },
+          ]}
+        />
+        <SelectControl
+          label="Double-click action"
+          description="What happens when you double-click a download (bridge UI action)."
+          value={t.download_doubleclick}
+          onChange={(v) => setOption("transfers", "download_doubleclick", v)}
+          options={[
+            { value: 0, label: "Nothing" },
+            { value: 1, label: "Open file" },
+            { value: 2, label: "Open in file manager" },
+            { value: 3, label: "Search" },
+            { value: 4, label: "Pause" },
+            { value: 5, label: "Remove" },
+            { value: 6, label: "Resume / Retry" },
+            { value: 7, label: "Browse folder" },
+          ]}
+        />
       </SectionCard>
 
       <SectionCard title="Download speed">
@@ -93,6 +129,9 @@ export function DownloadsSection() {
           checked={t.enablefilters}
           onChange={(v) => setOption("transfers", "enablefilters", v)}
         />
+        <div className="py-2 font-body text-xs text-on-surface-variant dark:text-outline">
+          Syntax: case-insensitive. If regex is enabled, Python-style regex is used; otherwise wildcard * is supported. Invalid regex shows a warning (like preferences.py:525).
+        </div>
         <TextFieldControl
           label="Filters (pattern|escaped)"
           description="One per line: pattern, 1 = wildcard, 0 = regex. Example: *.exe|1"
@@ -111,6 +150,19 @@ export function DownloadsSection() {
           }}
           onReset={() => setOption("transfers", "downloadfilters", defaults.transfers.downloadfilters)}
         />
+        {t.downloadfilters.some(([pat, esc]) => {
+          if (esc === 1) return false;
+          try {
+            new RegExp("(" + pat + ")");
+            return false;
+          } catch {
+            return true;
+          }
+        }) ? (
+          <div className="rounded-xl bg-error-container px-4 py-3 font-body text-xs text-on-error-container">
+            One or more regex filters are invalid — check the pattern syntax.
+          </div>
+        ) : null}
       </SectionCard>
     </div>
   );

@@ -10,11 +10,11 @@ export function UserProfileSection() {
   return (
     <SectionCard
       title="User profile"
-      description="Description and picture shown to other Soulseek users. Picture upload is a browser file picker (local preview) — bridge will publish it via UserInfo."
+      description="Description and picture shown to other Soulseek users. Picture upload is a browser file picker (local preview) — bridge will publish it via UserInfo (preferences.py:1254 userinfo.ui)."
     >
       <TextFieldControl
         label="Description"
-        description="Shown on your profile. Supports plain text."
+        description="Shown on your profile. Stored as repr() like Nicotine+ (pynicotine/config.py:244). Supports plain text and URLs."
         value={u.descr === "''" ? "" : u.descr.replace(/^'|'$/g, "").replace(/^"|"$/g, "")}
         multiline
         placeholder="Tell others about your music..."

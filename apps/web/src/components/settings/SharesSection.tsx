@@ -2,7 +2,20 @@
 
 import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
-import { SectionCard, ToggleControl, NumberControl, TextFieldControl } from "@/components/settings/controls";
+import { SectionCard, ToggleControl, NumberControl, TextFieldControl, SelectControl } from "@/components/settings/controls";
+
+function hourLabel(hour: number) {
+  const d = new Date();
+  d.setHours(hour, 0, 0, 0);
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function visibilityValue(buddy: boolean, trusted: boolean): string {
+  if (buddy && trusted) return "both";
+  if (buddy) return "buddy";
+  if (trusted) return "trusted";
+  return "none";
+}
 
 export function SharesSection() {
   const { settings, setOption } = useConfig();
@@ -102,25 +115,38 @@ export function SharesSection() {
           checked={t.rescan_shares_daily}
           onChange={(v) => setOption("transfers", "rescan_shares_daily", v)}
         />
-        <NumberControl
-          label="Rescan hour (0–23)"
-          description="Hour of day for daily rescan."
+        <SelectControl
+          label="Rescan hour"
+          description="Hour of day for daily rescan when enabled."
           value={t.rescan_shares_hour}
-          min={0}
-          max={23}
           onChange={(v) => setOption("transfers", "rescan_shares_hour", v)}
-          onReset={() => setOption("transfers", "rescan_shares_hour", defaults.transfers.rescan_shares_hour)}
+          options={Array.from({ length: 24 }, (_, h) => ({ value: h, label: hourLabel(h) }))}
         />
-        <ToggleControl
-          label="Reveal buddy shares to everyone (on request)"
-          description="If enabled, buddy shares are visible with an indicator and require a message to request access. Not recommended in most cases."
-          checked={t.reveal_buddy_shares}
-          onChange={(v) => setOption("transfers", "reveal_buddy_shares", v)}
-        />
-        <ToggleControl
-          label="Reveal trusted shares to everyone (on request)"
-          checked={t.reveal_trusted_shares}
-          onChange={(v) => setOption("transfers", "reveal_trusted_shares", v)}
+        <SelectControl
+          label="Buddy share visibility"
+          description="Who can see buddy/trusted shares without being a buddy. 'On request' entries show an indicator and require a message (pynicotine/shares visibility)."
+          value={visibilityValue(t.reveal_buddy_shares, t.reveal_trusted_shares)}
+          onChange={(v) => {
+            if (v === "none") {
+              setOption("transfers", "reveal_buddy_shares", false);
+              setOption("transfers", "reveal_trusted_shares", false);
+            } else if (v === "buddy") {
+              setOption("transfers", "reveal_buddy_shares", true);
+              setOption("transfers", "reveal_trusted_shares", false);
+            } else if (v === "trusted") {
+              setOption("transfers", "reveal_buddy_shares", false);
+              setOption("transfers", "reveal_trusted_shares", true);
+            } else {
+              setOption("transfers", "reveal_buddy_shares", true);
+              setOption("transfers", "reveal_trusted_shares", true);
+            }
+          }}
+          options={[
+            { value: "none", label: "Only buddies" },
+            { value: "buddy", label: "Everyone can view buddy shares (on request)" },
+            { value: "trusted", label: "Everyone can view trusted shares (on request)" },
+            { value: "both", label: "Everyone can view buddy & trusted (on request)" },
+          ]}
         />
       </SectionCard>
     </div>
