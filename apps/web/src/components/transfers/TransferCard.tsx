@@ -35,12 +35,14 @@ export function TransferCard({
   onPause,
   onCancel,
   onResume,
+  onRetry,
   onClear,
 }: {
   transfer: Transfer;
   onPause?: () => void;
   onCancel?: () => void;
   onResume?: () => void;
+  onRetry?: () => void;
   onClear?: () => void;
 }) {
   const pct = transfer.size > 0 ? Math.min(100, Math.round((transfer.current / transfer.size) * 100)) : 0;
@@ -48,6 +50,19 @@ export function TransferCard({
   const isPaused = transfer.status === "Paused";
   const isFinished = transfer.status === "Finished";
   const isCancelled = transfer.status === "Cancelled";
+  const isFailed =
+    transfer.status === "Connection closed" ||
+    transfer.status === "Connection timeout" ||
+    transfer.status === "Download folder error" ||
+    transfer.status === "Local file error" ||
+    transfer.status === "User logged off" ||
+    transfer.status === "Filtered" ||
+    transfer.status === "Banned" ||
+    transfer.status === "File not shared." ||
+    transfer.status === "File read error." ||
+    transfer.status === "Pending shutdown." ||
+    transfer.status === "Too many files" ||
+    transfer.status === "Too many megabytes";
   const isTransferring = transfer.status === "Transferring" || transfer.status === "Getting status";
 
   const barColor = transfer.isUpload
@@ -106,6 +121,16 @@ export function TransferCard({
       </div>
 
       <div className="flex justify-end gap-2">
+        {isFailed || isCancelled ? (
+          <button
+            aria-label="Retry"
+            onClick={onRetry}
+            className="p-2 min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-primary transition-colors"
+            title="Retry"
+          >
+            <span className="material-symbols-outlined text-[18px]">replay</span>
+          </button>
+        ) : null}
         {isPaused ? (
           <button
             aria-label="Resume"
@@ -135,7 +160,7 @@ export function TransferCard({
             <span className="material-symbols-outlined text-[18px]">arrow_upward</span>
           </button>
         ) : null}
-        {(isFinished || isCancelled || transfer.status === "Filtered") ? (
+        {(isFinished || isCancelled || transfer.status === "Filtered" || isFailed) ? (
           <button
             aria-label="Clear"
             onClick={onClear}

@@ -196,6 +196,20 @@ export interface TransferStatsMessage {
   queuedUploads: number;
 }
 
+export interface TransferQueueMessage {
+  type: "transfer:queue";
+  id: string;
+  place: number;
+}
+
+export interface TransferFinishedMessage {
+  type: "transfer:finished";
+  id: string;
+  fileName: string;
+  size: number;
+  downloadUrl: string; // GET /files/:token
+}
+
 export interface DownloadRequest {
   type: "download:request";
   username: string;
@@ -338,6 +352,8 @@ export type BridgeOutboundMessage =
   | TransferUpdateMessage
   | TransferRemovedMessage
   | TransferStatsMessage
+  | TransferQueueMessage
+  | TransferFinishedMessage
   | UserInfoEventMessage
   | UserInfoResponseOutbound
   | UserInfoFailedOutbound;

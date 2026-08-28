@@ -171,11 +171,61 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       return ok ? undefined : new Response("WebSocket upgrade failed", { status: 400 });
     }
 
-    // Download finished files if volume enabled — GET /files/:id
+    // GET /files/:token — serve finished downloads from DATA_DIR/downloads
     if (url.pathname.startsWith("/files/") && req.method === "GET") {
-      // Simple static file serving from DATA_DIR/downloads
-      // Deferred to transfers handler — return 404 for now if not found
-      return new Response("Not found", { status: 404 });
+      const tokenStr = url.pathname.slice("/files/".length).split("/")[0];
+      const token = Number(tokenStr);
+      if (!Number.isFinite(token)) return new Response("Not found", { status: 404 });
+      // Try to locate file in DATA_DIR/downloads by token — we don't have ws context here,
+      // so attempt direct FS lookup: scan downloads dir for files and also check downloads.json
+      try {
+        const { existsSync, readFileSync, createReadStream } = require("node:fs") as typeof import("node:fs");
+        const { join } = require("node:path") as typeof import("node:path");
+        // Try to find transfer by token via downloads.json
+        const dlPath = join(DATA_DIR, "downloads.json");
+        let fileName: string | undefined;
+        let size: number | undefined;
+        if (existsSync(dlPath)) {
+          try {
+            const arr = JSON.parse(readFileSync(dlPath, "utf8")) as Array<{ token?: number; fileName?: string; size?: number; status?: string }>;
+            const entry = arr.find((e) => e.token === token && e.status === "Finished");
+            if (entry) { fileName = entry.fileName; size = entry.size; }
+          } catch {}
+        }
+        // Fallback: try transfers.json
+        if (!fileName) {
+          const alt = join(DATA_DIR, "transfers.json");
+          if (existsSync(alt)) {
+            try {
+              const arr = JSON.parse(readFileSync(alt, "utf8")) as Array<{ token?: number; fileName?: string; size?: number; status?: string }>;
+              const entry = arr.find((e) => e.token === token && e.status === "Finished");
+              if (entry) fileName = entry.fileName;
+            } catch {}
+          }
+        }
+        let filePath: string | undefined;
+        if (fileName) {
+          const cand = join(DATA_DIR, "downloads", fileName);
+          if (existsSync(cand)) filePath = cand;
+        }
+        if (!filePath) {
+          // Last resort: first file in downloads
+          const { readdirSync } = require("node:fs") as typeof import("node:fs");
+          try {
+            const files = readdirSync(join(DATA_DIR, "downloads"));
+            if (files.length === 1) filePath = join(DATA_DIR, "downloads", files[0]);
+          } catch {}
+        }
+        if (!filePath || !existsSync(filePath)) return new Response("Not found", { status: 404 });
+        const file = Bun.file(filePath);
+        const headers: Record<string, string> = {
+          "Content-Disposition": `attachment; filename="${(fileName || "download").replace(/"/g, "")}"`,
+        };
+        // Let Bun handle range/streaming
+        return new Response(file as unknown as BodyInit, { headers });
+      } catch {
+        return new Response("Not found", { status: 404 });
+      }
     }
 
     return new Response("Not found", { status: 404 });
@@ -188,7 +238,12 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         onUpdate: (transfer) => { try { ws.send(JSON.stringify({ type: "transfer:update", transfer })); } catch {} },
         onRemoved: (id) => { try { ws.send(JSON.stringify({ type: "transfer:removed", id })); } catch {} },
         onStats: (stats) => { try { ws.send(JSON.stringify({ type: "transfer:stats", ...stats })); } catch {} },
+        onQueue: (id, place) => { try { ws.send(JSON.stringify({ type: "transfer:queue", id, place })); } catch {} },
+        onFinished: (id, fileName, size, downloadUrl) => { try { ws.send(JSON.stringify({ type: "transfer:finished", id, fileName, size, downloadUrl })); } catch {} },
+        getSession: () => ws.data.session as unknown as ReturnType<TransferManager["getByToken"]> extends never ? never : unknown as never,
       });
+      // Link session getter after creation
+      (tm as unknown as { setSessionGetter: (fn: () => unknown) => void }).setSessionGetter(() => ws.data.session as unknown as never);
       ws.data.transfers = tm;
       setTimeout(() => {
         for (const t of tm.list()) { try { ws.send(JSON.stringify({ type: "transfer:update", transfer: t })); } catch {} }
@@ -210,9 +265,34 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           onUserEvent: (event) => { try { ws.send(JSON.stringify({ type: "userinfo:event", event })); } catch {} },
           onChatEvent: (event) => { try { ws.send(JSON.stringify({ type: "chat:event", event })); } catch {} },
           onRoomEvent: (event) => { try { ws.send(JSON.stringify({ type: "room:event", event })); } catch {} },
-          onTransferEvent: (event) => { try { ws.send(JSON.stringify({ type: "peer:transfer", event })); } catch {} },
+          onTransferEvent: (event) => {
+            try { ws.send(JSON.stringify({ type: "peer:transfer", event })); } catch {}
+            // Delegate to TransferManager for queue / transfer-request handling
+            const tm = ws.data.transfers;
+            if (!tm) return;
+            try {
+              if (event.type === "place-in-queue" && event.file && event.place !== undefined) {
+                (tm as unknown as { handlePlaceInQueueResponse: (f: string, p: number) => void }).handlePlaceInQueueResponse(event.file, event.place);
+              } else if (event.type === "transfer-request" && event.file && event.token !== undefined) {
+                // direction 1 = upload (peer wants to send to us)
+                (tm as unknown as { handleTransferRequest: (d: number, t: number, f: string) => void }).handleTransferRequest(1, event.token, event.file);
+              } else if (event.type === "transfer-response" && event.reason) {
+                // treat as denied
+                const f = event.file || "";
+                (tm as unknown as { handleUploadDenied: (f: string, r: string) => void }).handleUploadDenied(f, event.reason);
+              } else if (event.type === "queue-upload" && event.file && event.username) {
+                (tm as unknown as { handleQueueUpload: (u: string, f: string) => void }).handleQueueUpload(event.username, event.file);
+              } else if (event.type === "upload-denied" && event.file) {
+                (tm as unknown as { handleUploadDenied: (f: string, r: string) => void }).handleUploadDenied(event.file, event.reason || "Cancelled");
+              } else if (event.type === "upload-failed" && event.file) {
+                (tm as unknown as { handleUploadFailed: (f: string) => void }).handleUploadFailed(event.file);
+              }
+            } catch {}
+          },
         });
         ws.data.session = session;
+        // Ensure TransferManager can call back into session
+        try { ws.data.transfers?.setSessionGetter(() => session as unknown as never); } catch {}
         ws.send(JSON.stringify({ type: "login:start" }));
         session.login()
           .then((outcome) => ws.send(JSON.stringify({ type: "login:result", ok: true, data: outcome })))
@@ -336,6 +416,16 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const session = requireLogin(); if (!session) return;
         if (result.data.action === "shares") session.requestSharedFileList(result.data.username);
         else if (result.data.action === "folder" && result.data.folder) session.requestFolderContents(result.data.username, result.data.folder, result.data.token ?? Math.floor(Math.random() * 1e9));
+        return;
+      }
+
+      if (data.type === "peer:connect") {
+        const session = requireLogin(); if (!session) return;
+        const { username, connType = "P" } = parsed as { username?: string; connType?: string };
+        if (!username) { ws.send(errorMessage("username required")); return; }
+        session.connectPeer(username, connType)
+          .then(() => ws.send(JSON.stringify({ type: "peer:connect", ok: true, username, connType })))
+          .catch((e: Error) => ws.send(JSON.stringify({ type: "peer:connect", ok: false, username, error: e.message })));
         return;
       }
 

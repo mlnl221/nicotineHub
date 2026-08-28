@@ -65,6 +65,7 @@ export interface Settings {
 export const DEFAULT_SERVER_HOST = "server.slsknet.org";
 export const DEFAULT_SERVER_PORT = 2242;
 
+// TODO(Phase 5): transfers section — uploadslots, queuelimit, filelimit, fifoqueue, friendsnolimits, preferfriends, autoclear, enablefilters, etc. (see docs/TRANSFERS.md §1.6 / docs/settings-mapping.md:127)
 export const defaults: Settings = {
   server: {
     server: { host: DEFAULT_SERVER_HOST, port: DEFAULT_SERVER_PORT },
