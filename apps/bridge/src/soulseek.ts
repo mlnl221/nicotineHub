@@ -208,9 +208,24 @@ export function packInt32(value: number): Buffer {
 }
 export function packUint64(value: number | bigint): Buffer {
   const buf = Buffer.alloc(8);
-  const v = typeof value === "bigint" ? value : BigInt(value >>> 0);
-  buf.writeBigUInt64LE(v, 0);
+  // Handle numbers > 2^32 correctly (use BigInt for all, but keep signed fix)
+  if (typeof value === "bigint") {
+    buf.writeBigUInt64LE(value, 0);
+  } else {
+    // For JS number, use BigInt to support > 2^32 without >>> 0 truncation
+    buf.writeBigUInt64LE(BigInt(Math.floor(value)), 0);
+  }
   return buf;
+}
+/** @deprecated alias for Phase 0 tests — same as packUint64 but number-only */
+export function packUint64LE(value: number): Buffer {
+  return packUint64(value);
+}
+/** @deprecated alias — reads LE uint64 as number (exact up to 2^53) */
+export function unpackUint64LE(buf: Buffer, offset = 0): number {
+  const lo = buf.readUInt32LE(offset);
+  const hi = buf.readUInt32LE(offset + 4);
+  return lo + hi * 2 ** 32;
 }
 export function packUint16(value: number): Buffer {
   const buf = Buffer.alloc(2);
@@ -353,8 +368,15 @@ export function buildGivePrivileges(username: string, days: number): Buffer {
 export function buildSendUploadSpeed(speed: number): Buffer {
   return frameMessage(SERVER_MESSAGE_CODES.sendUploadSpeed, packUint32(speed >>> 0));
 }
-export function buildCantConnectToPeer(token: number, username: string): Buffer {
+export function buildCantConnectToPeer(token: number, username?: string): Buffer {
+  if (username === undefined) return frameMessage(SERVER_MESSAGE_CODES.cantConnectToPeer, packUint32(token >>> 0));
   return frameMessage(SERVER_MESSAGE_CODES.cantConnectToPeer, Buffer.concat([packUint32(token >>> 0), packString(username)]));
+}
+/** Builder for PrivilegedUsers (69) — used by transfers Phase 0 */
+export function buildPrivilegedUsers(users: string[]): Buffer {
+  const parts = [packUint32(users.length)];
+  for (const u of users) parts.push(packString(u));
+  return frameMessage(SERVER_MESSAGE_CODES.privilegedUsers, Buffer.concat(parts));
 }
 export function buildMessageAcked(msgId: number): Buffer {
   return frameMessage(SERVER_MESSAGE_CODES.messageAcked, packUint32(msgId >>> 0));
@@ -719,22 +741,34 @@ export function buildUserInfoResponse(opts: { descr: string; pic: Buffer | null;
   parts.push(packUint32(opts.totalupl)); parts.push(packUint32(opts.queuesize)); parts.push(packBool(opts.slotsavail)); parts.push(packUint32(opts.uploadallowed));
   return frameMessage(PEER_MESSAGE_CODES.userInfoResponse, Buffer.concat(parts));
 }
-export interface TransferRequestMsg { direction: number; token: number; file: string; size?: bigint; }
+export interface TransferRequestMsg { direction: number; token: number; file: string; size?: number | bigint; }
 export function parseTransferRequest(payload: Buffer): TransferRequestMsg {
   const r = new SlskReader(payload); const direction = r.uint32(); const token = r.uint32(); const file = r.string();
-  let size: bigint | undefined; if (direction === 1 && r.remaining >= 8) size = r.uint64();
+  let size: number | bigint | undefined;
+  if (direction === 1 && r.remaining >= 8) {
+    const v = r.uint64();
+    size = v <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(v) : v;
+  }
   return { direction, token, file, size };
 }
-export interface TransferResponseMsg { token: number; allowed: boolean; size?: bigint; reason?: string; }
+export interface TransferResponseMsg { token: number; allowed: boolean; size?: number | bigint; reason?: string; }
 export function parseTransferResponse(payload: Buffer): TransferResponseMsg {
   const r = new SlskReader(payload); const token = r.uint32(); const allowed = r.bool();
-  if (allowed) { const size = r.remaining >= 8 ? r.uint64() : BigInt(0); return { token, allowed, size }; }
+  if (allowed) {
+    const raw = r.remaining >= 8 ? r.uint64() : BigInt(0);
+    const size = raw <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(raw) : raw;
+    return { token, allowed, size };
+  }
   const reason = r.remaining ? r.string() : ""; return { token, allowed, reason };
 }
-export function parseQueueUpload(payload: Buffer): string { return new SlskReader(payload).string(); }
-export function parsePlaceInQueueRequest(payload: Buffer): string { return new SlskReader(payload).string(); }
+export function parseQueueUpload(payload: Buffer): { file: string } { return { file: new SlskReader(payload).string() }; }
+export function parsePlaceInQueueRequest(payload: Buffer): { file: string } { return { file: new SlskReader(payload).string() }; }
 export function parsePlaceInQueueResponse(payload: Buffer): { file: string; place: number } {
   const r = new SlskReader(payload); const file = r.string(); const place = r.uint32(); return { file, place };
+}
+export function parseUploadFailed(payload: Buffer): { file: string } { return { file: new SlskReader(payload).string() }; }
+export function parseUploadDenied(payload: Buffer): { file: string; reason: string } {
+  const r = new SlskReader(payload); return { file: r.string(), reason: r.string() };
 }
 
 export function parseMessageUsers(payload: Buffer): PrivateMessage[] {
@@ -791,5 +825,10 @@ export function parseBranchRoot(payload: Buffer): string { return new SlskReader
 export function parseChildDepth(payload: Buffer): number { return new SlskReader(payload).uint32(); }
 
 /* File — F conn helpers */
-export function parseFileTransferInit(buf: Buffer): number { return buf.readUInt32LE(0); }
-export function parseFileOffset(buf: Buffer): bigint { return buf.readBigUInt64LE(0); }
+export function parseFileTransferInit(buf: Buffer): { token: number } { return { token: buf.readUInt32LE(0) }; }
+export function parseFileOffset(buf: Buffer): number {
+  // Return as number for Phase 0 tests (exact up to 2^53), compatible with BigInt writer
+  const lo = buf.readUInt32LE(0);
+  const hi = buf.readUInt32LE(4);
+  return lo + hi * 2 ** 32;
+}

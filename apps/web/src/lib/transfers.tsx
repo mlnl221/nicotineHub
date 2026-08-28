@@ -21,6 +21,7 @@ interface TransfersApi {
   cancelDownload: (id: string) => void;
   pauseDownload: (id: string) => void;
   resumeDownload: (id: string) => void;
+  retryDownload: (id: string) => void;
   clearTransfer: (id: string, isUpload: boolean) => void;
   cancelUpload: (id: string) => void;
 }
@@ -68,6 +69,18 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
           }
           return [...prev, msg.transfer];
         });
+      } else if (msg.type === "transfer:queue") {
+        setTransfers((prev) => prev.map((t) => (t.id === msg.id ? { ...t, queuePosition: msg.place, status: "Queued" as const } : t)));
+      } else if (msg.type === "transfer:finished") {
+        setTransfers((prev) =>
+          prev.map((t) =>
+            t.id === msg.id
+              ? { ...t, status: "Finished" as const, current: t.size, speed: 0, timeLeft: null, queuePosition: null }
+              : t,
+          ),
+        );
+        // Optionally trigger browser download via hidden link (Phase 5 OPFS handling deferred)
+        // We keep it non-intrusive: UI will show Finished with downloadUrl available
       } else if (msg.type === "transfer:removed") {
         setTransfers((prev) => prev.filter((t) => t.id !== msg.id));
       } else if (msg.type === "transfer:stats") {
@@ -127,6 +140,14 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
     [send],
   );
 
+  const retryDownload = useCallback(
+    (id: string) => {
+      send({ type: "download:control", id, action: "retry" });
+      setTransfers((prev) => prev.map((t) => (t.id === id ? { ...t, status: "Queued" as const, queuePosition: 1 } : t)));
+    },
+    [send],
+  );
+
   const clearTransfer = useCallback(
     (id: string, isUpload: boolean) => {
       if (isUpload) send({ type: "upload:control", id, action: "clear" });
@@ -148,8 +169,8 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
   const uploads = useMemo(() => transfers.filter((t) => t.isUpload), [transfers]);
 
   const api = useMemo<TransfersApi>(
-    () => ({ transfers, downloads, uploads, stats, requestDownload, cancelDownload, pauseDownload, resumeDownload, clearTransfer, cancelUpload }),
-    [transfers, downloads, uploads, stats, requestDownload, cancelDownload, pauseDownload, resumeDownload, clearTransfer, cancelUpload],
+    () => ({ transfers, downloads, uploads, stats, requestDownload, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer, cancelUpload }),
+    [transfers, downloads, uploads, stats, requestDownload, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer, cancelUpload],
   );
 
   return <TransfersContext.Provider value={api}>{children}</TransfersContext.Provider>;
