@@ -1,0 +1,114 @@
+"use client";
+
+import { useConfig } from "@/lib/config/provider";
+import { defaults } from "@/lib/config/defaults";
+import { SectionCard, ToggleControl, NumberControl, RadioGroupControl, SelectControl } from "@/components/settings/controls";
+
+export function UploadsSection() {
+  const { settings, setOption } = useConfig();
+  const t = settings.transfers;
+
+  return (
+    <div className="flex flex-col gap-6">
+      <SectionCard title="Uploads" description="Queueing and bandwidth for files you share. Maps to the bridge upload queue when P2P serving is active.">
+        <ToggleControl
+          label="Auto-clear finished uploads"
+          checked={t.autoclear_uploads}
+          onChange={(v) => setOption("transfers", "autoclear_uploads", v)}
+        />
+        <NumberControl
+          label="Upload bandwidth share (%)"
+          value={t.uploadbandwidth}
+          min={1}
+          max={100}
+          onChange={(v) => setOption("transfers", "uploadbandwidth", v)}
+          onReset={() => setOption("transfers", "uploadbandwidth", defaults.transfers.uploadbandwidth)}
+        />
+        <ToggleControl
+          label="Use fixed upload slots"
+          description="If off, slots are determined dynamically from bandwidth."
+          checked={t.useupslots}
+          onChange={(v) => setOption("transfers", "useupslots", v)}
+        />
+        <NumberControl
+          label="Upload slots"
+          value={t.uploadslots}
+          min={1}
+          max={100}
+          onChange={(v) => setOption("transfers", "uploadslots", v)}
+          onReset={() => setOption("transfers", "uploadslots", defaults.transfers.uploadslots)}
+        />
+        <RadioGroupControl
+          label="Upload speed limit"
+          value={t.use_upload_speed_limit}
+          onChange={(v) => setOption("transfers", "use_upload_speed_limit", v)}
+          options={[
+            { value: "unlimited", label: "Unlimited" },
+            { value: "primary", label: "Primary" },
+            { value: "alternative", label: "Alternative" },
+          ]}
+        />
+        <NumberControl
+          label="Primary upload limit (KB/s)"
+          value={t.uploadlimit}
+          min={1}
+          max={1000000}
+          onChange={(v) => setOption("transfers", "uploadlimit", v)}
+          onReset={() => setOption("transfers", "uploadlimit", defaults.transfers.uploadlimit)}
+        />
+        <NumberControl
+          label="Alternative upload limit (KB/s)"
+          value={t.uploadlimitalt}
+          min={1}
+          max={1000000}
+          onChange={(v) => setOption("transfers", "uploadlimitalt", v)}
+          onReset={() => setOption("transfers", "uploadlimitalt", defaults.transfers.uploadlimitalt)}
+        />
+        <SelectControl
+          label="Queue type"
+          value={t.fifoqueue ? 1 : 0}
+          onChange={(v) => setOption("transfers", "fifoqueue", v === 1)}
+          options={[
+            { value: 0, label: "Round Robin" },
+            { value: 1, label: "First In, First Out" },
+          ]}
+        />
+        <RadioGroupControl
+          label="Limit queue by"
+          value={t.limitby ? "size" : "count"}
+          onChange={(v) => setOption("transfers", "limitby", v === "size")}
+          options={[
+            { value: "size", label: "Total size" },
+            { value: "count", label: "File count" },
+          ]}
+        />
+        <NumberControl
+          label="Queue size limit (MB)"
+          value={t.queuelimit}
+          min={1}
+          max={1000000}
+          onChange={(v) => setOption("transfers", "queuelimit", v)}
+          onReset={() => setOption("transfers", "queuelimit", defaults.transfers.queuelimit)}
+        />
+        <NumberControl
+          label="Queue file limit"
+          value={t.filelimit}
+          min={1}
+          max={10000}
+          onChange={(v) => setOption("transfers", "filelimit", v)}
+          onReset={() => setOption("transfers", "filelimit", defaults.transfers.filelimit)}
+        />
+        <ToggleControl
+          label="No limits for buddies"
+          checked={t.friendsnolimits}
+          onChange={(v) => setOption("transfers", "friendsnolimits", v)}
+        />
+        <ToggleControl
+          label="Prioritize buddies"
+          checked={t.preferfriends}
+          onChange={(v) => setOption("transfers", "preferfriends", v)}
+        />
+      </SectionCard>
+    </div>
+  );
+}

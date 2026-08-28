@@ -7,13 +7,50 @@ import { NetworkSection } from "@/components/settings/NetworkSection";
 import { UiSection } from "@/components/settings/UiSection";
 import { SearchesSection } from "@/components/settings/SearchesSection";
 import { NotificationsSection } from "@/components/settings/NotificationsSection";
+import { SharesSection } from "@/components/settings/SharesSection";
+import { DownloadsSection } from "@/components/settings/DownloadsSection";
+import { UploadsSection } from "@/components/settings/UploadsSection";
+import { UserProfileSection } from "@/components/settings/UserProfileSection";
+import { ChatsSection } from "@/components/settings/ChatsSection";
+import { NowPlayingSection } from "@/components/settings/NowPlayingSection";
+import { LoggingSection } from "@/components/settings/LoggingSection";
+import { BannedUsersSection } from "@/components/settings/BannedUsersSection";
+import { IgnoredUsersSection } from "@/components/settings/IgnoredUsersSection";
+import { UrlHandlersSection } from "@/components/settings/UrlHandlersSection";
+import { PluginsSection } from "@/components/settings/PluginsSection";
 
-type TabId = "network" | "appearance" | "searches" | "notifications";
+type TabId =
+  | "network"
+  | "appearance"
+  | "shares"
+  | "downloads"
+  | "uploads"
+  | "searches"
+  | "user-profile"
+  | "chats"
+  | "now-playing"
+  | "logging"
+  | "banned-users"
+  | "ignored-users"
+  | "url-handlers"
+  | "plugins"
+  | "notifications";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "network", label: "Network", icon: "dns" },
   { id: "appearance", label: "Appearance", icon: "palette" },
+  { id: "shares", label: "Shares", icon: "folder" },
+  { id: "downloads", label: "Downloads", icon: "download" },
+  { id: "uploads", label: "Uploads", icon: "upload" },
   { id: "searches", label: "Searches", icon: "search" },
+  { id: "user-profile", label: "User Profile", icon: "person" },
+  { id: "chats", label: "Chats", icon: "chat" },
+  { id: "now-playing", label: "Now Playing", icon: "music_note" },
+  { id: "logging", label: "Logging", icon: "article" },
+  { id: "banned-users", label: "Banned Users", icon: "block" },
+  { id: "ignored-users", label: "Ignored Users", icon: "person_off" },
+  { id: "url-handlers", label: "URL Handlers", icon: "link" },
+  { id: "plugins", label: "Plugins", icon: "extension" },
   { id: "notifications", label: "Notifications", icon: "notifications" },
 ];
 
@@ -85,8 +122,30 @@ export default function SettingsPage() {
             <NetworkSection />
           ) : tab === "appearance" ? (
             <UiSection />
+          ) : tab === "shares" ? (
+            <SharesSection />
+          ) : tab === "downloads" ? (
+            <DownloadsSection />
+          ) : tab === "uploads" ? (
+            <UploadsSection />
           ) : tab === "searches" ? (
             <SearchesSection />
+          ) : tab === "user-profile" ? (
+            <UserProfileSection />
+          ) : tab === "chats" ? (
+            <ChatsSection />
+          ) : tab === "now-playing" ? (
+            <NowPlayingSection />
+          ) : tab === "logging" ? (
+            <LoggingSection />
+          ) : tab === "banned-users" ? (
+            <BannedUsersSection />
+          ) : tab === "ignored-users" ? (
+            <IgnoredUsersSection />
+          ) : tab === "url-handlers" ? (
+            <UrlHandlersSection />
+          ) : tab === "plugins" ? (
+            <PluginsSection />
           ) : (
             <NotificationsSection />
           )}
