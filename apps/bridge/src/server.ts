@@ -12,6 +12,7 @@ import { mkdirSync } from "node:fs";
 import { z } from "zod";
 import { SoulseekSession } from "./session.ts";
 import { TransferManager } from "./transfers.ts";
+import { diagClear, diagLog, diagTail, diagSubscribe, logger, type LogLevel } from "./logger.ts";
 
 /* Schemas */
 
@@ -154,11 +155,67 @@ function extractToken(req: Request): string | null {
   return null;
 }
 
-export const server = Bun.serve<{ session?: SoulseekSession; transfers?: TransferManager }>({
+const CORS_HEADERS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, POST, OPTIONS",
+  "access-control-allow-headers": "content-type, authorization",
+};
+
+export const server = Bun.serve<{ session?: SoulseekSession; transfers?: TransferManager; logUnsub?: () => void }>({
   port: PORT,
   fetch(req, server) {
     const url = new URL(req.url);
-    if (url.pathname === "/health" && req.method === "GET") return new Response("ok", { status: 200 });
+    if (req.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+    if (url.pathname === "/health" && req.method === "GET") {
+      // Detailed health JSON if ?json or Accept: application/json, else plain "ok" for compose healthcheck
+      const wantJson = url.searchParams.has("json") || (req.headers.get("accept") || "").includes("application/json");
+      if (wantJson) {
+        const peerCount = (() => {
+          // best-effort: count sessions — not tracked globally, so 0 here; diagnostics page uses WS-derived counts
+          return 0;
+        })();
+        return new Response(JSON.stringify({
+          ok: true,
+          ts: new Date().toISOString(),
+          uptime: process.uptime(),
+          port: PORT,
+          listenPort: LISTEN_PORT,
+          dataDir: DATA_DIR,
+          tokenAuth: !!BRIDGE_TOKEN,
+        }), { status: 200, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+      }
+      return new Response("ok", { status: 200, headers: CORS_HEADERS });
+    }
+    if (url.pathname === "/logs" && req.method === "GET") {
+      // Simple auth check via token param/header (mirror /ws)
+      if (BRIDGE_TOKEN) {
+        const tok = extractToken(req);
+        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401 });
+      }
+      const tail = Math.min(Math.max(Number(url.searchParams.get("tail") || "500"), 1), 2000);
+      const level = (url.searchParams.get("level") as LogLevel) || "debug";
+      const scope = url.searchParams.get("scope") || undefined;
+      let entries = diagTail(2000, level as LogLevel);
+      if (scope) entries = entries.filter((e) => e.scope === scope);
+      entries = entries.slice(-tail);
+      return new Response(JSON.stringify({ entries, total: entries.length }), { status: 200, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+    }
+    if (url.pathname === "/diagnostics" && req.method === "GET") {
+      if (BRIDGE_TOKEN) {
+        const tok = extractToken(req);
+        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401 });
+      }
+      const tail = Math.min(Math.max(Number(url.searchParams.get("tail") || "500"), 1), 2000);
+      const level = (url.searchParams.get("level") as LogLevel) || "debug";
+      let entries = diagTail(2000, level as LogLevel);
+      entries = entries.slice(-tail);
+      return new Response(JSON.stringify({
+        health: { ok: true, ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN },
+        logs: entries,
+      }), { status: 200, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+    }
 
     if (url.pathname === "/ws") {
       if (BRIDGE_TOKEN) {
@@ -233,6 +290,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
   websocket: {
     open(ws) {
       ws.data = {};
+      logger.info("bridge", "ws open", { ip: (ws as unknown as { remoteAddress?: string }).remoteAddress });
       const tm = new TransferManager({
         dataDir: DATA_DIR,
         onUpdate: (transfer) => { try { ws.send(JSON.stringify({ type: "transfer:update", transfer })); } catch {} },
@@ -248,6 +306,20 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       setTimeout(() => {
         for (const t of tm.list()) { try { ws.send(JSON.stringify({ type: "transfer:update", transfer: t })); } catch {} }
       }, 50);
+      // Subscribe this socket to live diagnostics logs (all logged-in users OK — ws is already the auth boundary)
+      const unsub = diagSubscribe((entry) => {
+        try { ws.send(JSON.stringify({ type: "diagnostics:log", entry })); } catch {}
+      });
+      (ws.data as unknown as { logUnsub?: () => void }).logUnsub = unsub;
+      // Send initial tail (500)
+      try {
+        const tail = diagTail(500, "debug");
+        ws.send(JSON.stringify({ type: "diagnostics:init", entries: tail }));
+      } catch {}
+      // Send initial diagnostics health
+      try {
+        ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN } }));
+      } catch {}
     },
     message(ws, raw) {
       let parsed: unknown;
@@ -258,14 +330,25 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const result = LoginMessageSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid login message.")); return; }
         const { username, password, host, port } = result.data;
+        logger.info("auth", "login attempt", { username, host: host || "server.slsknet.org", port: port || 2242 });
         // Close previous session if any
         ws.data.session?.close();
         const session = new SoulseekSession({
           username, password, host, port, listenPort: LISTEN_PORT, profile: defaultProfile(username), dataDir: DATA_DIR,
-          onUserEvent: (event) => { try { ws.send(JSON.stringify({ type: "userinfo:event", event })); } catch {} },
-          onChatEvent: (event) => { try { ws.send(JSON.stringify({ type: "chat:event", event })); } catch {} },
-          onRoomEvent: (event) => { try { ws.send(JSON.stringify({ type: "room:event", event })); } catch {} },
+          onUserEvent: (event) => {
+            logger.debug("server", "user event", { type: event.type, username: event.username });
+            try { ws.send(JSON.stringify({ type: "userinfo:event", event })); } catch {}
+          },
+          onChatEvent: (event) => {
+            logger.debug("chat", "chat event", { type: event.type, room: event.room, username: event.username });
+            try { ws.send(JSON.stringify({ type: "chat:event", event })); } catch {}
+          },
+          onRoomEvent: (event) => {
+            logger.debug("chat", "room event", { type: event.type, room: event.room });
+            try { ws.send(JSON.stringify({ type: "room:event", event })); } catch {}
+          },
           onTransferEvent: (event) => {
+            logger.debug("transfer", "transfer event", { type: event.type, username: event.username, file: event.file?.slice(0,80), token: event.token });
             try { ws.send(JSON.stringify({ type: "peer:transfer", event })); } catch {}
             // Delegate to TransferManager for queue / transfer-request handling
             const tm = ws.data.transfers;
@@ -289,15 +372,24 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
               }
             } catch {}
           },
-          onServerEvent: (event) => { try { ws.send(JSON.stringify({ type: "server:reconnect", ...event })); } catch {} },
+          onServerEvent: (event) => {
+            logger.info("server", "server reconnect", event as unknown as Record<string, unknown>);
+            try { ws.send(JSON.stringify({ type: "server:reconnect", ...event })); } catch {}
+          },
         });
         ws.data.session = session;
         // Ensure TransferManager can call back into session
         try { ws.data.transfers?.setSessionGetter(() => session as unknown as never); } catch {}
         ws.send(JSON.stringify({ type: "login:start" }));
         session.login()
-          .then((outcome) => ws.send(JSON.stringify({ type: "login:result", ok: true, data: outcome })))
-          .catch((err: Error) => ws.send(JSON.stringify({ type: "login:result", ok: false, error: err.message })));
+          .then((outcome) => {
+            logger.info("auth", "login success", { username, ip: (outcome as unknown as { ipAddress?: string }).ipAddress });
+            ws.send(JSON.stringify({ type: "login:result", ok: true, data: outcome }));
+          })
+          .catch((err: Error) => {
+            logger.warn("auth", "login failed", { username, error: err.message });
+            ws.send(JSON.stringify({ type: "login:result", ok: false, error: err.message }));
+          });
         return;
       }
 
@@ -313,9 +405,16 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid search message.")); return; }
         const session = requireLogin(); if (!session) return;
         const { searchId, query } = result.data;
+        logger.info("search", "search request", { searchId, query: query.slice(0,80) });
         const token = session.search(query, searchId, {
-          onResult: (p) => ws.send(JSON.stringify({ type: "search:result", ...p })),
-          onEnd: (p) => ws.send(JSON.stringify({ type: "search:end", ...p })),
+          onResult: (p) => {
+            logger.debug("search", "search result", { searchId, rows: p.rows?.length });
+            ws.send(JSON.stringify({ type: "search:result", ...p }));
+          },
+          onEnd: (p) => {
+            logger.info("search", "search end", { searchId, reason: p.reason });
+            ws.send(JSON.stringify({ type: "search:end", ...p }));
+          },
         });
         if (token === 0) ws.send(JSON.stringify({ type: "search:end", searchId, reason: "error" }));
         else ws.send(JSON.stringify({ type: "search:start", searchId, token }));
@@ -368,6 +467,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const result = DownloadRequestSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid download request.")); return; }
         const session = requireLogin(); if (!session) return;
+        logger.info("transfer", "download request", { username: result.data.username, path: result.data.virtualPath.slice(0,80), size: result.data.size });
         session.queueUpload(result.data.username, result.data.virtualPath);
         ws.data.transfers?.requestDownload(result.data.username, result.data.virtualPath, result.data.size, result.data.fileName);
         return;
@@ -375,12 +475,14 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (data.type === "download:control") {
         const result = DownloadControlSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid download control.")); return; }
+        logger.info("transfer", "download control", { id: result.data.id, action: result.data.action });
         ws.data.transfers?.controlDownload(result.data.id, result.data.action);
         return;
       }
       if (data.type === "upload:control") {
         const result = UploadControlSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid upload control.")); return; }
+        logger.info("transfer", "upload control", { id: result.data.id, action: result.data.action });
         ws.data.transfers?.controlUpload(result.data.id, result.data.action);
         return;
       }
@@ -424,9 +526,37 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const session = requireLogin(); if (!session) return;
         const { username, connType = "P" } = parsed as { username?: string; connType?: string };
         if (!username) { ws.send(errorMessage("username required")); return; }
+        logger.info("peer", "peer connect requested", { username, connType });
         session.connectPeer(username, connType)
-          .then(() => ws.send(JSON.stringify({ type: "peer:connect", ok: true, username, connType })))
-          .catch((e: Error) => ws.send(JSON.stringify({ type: "peer:connect", ok: false, username, error: e.message })));
+          .then(() => {
+            logger.info("peer", "peer connect ok", { username, connType });
+            ws.send(JSON.stringify({ type: "peer:connect", ok: true, username, connType }));
+          })
+          .catch((e: Error) => {
+            logger.warn("peer", "peer connect failed", { username, connType, error: e.message });
+            ws.send(JSON.stringify({ type: "peer:connect", ok: false, username, error: e.message }));
+          });
+        return;
+      }
+
+      if (data.type === "diagnostics:clear") {
+        logger.info("system", "diagnostics clear requested");
+        diagClear();
+        ws.send(JSON.stringify({ type: "diagnostics:cleared" }));
+        return;
+      }
+      if (data.type === "diagnostics:subscribe") {
+        const { level } = parsed as { level?: LogLevel };
+        logger.info("system", "diagnostics subscribe", { level: level || "debug" });
+        try {
+          const tail = diagTail(500, (level as LogLevel) || "debug");
+          ws.send(JSON.stringify({ type: "diagnostics:init", entries: tail }));
+        } catch {}
+        return;
+      }
+      if (data.type === "diagnostics:browser-log") {
+        const { level, scope, msg, meta } = parsed as { level?: string; scope?: string; msg?: string; meta?: Record<string, unknown> };
+        if (msg) diagLog((level as LogLevel) || "info", (scope as never) || "system", `[browser] ${msg}`, meta);
         return;
       }
 
@@ -435,6 +565,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid userinfo message.")); return; }
         const session = requireLogin(); if (!session) return;
         const msg = result.data;
+        logger.debug("server", "userinfo request", { action: msg.action });
         switch (msg.action) {
           case "watch": session.watchUser(msg.username); break;
           case "unwatch": session.unwatchUser(msg.username); break;
@@ -465,9 +596,12 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         return;
       }
 
+      logger.debug("bridge", "unknown message type", { type: data.type });
       ws.send(errorMessage("Unknown message type."));
     },
     close(ws) {
+      try { (ws.data as unknown as { logUnsub?: () => void }).logUnsub?.(); } catch {}
+      logger.info("bridge", "ws close");
       ws.data.session?.close();
       ws.data.transfers?.close();
       ws.data = {};
@@ -476,5 +610,6 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
 });
 
 if (import.meta.main) {
+  diagLog("info", "bridge", `bridge listening on ws://localhost:${PORT}/ws ${BRIDGE_TOKEN ? "(token auth enabled)" : "(open)"} DATA_DIR=${DATA_DIR}`, { port: PORT, listenPort: LISTEN_PORT });
   console.log(`Nicotine Mobile bridge listening on ws://localhost:${PORT}/ws ${BRIDGE_TOKEN ? "(token auth enabled)" : "(open)"} DATA_DIR=${DATA_DIR}`);
 }

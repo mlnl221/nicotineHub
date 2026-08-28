@@ -7,6 +7,7 @@
 import type { Socket, TCPSocketListener } from "bun";
 import { deflateSync, inflateSync } from "node:zlib";
 import { ShareDB } from "./shares.ts";
+import { logger } from "./logger.ts";
 import {
   buildAddThingIHate,
   buildAddThingILike,
@@ -227,11 +228,13 @@ export class SoulseekSession {
   }
 
   private connectServer() {
+    logger.info("server", `connecting to ${this.opts.host || "server.slsknet.org"}:${this.opts.port || 2242}`, { username: this.username });
     Bun.connect({
       hostname: this.opts.host || "server.slsknet.org",
       port: this.opts.port || 2242,
       socket: {
         open: (sock) => {
+          logger.info("server", "tcp open, sending login", { username: this.username });
           try { (sock as unknown as { setKeepAlive?: (b: boolean) => void }).setKeepAlive?.(true); } catch {}
           this.serverSocket = sock as Socket;
           // Send Login only; SetWaitPort after success (nicotine parity)
@@ -239,10 +242,12 @@ export class SoulseekSession {
         },
         data: (_sock, chunk) => this.handleServerData(chunk),
         error: (_sock, err) => {
+          logger.warn("server", "tcp error", { error: err.message, username: this.username });
           if (!this.loggedIn) this.loginReject?.(new Error(`Connection error: ${err.message}`));
           this.scheduleReconnect(`Connection error: ${err.message}`);
         },
         close: () => {
+          logger.warn("server", "tcp close", { loggedIn: this.loggedIn, username: this.username });
           if (!this.loggedIn && this.loginReject) {
             const err = new Error("Connection closed before login completed.");
             this.loginReject(err);
@@ -258,6 +263,7 @@ export class SoulseekSession {
         },
       },
     }).catch((err) => {
+      logger.error("server", "connect failed", { error: err.message, username: this.username });
       if (!this.loggedIn) this.loginReject?.(new Error(`Unable to connect: ${err.message}`));
       this.scheduleReconnect(`Unable to connect: ${err.message}`);
     });
@@ -270,6 +276,7 @@ export class SoulseekSession {
     const jitter = base * 0.2 * (Math.random() * 2 - 1);
     const delay = Math.min(RECONNECT_MAX_MS, Math.max(RECONNECT_BASE_MS, base + jitter));
     this.reconnectAttempts += 1;
+    logger.warn("server", "schedule reconnect", { attempt: this.reconnectAttempts, delay: Math.round(delay), reason });
     this.emitServer({ type: "reconnect", attempt: this.reconnectAttempts, delay: Math.round(delay) });
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
@@ -277,6 +284,7 @@ export class SoulseekSession {
       this.connectServer();
     }, delay);
     if (this.reconnectAttempts > 15) {
+      logger.error("server", "reconnect failed", { reason, attempts: this.reconnectAttempts });
       this.emitServer({ type: "reconnect-failed", error: reason });
     }
   }
@@ -312,9 +320,11 @@ export class SoulseekSession {
   }
 
   private dispatchServerMessage(code: number, payload: Buffer) {
+    logger.debug("server", "server message", { code, len: payload.length });
     if (code === SERVER_MESSAGE_CODES.login) {
       const resp = parseLoginResponse(payload);
       if (resp.success) {
+        logger.info("server", "login success", { banner: resp.banner?.slice(0,60), ip: resp.ipAddress });
         this.loggedIn = true;
         this.reconnectAttempts = 0;
         if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
@@ -331,6 +341,7 @@ export class SoulseekSession {
         this.loginResolve = undefined;
         this.loginReject = undefined;
       } else {
+        logger.warn("server", "login rejected", { reason: resp.rejectionReason, detail: resp.rejectionDetail?.slice(0,120) });
         this.shouldReconnect = false;
         this.loginReject?.(new Error(`Login rejected: ${resp.rejectionReason}`));
         this.loginReject = undefined;
@@ -339,6 +350,7 @@ export class SoulseekSession {
       return;
     }
     if (code === SERVER_MESSAGE_CODES.relogged) {
+      logger.warn("server", "relogged elsewhere");
       this.loginReject?.(new Error("You have been logged in elsewhere."));
       this.close(); return;
     }

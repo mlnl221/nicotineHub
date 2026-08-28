@@ -351,6 +351,60 @@ export interface ServerReconnectFailedMessage {
   error: string;
 }
 
+/* ------------------------------------------------------------------ *
+ * Diagnostics
+ * ------------------------------------------------------------------ */
+
+export type DiagLevel = "debug" | "info" | "warn" | "error";
+export type DiagScope = "bridge" | "server" | "peer" | "transfer" | "search" | "chat" | "system" | "auth";
+
+export interface DiagEntry {
+  ts: string;
+  level: DiagLevel;
+  scope: DiagScope;
+  msg: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface DiagnosticsHealth {
+  ts: string;
+  uptime: number;
+  port: number;
+  listenPort: number;
+  dataDir: string;
+  tokenAuth: boolean;
+}
+
+export interface DiagnosticsInitMessage {
+  type: "diagnostics:init";
+  entries: DiagEntry[];
+}
+export interface DiagnosticsLogMessage {
+  type: "diagnostics:log";
+  entry: DiagEntry;
+}
+export interface DiagnosticsHealthMessage {
+  type: "diagnostics:health";
+  health: DiagnosticsHealth;
+}
+export interface DiagnosticsClearedMessage {
+  type: "diagnostics:cleared";
+}
+export interface DiagnosticsClearRequest {
+  type: "diagnostics:clear";
+}
+export interface DiagnosticsSubscribeRequest {
+  type: "diagnostics:subscribe";
+  level?: DiagLevel;
+}
+export interface DiagnosticsBrowserLogRequest {
+  type: "diagnostics:browser-log";
+  level?: DiagLevel;
+  scope?: DiagScope;
+  msg: string;
+  meta?: Record<string, unknown>;
+}
+
 export type BridgeOutboundMessage =
   | LoginStartMessage
   | LoginResultSuccess
@@ -368,7 +422,11 @@ export type BridgeOutboundMessage =
   | UserInfoResponseOutbound
   | UserInfoFailedOutbound
   | ServerReconnectMessage
-  | ServerReconnectFailedMessage;
+  | ServerReconnectFailedMessage
+  | DiagnosticsInitMessage
+  | DiagnosticsLogMessage
+  | DiagnosticsHealthMessage
+  | DiagnosticsClearedMessage;
 
 export type BridgeInboundMessage =
   | LoginRequest
@@ -377,4 +435,7 @@ export type BridgeInboundMessage =
   | DownloadRequest
   | DownloadControlRequest
   | UploadControlRequest
-  | UserinfoRequestMessage;
+  | UserinfoRequestMessage
+  | DiagnosticsClearRequest
+  | DiagnosticsSubscribeRequest
+  | DiagnosticsBrowserLogRequest;
