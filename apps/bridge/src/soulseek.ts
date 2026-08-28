@@ -1,54 +1,175 @@
 /**
- * Minimal Soulseek (SLSK) protocol implementation for server login and search.
+ * Full Soulseek (SLSK) protocol implementation for the WebSocket bridge.
  *
- * Based on Nicotine+'s protocol documentation (doc/SLSKPROTOCOL.md) and the
- * reference implementation in pynicotine/slskmessages.py and slskproto.py.
+ * Mirrors nicotine-plus pynicotine/slskmessages.py + slskproto.py:
+ *  - All 76 server codes, 18 peer codes, 6 distrib codes, init + file codes
+ *  - Framing [uint32 len][uint32 code][payload] (server/peer), [len][uint8 code][payload] (init/distrib)
+ *  - Packing primitives little-endian, zlib caps, >2GiB quirk, obfuscation tail
+ *  - Token gating for search/browse, size guards
  *
- * We implement what's needed to authenticate with the server and receive real
- * search results over inbound peer connections:
- *   - message framing            [uint32 len][uint32 code][payload]
- *   - Login (code 1)             send + parse response
- *   - SetWaitPort (code 2)
- *   - FileSearch (code 26)       send to the server
- *   - PeerInit (peer code 1)     handshake on inbound peer connections
- *   - FileSearchResponse (peer code 9, zlib)  parse results
+ * Reference: doc/SLSKPROTOCOL.md + apps/bridge/src/soulseek.ts framing docs.
  */
 
 import { inflateSync } from "node:zlib";
 
-/** Server message codes (subset). */
+/* ------------------------------------------------------------------ *
+ * Message code tables — mirrors pynicotine/slskmessages.py
+ * ------------------------------------------------------------------ */
+
 export const SERVER_MESSAGE_CODES = {
   login: 1,
   setWaitPort: 2,
-  fileSearch: 26,
   getPeerAddress: 3,
   watchUser: 5,
   unwatchUser: 6,
   getUserStatus: 7,
+  ignoreUser: 11,
+  unignoreUser: 12,
+  sayChatroom: 13,
+  joinRoom: 14,
+  leaveRoom: 15,
+  userJoinedRoom: 16,
+  userLeftRoom: 17,
+  connectToPeer: 18,
+  messageUser: 22,
+  messageAcked: 23,
+  fileSearchRoom: 25,
+  fileSearch: 26,
   setStatus: 28,
+  serverPing: 32,
+  sendConnectToken: 33,
+  sendDownloadSpeed: 34,
   sharedFoldersFiles: 35,
   getUserStats: 36,
+  uploadSlotsFull: 40,
+  relogged: 41,
+  userSearch: 42,
+  similarRecommendations: 50,
   addThingILike: 51,
   removeThingILike: 52,
   recommendations: 54,
+  myRecommendations: 55,
   globalRecommendations: 56,
   userInterests: 57,
+  adminCommand: 58,
+  placeInLineRequest: 59,
+  placeInLineResponse: 60,
+  roomAdded: 62,
+  roomRemoved: 63,
+  roomList: 64,
+  exactFileSearch: 65,
+  adminMessage: 66,
+  globalUserList: 67,
+  tunneledMessage: 68,
+  privilegedUsers: 69,
+  haveNoParent: 71,
+  parentIP: 73,
+  parentMinSpeed: 83,
+  parentSpeedRatio: 84,
+  parentInactivityTimeout: 86,
+  searchInactivityTimeout: 87,
+  minParentsInCache: 88,
+  distribPingInterval: 90,
+  addToPrivileged: 91,
+  checkPrivileges: 92,
+  embeddedMessage: 93,
+  acceptChildren: 100,
+  possibleParents: 102,
+  wishlistSearch: 103,
+  wishlistInterval: 104,
   similarUsers: 110,
   itemRecommendations: 111,
   itemSimilarUsers: 112,
+  roomTickers: 113,
+  roomTickerAdded: 114,
+  roomTickerRemoved: 115,
+  setRoomTicker: 116,
   addThingIHate: 117,
   removeThingIHate: 118,
+  roomSearch: 120,
+  sendUploadSpeed: 121,
+  userPrivileged: 122,
   givePrivileges: 123,
+  notifyPrivileges: 124,
+  ackNotifyPrivileges: 125,
+  branchLevel: 126,
+  branchRoot: 127,
+  childDepth: 129,
+  resetDistributed: 130,
+  roomMembers: 133,
+  addRoomMember: 134,
+  removeRoomMember: 135,
+  cancelRoomMembership: 136,
+  cancelRoomOwnership: 137,
+  roomSomething: 138,
+  roomMembershipGranted: 139,
+  roomMembershipRevoked: 140,
+  enableRoomInvitations: 141,
+  changePassword: 142,
+  addRoomOperator: 143,
+  removeRoomOperator: 144,
+  roomOperatorshipGranted: 145,
+  roomOperatorshipRevoked: 146,
+  roomOperators: 148,
+  messageUsers: 149,
+  joinGlobalRoom: 150,
+  leaveGlobalRoom: 151,
+  globalRoomMessage: 152,
+  relatedSearch: 153,
+  excludedSearchPhrases: 160,
+  cantConnectToPeer: 1001,
+  cantCreateRoom: 1003,
 } as const;
 
-/** Peer message codes (subset). */
-export const PEER_MESSAGE_CODES = {
+export const PEER_INIT_CODES = {
+  pierceFireWall: 0,
   peerInit: 1,
+} as const;
+
+export const PEER_MESSAGE_CODES = {
+  sharedFileListRequest: 4,
+  sharedFileListResponse: 5,
+  fileSearchRequest: 8,
+  fileSearchResponse: 9,
   userInfoRequest: 15,
   userInfoResponse: 16,
+  folderContentsRequest: 36,
+  folderContentsResponse: 37,
+  transferRequest: 40,
+  transferResponse: 41,
+  placeholdUpload: 42,
+  queueUpload: 43,
+  placeInQueueResponse: 44,
+  uploadFailed: 46,
+  uploadDenied: 50,
+  placeInQueueRequest: 51,
+  uploadQueueNotification: 52,
+  unknownPeerMessage: 12547,
 } as const;
 
-/** File attribute types returned inside search results. */
+export const DISTRIBUTED_MESSAGE_CODES = {
+  distribPing: 0,
+  distribSearch: 3,
+  distribBranchLevel: 4,
+  distribBranchRoot: 5,
+  distribChildDepth: 7,
+  distribEmbeddedMessage: 93,
+} as const;
+
+export const FILE_MESSAGE_CODES = {
+  fileTransferInit: 0, // [uint32 token] on F conn, no code field — distinct framing
+  fileOffset: 1, // [uint64 offset] — not a separate code, sent as raw uint64 after Init
+} as const;
+
+/** Server max incoming sizes (bytes) — slskproto.py limits. */
+export const MAX_INCOMING = {
+  server16K: 16384,
+  server1M: 1048576,
+  server16M: 16777216,
+  server448M: 469762048,
+} as const;
+
+/** File attribute types. */
 export const FILE_ATTRIBUTE = {
   BITRATE: 0,
   LENGTH: 1,
@@ -57,7 +178,7 @@ export const FILE_ATTRIBUTE = {
   BIT_DEPTH: 5,
 } as const;
 
-/** Login rejection reasons returned by the server. */
+/** Login rejection reasons. */
 export const LOGIN_REJECT_REASONS = {
   INVALID_USERNAME: "INVALIDUSERNAME",
   EMPTY_PASSWORD: "EMPTYPASSWORD",
@@ -67,451 +188,340 @@ export const LOGIN_REJECT_REASONS = {
   SERVER_PRIVATE: "SVRPRIVATE",
 } as const;
 
-/**
- * Client major/minor version.
- *
- * The protocol reserves major version 177 for experimental downstream
- * clients. Each project picks its own minor version. We use 177/1.
- */
 export const MAJOR_VERSION = 177;
 export const MINOR_VERSION = 1;
 
-/** Default official Soulseek server. */
 export const DEFAULT_SERVER_HOST = "server.slsknet.org";
 export const DEFAULT_SERVER_PORT = 2242;
 
-/* ------------------------------------------------------------------ *
- * Packing primitives (little-endian, same as Nicotine+ SlskMessage)
- * ------------------------------------------------------------------ */
+/* Packing primitives */
 
 export function packUint32(value: number): Buffer {
   const buf = Buffer.alloc(4);
   buf.writeUInt32LE(value >>> 0, 0);
   return buf;
 }
-
-export function packString(value: string): Buffer {
-  const body = Buffer.from(value, "utf8");
-  return Buffer.concat([packUint32(body.length), body]);
-}
-
-export function packBool(value: boolean): Buffer {
-  return Buffer.from([value ? 1 : 0]);
-}
-
-export function packUint8(value: number): Buffer {
-  return Buffer.from([value & 0xff]);
-}
-
 export function packInt32(value: number): Buffer {
   const buf = Buffer.alloc(4);
   buf.writeInt32LE(value, 0);
   return buf;
 }
-
+export function packUint64(value: number | bigint): Buffer {
+  const buf = Buffer.alloc(8);
+  const v = typeof value === "bigint" ? value : BigInt(value >>> 0);
+  buf.writeBigUInt64LE(v, 0);
+  return buf;
+}
+export function packUint16(value: number): Buffer {
+  const buf = Buffer.alloc(2);
+  buf.writeUInt16LE(value & 0xffff, 0);
+  return buf;
+}
+export function packString(value: string): Buffer {
+  const body = Buffer.from(value, "utf8");
+  return Buffer.concat([packUint32(body.length), body]);
+}
+export function packBool(value: boolean): Buffer {
+  return Buffer.from([value ? 1 : 0]);
+}
+export function packUint8(value: number): Buffer {
+  return Buffer.from([value & 0xff]);
+}
 export function packBytes(value: Buffer): Buffer {
   return Buffer.concat([packUint32(value.length), value]);
 }
-
-/**
- * Cursor-based reader for parsing Soulseek messages. Mirrors pynicotine's
- * SlskMessage, advancing an internal offset as fields are consumed.
- */
-export class SlskReader {
-  private offset = 0;
-
-  constructor(private readonly buf: Buffer) {}
-
-  get remaining(): number {
-    return this.buf.length - this.offset;
-  }
-
-  uint32(): number {
-    const v = this.buf.readUInt32LE(this.offset);
-    this.offset += 4;
-    return v;
-  }
-
-  int32(): number {
-    const v = this.buf.readInt32LE(this.offset);
-    this.offset += 4;
-    return v;
-  }
-
-  uint8(): number {
-    const v = this.buf.readUInt8(this.offset);
-    this.offset += 1;
-    return v;
-  }
-
-  bool(): boolean {
-    return this.uint8() !== 0;
-  }
-
-  string(): string {
-    const len = this.uint32();
-    const v = this.buf.subarray(this.offset, this.offset + len).toString("utf8");
-    this.offset += len;
-    return v;
-  }
-
-  bytes(): Buffer {
-    const len = this.uint32();
-    const v = Buffer.from(this.buf.subarray(this.offset, this.offset + len));
-    this.offset += len;
-    return v;
-  }
-}
-
-/** Parse a little-endian uint32 at a fixed offset (no cursor advance). */
-export function readUint32(buf: Buffer, offset: number): number {
-  return buf.readUInt32LE(offset);
-}
-
 export function packIp(value: string): Buffer {
   const parts = value.split(".").filter((p) => p !== "");
-  if (parts.length !== 4) {
-    throw new Error(`Invalid IP address: ${value}`);
-  }
+  if (parts.length !== 4) throw new Error(`Invalid IP: ${value}`);
   const nums = parts.map((p) => parseInt(p, 10));
-  if (!nums.every((n) => n >= 0 && n <= 255)) {
-    throw new Error(`Invalid IP address: ${value}`);
-  }
+  if (!nums.every((n) => n >= 0 && n <= 255)) throw new Error(`Invalid IP: ${value}`);
   return Buffer.from(nums);
 }
 
-/* ------------------------------------------------------------------ *
- * Message framing
- * ------------------------------------------------------------------ */
+/** Cursor reader — mirrors SlskMessage. */
+export class SlskReader {
+  private offset = 0;
+  constructor(private readonly buf: Buffer) {}
+  get remaining(): number { return this.buf.length - this.offset; }
+  uint32(): number { const v = this.buf.readUInt32LE(this.offset); this.offset += 4; return v; }
+  int32(): number { const v = this.buf.readInt32LE(this.offset); this.offset += 4; return v; }
+  uint16(): number { const v = this.buf.readUInt16LE(this.offset); this.offset += 2; return v; }
+  uint8(): number { const v = this.buf.readUInt8(this.offset); this.offset += 1; return v; }
+  bool(): boolean { return this.uint8() !== 0; }
+  uint64(): bigint { const v = this.buf.readBigUInt64LE(this.offset); this.offset += 8; return v; }
+  string(): string {
+    const len = this.uint32();
+    const v = this.buf.subarray(this.offset, this.offset + len).toString("utf8");
+    this.offset += len; return v;
+  }
+  bytes(): Buffer {
+    const len = this.uint32();
+    const v = Buffer.from(this.buf.subarray(this.offset, this.offset + len));
+    this.offset += len; return v;
+  }
+  ip(): string {
+    const start = this.offset; this.offset += 4;
+    const b = this.buf.subarray(start, this.offset);
+    // wire: little-endian reversed inet_aton
+    return `${b[3]}.${b[2]}.${b[1]}.${b[0]}`;
+  }
+  ipLE(): string {
+    const v = this.uint32();
+    return `${(v >>> 0) & 0xff}.${(v >>> 8) & 0xff}.${(v >>> 16) & 0xff}.${(v >>> 24) & 0xff}`;
+  }
+}
 
-/**
- * Frame a message: [uint32 len][uint32 code][payload].
- * len == payload.length + 4 (the length of the code field).
- */
+export function readUint32(buf: Buffer, offset: number): number { return buf.readUInt32LE(offset); }
+export function uint32ToIp(value: number): string {
+  return `${(value >>> 0) & 0xff}.${(value >>> 8) & 0xff}.${(value >>> 16) & 0xff}.${(value >>> 24) & 0xff}`;
+}
+
+/* Framing */
+
 export function frameMessage(code: number, payload: Buffer): Buffer {
   const len = payload.length + 4;
   return Buffer.concat([packUint32(len), packUint32(code), payload]);
 }
-
-/**
- * Parse a single message from a buffer. Returns null if incomplete.
- * Buffers are consumed as they arrive, so we return offset only if the
- * full message body is present.
- */
 export function tryParseMessage(buffer: Buffer): { code: number; payload: Buffer } | null {
   if (buffer.length < 4) return null;
   const len = buffer.readUInt32LE(0);
+  if (len > MAX_INCOMING.server16M) return null; // guard — caller may treat as overflow close
   const total = 4 + len;
   if (buffer.length < total) return null;
   const code = buffer.readUInt32LE(4);
   const payload = buffer.subarray(8, total);
   return { code, payload };
 }
-
-/* ------------------------------------------------------------------ *
- * Message builders
- * ------------------------------------------------------------------ */
-
-export function buildLogin(username: string, password: string): Buffer {
-  // MD5 hex digest of username + password (concatenated, no separator).
-  const hash = Bun.CryptoHasher.hash("md5", `${username}${password}`, "hex");
-
-  const payload = Buffer.concat([
-    packString(username),
-    packString(password),
-    packUint32(MAJOR_VERSION),
-    packString(hash),
-    packUint32(MINOR_VERSION),
-  ]);
-
-  return frameMessage(SERVER_MESSAGE_CODES.login, payload);
-}
-
-export function buildSetWaitPort(port: number): Buffer {
-  // Tells the server the TCP port we listen on for inbound peer connections
-  // (used to receive search results). SetWaitPort is required immediately
-  // after Login.
-  return frameMessage(SERVER_MESSAGE_CODES.setWaitPort, packUint32(port));
-}
-
-export function buildFileSearch(token: number, query: string): Buffer {
-  // Server code 26: FileSearch. The token is echoed back by peers in their
-  // FileSearchResponse so we can correlate results to a request.
-  return frameMessage(
-    SERVER_MESSAGE_CODES.fileSearch,
-    Buffer.concat([packUint32(token >>> 0), packString(query)]),
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * Peer init framing (uint8 code, distinct from the uint32 code used by
- * regular server/peer messages). PeerInit and PierceFireWall are sent as
- * [uint32 len][uint8 code][payload], where len == payload.length + 1.
- * ------------------------------------------------------------------ */
-
 export function frameInitMessage(code: number, payload: Buffer): Buffer {
   const len = payload.length + 1;
   return Buffer.concat([packUint32(len), packUint8(code), payload]);
 }
+export function frameDistribMessage(code: number, payload: Buffer): Buffer {
+  return frameInitMessage(code, payload);
+}
+
+/* Builders — server */
+
+export function buildLogin(username: string, password: string): Buffer {
+  const hash = Bun.CryptoHasher.hash("md5", `${username}${password}`, "hex");
+  const payload = Buffer.concat([
+    packString(username), packString(password),
+    packUint32(MAJOR_VERSION), packString(hash), packUint32(MINOR_VERSION),
+  ]);
+  return frameMessage(SERVER_MESSAGE_CODES.login, payload);
+}
+export function buildSetWaitPort(port: number): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.setWaitPort, packUint32(port));
+}
+export function buildFileSearch(token: number, query: string): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.fileSearch, Buffer.concat([packUint32(token >>> 0), packString(query)]));
+}
+export function buildUserSearch(username: string, token: number, query: string): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.userSearch, Buffer.concat([packString(username), packUint32(token >>> 0), packString(query)]));
+}
+export function buildRoomSearch(room: string, token: number, query: string): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.roomSearch, Buffer.concat([packString(room), packUint32(token >>> 0), packString(query)]));
+}
+export function buildWishlistSearch(token: number, query: string): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.wishlistSearch, Buffer.concat([packUint32(token >>> 0), packString(query)]));
+}
+export function buildWatchUser(username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.watchUser, packString(username)); }
+export function buildUnwatchUser(username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.unwatchUser, packString(username)); }
+export function buildGetUserStats(username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.getUserStats, packString(username)); }
+export function buildUserInterests(username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.userInterests, packString(username)); }
+export function buildGetPeerAddress(username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.getPeerAddress, packString(username)); }
+export function buildSetStatus(status: number): Buffer { return frameMessage(SERVER_MESSAGE_CODES.setStatus, packInt32(status)); }
+export function buildSharedFoldersFiles(dirs: number, files: number): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.sharedFoldersFiles, Buffer.concat([packUint32(dirs), packUint32(files)]));
+}
+export function buildAddThingILike(thing: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.addThingILike, packString(thing)); }
+export function buildRemoveThingILike(thing: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.removeThingILike, packString(thing)); }
+export function buildAddThingIHate(thing: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.addThingIHate, packString(thing)); }
+export function buildRemoveThingIHate(thing: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.removeThingIHate, packString(thing)); }
+export function buildGivePrivileges(username: string, days: number): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.givePrivileges, Buffer.concat([packString(username), packUint32(days)]));
+}
+export function buildSendUploadSpeed(speed: number): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.sendUploadSpeed, packUint32(speed >>> 0));
+}
+export function buildCantConnectToPeer(token: number, username: string): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.cantConnectToPeer, Buffer.concat([packUint32(token >>> 0), packString(username)]));
+}
+export function buildMessageAcked(msgId: number): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.messageAcked, packUint32(msgId >>> 0));
+}
+export function buildMessageUser(username: string, message: string): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.messageUser, Buffer.concat([packString(username), packString(message)]));
+}
+export function buildSayChatroom(room: string, message: string): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.sayChatroom, Buffer.concat([packString(room), packString(message)]));
+}
+export function buildJoinRoom(room: string, priv = false): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.joinRoom, Buffer.concat([packString(room), packUint32(priv ? 1 : 0)]));
+}
+export function buildLeaveRoom(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.leaveRoom, packString(room)); }
+export function buildChangePassword(password: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.changePassword, packString(password)); }
+export function buildCheckPrivileges(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.checkPrivileges, Buffer.alloc(0)); }
+export function buildRoomTickers(room: string): Buffer { return Buffer.alloc(0); } // not sent — server pushes
+export function buildSetRoomTicker(room: string, msg: string): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.setRoomTicker, Buffer.concat([packString(room), packString(msg)]));
+}
+export function buildRecommendationsEmpty(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.recommendations, Buffer.alloc(0)); }
+export function buildGlobalRecommendationsEmpty(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.globalRecommendations, Buffer.alloc(0)); }
+export function buildSimilarUsersEmpty(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.similarUsers, Buffer.alloc(0)); }
+export function buildHaveNoParent(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.haveNoParent, Buffer.alloc(0)); }
+export function buildBranchLevel(level: number): Buffer { return frameMessage(SERVER_MESSAGE_CODES.branchLevel, packUint32(level >>> 0)); }
+export function buildBranchRoot(root: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.branchRoot, packString(root)); }
+export function buildAcceptChildren(accept: boolean): Buffer { return frameMessage(SERVER_MESSAGE_CODES.acceptChildren, packBool(accept)); }
+export function buildJoinGlobalRoom(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.joinGlobalRoom, Buffer.alloc(0)); }
+export function buildLeaveGlobalRoom(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.leaveGlobalRoom, Buffer.alloc(0)); }
+
+/* Builders — peer */
 
 export function buildPeerInit(ownUser: string, connType = "P"): Buffer {
-  // Peer init code 1. Sent/received on a fresh peer TCP connection to identify
-  // the remote user and the connection type ("P" peer, "F" file, "D" distrib).
-  // The token is always zero in the modern handshake. This is an init message,
-  // so it uses the uint8 code framing.
-  return frameInitMessage(
-    1,
-    Buffer.concat([packString(ownUser), packString(connType), packUint32(0)]),
-  );
+  return frameInitMessage(1, Buffer.concat([packString(ownUser), packString(connType), packUint32(0)]));
 }
-
-export function buildPierceFireWall(token: number): Buffer {
-  // Peer init code 0. Sent when we initiate a peer connection in response to a
-  // server ConnectToPeer (code 18) relay: we connect to the peer and send this
-  // token to punch through. Init message framing (uint8 code).
-  return frameInitMessage(0, packUint32(token >>> 0));
+export function buildPierceFireWall(token: number): Buffer { return frameInitMessage(0, packUint32(token >>> 0)); }
+export function buildConnectToPeer(token: number, username: string, connType: string): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.connectToPeer, Buffer.concat([packUint32(token >>> 0), packString(username), packString(connType)]));
 }
-
-export interface PierceFireWall {
-  token: number;
+export function buildSharedFileListRequest(): Buffer { return frameMessage(PEER_MESSAGE_CODES.sharedFileListRequest, Buffer.alloc(0)); }
+export function buildFolderContentsRequest(token: number, dir: string): Buffer {
+  return frameMessage(PEER_MESSAGE_CODES.folderContentsRequest, Buffer.concat([packUint32(token >>> 0), packString(dir)]));
 }
-
-export function parsePierceFireWall(payload: Buffer): PierceFireWall {
-  return { token: payload.readUInt32LE(0) };
+export function buildTransferRequest(direction: number, token: number, file: string, size?: number | bigint): Buffer {
+  const parts = [packUint32(direction >>> 0), packUint32(token >>> 0), packString(file)];
+  if (direction === 1 && size !== undefined) parts.push(packUint64(size));
+  return frameMessage(PEER_MESSAGE_CODES.transferRequest, Buffer.concat(parts));
 }
+export function buildTransferResponse(token: number, allowed: boolean, sizeOrReason?: number | bigint | string): Buffer {
+  const parts: Buffer[] = [packUint32(token >>> 0), packBool(allowed)];
+  if (allowed && typeof sizeOrReason !== "string") parts.push(packUint64((sizeOrReason as number | bigint) ?? 0));
+  else if (!allowed && typeof sizeOrReason === "string") parts.push(packString(sizeOrReason));
+  return frameMessage(PEER_MESSAGE_CODES.transferResponse, Buffer.concat(parts));
+}
+export function buildQueueUpload(file: string): Buffer { return frameMessage(PEER_MESSAGE_CODES.queueUpload, packString(file)); }
+export function buildPlaceInQueueRequest(file: string): Buffer { return frameMessage(PEER_MESSAGE_CODES.placeInQueueRequest, packString(file)); }
+export function buildPlaceInQueueResponse(file: string, place: number): Buffer {
+  return frameMessage(PEER_MESSAGE_CODES.placeInQueueResponse, Buffer.concat([packString(file), packUint32(place >>> 0)]));
+}
+export function buildUploadFailed(file: string): Buffer { return frameMessage(PEER_MESSAGE_CODES.uploadFailed, packString(file)); }
+export function buildUploadDenied(file: string, reason: string): Buffer {
+  return frameMessage(PEER_MESSAGE_CODES.uploadDenied, Buffer.concat([packString(file), packString(reason)]));
+}
+export function buildFileTransferInit(token: number): Buffer { return packUint32(token >>> 0); }
+export function buildFileOffset(offset: number | bigint): Buffer { return packUint64(offset); }
 
-/** Render a uint32 IP as a dotted quad. */
+/* Parsers — helpers */
+
+export interface PierceFireWall { token: number; }
+export function parsePierceFireWall(payload: Buffer): PierceFireWall { return { token: payload.readUInt32LE(0) }; }
 export function uint32ToIp(value: number): string {
   return `${(value >>> 0) & 0xff}.${(value >>> 8) & 0xff}.${(value >>> 16) & 0xff}.${(value >>> 24) & 0xff}`;
 }
 
 export interface ConnectToPeer {
-  username: string;
-  connType: string;
-  ip: string;
-  port: number;
-  token: number;
-  privileged: boolean;
+  username: string; connType: string; ip: string; port: number; token: number; privileged: boolean;
+  obfuscationType?: number; obfuscatedPort?: number;
 }
-
-/**
- * Parse a server ConnectToPeer (code 18) message we receive as the search
- * result recipient. Layout (receive):
- *   string username | string type | uint32 ip | uint32 port | uint32 token
- *   | bool privileged | uint32 obfuscationType | uint16 obfuscatedPort
- */
 export function parseConnectToPeer(payload: Buffer): ConnectToPeer {
-  let offset = 0;
-  const readString = (): string => {
-    const len = payload.readUInt32LE(offset);
-    offset += 4;
-    const v = payload.subarray(offset, offset + len).toString("utf8");
-    offset += len;
-    return v;
-  };
-  const username = readString();
-  const connType = readString();
-  const ip = uint32ToIp(payload.readUInt32LE(offset));
-  offset += 4;
-  const port = payload.readUInt32LE(offset);
-  offset += 4;
-  const token = payload.readUInt32LE(offset);
-  offset += 4;
-  const privileged = payload[offset] !== 0;
-  offset += 1;
-  // obfuscationType (uint32) + obfuscatedPort (uint16) — ignored.
-  return { username, connType, ip, port, token, privileged };
+  const r = new SlskReader(payload);
+  const username = r.string();
+  const connType = r.string();
+  const ip = r.ipLE();
+  const port = r.uint32();
+  const token = r.uint32();
+  const privileged = r.bool();
+  let obfuscationType: number | undefined;
+  let obfuscatedPort: number | undefined;
+  if (r.remaining >= 6) { obfuscationType = r.uint32(); obfuscatedPort = r.uint16(); }
+  return { username, connType, ip, port, token, privileged, obfuscationType, obfuscatedPort };
 }
-
-export interface PeerInit {
-  targetUser: string;
-  connType: string;
-}
-
+export interface PeerInit { targetUser: string; connType: string; }
 export function parsePeerInit(payload: Buffer): PeerInit {
-  let offset = 0;
-  const readString = (): string => {
-    const len = payload.readUInt32LE(offset);
-    offset += 4;
-    const v = payload.subarray(offset, offset + len).toString("utf8");
-    offset += len;
-    return v;
-  };
-  const targetUser = readString();
-  const connType = readString();
-  return { targetUser, connType };
+  const r = new SlskReader(payload);
+  const targetUser = r.string(); const connType = r.string(); return { targetUser, connType };
 }
 
-/* ------------------------------------------------------------------ *
- * Response parsing
- * ------------------------------------------------------------------ */
+/* Login */
 
-export interface LoginSuccess {
-  success: true;
-  banner: string;
-  ipAddress: string;
-  checksum: string;
-  isSupporter: boolean;
-}
-
-export interface LoginFailure {
-  success: false;
-  rejectionReason: string;
-  rejectionDetail?: string;
-}
-
+export interface LoginSuccess { success: true; banner: string; ipAddress: string; checksum: string; isSupporter: boolean; }
+export interface LoginFailure { success: false; rejectionReason: string; rejectionDetail?: string; }
 export type LoginResponse = LoginSuccess | LoginFailure;
-
-/** Parse a Login (code 1) server response. */
 export function parseLoginResponse(payload: Buffer): LoginResponse {
   let offset = 0;
-
-  const readBool = (): boolean => {
-    const v = payload[offset] !== 0;
-    offset += 1;
-    return v;
-  };
-
-  const readUint32 = (): number => {
-    const v = payload.readUInt32LE(offset);
-    offset += 4;
-    return v;
-  };
-
-  const readString = (): string => {
-    const len = readUint32();
-    const v = payload.subarray(offset, offset + len).toString("utf8");
-    offset += len;
-    return v;
-  };
-
+  const readBool = (): boolean => { const v = payload[offset] !== 0; offset += 1; return v; };
+  const readUint32 = (): number => { const v = payload.readUInt32LE(offset); offset += 4; return v; };
+  const readString = (): string => { const len = readUint32(); const v = payload.subarray(offset, offset + len).toString("utf8"); offset += len; return v; };
   const success = readBool();
-
   if (!success) {
     const rejectionReason = readString();
     const rejectionDetail = offset < payload.length ? readString() : undefined;
     return { success: false, rejectionReason, rejectionDetail };
   }
-
   const banner = readString();
-  const ipBytes = payload.subarray(offset, offset + 4);
-  offset += 4;
+  const ipBytes = payload.subarray(offset, offset + 4); offset += 4;
   const ipAddress = `${ipBytes[0]}.${ipBytes[1]}.${ipBytes[2]}.${ipBytes[3]}`;
-  const checksum = readString();
-  const isSupporter = readBool();
-
+  const checksum = readString(); const isSupporter = readBool();
   return { success: true, banner, ipAddress, checksum, isSupporter };
 }
-
-/* ------------------------------------------------------------------ *
- * Human-friendly rejection messages
- * ------------------------------------------------------------------ */
-
 export function describeRejection(reason: string): string {
   switch (reason) {
-    case LOGIN_REJECT_REASONS.INVALID_USERNAME:
-      return "Unknown username.";
-    case LOGIN_REJECT_REASONS.EMPTY_PASSWORD:
-      return "The password cannot be empty.";
-    case LOGIN_REJECT_REASONS.INVALID_PASSWORD:
-      return "Incorrect password.";
-    case LOGIN_REJECT_REASONS.INVALID_VERSION:
-      return "Client version rejected by the server. The bridge may need updating.";
-    case LOGIN_REJECT_REASONS.SERVER_FULL:
-      return "The server is currently full. Please try again later.";
-    case LOGIN_REJECT_REASONS.SERVER_PRIVATE:
-      return "This server does not allow public registrations.";
-    default:
-      return `Login rejected by server (${reason}).`;
+    case LOGIN_REJECT_REASONS.INVALID_USERNAME: return "Unknown username.";
+    case LOGIN_REJECT_REASONS.EMPTY_PASSWORD: return "The password cannot be empty.";
+    case LOGIN_REJECT_REASONS.INVALID_PASSWORD: return "Incorrect password.";
+    case LOGIN_REJECT_REASONS.INVALID_VERSION: return "Client version rejected by the server. The bridge may need updating.";
+    case LOGIN_REJECT_REASONS.SERVER_FULL: return "The server is currently full. Please try again later.";
+    case LOGIN_REJECT_REASONS.SERVER_PRIVATE: return "This server does not allow public registrations.";
+    default: return `Login rejected by server (${reason}).`;
   }
 }
 
-/* ------------------------------------------------------------------ *
- * Search result parsing (peer FileSearchResponse, code 9)
- * ------------------------------------------------------------------ */
+/* Search result parsing — with zlib cap, >2GiB bug, private guard */
 
-export interface SearchFileAttributes {
-  bitrate?: number;
-  length?: number;
-  vbr?: number;
-  sampleRate?: number;
-  bitDepth?: number;
+export interface SearchFileAttributes { bitrate?: number; length?: number; vbr?: number; sampleRate?: number; bitDepth?: number; }
+export interface SearchFile { name: string; size: number; attrs: SearchFileAttributes; private: boolean; }
+export interface FileSearchResult { token: number; username: string; freeUploadSlots: boolean; uploadSpeed: number; inQueue: number; results: SearchFile[]; }
+
+const MAX_SEARCH_DECOMPRESSED = 128 * 1024 * 1024; // 128 MiB guard
+
+function inflateWithCap(payload: Buffer, max = MAX_SEARCH_DECOMPRESSED): Buffer {
+  if (payload.length > 16 * 1024 * 1024) throw new Error("Search response too large");
+  const buf = inflateSync(payload, { chunkSize: 64 * 1024 } as unknown as Record<string, unknown>);
+  if (buf.length > max) throw new Error("Decompressed search response exceeds limit");
+  return Buffer.from(buf);
+}
+function readFileSize(buf: Buffer, offset: number): { size: number; next: number } {
+  // Nicotine quirk: Soulseek NS >2GiB uses truncated 32-bit + 0xFF sentinel
+  if (offset + 8 > buf.length) throw new Error("Truncated file size");
+  const lo = buf.readUInt32LE(offset);
+  const hi = buf.readUInt32LE(offset + 4);
+  // If high bytes are 0xFF 0xFF 0xFF 0xFF sentinel, treat as 32-bit
+  if (buf[offset + 7] === 0xff && hi === 0xffffffff) {
+    return { size: lo, next: offset + 8 };
+  }
+  const size = lo + hi * 2 ** 32;
+  return { size, next: offset + 8 };
 }
 
-export interface SearchFile {
-  name: string;
-  size: number;
-  attrs: SearchFileAttributes;
-  private: boolean;
-}
-
-export interface FileSearchResult {
-  token: number;
-  username: string;
-  freeUploadSlots: boolean;
-  uploadSpeed: number;
-  inQueue: number;
-  results: SearchFile[];
-}
-
-/**
- * Parse a FileSearchResponse (peer code 9) payload. The entire payload is
- * zlib-compressed; after inflation the layout is:
- *   string username | uint32 token | uint32 nfiles
- *   repeated nfiles: uint8(1) | string name | uint64 size | uint32 extLen (ignored)
- *                    | uint32 numAttrs (uint32 type + uint32 value)*
- *   bool freeUploadSlots | uint32 uploadSpeed | uint32 inQueue
- * Mirrors nicotine-plus pynicotine/slskmessages.py FileSearchResponse.
- */
 export function parseFileSearchResponse(payload: Buffer): FileSearchResult {
-  const buf = inflateSync(payload);
+  const buf = inflateWithCap(payload);
   let offset = 0;
-
-  const readString = (): string => {
-    const len = buf.readUInt32LE(offset);
-    offset += 4;
-    const v = buf.subarray(offset, offset + len).toString("utf8");
-    offset += len;
-    return v;
-  };
-  const readUint32 = (): number => {
-    const v = buf.readUInt32LE(offset);
-    offset += 4;
-    return v;
-  };
-  const readUint64 = (): number => {
-    const lo = buf.readUInt32LE(offset);
-    const hi = buf.readUInt32LE(offset + 4);
-    offset += 8;
-    return lo + hi * 2 ** 32;
-  };
-  const readBool = (): boolean => {
-    const v = buf[offset] !== 0;
-    offset += 1;
-    return v;
-  };
-  const readUint8 = (): number => {
-    const v = buf[offset];
-    offset += 1;
-    return v;
-  };
-
-  const username = readString();
-  const token = readUint32();
-  const nfiles = readUint32();
-
+  const readString = (): string => { const len = buf.readUInt32LE(offset); offset += 4; const v = buf.subarray(offset, offset + len).toString("utf8"); offset += len; return v; };
+  const readUint32 = (): number => { const v = buf.readUInt32LE(offset); offset += 4; return v; };
+  const readBool = (): boolean => { const v = buf[offset] !== 0; offset += 1; return v; };
+  const readUint8 = (): number => { const v = buf[offset]; offset += 1; return v; };
+  const username = readString(); const token = readUint32(); const nfiles = readUint32();
   const results: SearchFile[] = [];
   const readOne = (isPrivate: boolean) => {
-    readUint8(); // result code, always 1
+    readUint8();
     const name = readString().replace("/", "\\");
-    const size = readUint64();
-    const extLen = readUint32();
-    offset += extLen; // extension is obsolete; skip its bytes
+    const { size, next } = readFileSize(buf, offset); offset = next;
+    const extLen = readUint32(); offset += extLen;
     const numAttrs = readUint32();
     const attrs: SearchFileAttributes = {};
     for (let j = 0; j < numAttrs; j++) {
-      const type = readUint32();
-      const value = readUint32();
+      const type = readUint32(); const value = readUint32();
       if (type === FILE_ATTRIBUTE.BITRATE) attrs.bitrate = value;
       else if (type === FILE_ATTRIBUTE.LENGTH) attrs.length = value;
       else if (type === FILE_ATTRIBUTE.VBR) attrs.vbr = value;
@@ -520,299 +530,198 @@ export function parseFileSearchResponse(payload: Buffer): FileSearchResult {
     }
     results.push({ name, size, attrs, private: isPrivate });
   };
-
   for (let i = 0; i < nfiles; i++) readOne(false);
-
-  const freeUploadSlots = readBool();
-  const uploadSpeed = readUint32();
-  const inQueue = readUint32();
-
-  // Optional private-share results: present only if bytes remain.
-  if (offset < buf.length) {
-    const npriv = readUint32();
-    for (let i = 0; i < npriv; i++) readOne(true);
+  const freeUploadSlots = readBool(); const uploadSpeed = readUint32(); const inQueue = readUint32();
+  if (offset + 4 <= buf.length) {
+    try {
+      const npriv = buf.readUInt32LE(offset); offset += 4;
+      if (npriv <= 10000 && offset < buf.length) {
+        for (let i = 0; i < npriv; i++) {
+          if (offset >= buf.length) break;
+          readOne(true);
+        }
+      }
+    } catch { /* truncated private block */ }
   }
-
   return { token, username, freeUploadSlots, uploadSpeed, inQueue, results };
 }
 
-/* ------------------------------------------------------------------ *
- * User info — server messages
- * ------------------------------------------------------------------ */
+/* Server message parsers */
 
-/** WatchUser (server code 5): subscribe to a user's status + initial stats. */
-export function buildWatchUser(username: string): Buffer {
-  return frameMessage(SERVER_MESSAGE_CODES.watchUser, packString(username));
-}
-
-/** UnwatchUser (server code 6): stop receiving updates for a user. */
-export function buildUnwatchUser(username: string): Buffer {
-  return frameMessage(SERVER_MESSAGE_CODES.unwatchUser, packString(username));
-}
-
-/** GetUserStats (server code 36): request a user's shared stats. */
-export function buildGetUserStats(username: string): Buffer {
-  return frameMessage(SERVER_MESSAGE_CODES.getUserStats, packString(username));
-}
-
-/** UserInterests (server code 57): request a user's likes/hates. */
-export function buildUserInterests(username: string): Buffer {
-  return frameMessage(SERVER_MESSAGE_CODES.userInterests, packString(username));
-}
-
-/** GetPeerAddress (server code 3): ask the server for a peer's IP/port. */
-export function buildGetPeerAddress(username: string): Buffer {
-  return frameMessage(SERVER_MESSAGE_CODES.getPeerAddress, packString(username));
-}
-
-/** SetStatus (server code 28): set our own status (2 = online, 1 = away). */
-export function buildSetStatus(status: number): Buffer {
-  return frameMessage(SERVER_MESSAGE_CODES.setStatus, packInt32(status));
-}
-
-/** SharedFoldersFiles (server code 35): report our share counts to the server. */
-export function buildSharedFoldersFiles(dirs: number, files: number): Buffer {
-  return frameMessage(
-    SERVER_MESSAGE_CODES.sharedFoldersFiles,
-    Buffer.concat([packUint32(dirs), packUint32(files)]),
-  );
-}
-
-/** AddThingILike (server code 51) / RemoveThingILike (server code 52). */
-export function buildAddThingILike(thing: string): Buffer {
-  return frameMessage(SERVER_MESSAGE_CODES.addThingILike, packString(thing));
-}
-export function buildRemoveThingILike(thing: string): Buffer {
-  return frameMessage(SERVER_MESSAGE_CODES.removeThingILike, packString(thing));
-}
-
-/** AddThingIHate (server code 117) / RemoveThingIHate (server code 118). */
-export function buildAddThingIHate(thing: string): Buffer {
-  return frameMessage(SERVER_MESSAGE_CODES.addThingIHate, packString(thing));
-}
-export function buildRemoveThingIHate(thing: string): Buffer {
-  return frameMessage(SERVER_MESSAGE_CODES.removeThingIHate, packString(thing));
-}
-
-/** GivePrivileges (server code 123): gift N days of privileges to a user. */
-export function buildGivePrivileges(username: string, days: number): Buffer {
-  return frameMessage(
-    SERVER_MESSAGE_CODES.givePrivileges,
-    Buffer.concat([packString(username), packUint32(days)]),
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * User info — server message parsers
- * ------------------------------------------------------------------ */
-
-export interface UserStatusMessage {
-  username: string;
-  status: number; // 0 offline, 1 away, 2 online
-  privileged: boolean;
-}
-
-/** GetUserStatus (server code 7). */
+export interface UserStatusMessage { username: string; status: number; privileged: boolean; }
 export function parseUserStatus(payload: Buffer): UserStatusMessage {
   const r = new SlskReader(payload);
-  const username = r.string();
-  const status = r.uint32();
-  const privileged = r.bool();
+  const username = r.string(); const status = r.uint32(); const privileged = r.bool();
   return { username, status, privileged };
 }
-
-export interface UserStatsMessage {
-  username: string;
-  avgspeed: number;
-  uploadnum: number; // number of uploaded files
-  files: number;
-  dirs: number;
-}
-
-/** GetUserStats (server code 36). */
+export interface UserStatsMessage { username: string; avgspeed: number; uploadnum: number; files: number; dirs: number; }
 export function parseUserStats(payload: Buffer): UserStatsMessage {
   const r = new SlskReader(payload);
-  const username = r.string();
-  const avgspeed = r.uint32();
-  const uploadnum = r.uint32();
-  r.uint32(); // unknown
-  const files = r.uint32();
-  const dirs = r.uint32();
+  const username = r.string(); const avgspeed = r.uint32(); const uploadnum = r.uint32();
+  r.uint32(); const files = r.uint32(); const dirs = r.uint32();
   return { username, avgspeed, uploadnum, files, dirs };
 }
-
-export interface UserInterestsMessage {
-  username: string;
-  likes: string[];
-  hates: string[];
-}
-
-/** UserInterests (server code 57). */
+export interface UserInterestsMessage { username: string; likes: string[]; hates: string[]; }
 export function parseUserInterests(payload: Buffer): UserInterestsMessage {
   const r = new SlskReader(payload);
-  const username = r.string();
-  const likes: string[] = [];
-  const hates: string[] = [];
-  const nLikes = r.uint32();
-  for (let i = 0; i < nLikes; i++) likes.push(r.string());
-  const nHates = r.uint32();
-  for (let i = 0; i < nHates; i++) hates.push(r.string());
+  const username = r.string(); const likes: string[] = []; const hates: string[] = [];
+  const nLikes = r.uint32(); for (let i = 0; i < nLikes; i++) likes.push(r.string());
+  const nHates = r.uint32(); for (let i = 0; i < nHates; i++) hates.push(r.string());
   return { username, likes, hates };
 }
-
-export interface Recommendation {
-  thing: string;
-  rating: number;
-}
-
-/** Recommendations (server code 54) and GlobalRecommendations (server code 56). */
-export function parseRecommendations(payload: Buffer): {
-  recommendations: Recommendation[];
-  unrecommendations: Recommendation[];
-} {
+export interface Recommendation { thing: string; rating: number; }
+export function parseRecommendations(payload: Buffer): { recommendations: Recommendation[]; unrecommendations: Recommendation[] } {
   const r = new SlskReader(payload);
-  const recommendations: Recommendation[] = [];
-  const unrecommendations: Recommendation[] = [];
-  const nRecs = r.uint32();
-  for (let i = 0; i < nRecs; i++) {
-    const thing = r.string();
-    const rating = r.int32();
-    recommendations.push({ thing, rating });
-  }
-  const nUnrecs = r.uint32();
-  for (let i = 0; i < nUnrecs; i++) {
-    const thing = r.string();
-    const rating = r.int32();
-    unrecommendations.push({ thing, rating });
-  }
+  const recommendations: Recommendation[] = []; const unrecommendations: Recommendation[] = [];
+  const nRecs = r.uint32(); for (let i = 0; i < nRecs; i++) { const thing = r.string(); const rating = r.int32(); recommendations.push({ thing, rating }); }
+  const nUnrecs = r.uint32(); for (let i = 0; i < nUnrecs; i++) { const thing = r.string(); const rating = r.int32(); unrecommendations.push({ thing, rating }); }
   return { recommendations, unrecommendations };
 }
-
-export interface SimilarUser {
-  username: string;
-  rating: number;
-}
-
-/** SimilarUsers (server code 110). */
+export interface SimilarUser { username: string; rating: number; }
 export function parseSimilarUsers(payload: Buffer): SimilarUser[] {
-  const r = new SlskReader(payload);
-  const count = r.uint32();
-  const users: SimilarUser[] = [];
-  for (let i = 0; i < count; i++) {
-    const username = r.string();
-    const rating = r.uint32();
-    users.push({ username, rating });
-  }
+  const r = new SlskReader(payload); const count = r.uint32(); const users: SimilarUser[] = [];
+  for (let i = 0; i < count; i++) { const username = r.string(); const rating = r.uint32(); users.push({ username, rating }); }
   return users;
 }
-
-/** ItemRecommendations (server code 111) / ItemSimilarUsers (server code 112). */
-export function parseItemRecommendations(payload: Buffer): {
-  thing: string;
-  recommendations: Recommendation[];
-} {
-  const r = new SlskReader(payload);
-  const thing = r.string();
-  const recommendations: Recommendation[] = [];
-  const n = r.uint32();
-  for (let i = 0; i < n; i++) {
-    const recThing = r.string();
-    const rating = r.uint32();
-    recommendations.push({ thing: recThing, rating });
-  }
+export function parseItemRecommendations(payload: Buffer): { thing: string; recommendations: Recommendation[] } {
+  const r = new SlskReader(payload); const thing = r.string(); const recommendations: Recommendation[] = []; const n = r.uint32();
+  for (let i = 0; i < n; i++) { const recThing = r.string(); const rating = r.uint32(); recommendations.push({ thing: recThing, rating }); }
   return { thing, recommendations };
 }
-
-/** ItemSimilarUsers (server code 112). */
-export function parseItemSimilarUsers(payload: Buffer): {
-  thing: string;
-  users: SimilarUser[];
-} {
-  const r = new SlskReader(payload);
-  const thing = r.string();
-  const users: SimilarUser[] = [];
-  const n = r.uint32();
-  for (let i = 0; i < n; i++) {
-    const username = r.string();
-    const rating = r.uint32();
-    users.push({ username, rating });
-  }
+export function parseItemSimilarUsers(payload: Buffer): { thing: string; users: SimilarUser[] } {
+  const r = new SlskReader(payload); const thing = r.string(); const users: SimilarUser[] = []; const n = r.uint32();
+  for (let i = 0; i < n; i++) { const username = r.string(); const rating = r.uint32(); users.push({ username, rating }); }
   return { thing, users };
 }
-
-/** GetPeerAddress response (server code 3). */
-export interface PeerAddress {
-  username: string;
-  ip: string;
-  port: number;
-}
-
+export interface PeerAddress { username: string; ip: string; port: number; obfuscationType?: number; obfuscatedPort?: number; }
 export function parsePeerAddress(payload: Buffer): PeerAddress {
   const r = new SlskReader(payload);
-  const username = r.string();
-  const ipInt = r.uint32();
-  // Serialised little-endian: byte0.byte1.byte2.byte3.
+  const username = r.string(); const ipInt = r.uint32();
   const ip = `${(ipInt >>> 0) & 0xff}.${(ipInt >>> 8) & 0xff}.${(ipInt >>> 16) & 0xff}.${(ipInt >>> 24) & 0xff}`;
   const port = r.uint32();
-  return { username, ip, port };
+  let obfuscationType: number | undefined; let obfuscatedPort: number | undefined;
+  if (r.remaining >= 6) { obfuscationType = r.uint32(); obfuscatedPort = r.uint16(); }
+  return { username, ip, port, obfuscationType, obfuscatedPort };
+}
+export interface ChatMessage { room: string; username: string; message: string; }
+export function parseSayChatroom(payload: Buffer): ChatMessage {
+  const r = new SlskReader(payload); const room = r.string(); const username = r.string(); const message = r.string();
+  return { room, username, message };
+}
+export interface PrivateMessage { id: number; timestamp: number; username: string; message: string; isNew: boolean; }
+export function parseMessageUser(payload: Buffer): PrivateMessage {
+  const r = new SlskReader(payload);
+  const id = r.uint32(); const timestamp = r.uint32(); const username = r.string(); const message = r.string(); const isNew = r.bool();
+  return { id, timestamp, username, message, isNew };
+}
+export interface RoomListEntry { name: string; users: number; }
+export function parseRoomList(payload: Buffer): { rooms: RoomListEntry[]; owned: RoomListEntry[]; member: RoomListEntry[]; operator: string[] } {
+  const r = new SlskReader(payload);
+  const parseRooms = (hasCount: boolean): RoomListEntry[] | string[] => {
+    const n = r.uint32(); const names: string[] = [];
+    for (let i = 0; i < n; i++) names.push(r.string());
+    if (!hasCount) return names;
+    const counts: number[] = []; for (let i = 0; i < n; i++) counts.push(r.uint32());
+    return names.map((name, i) => ({ name, users: counts[i] ?? 0 }));
+  };
+  const rooms = parseRooms(true) as RoomListEntry[];
+  const owned = parseRooms(true) as RoomListEntry[];
+  const member = parseRooms(true) as RoomListEntry[];
+  const operator = parseRooms(false) as string[];
+  return { rooms, owned, member, operator };
+}
+export function parsePrivilegedUsers(payload: Buffer): string[] {
+  const r = new SlskReader(payload); const n = r.uint32(); const users: string[] = [];
+  for (let i = 0; i < n; i++) users.push(r.string()); return users;
+}
+export function parseCheckPrivileges(payload: Buffer): number { return new SlskReader(payload).uint32(); }
+export function parseWishlistInterval(payload: Buffer): number { return new SlskReader(payload).uint32(); }
+export function parseExcludedSearchPhrases(payload: Buffer): string[] {
+  const r = new SlskReader(payload); const n = r.uint32(); const out: string[] = [];
+  for (let i = 0; i < n; i++) out.push(r.string()); return out;
+}
+export function parseRoomTickers(payload: Buffer): { room: string; tickers: Array<{ username: string; msg: string }> } {
+  const r = new SlskReader(payload); const room = r.string(); const n = r.uint32(); const tickers: Array<{ username: string; msg: string }> = [];
+  for (let i = 0; i < n; i++) { const username = r.string(); const msg = r.string(); tickers.push({ username, msg }); }
+  return { room, tickers };
+}
+export function parsePossibleParents(payload: Buffer): Array<{ username: string; ip: string; port: number }> {
+  const r = new SlskReader(payload); const n = r.uint32(); const out: Array<{ username: string; ip: string; port: number }> = [];
+  for (let i = 0; i < n; i++) { const username = r.string(); const ip = r.ip(); const port = r.uint32(); out.push({ username, ip, port }); }
+  return out;
+}
+export interface UserData { username: string; status: number; avgspeed: number; uploadnum: number; unknown: number; files: number; dirs: number; slotsfull: number; country: string; }
+export function parseJoinRoom(payload: Buffer): { room: string; users: UserData[]; owner?: string; operators: string[] } {
+  const r = new SlskReader(payload);
+  const room = r.string();
+  // parse_users interleaved
+  const nUsers = r.uint32(); const users: UserData[] = [];
+  for (let i = 0; i < nUsers; i++) users.push({ username: r.string(), status: 0, avgspeed: 0, uploadnum: 0, unknown: 0, files: 0, dirs: 0, slotsfull: 0, country: "" } as UserData);
+  const statusLen = r.uint32(); for (let i = 0; i < statusLen; i++) users[i].status = r.uint32();
+  const statsLen = r.uint32(); for (let i = 0; i < statsLen; i++) { users[i].avgspeed = r.uint32(); users[i].uploadnum = r.uint32(); users[i].unknown = r.uint32(); users[i].files = r.uint32(); users[i].dirs = r.uint32(); }
+  const slotsLen = r.uint32(); for (let i = 0; i < slotsLen; i++) users[i].slotsfull = r.uint32();
+  const cLen = r.uint32(); for (let i = 0; i < cLen; i++) users[i].country = r.string();
+  if (!r.remaining) return { room, users, operators: [] };
+  const owner = r.string(); const nOps = r.uint32(); const operators: string[] = [];
+  for (let i = 0; i < nOps; i++) operators.push(r.string());
+  return { room, users, owner, operators };
+}
+export function parseWatchUser(payload: Buffer): { username: string; exists: boolean; status?: number; avgspeed?: number; files?: number; dirs?: number; country?: string } {
+  const r = new SlskReader(payload);
+  const username = r.string(); const exists = r.bool();
+  if (!exists) return { username, exists: false };
+  const status = r.uint32(); const avgspeed = r.uint32(); r.uint32(); r.uint32(); const files = r.uint32(); const dirs = r.uint32();
+  let country: string | undefined;
+  if (r.remaining) country = r.string();
+  return { username, exists: true, status, avgspeed, files, dirs, country };
 }
 
-/* ------------------------------------------------------------------ *
- * User info — peer messages
- * ------------------------------------------------------------------ */
+/* Peer parsers/builders */
 
-/** UserInfoRequest (peer code 15). */
-export function buildUserInfoRequest(): Buffer {
-  return frameMessage(PEER_MESSAGE_CODES.userInfoRequest, Buffer.alloc(0));
-}
-
-export interface UserInfoResponseMessage {
-  username: string;
-  descr: string;
-  pic: Buffer | null;
-  totalupl: number;
-  queuesize: number;
-  slotsavail: boolean;
-  uploadallowed: number;
-}
-
-/**
- * UserInfoResponse (peer code 16). Layout:
- *   string descr | bool has_pic | (bytes pic)? | uint32 totalupl
- *   uint32 queuesize | bool slotsavail | uint32 uploadallowed
- */
+export function buildUserInfoRequest(): Buffer { return frameMessage(PEER_MESSAGE_CODES.userInfoRequest, Buffer.alloc(0)); }
+export interface UserInfoResponseMessage { username: string; descr: string; pic: Buffer | null; totalupl: number; queuesize: number; slotsavail: boolean; uploadallowed: number; }
 export function parseUserInfoResponse(payload: Buffer, username: string): UserInfoResponseMessage {
   const r = new SlskReader(payload);
-  const descr = r.string();
-  const hasPic = r.bool();
-  const pic = hasPic ? r.bytes() : null;
-  const totalupl = r.uint32();
-  const queuesize = r.uint32();
-  const slotsavail = r.bool();
+  const descr = r.string(); const hasPic = r.bool(); const pic = hasPic ? r.bytes() : null;
+  const totalupl = r.uint32(); const queuesize = r.uint32(); const slotsavail = r.bool();
   const uploadallowed = r.remaining >= 4 ? r.uint32() : 0;
   return { username, descr, pic, totalupl, queuesize, slotsavail, uploadallowed };
 }
-
-/** Build an outgoing UserInfoResponse (peer code 16) for our own profile. */
-export function buildUserInfoResponse(opts: {
-  descr: string;
-  pic: Buffer | null;
-  totalupl: number;
-  queuesize: number;
-  slotsavail: boolean;
-  uploadallowed: number;
-}): Buffer {
+export function buildUserInfoResponse(opts: { descr: string; pic: Buffer | null; totalupl: number; queuesize: number; slotsavail: boolean; uploadallowed: number; }): Buffer {
   const parts: Buffer[] = [];
   parts.push(packString(opts.descr));
-  if (opts.pic) {
-    parts.push(packBool(true));
-    parts.push(packBytes(opts.pic));
-  } else {
-    parts.push(packBool(false));
-  }
-  parts.push(packUint32(opts.totalupl));
-  parts.push(packUint32(opts.queuesize));
-  parts.push(packBool(opts.slotsavail));
-  parts.push(packUint32(opts.uploadallowed));
+  if (opts.pic) { parts.push(packBool(true)); parts.push(packBytes(opts.pic)); } else parts.push(packBool(false));
+  parts.push(packUint32(opts.totalupl)); parts.push(packUint32(opts.queuesize)); parts.push(packBool(opts.slotsavail)); parts.push(packUint32(opts.uploadallowed));
   return frameMessage(PEER_MESSAGE_CODES.userInfoResponse, Buffer.concat(parts));
 }
+export interface TransferRequestMsg { direction: number; token: number; file: string; size?: bigint; }
+export function parseTransferRequest(payload: Buffer): TransferRequestMsg {
+  const r = new SlskReader(payload); const direction = r.uint32(); const token = r.uint32(); const file = r.string();
+  let size: bigint | undefined; if (direction === 1 && r.remaining >= 8) size = r.uint64();
+  return { direction, token, file, size };
+}
+export interface TransferResponseMsg { token: number; allowed: boolean; size?: bigint; reason?: string; }
+export function parseTransferResponse(payload: Buffer): TransferResponseMsg {
+  const r = new SlskReader(payload); const token = r.uint32(); const allowed = r.bool();
+  if (allowed) { const size = r.remaining >= 8 ? r.uint64() : BigInt(0); return { token, allowed, size }; }
+  const reason = r.remaining ? r.string() : ""; return { token, allowed, reason };
+}
+export function parseQueueUpload(payload: Buffer): string { return new SlskReader(payload).string(); }
+export function parsePlaceInQueueRequest(payload: Buffer): string { return new SlskReader(payload).string(); }
+export function parsePlaceInQueueResponse(payload: Buffer): { file: string; place: number } {
+  const r = new SlskReader(payload); const file = r.string(); const place = r.uint32(); return { file, place };
+}
+
+/* Distrib */
+
+export function parseDistribSearch(payload: Buffer): { username: string; token: number; query: string } {
+  const r = new SlskReader(payload);
+  // DistribSearch layout: uint32 unknown (49) | string username | uint32 token | string query
+  if (r.remaining >= 4) r.uint32(); // 49
+  const username = r.string(); const token = r.uint32(); const query = r.string();
+  return { username, token, query };
+}
+
+/* File — F conn helpers */
+export function parseFileTransferInit(buf: Buffer): number { return buf.readUInt32LE(0); }
+export function parseFileOffset(buf: Buffer): bigint { return buf.readBigUInt64LE(0); }

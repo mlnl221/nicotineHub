@@ -71,8 +71,10 @@ export class TransferManager {
   private onRemoved: TransferRemovedCb;
   private onStats: TransferStatsCb;
   private statsTimer: Timer | null = null;
+  private dataDir: string;
 
   constructor(opts: {
+    dataDir?: string;
     onUpdate: TransferUpdateCb;
     onRemoved: TransferRemovedCb;
     onStats: TransferStatsCb;
@@ -80,12 +82,49 @@ export class TransferManager {
     this.onUpdate = opts.onUpdate;
     this.onRemoved = opts.onRemoved;
     this.onStats = opts.onStats;
+    this.dataDir = opts.dataDir || process.env.DATA_DIR || "/data";
+
+    // Ensure volume directories exist (best-effort)
+    try {
+      const { mkdirSync, existsSync } = require("node:fs");
+      for (const sub of ["", "downloads", "incomplete", "uploads"]) {
+        const p = sub ? `${this.dataDir}/${sub}` : this.dataDir;
+        if (!existsSync(p)) mkdirSync(p, { recursive: true });
+      }
+      this.loadFromDisk();
+    } catch {
+      // fallback — in-memory only if volume not writable
+    }
 
     // Demo uploads: two queued examples to show UI when bridge starts.
     // In real mode uploads would only appear when peers QueueUpload us.
     this.seedDemoUploads();
 
     this.statsTimer = setInterval(() => this.emitStats(), 2000);
+  }
+
+  private persist() {
+    try {
+      const { writeFileSync } = require("node:fs");
+      const serial = [...this.transfers.values()].map(({ _timer: _t, _startTime: _s, _transferredAtStart: _a, ...rest }) => rest);
+      writeFileSync(`${this.dataDir}/transfers.json`, JSON.stringify(serial, null, 2));
+    } catch {}
+  }
+
+  private loadFromDisk() {
+    try {
+      const { readFileSync, existsSync } = require("node:fs");
+      const p = `${this.dataDir}/transfers.json`;
+      if (!existsSync(p)) return;
+      const raw = JSON.parse(readFileSync(p, "utf8")) as BridgeTransfer[];
+      for (const t of raw) {
+        // Reset transient progress timers; persisted status stays
+        if (t.status === "Transferring") t.status = "Paused";
+        t.current = t.current ?? 0;
+        t.speed = 0;
+        this.transfers.set(t.id, t as BridgeTransfer);
+      }
+    } catch {}
   }
 
   private seedDemoUploads() {
@@ -128,9 +167,9 @@ export class TransferManager {
   }
 
   private emit(t: BridgeTransfer) {
-    // strip internal
     const { _timer: _t, _startTime: _s, _transferredAtStart: _a, ...publicT } = t;
     this.onUpdate(publicT as BridgeTransfer);
+    this.persist();
   }
 
   private emitStats() {
@@ -272,6 +311,7 @@ export class TransferManager {
         this.transfers.delete(id);
         this.onRemoved(id);
         this.emitStats();
+        this.persist();
         break;
     }
   }
@@ -283,10 +323,12 @@ export class TransferManager {
       t.status = "Cancelled";
       this.emit(t);
       this.emitStats();
+      this.persist();
     } else if (action === "clear") {
       this.transfers.delete(id);
       this.onRemoved(id);
       this.emitStats();
+      this.persist();
     }
   }
 

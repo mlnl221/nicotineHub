@@ -7,15 +7,22 @@ services:
     environment:
       PORT: "8787"
       LISTEN_PORT: "2234"
+      DATA_DIR: "/data"
+      BRIDGE_TOKEN: "${BRIDGE_TOKEN:-}"
     ports:
       - "8787:8787"
       - "2234:2234"
       - "2234:2234/udp"
+    volumes:
+      - bridge-data:/data
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://localhost:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 5
+
+volumes:
+  bridge-data:
 
   web:
     build:
