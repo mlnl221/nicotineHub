@@ -9,12 +9,12 @@ const NAV = [
   { icon: "search_check", label: "Search Files", href: "/search" },
   { icon: "downloading", label: "Downloads", href: "/downloads" },
   { icon: "upload", label: "Uploads", href: "/uploads" },
-  { icon: "forum", label: "Private Chat", href: "#" },
-  { icon: "folder_managed", label: "Browse Shares", href: "#" },
+  { icon: "forum", label: "Private Chat", href: "/private-chat" },
+  { icon: "folder_managed", label: "Browse Shares", href: "/browse" },
   { icon: "account_circle", label: "User Profiles", href: "/profile" },
-  { icon: "group", label: "Buddies", href: "#" },
-  { icon: "groups", label: "Chat Rooms", href: "#" },
-  { icon: "interests", label: "Interests", href: "#" },
+  { icon: "group", label: "Buddies", href: "/buddies" },
+  { icon: "groups", label: "Chat Rooms", href: "/chat" },
+  { icon: "interests", label: "Interests", href: "/interests" },
 ];
 
 export function Sidebar() {
@@ -95,7 +95,7 @@ export function Sidebar() {
           <span className="font-label text-xs uppercase tracking-widest">Settings</span>
         </a>
         <a
-          href="#"
+          href="/diagnostics"
           className="flex items-center space-x-3 rounded-xl px-4 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant"
         >
           <span className="material-symbols-outlined">monitoring</span>
