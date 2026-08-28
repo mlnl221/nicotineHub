@@ -11,6 +11,7 @@ import {
   tryParseMessage,
   packString,
   packUint32,
+  packUint16,
   packIp,
   packBool,
   frameMessage,
@@ -19,6 +20,8 @@ import {
   MAJOR_VERSION,
   MINOR_VERSION,
   SERVER_MESSAGE_CODES,
+  PEER_MESSAGE_CODES,
+  MAX_INCOMING,
   buildWatchUser,
   buildUserInterests,
   buildGetPeerAddress,
@@ -30,6 +33,13 @@ import {
   parseItemRecommendations,
   parseItemSimilarUsers,
   parsePeerAddress,
+  parseConnectToPeer,
+  parseCantConnectToPeer,
+  buildCantConnectToPeer,
+  buildSendUploadSpeed,
+  buildRecommendationsEmpty,
+  buildGlobalRecommendationsEmpty,
+  buildSimilarUsersEmpty,
   buildUserInfoResponse,
   parseUserInfoResponse,
   buildQueueUpload,
@@ -454,6 +464,86 @@ describe("user info — peer UserInfoResponse", () => {
     const msg = parseUserInfoResponse(p.payload, "heidi");
     expect(msg.pic).toBeNull();
     expect(msg.descr).toBe("no pic");
+  });
+});
+
+describe("Phase 0 — recommendations empty + 1001 + 121", () => {
+  test("Recommendations 54 empty frame", () => {
+    const raw = buildRecommendationsEmpty();
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(SERVER_MESSAGE_CODES.recommendations);
+    expect(p.payload.length).toBe(0);
+  });
+  test("GlobalRecommendations 56 empty frame", () => {
+    const raw = buildGlobalRecommendationsEmpty();
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(SERVER_MESSAGE_CODES.globalRecommendations);
+    expect(p.payload.length).toBe(0);
+  });
+  test("SimilarUsers 110 empty frame", () => {
+    const raw = buildSimilarUsersEmpty();
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(SERVER_MESSAGE_CODES.similarUsers);
+    expect(p.payload.length).toBe(0);
+  });
+  test("CantConnectToPeer 1001 round-trip", () => {
+    const raw = buildCantConnectToPeer(12345, "alice");
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(SERVER_MESSAGE_CODES.cantConnectToPeer);
+    const parsed = parseCantConnectToPeer(p.payload);
+    expect(parsed.token).toBe(12345);
+    expect(parsed.username).toBe("alice");
+  });
+  test("SendUploadSpeed 121 round-trip", () => {
+    const raw = buildSendUploadSpeed(98765);
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(SERVER_MESSAGE_CODES.sendUploadSpeed);
+    expect(p.payload.readUInt32LE(0)).toBe(98765);
+  });
+  test("tryParseMessage enforces MAX_INCOMING", () => {
+    const oversized = Buffer.alloc(8);
+    oversized.writeUInt32LE(MAX_INCOMING.server16M + 1, 0);
+    oversized.writeUInt32LE(42, 4);
+    expect(tryParseMessage(oversized)).toBeNull();
+    expect(tryParseMessage(oversized, MAX_INCOMING.server448M)).toBeNull();
+  });
+});
+
+describe("Phase 0 — obfuscation tail", () => {
+  test("parseConnectToPeer handles uint32 obfuscation trailing", () => {
+    const parts = [
+      packString("bob"), packString("P"),
+      packIp("1.2.3.4"), packUint32(2234), packUint32(999), Buffer.from([1]),
+      packUint32(1), packUint32(4321),
+    ];
+    const payload = Buffer.concat(parts);
+    const ctp = parseConnectToPeer(payload);
+    expect(ctp.obfuscationType).toBe(1);
+    expect(ctp.obfuscatedPort).toBe(4321);
+  });
+  test("parseConnectToPeer handles uint16 trailing", () => {
+    const parts = [
+      packString("carol"), packString("F"),
+      packIp("5.6.7.8"), packUint32(2234), packUint32(555), Buffer.from([0]),
+      packUint32(2), packUint16(1234),
+    ];
+    const payload = Buffer.concat(parts);
+    const ctp = parseConnectToPeer(payload);
+    expect(ctp.obfuscationType).toBe(2);
+    expect(ctp.obfuscatedPort).toBe(1234);
+  });
+  test("parsePeerAddress handles obfuscation", () => {
+    const payload = Buffer.concat([packString("dave"), packIp("10.0.0.1"), packUint32(2234), packUint32(3), packUint16(5678)]);
+    const addr = parsePeerAddress(payload);
+    expect(addr.obfuscationType).toBe(3);
+    expect(addr.obfuscatedPort).toBe(5678);
+  });
+});
+
+describe("Phase 1 — zlib caps", () => {
+  test("parseFileSearchResponse rejects oversized compressed (>16M)", () => {
+    const big = Buffer.alloc(16 * 1024 * 1024 + 1);
+    expect(() => parseFileSearchResponse(big)).toThrow("too large");
   });
 });
 

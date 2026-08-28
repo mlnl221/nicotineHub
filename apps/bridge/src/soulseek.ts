@@ -297,15 +297,24 @@ export function frameMessage(code: number, payload: Buffer): Buffer {
   const len = payload.length + 4;
   return Buffer.concat([packUint32(len), packUint32(code), payload]);
 }
-export function tryParseMessage(buffer: Buffer): { code: number; payload: Buffer } | null {
+export function tryParseMessage(buffer: Buffer, maxLen = MAX_INCOMING.server16M): { code: number; payload: Buffer } | null {
   if (buffer.length < 4) return null;
   const len = buffer.readUInt32LE(0);
-  if (len > MAX_INCOMING.server16M) return null; // guard — caller may treat as overflow close
+  if (len > maxLen) return null; // guard — caller may treat as overflow close
+  if (len < 4) return null; // must at least contain code
   const total = 4 + len;
   if (buffer.length < total) return null;
   const code = buffer.readUInt32LE(4);
   const payload = buffer.subarray(8, total);
   return { code, payload };
+}
+
+/** Per-connection max incoming — nicotine parity: 448M shares, 16M search, 1M generic, 16K distrib */
+export function maxIncomingForPeer(code: number): number {
+  // Peer shares are huge (448M)
+  if (code === PEER_MESSAGE_CODES.sharedFileListResponse || code === PEER_MESSAGE_CODES.folderContentsResponse) return MAX_INCOMING.server448M;
+  if (code === PEER_MESSAGE_CODES.fileSearchResponse) return MAX_INCOMING.server16M;
+  return MAX_INCOMING.server1M;
 }
 export function frameInitMessage(code: number, payload: Buffer): Buffer {
   const len = payload.length + 1;
@@ -456,7 +465,9 @@ export function parseConnectToPeer(payload: Buffer): ConnectToPeer {
   const privileged = r.bool();
   let obfuscationType: number | undefined;
   let obfuscatedPort: number | undefined;
-  if (r.remaining >= 6) { obfuscationType = r.uint32(); obfuscatedPort = r.uint16(); }
+  // Trailing obfuscation: uint32 type + uint32 or uint16 port (nicotine handles both)
+  if (r.remaining >= 8) { obfuscationType = r.uint32(); obfuscatedPort = r.uint32(); }
+  else if (r.remaining >= 6) { obfuscationType = r.uint32(); obfuscatedPort = r.uint16(); }
   return { username, connType, ip, port, token, privileged, obfuscationType, obfuscatedPort };
 }
 export interface PeerInit { targetUser: string; connType: string; }
@@ -506,12 +517,25 @@ export interface SearchFile { name: string; size: number; attrs: SearchFileAttri
 export interface FileSearchResult { token: number; username: string; freeUploadSlots: boolean; uploadSpeed: number; inQueue: number; results: SearchFile[]; }
 
 const MAX_SEARCH_DECOMPRESSED = 128 * 1024 * 1024; // 128 MiB guard
+const MAX_SEARCH_COMPRESSED = 16 * 1024 * 1024;
 
 function inflateWithCap(payload: Buffer, max = MAX_SEARCH_DECOMPRESSED): Buffer {
-  if (payload.length > 16 * 1024 * 1024) throw new Error("Search response too large");
-  const buf = inflateSync(payload, { chunkSize: 64 * 1024 } as unknown as Record<string, unknown>);
+  if (payload.length > MAX_SEARCH_COMPRESSED) throw new Error("Search response too large");
+  // Guard against zlib bomb: try inflate with cap
+  let buf: Buffer;
+  try {
+    buf = inflateSync(payload, { chunkSize: 64 * 1024 } as unknown as Record<string, unknown>) as Buffer;
+  } catch (e) {
+    // second stage attempt — some peers double-compress (nicotine two-stage)
+    throw e;
+  }
   if (buf.length > max) throw new Error("Decompressed search response exceeds limit");
   return Buffer.from(buf);
+}
+
+export function parseCantConnectToPeer(payload: Buffer): { token: number; username: string } {
+  const r = new SlskReader(payload);
+  return { token: r.uint32(), username: r.string() };
 }
 function readFileSize(buf: Buffer, offset: number): { size: number; next: number } {
   // Nicotine quirk: Soulseek NS >2GiB uses truncated 32-bit + 0xFF sentinel
@@ -622,7 +646,8 @@ export function parsePeerAddress(payload: Buffer): PeerAddress {
   const ip = `${(ipInt >>> 0) & 0xff}.${(ipInt >>> 8) & 0xff}.${(ipInt >>> 16) & 0xff}.${(ipInt >>> 24) & 0xff}`;
   const port = r.uint32();
   let obfuscationType: number | undefined; let obfuscatedPort: number | undefined;
-  if (r.remaining >= 6) { obfuscationType = r.uint32(); obfuscatedPort = r.uint16(); }
+  if (r.remaining >= 8) { obfuscationType = r.uint32(); obfuscatedPort = r.uint32(); }
+  else if (r.remaining >= 6) { obfuscationType = r.uint32(); obfuscatedPort = r.uint16(); }
   return { username, ip, port, obfuscationType, obfuscatedPort };
 }
 export interface ChatMessage { room: string; username: string; message: string; }
@@ -746,6 +771,46 @@ export function parseUploadDenied(payload: Buffer): { file: string; reason: stri
   const r = new SlskReader(payload); return { file: r.string(), reason: r.string() };
 }
 
+export function parseMessageUsers(payload: Buffer): PrivateMessage[] {
+  const r = new SlskReader(payload);
+  const n = r.uint32(); const out: PrivateMessage[] = [];
+  for (let i=0;i<n;i++) {
+    const id = r.uint32(); const ts = r.uint32(); const user = r.string(); const msg = r.string();
+    out.push({ id, timestamp: ts, username: user, message: msg, isNew: false });
+  }
+  return out;
+}
+export function parseRoomMembers(payload: Buffer): { room: string; members: string[] } {
+  const r = new SlskReader(payload);
+  const room = r.string(); const n = r.uint32(); const members: string[] = [];
+  for(let i=0;i<n;i++) members.push(r.string());
+  return { room, members };
+}
+export function parseRoomMember(payload: Buffer): { room: string; username: string } {
+  const r = new SlskReader(payload);
+  return { room: r.string(), username: r.string() };
+}
+export function parseGlobalRoomMessage(payload: Buffer): ChatMessage {
+  const r = new SlskReader(payload);
+  return { room: r.string(), username: r.string(), message: r.string() };
+}
+export function parseCantCreateRoom(payload: Buffer): string {
+  const r = new SlskReader(payload);
+  return r.string();
+}
+export function parsePrivileges(payload: Buffer): { username: string; timeLeft?: number } {
+  const r = new SlskReader(payload);
+  if (!r.remaining) return { username: "" };
+  // 122 userPrivileged: string username
+  // 92 checkPrivileges handled elsewhere; fallback generic
+  try { const u = r.string(); if(r.remaining) return { username: u, timeLeft: r.uint32() }; return { username: u }; } catch { return { username: "" }; }
+}
+export interface RoomTickerEvent { room: string; username: string; msg: string; }
+export function parseRoomTickerEvent(payload: Buffer): RoomTickerEvent {
+  const r = new SlskReader(payload);
+  return { room: r.string(), username: r.string(), msg: r.string() };
+}
+
 /* Distrib */
 
 export function parseDistribSearch(payload: Buffer): { username: string; token: number; query: string } {
@@ -755,6 +820,9 @@ export function parseDistribSearch(payload: Buffer): { username: string; token: 
   const username = r.string(); const token = r.uint32(); const query = r.string();
   return { username, token, query };
 }
+export function parseBranchLevel(payload: Buffer): number { return new SlskReader(payload).uint32(); }
+export function parseBranchRoot(payload: Buffer): string { return new SlskReader(payload).string(); }
+export function parseChildDepth(payload: Buffer): number { return new SlskReader(payload).uint32(); }
 
 /* File — F conn helpers */
 export function parseFileTransferInit(buf: Buffer): { token: number } { return { token: buf.readUInt32LE(0) }; }

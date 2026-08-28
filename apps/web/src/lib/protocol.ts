@@ -341,6 +341,16 @@ export type UserinfoRequestMessage =
     };
 
 
+export interface ServerReconnectMessage {
+  type: "server:reconnect";
+  attempt: number;
+  delay: number;
+}
+export interface ServerReconnectFailedMessage {
+  type: "server:reconnect";
+  error: string;
+}
+
 export type BridgeOutboundMessage =
   | LoginStartMessage
   | LoginResultSuccess
@@ -356,7 +366,9 @@ export type BridgeOutboundMessage =
   | TransferFinishedMessage
   | UserInfoEventMessage
   | UserInfoResponseOutbound
-  | UserInfoFailedOutbound;
+  | UserInfoFailedOutbound
+  | ServerReconnectMessage
+  | ServerReconnectFailedMessage;
 
 export type BridgeInboundMessage =
   | LoginRequest
