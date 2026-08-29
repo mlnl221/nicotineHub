@@ -27,10 +27,10 @@ export function TopBar({ title = "Nicotine Hub", subtitle, showBack, backHref }:
   };
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between gap-2 bg-surface-container-lowest/80 backdrop-blur-xl border-b border-outline-variant/10 px-4 pt-[calc(0.75rem+env(safe-area-inset-top,0px))] pb-3 shadow-sm dark:bg-surface-container-low/80 md:hidden">
+    <header className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between gap-2 bg-surface-container-lowest/80 backdrop-blur-xl border-b border-outline-variant/10 px-4 pl-[calc(1rem+env(safe-area-inset-left,0px))] pr-[calc(1rem+env(safe-area-inset-right,0px))] pt-[calc(0.75rem+env(safe-area-inset-top,0px))] pb-3 shadow-sm dark:bg-surface-container-low/80 md:hidden max-w-[100vw] overflow-hidden">
       <div className="flex items-center gap-2 min-w-0 flex-1">
         {showBack && backHref ? (
-          <Link href={backHref} className="p-2 -ml-2 rounded-full hover:bg-surface-container-high active:scale-95 transition-colors">
+          <Link href={backHref} className="flex h-11 w-11 shrink-0 items-center justify-center -ml-2 rounded-full hover:bg-surface-container-high active:scale-95 transition-colors">
             <span className="material-symbols-outlined text-[20px] text-on-surface-variant">arrow_back</span>
           </Link>
         ) : (
@@ -38,10 +38,10 @@ export function TopBar({ title = "Nicotine Hub", subtitle, showBack, backHref }:
             N
           </Link>
         )}
-        <div className="min-w-0">
-          <h1 className="font-headline text-[15px] font-bold tracking-tight text-on-surface truncate leading-none">{title}</h1>
-          {subtitle ? <p className="font-label text-[10px] uppercase tracking-widest text-on-surface-variant truncate leading-none mt-0.5">{subtitle}</p> : null}
-          {state.user && !subtitle ? <p className="font-label text-[10px] text-on-surface-variant truncate">{state.user}</p> : null}
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <h1 className="font-headline text-[15px] font-bold tracking-tight text-on-surface truncate leading-none max-w-full">{title}</h1>
+          {subtitle ? <p className="font-label text-[10px] uppercase tracking-widest text-on-surface-variant truncate leading-none mt-0.5 max-w-full">{subtitle}</p> : null}
+          {state.user && !subtitle ? <p className="font-label text-[10px] text-on-surface-variant truncate max-w-[40vw]">{state.user}</p> : null}
         </div>
       </div>
 
@@ -49,7 +49,7 @@ export function TopBar({ title = "Nicotine Hub", subtitle, showBack, backHref }:
         <button
           onClick={handleToggle}
           aria-label="Toggle theme"
-          className="p-2 rounded-full hover:bg-surface-container-high active:scale-95 transition-colors"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-surface-container-high active:scale-95 transition-colors"
         >
           <span className="material-symbols-outlined text-[20px] text-on-surface-variant">
             {theme === "dark" ? "light_mode" : "dark_mode"}
@@ -57,7 +57,7 @@ export function TopBar({ title = "Nicotine Hub", subtitle, showBack, backHref }:
         </button>
         <Link
           href="/settings"
-          className="p-2 rounded-full hover:bg-surface-container-high active:scale-95 transition-colors"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-surface-container-high active:scale-95 transition-colors"
           aria-label="Settings"
         >
           <span className="material-symbols-outlined text-[20px] text-on-surface-variant">settings</span>

@@ -35,7 +35,7 @@ export default function BuddiesPage() {
       <Sidebar />
       <TopBar title="Buddies" subtitle="Trusted peers • watch status" />
       <main className="md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
-        <div className="mx-auto w-full max-w-screen-2xl flex-1 px-6 py-8 md:px-10">
+          <div className="mx-auto w-full max-w-screen-2xl flex-1 px-4 sm:px-6 py-8 md:px-10 overflow-x-hidden max-w-full">
           <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
               <h1 className="font-headline text-4xl font-bold tracking-tight text-on-background">Buddies</h1>
@@ -47,8 +47,8 @@ export default function BuddiesPage() {
                 {buddies.length} buddies • {onlineCount} online
               </p>
             </div>
-            <div className="flex gap-2">
-              <div className="relative">
+            <div className="flex gap-2 min-w-0">
+              <div className="relative flex-1 sm:flex-none min-w-0">
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]">
                   search
                 </span>
@@ -56,15 +56,15 @@ export default function BuddiesPage() {
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
                   placeholder="Filter buddies..."
-                  className="w-64 rounded-full bg-surface-container-lowest py-2 pl-9 pr-4 font-body text-sm placeholder:text-outline-variant focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  className="w-full sm:w-64 min-h-11 rounded-full bg-surface-container-lowest py-2.5 pl-9 pr-4 font-body text-sm placeholder:text-outline-variant focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
               </div>
             </div>
           </div>
 
           {/* Add buddy bar */}
-          <div className="mb-8 flex gap-2">
-            <div className="relative flex-1">
+          <div className="mb-8 flex gap-2 min-w-0">
+            <div className="relative flex-1 min-w-0">
               <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]">
                 person_add
               </span>
@@ -73,12 +73,12 @@ export default function BuddiesPage() {
                 onChange={(e) => setAddInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleAdd()}
                 placeholder="Add buddy… (username)"
-                className="w-full rounded-xl bg-surface-container-lowest py-3 pl-10 pr-4 font-body text-sm ghost-border focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="w-full rounded-xl bg-surface-container-lowest py-3 pl-10 pr-4 font-body text-sm ghost-border focus:outline-none focus:ring-2 focus:ring-primary/20 min-h-11"
               />
             </div>
             <button
               onClick={handleAdd}
-              className="rounded-xl bg-primary px-6 py-3 font-label text-xs font-bold uppercase tracking-widest text-on-primary hover:bg-primary-container"
+              className="shrink-0 rounded-xl bg-primary px-6 py-3 min-h-11 font-label text-xs font-bold uppercase tracking-widest text-on-primary hover:bg-primary-container"
             >
               Add
             </button>

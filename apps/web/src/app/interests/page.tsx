@@ -60,8 +60,8 @@ export default function InterestsPage() {
     <div className="flex min-h-screen bg-background font-body text-on-surface antialiased">
       <Sidebar />
       <TopBar title="Interests" />
-      <main className="md:ml-72 flex min-h-screen flex-1 flex-col pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
-        <div className="flex w-full max-w-screen-2xl flex-1 flex-col gap-12 px-6 py-12 md:px-10 lg:flex-row">
+      <main className="md:ml-72 flex min-h-screen flex-1 flex-col pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 overflow-x-hidden max-w-full">
+        <div className="flex w-full max-w-screen-2xl flex-1 flex-col gap-8 md:gap-12 px-4 sm:px-6 py-6 md:py-12 md:px-10 lg:flex-row max-w-full overflow-hidden">
           {/* Left Column */}
           <div className="flex flex-1 flex-col space-y-8 md:space-y-12">
             <header className="space-y-3">
@@ -95,10 +95,13 @@ export default function InterestsPage() {
                     <p className="font-body text-sm text-outline">No likes yet. Add one below — e.g. an artist, genre, or tag.</p>
                   ) : (
                     likes.map((thing) => (
-                      <button
+                      <div
                         key={thing}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => fetchItemDetails(thing)}
-                        className="chip flex cursor-pointer items-center rounded-full border border-primary/20 bg-primary text-on-primary px-5 py-2.5 font-label text-sm gap-1.5 shadow-[0_2px_8px_rgba(9,76,178,0.15)] transition-all active:scale-95 hover:opacity-90"
+                        onKeyDown={(e) => e.key === "Enter" && fetchItemDetails(thing)}
+                        className="chip flex cursor-pointer items-center rounded-full border border-primary/20 bg-primary text-on-primary px-5 py-2.5 min-h-9 font-label text-sm gap-1.5 shadow-[0_2px_8px_rgba(9,76,178,0.15)] transition-all active:scale-95 hover:opacity-90"
                         title="Tap for recommendations. Long-press to remove."
                         onContextMenu={(e) => {
                           e.preventDefault();
@@ -106,19 +109,18 @@ export default function InterestsPage() {
                         }}
                       >
                         <span>{thing}</span>
-                        <span
-                          role="button"
-                          tabIndex={0}
+                        <button
+                          type="button"
+                          aria-label="Remove like"
                           onClick={(e) => {
                             e.stopPropagation();
                             removeLike(thing);
                           }}
-                          onKeyDown={(e) => e.key === "Enter" && removeLike(thing)}
-                          className="material-symbols-outlined ml-1 text-[16px] opacity-80"
+                          className="ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/20 -mr-1 hover:bg-white/30"
                         >
-                          close
-                        </span>
-                      </button>
+                          <span className="material-symbols-outlined text-[14px]">close</span>
+                        </button>
+                      </div>
                     ))
                   )}
                   <button
@@ -126,18 +128,18 @@ export default function InterestsPage() {
                     className="hidden"
                     aria-hidden
                   />
-                  <div className="mt-3 flex w-full items-center">
+                  <div className="mt-3 flex w-full items-center gap-0 min-w-0 overflow-hidden">
                     <input
                       id="like-input"
                       value={likeInput}
                       onChange={(e) => setLikeInput(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && handleLikeAdd()}
                       placeholder="Add a like…"
-                      className="w-full rounded-l-full border border-outline-variant/30 bg-surface-container-lowest px-4 py-2.5 font-body text-sm text-on-surface placeholder:text-outline-variant focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                      className="flex-1 min-w-0 w-auto rounded-l-full border border-outline-variant/30 bg-surface-container-lowest px-4 py-2.5 min-h-11 font-body text-sm text-on-surface placeholder:text-outline-variant focus:border-primary focus:ring-1 focus:ring-primary outline-none"
                     />
                     <button
                       onClick={handleLikeAdd}
-                      className="rounded-r-full bg-primary px-5 py-2.5 text-on-primary transition-colors hover:bg-primary-container active:scale-95"
+                      className="shrink-0 rounded-r-full bg-primary px-5 py-2.5 min-h-11 text-on-primary transition-colors hover:bg-primary-container active:scale-95"
                     >
                       <span className="material-symbols-outlined text-[18px]">add</span>
                     </button>
@@ -164,32 +166,31 @@ export default function InterestsPage() {
                     hates.map((thing) => (
                       <div
                         key={thing}
-                        className="chip flex cursor-pointer items-center rounded-full border border-error/20 bg-error-container text-on-error-container px-4 py-2 font-label text-xs gap-1.5 opacity-90"
+                        className="chip flex cursor-pointer items-center rounded-full border border-error/20 bg-error-container text-on-error-container px-4 py-2 min-h-9 font-label text-xs gap-1.5 opacity-90"
                       >
                         <span>{thing}</span>
-                        <span
-                          role="button"
-                          tabIndex={0}
+                        <button
+                          type="button"
+                          aria-label="Remove dislike"
                           onClick={() => removeHate(thing)}
-                          onKeyDown={(e) => e.key === "Enter" && removeHate(thing)}
-                          className="material-symbols-outlined ml-1 text-[16px] text-on-error-container/80"
+                          className="ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-black/10 -mr-1 hover:bg-black/20"
                         >
-                          close
-                        </span>
+                          <span className="material-symbols-outlined text-[14px]">close</span>
+                        </button>
                       </div>
                     ))
                   )}
-                  <div className="mt-3 flex w-full items-center">
+                  <div className="mt-3 flex w-full items-center gap-0 min-w-0 overflow-hidden">
                     <input
                       value={hateInput}
                       onChange={(e) => setHateInput(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && handleHateAdd()}
                       placeholder="Add a dislike…"
-                      className="w-full rounded-l-full border border-outline-variant/30 bg-surface-container-lowest px-4 py-2.5 font-body text-sm text-on-surface placeholder:text-outline-variant focus:border-error focus:ring-1 focus:ring-error outline-none"
+                      className="flex-1 min-w-0 w-auto rounded-l-full border border-outline-variant/30 bg-surface-container-lowest px-4 py-2.5 min-h-11 font-body text-sm text-on-surface placeholder:text-outline-variant focus:border-error focus:ring-1 focus:ring-error outline-none"
                     />
                     <button
                       onClick={handleHateAdd}
-                      className="rounded-r-full bg-surface-container-high px-5 py-2.5 text-error transition-colors hover:bg-error hover:text-on-error active:scale-95"
+                      className="shrink-0 rounded-r-full bg-surface-container-high px-5 py-2.5 min-h-11 text-error transition-colors hover:bg-error hover:text-on-error active:scale-95"
                     >
                       <span className="material-symbols-outlined text-[18px]">add</span>
                     </button>
@@ -243,25 +244,25 @@ export default function InterestsPage() {
                     )}
                   </div>
                 </div>
-                <div className="mt-4 flex gap-2">
+                <div className="mt-4 flex flex-wrap gap-2">
                   <button
                     onClick={() => {
                       const q = itemName;
                       window.location.href = `/search?q=${encodeURIComponent(q)}`;
                     }}
-                    className="rounded-lg bg-surface-container-high px-4 py-2 font-label text-xs uppercase tracking-widest hover:bg-surface-variant"
+                    className="rounded-lg bg-surface-container-high px-4 py-2.5 min-h-9 font-label text-xs uppercase tracking-widest hover:bg-surface-variant"
                   >
                     Search for Item
                   </button>
                   <button
                     onClick={() => addLike(itemName)}
-                    className="rounded-lg bg-primary px-4 py-2 font-label text-xs font-semibold uppercase tracking-widest text-on-primary"
+                    className="rounded-lg bg-primary px-4 py-2.5 min-h-9 font-label text-xs font-semibold uppercase tracking-widest text-on-primary"
                   >
                     I Like This
                   </button>
                   <button
                     onClick={() => addHate(itemName)}
-                    className="rounded-lg bg-surface-container-high px-4 py-2 font-label text-xs uppercase tracking-widest text-error"
+                    className="rounded-lg bg-surface-container-high px-4 py-2.5 min-h-9 font-label text-xs uppercase tracking-widest text-error"
                   >
                     I Dislike
                   </button>
@@ -271,8 +272,8 @@ export default function InterestsPage() {
           </div>
 
           {/* Right Column: Recommendations Panel */}
-          <aside className="w-full lg:w-96 flex-shrink-0">
-            <div className="sticky top-6 rounded-xl bg-surface-container-lowest md:bg-surface-container-low/60 p-6 md:p-8 backdrop-blur-sm ghost-border">
+          <aside className="w-full lg:w-96 flex-shrink-0 max-w-full overflow-hidden">
+            <div className="lg:sticky lg:top-6 rounded-xl bg-surface-container-lowest md:bg-surface-container-low/60 p-6 md:p-8 backdrop-blur-sm ghost-border max-w-full overflow-hidden">
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="font-headline text-xl font-semibold text-on-surface">Recommendations</h3>
                 <span className="material-symbols-outlined text-tertiary">auto_awesome</span>

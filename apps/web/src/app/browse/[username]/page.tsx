@@ -56,13 +56,13 @@ export default function BrowseUserPage() {
   const totalFiles = folders.reduce((acc, f) => acc + f.files.length, 0);
 
   return (
-    <div className="flex min-h-screen bg-background font-body text-on-surface antialiased">
+    <div className="flex min-h-screen max-w-[100vw] overflow-x-hidden bg-background font-body text-on-surface antialiased">
       <Sidebar />
       <TopBar title="Browse" />
       <main className="md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         {/* Header breadcrumbs */}
-        <header className="sticky top-0 z-10 border-b border-surface-container-highest/20 bg-surface-container-lowest/80 backdrop-blur-xl px-6 py-4 md:px-8">
-          <nav className="flex items-center gap-1 font-body text-xs overflow-x-auto">
+        <header className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-10 border-b border-surface-container-highest/20 bg-surface-container-lowest/80 backdrop-blur-xl px-6 py-4 md:px-8">
+          <nav className="flex items-center gap-1 font-body text-xs overflow-x-auto hide-scrollbar whitespace-nowrap max-w-full">
             <button onClick={() => router.push("/browse")} className="text-on-surface-variant hover:text-primary whitespace-nowrap">
               Browse
             </button>
@@ -75,22 +75,22 @@ export default function BrowseUserPage() {
               </>
             ) : null}
           </nav>
-          <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-            <div>
-              <h1 className="font-headline text-2xl font-bold tracking-tight">{username}&apos;s Shares</h1>
+          <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-end md:justify-between max-w-full overflow-hidden">
+            <div className="min-w-0">
+              <h1 className="font-headline text-2xl font-bold tracking-tight truncate max-w-full">{username}&apos;s Shares</h1>
               <p className="mt-1 font-body text-xs text-on-surface-variant">
                 {loading ? "Loading…" : `${folders.length} folders • ${totalFiles} files • ${formatBytes(totalSize)}`}
                 {error ? ` • ${error}` : ""}
               </p>
             </div>
-            <div className="flex gap-2">
-              <div className="relative">
+            <div className="flex gap-2 min-w-0">
+              <div className="relative flex-1 sm:flex-none min-w-0">
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-outline">search</span>
                 <input
                   value={fileQuery}
                   onChange={(e) => setFileQuery(e.target.value)}
                   placeholder="Search files in folder..."
-                  className="w-64 rounded-full bg-surface-container-low py-2 pl-9 pr-4 font-body text-sm placeholder:text-outline-variant focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  className="w-full sm:w-64 min-h-11 rounded-full bg-surface-container-low py-2.5 pl-9 pr-4 font-body text-sm placeholder:text-outline-variant focus:outline-none focus:ring-2 focus:ring-primary/20"
                 />
               </div>
             </div>
@@ -152,7 +152,7 @@ export default function BrowseUserPage() {
                   setSelectedFolder(e.target.value);
                   openFolder(e.target.value);
                 }}
-                className="w-full rounded-lg bg-surface-container-low px-3 py-2 font-body text-sm"
+                className="w-full rounded-lg bg-surface-container-low px-3 py-2.5 min-h-11 font-body text-sm"
               >
                 {filteredFolders.map((f) => (
                   <option key={f.name} value={f.name}>
@@ -220,7 +220,7 @@ export default function BrowseUserPage() {
                             </div>
                             <button
                               onClick={() => setPropsFile({ name: file.name, size: file.size, ext: file.ext, attrs: file.attrs, folder: activeFolder.name })}
-                              className="rounded-full bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-surface-variant"
+                              className="shrink-0 rounded-full bg-surface-container-high px-3 py-2.5 min-h-9 font-label text-xs hover:bg-surface-variant"
                               title="Properties"
                             >
                               <span className="material-symbols-outlined text-[16px]">info</span>
@@ -235,7 +235,7 @@ export default function BrowseUserPage() {
                                 const vp = file.name.includes("\\\\") || file.name.includes("/") ? file.name : virtualPath;
                                 requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName });
                               }}
-                              className={`rounded-full px-4 py-2 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline cursor-not-allowed" : "bg-primary text-on-primary hover:bg-primary-container"}`}
+                              className={`shrink-0 rounded-full px-4 py-2.5 min-h-9 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline cursor-not-allowed" : "bg-primary text-on-primary hover:bg-primary-container"}`}
                             >
                               {isDemo ? "Disabled" : "Download"}
                             </button>

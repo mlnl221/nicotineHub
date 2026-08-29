@@ -29,28 +29,28 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
               value={filters[f.key] as string}
               onChange={(e) => onChange({ [f.key]: e.target.value })}
               placeholder={f.placeholder}
-              className="rounded-xl bg-surface-container-lowest px-3 py-2 font-body text-sm text-on-surface ghost-border transition-all focus:border-primary focus:outline-none"
+              className="rounded-xl bg-surface-container-lowest px-3 py-2.5 min-h-11 font-body text-sm text-on-surface ghost-border transition-all focus:border-primary focus:outline-none"
             />
           </label>
         ))}
 
-        <label className="flex items-center justify-between rounded-xl bg-surface-container-lowest px-3 py-2 ghost-border">
+        <label className="flex items-center justify-between rounded-xl bg-surface-container-lowest px-3 py-3 min-h-11 ghost-border">
           <span className="font-label text-xs tracking-wide text-on-surface-variant">Free slot only</span>
           <input
             type="checkbox"
             checked={filters.freeSlot}
             onChange={(e) => onChange({ freeSlot: e.target.checked })}
-            className="h-5 w-5 accent-[#094cb2]"
+            className="h-6 w-6 accent-[#094cb2] shrink-0"
           />
         </label>
 
-        <label className="flex items-center justify-between rounded-xl bg-surface-container-lowest px-3 py-2 ghost-border">
+        <label className="flex items-center justify-between rounded-xl bg-surface-container-lowest px-3 py-3 min-h-11 ghost-border">
           <span className="font-label text-xs tracking-wide text-on-surface-variant">Public files only</span>
           <input
             type="checkbox"
             checked={filters.publicOnly}
             onChange={(e) => onChange({ publicOnly: e.target.checked })}
-            className="h-5 w-5 accent-[#094cb2]"
+            className="h-6 w-6 accent-[#094cb2] shrink-0"
           />
         </label>
       </div>
@@ -59,7 +59,7 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
         <button
           type="button"
           onClick={onClear}
-          className="rounded-full px-4 py-1.5 font-label text-xs text-on-surface-variant transition-colors hover:text-primary"
+          className="rounded-full px-4 py-2.5 min-h-9 font-label text-xs text-on-surface-variant transition-colors hover:text-primary"
         >
           Clear filters
         </button>
