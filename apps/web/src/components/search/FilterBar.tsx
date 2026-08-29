@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { FilterState } from "@/lib/protocol";
 
 interface FilterBarProps {
@@ -19,6 +20,22 @@ const FIELDS: Array<{ key: keyof FilterState; label: string; placeholder: string
 ];
 
 export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
+  // local debounced text state 150ms — checkboxes bypass debounce
+  const [local, setLocal] = useState<FilterState>(filters);
+  useEffect(() => setLocal(filters), [filters]);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const diff: Partial<FilterState> = {};
+      let changed = false;
+      for (const k of Object.keys(local) as Array<keyof FilterState>) {
+        if (k === "freeSlot" || k === "publicOnly") continue;
+        if (local[k] !== filters[k]) { (diff as Record<string, unknown>)[k] = local[k]; changed = true; }
+      }
+      if (changed) onChange(diff);
+    }, 150);
+    return () => clearTimeout(t);
+  }, [local, filters, onChange]);
+
   return (
     <div className="border-b border-outline-variant/30 bg-surface-container px-4 py-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -26,8 +43,8 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
           <label key={f.key as string} className="flex flex-col gap-1">
             <span className="font-label text-xs tracking-wide text-on-surface-variant">{f.label}</span>
             <input
-              value={filters[f.key] as string}
-              onChange={(e) => onChange({ [f.key]: e.target.value })}
+              value={local[f.key] as string}
+              onChange={(e) => setLocal((prev) => ({ ...prev, [f.key]: e.target.value }))}
               placeholder={f.placeholder}
               className="rounded-xl bg-surface-container-lowest px-3 py-2.5 min-h-11 font-body text-sm text-on-surface ghost-border transition-all focus:border-primary focus:outline-none"
             />

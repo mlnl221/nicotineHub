@@ -10,6 +10,7 @@ import { WishlistProvider } from "@/lib/wishlist";
 import { StatisticsProvider } from "@/lib/statistics";
 import { ToastHost } from "@/components/ToastHost";
 import { NowPlayingSync } from "@/components/NowPlayingSync";
+import { WebVitals } from "@/components/WebVitals";
 
 export const metadata: Metadata = {
   title: "Nicotine Hub",
@@ -80,6 +81,7 @@ export default function RootLayout({
             </SessionProvider>
           </ConfigProvider>
         </ThemeProvider>
+        <WebVitals />
       </body>
     </html>
   );

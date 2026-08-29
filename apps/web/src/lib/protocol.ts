@@ -47,6 +47,14 @@ export interface SearchRequest {
   query: string;
 }
 
+/** Client-side pagination request — fetch next window of cached rows */
+export interface SearchPageRequest {
+  type: "search:page";
+  searchId: string;
+  offset: number;
+  limit: number;
+}
+
 export interface SearchUserRequest {
   type: "search:user";
   searchId: string;
@@ -122,12 +130,24 @@ export interface SearchResultMessage {
   searchId: string;
   token: number;
   rows: SearchRow[];
+  /** Present when this batch came from bridge memory cache (5m TTL) */
+  cached?: boolean;
 }
 
 export interface SearchEndMessage {
   type: "search:end";
   searchId: string;
   reason: "max_results" | "stopped" | "timeout" | "error";
+}
+
+export interface SearchPageMessage {
+  type: "search:page";
+  searchId: string;
+  offset: number;
+  limit: number;
+  rows: SearchRow[];
+  total: number;
+  hasMore: boolean;
 }
 
 /** Filter state for the result filter bar (full nicotine parity). */
@@ -333,6 +353,10 @@ export interface BrowseSharesMessage {
   username: string;
   folders: BrowseFolder[];
   error?: string;
+  /** Pagination metadata — when present, client should page with browse:page */
+  total?: number;
+  hasMore?: boolean;
+  offset?: number;
 }
 
 export interface BrowseFolderMessage {
@@ -342,6 +366,16 @@ export interface BrowseFolderMessage {
   folder: string;
   files: BrowseFile[];
   error?: string;
+  total?: number;
+  hasMore?: boolean;
+  offset?: number;
+}
+
+export interface BrowsePageRequest {
+  type: "browse:page";
+  username: string;
+  offset: number;
+  limit: number;
 }
 
 export interface BrowseSharesRequest {
@@ -496,6 +530,20 @@ export interface ServerReconnectFailedMessage {
 }
 
 /* ------------------------------------------------------------------ *
+ * Heartbeat (bridge <-> web keepalive, 25s)
+ * ------------------------------------------------------------------ */
+
+export interface PingRequest {
+  type: "ping";
+  ts: number;
+}
+
+export interface PongMessage {
+  type: "pong";
+  ts: number;
+}
+
+/* ------------------------------------------------------------------ *
  * Diagnostics
  * ------------------------------------------------------------------ */
 
@@ -634,6 +682,7 @@ export type BridgeOutboundMessage =
   | SearchStartMessage
   | SearchResultMessage
   | SearchEndMessage
+  | SearchPageMessage
   | TransferUpdateMessage
   | TransferRemovedMessage
   | TransferStatsMessage
@@ -657,7 +706,8 @@ export type BridgeOutboundMessage =
   | PluginToggledMessage
   | PluginReloadedMessage
   | PluginUninstalledMessage
-  | PluginOutputMessage;
+  | PluginOutputMessage
+  | PongMessage;
 
 export type BridgeInboundMessage =
   | LoginRequest
@@ -666,6 +716,7 @@ export type BridgeInboundMessage =
   | SearchRoomRequest
   | SearchWishlistRequest
   | SearchStopRequest
+  | SearchPageRequest
   | DownloadRequest
   | DownloadControlRequest
   | UploadControlRequest
@@ -674,6 +725,7 @@ export type BridgeInboundMessage =
   | ChatGlobalRequest
   | BrowseSharesRequest
   | BrowseFolderRequest
+  | BrowsePageRequest
   | UserinfoRequestMessage
   | DiagnosticsClearRequest
   | DiagnosticsSubscribeRequest
@@ -685,4 +737,5 @@ export type BridgeInboundMessage =
   | PluginSettingsRequest
   | PluginResetSettingsRequest
   | PluginInstallRequest
-  | PluginInstallUrlRequest;
+  | PluginInstallUrlRequest
+  | PingRequest;
