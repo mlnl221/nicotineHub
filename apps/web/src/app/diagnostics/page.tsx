@@ -11,6 +11,8 @@ import { BottomNav } from "@/components/mobile/BottomNav";
 import type { DiagEntry, DiagLevel, DiagnosticsHealth } from "@/lib/protocol";
 import { PortChecker } from "@/components/PortChecker";
 import { StatisticsPanel } from "@/components/StatisticsPanel";
+import { useConfig } from "@/lib/config/provider";
+import { formatStrftime } from "@/lib/chatFormat";
 
 const LEVELS: DiagLevel[] = ["debug", "info", "warn", "error"];
 const LEVEL_COLOR: Record<DiagLevel, string> = {
@@ -20,9 +22,10 @@ const LEVEL_COLOR: Record<DiagLevel, string> = {
   error: "text-error",
 };
 
-function formatTime(iso: string): string {
+function formatTime(iso: string, fmt?: string): string {
   try {
     const d = new Date(iso);
+    if (fmt && fmt !== "%x %X") return formatStrftime(d, fmt);
     return d.toISOString().slice(11, 19) + "." + String(d.getMilliseconds()).padStart(3, "0");
   } catch { return iso; }
 }
@@ -41,6 +44,7 @@ function HealthCard({ title, icon, children }: { title: string; icon: string; ch
 
 export default function DiagnosticsPage() {
   const { state, send, subscribe } = useSession();
+  const { settings } = useConfig();
   const router = useRouter();
   let transfersApi: ReturnType<typeof useTransfers> | null = null;
   try { transfersApi = useTransfers(); } catch { transfersApi = null; }
@@ -207,6 +211,15 @@ export default function DiagnosticsPage() {
     }
     return true;
   });
+  const isCollapsed = settings.logging.logcollapsed ?? true;
+  const grouped = isCollapsed ? (() => {
+    const m = new Map<string, DiagEntry[]>();
+    for (const e of filtered) {
+      if (!m.has(e.scope)) m.set(e.scope, []);
+      m.get(e.scope)!.push(e);
+    }
+    return Array.from(m.entries());
+  })() : null;
 
   const handleCopy = useCallback(async () => {
     const text = filtered.map((e) => `[${e.ts}] ${e.level.toUpperCase()} [${e.scope}] ${e.msg}${e.meta ? " " + JSON.stringify(e.meta) : ""}`).join("\n");
@@ -354,9 +367,26 @@ export default function DiagnosticsPage() {
             >
               {filtered.length === 0 ? (
                 <div className="py-8 text-center font-body text-xs text-on-surface-variant dark:text-outline">No logs yet — logs appear here in real time (bridge + browser). Try a search or download.</div>
+              ) : isCollapsed && grouped ? (
+                grouped.map(([scope, entries]) => (
+                  <details key={scope} open className="mb-2">
+                    <summary className="cursor-pointer font-semibold text-xs uppercase tracking-widest text-on-surface-variant">{scope} — {entries.length}</summary>
+                    <div className="mt-1 space-y-1">
+                      {entries.map((e, i) => (
+                        <div key={i} className="flex gap-2 whitespace-pre-wrap break-words">
+                          <span className="shrink-0 text-on-surface-variant dark:text-outline">{formatTime(e.ts, settings.logging.log_timestamp)}</span>
+                          <span className={`shrink-0 font-semibold uppercase ${LEVEL_COLOR[e.level]}`}>{e.level}</span>
+                          <span className="shrink-0 rounded bg-surface-container-high px-1 py-0 dark:bg-surface-variant">{e.scope}</span>
+                          <span className="text-on-surface dark:text-inverse-on-surface">{e.msg}</span>
+                          {e.meta && <span className="text-on-surface-variant dark:text-outline">{JSON.stringify(e.meta)}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                ))
               ) : filtered.map((e, i) => (
                 <div key={i} className="flex gap-2 whitespace-pre-wrap break-words">
-                  <span className="shrink-0 text-on-surface-variant dark:text-outline">{formatTime(e.ts)}</span>
+                  <span className="shrink-0 text-on-surface-variant dark:text-outline">{formatTime(e.ts, settings.logging.log_timestamp)}</span>
                   <span className={`shrink-0 font-semibold uppercase ${LEVEL_COLOR[e.level]}`}>{e.level}</span>
                   <span className="shrink-0 rounded bg-surface-container-high px-1 py-0 dark:bg-surface-variant">{e.scope}</span>
                   <span className="text-on-surface dark:text-inverse-on-surface">{e.msg}</span>

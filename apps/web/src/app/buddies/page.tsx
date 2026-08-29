@@ -156,7 +156,7 @@ export default function BuddiesPage() {
                     <h3 className="truncate font-headline text-base font-semibold text-on-surface">{b.username}</h3>
                     <p className="mt-1 flex items-center gap-1 font-label text-xs text-on-surface-variant">
                       <span className="material-symbols-outlined text-[14px]">{isOnline ? "public" : "schedule"}</span>
-                      {b.country ? `${b.country} • ` : ""}
+                      {b.country ? `${(() => { try { const cc = b.country!.toUpperCase(); if (cc.length !== 2) return `${cc} • `; const A = 0x1F1E6; return `${String.fromCodePoint(A + cc.charCodeAt(0) - 65, A + cc.charCodeAt(1) - 65)} ${cc} • `; } catch { return `${b.country} • `; } })()}` : ""}
                       {isOnline ? "Online" : isAway ? "Away" : b.lastSeen ? `Last seen ${b.lastSeen}` : "Offline"}
                       {b.privileged ? " • ★ Privileged" : ""}
                     </p>

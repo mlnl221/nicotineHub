@@ -256,7 +256,20 @@ export function PluginsSection() {
                       <button onClick={() => openSettings(p)} className="font-label text-xs text-primary underline">{expandedSettings === p.name ? "Hide settings" : "Settings…"}</button>
                       {expandedSettings === p.name ? (
                         <div className="mt-3 rounded-xl bg-surface-container-lowest p-4 ghost-border">
-                          {Object.entries(metas as Record<string, MetaSetting>).map(([k, meta]) => renderField(k, meta, editValues[k]))}
+                          {(() => {
+                            const grouped = new Map<string, Array<[string, MetaSetting]>>();
+                            for (const [k, meta] of Object.entries(metas as Record<string, MetaSetting>)) {
+                              const g = meta.group || "General";
+                              if (!grouped.has(g)) grouped.set(g, []);
+                              grouped.get(g)!.push([k, meta]);
+                            }
+                            return Array.from(grouped.entries()).map(([group, fields]) => (
+                              <div key={group} className="mb-4 rounded-lg bg-surface-container-low p-3">
+                                <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant mb-2">{group}</h4>
+                                {fields.map(([k, meta]) => renderField(k, meta, editValues[k]))}
+                              </div>
+                            ));
+                          })()}
                           <div className="mt-4 flex gap-2">
                             <button onClick={() => saveSettings(p.name)} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary">Save</button>
                             <button onClick={() => resetSettings(p.name)} className="rounded-xl bg-surface-container-high px-4 py-2 text-sm">Reset</button>

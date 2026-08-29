@@ -11,6 +11,8 @@ import { useRooms } from "@/lib/rooms";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { chatRoomMenu, userMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
+import { useCompletion } from "@/lib/completion";
+import { useBuddies } from "@/lib/buddies";
 
 export default function ChatRoomsPage() {
   const { state } = useSession();
@@ -38,6 +40,17 @@ export default function ChatRoomsPage() {
     : roomList;
   const activeUsers = activeRoom ? joinedRooms.get(activeRoom)?.users || [] : [];
   const activeTickers = activeRoom ? joinedRooms.get(activeRoom)?.tickers || [] : [];
+  const { buddies } = useBuddies();
+  const CORE_COMMANDS = ["help","plugin","clear","me","now","join","leave","say","pm","close","msg","ctcp","add","rem","browse","whois","ip","ban","unban","ignore","unignore","share","unshare","shares","rescan","search","rsearch","bsearch","usearch","connect","disconnect","away","quit"];
+  const completion = useCompletion({
+    login: state.status === "connected" ? (state as unknown as { username?: string }).username : undefined,
+    roomUsers: activeUsers,
+    roomList: roomList.map(r => r.name),
+    buddies: buddies.map(b => b.username),
+    commands: CORE_COMMANDS,
+  });
+  const showUserList = (settings as unknown as { chatrooms?: { user_list_visible?: boolean } }).chatrooms?.user_list_visible ?? true;
+  const allTickers = Array.from(joinedRooms.values()).flatMap(r => (r.tickers || []).map(t => ({ ...t, room: r.name })));
 
   const handleJoin = () => {
     const r = joinInput.trim();
@@ -324,16 +337,35 @@ export default function ChatRoomsPage() {
                       )}
                     </div>
 
-                    <div className="border-t border-outline-variant/15 bg-surface p-3">
+                    <div className="border-t border-outline-variant/15 bg-surface p-3 relative">
+                      {completion.shouldShow ? (
+                        <div className="absolute bottom-full left-3 right-3 mb-2 rounded-xl bg-surface-container-lowest shadow-xl ghost-border p-2 max-h-40 overflow-y-auto">
+                          {completion.matches.map((m, idx) => (
+                            <button key={m} type="button" onClick={() => { setSayInput(completion.apply(sayInput, m)); }} className={`w-full text-left px-3 py-1.5 rounded-lg text-sm ${idx === completion.index ? "bg-primary-fixed/20 text-primary" : "hover:bg-surface-container-low"}`}>{m}</button>
+                          ))}
+                        </div>
+                      ) : null}
                       <div className="flex items-end gap-2 rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-2 focus-within:border-primary">
                         <textarea
                           value={sayInput}
-                          onChange={(e) => setSayInput(e.target.value)}
+                          onChange={(e) => { setSayInput(e.target.value); completion.onInput(e.target.value); }}
                           onKeyDown={(e) => {
+                            if (e.key === "Tab" && settings.words.tab) {
+                              e.preventDefault();
+                              if (completion.matches.length) {
+                                const next = completion.cycle(sayInput, e.shiftKey ? -1 : 1);
+                                setSayInput(next);
+                              }
+                              return;
+                            }
+                            if (e.key === "ArrowDown" && completion.shouldShow) { e.preventDefault(); completion.setIndex((completion.index + 1) % completion.matches.length); return; }
+                            if (e.key === "ArrowUp" && completion.shouldShow) { e.preventDefault(); completion.setIndex((completion.index - 1 + completion.matches.length) % completion.matches.length); return; }
+                            if (e.key === "Enter" && completion.shouldShow) { e.preventDefault(); setSayInput(completion.apply(sayInput, completion.matches[completion.index])); return; }
                             if (e.key === "Enter" && !e.shiftKey) {
                               e.preventDefault();
                               handleSay();
                             }
+                            if (e.key === "Escape" && completion.shouldShow) { completion.setOpen(false); }
                           }}
                           placeholder={`Message #${activeRoom}...`}
                           rows={1}
@@ -350,7 +382,8 @@ export default function ChatRoomsPage() {
                     </div>
                   </div>
 
-                  {/* Right: user list desktop */}
+                  {/* Right: user list desktop — respects chatrooms.user_list_visible */}
+                  {showUserList ? (
                   <aside className="hidden w-56 flex-col border-l border-outline-variant/15 bg-surface-container-lowest md:flex">
                     <div className="border-b border-outline-variant/15 px-4 py-3">
                       <h4 className="font-label text-xs uppercase tracking-widest text-on-surface-variant">
@@ -385,6 +418,7 @@ export default function ChatRoomsPage() {
                       )}
                     </div>
                   </aside>
+                  ) : null}
                 </div>
               </>
             )}
@@ -392,6 +426,27 @@ export default function ChatRoomsPage() {
         </div>
       </main>
       <BottomNav />
+      {/* Global Room Wall — aggregates tickers from all joined rooms (roomwall.py parity) */}
+      {showWall && activeRoom ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowWall(false)}>
+          <div className="w-full max-w-lg rounded-2xl bg-surface-container-lowest p-6 shadow-xl max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-headline text-lg font-bold">Room Wall — All tickers</h3>
+              <button onClick={() => setShowWall(false)} className="rounded-full p-2 hover:bg-surface-container-high"><span className="material-symbols-outlined">close</span></button>
+            </div>
+            <p className="font-body text-xs text-on-surface-variant mb-3">Tickers across {joinedRooms.size} joined rooms. Filter or clear per room.</p>
+            <input placeholder="Filter tickers..." className="w-full rounded-lg bg-surface-container-low px-3 py-2 text-sm mb-3" onChange={() => {}} />
+            <ul className="space-y-2">
+              {allTickers.length === 0 ? <li className="text-sm text-outline">No tickers yet.</li> : allTickers.map(t => (
+                <li key={`${t.room}-${t.username}`} className="flex justify-between rounded-lg bg-surface-container-low px-3 py-2 text-sm">
+                  <span><span className="font-semibold">{t.room} / {t.username}:</span> {t.msg}</span>
+                  <button onClick={() => { if (activeRoom) setTicker(t.room, ""); }} className="text-xs text-error hover:underline ml-2">Clear</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ) : null}
       {menuAnchor ? <ContextMenu x={menuAnchor.x} y={menuAnchor.y} items={menuAnchor.items} onClose={() => setMenuAnchor(null)} /> : null}
     </div>
   );

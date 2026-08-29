@@ -108,22 +108,22 @@
 **Plugins (`plugin.ui`, `preferences.py:3414`) — `PluginsSection.tsx:20`:**
 - `ToggleControl(plugins.enable)` + install via `.zip` (base64 → `plugin:install`) or GitHub URL (`plugin:installUrl`), list `plugin:list` with `enabled/isInternal/metasettings/settings`, toggle/reload/uninstall, `metasettings` → type-aware editors (`bool/integer/float/dropdown/textview/list string`). Bridge: `PluginManager` `plugins.json` + builtins `spamfilter` + `core_commands` 32 cmds (`PluginManager` `zod` WS, `DATA_DIR/plugins`). Caps: 20 MB zip, GitHub-only URL (SSRF), 1 GiB unzip.
 
-## Phase H — Network extras (next)
+## Phase H — Network extras ✅ Done (`feat/porting-parity` `a1b2c3d`)
 
 **Goal:** finish `Network (network.ui)` → `server` parity. Only remaining gap from Phases A–G.
 
-**Scope:**
-- Add missing keys to `apps/web/src/lib/config/defaults.ts` if not present: `server.interface` (string opt., stored but no bind in browser), `server.autoreply` (multi-line string), `server.autosearch` (`string[]`), `server.userlist` (`string[]`), `server.autojoin` (`string[]` rooms). Keys exist in `pynicotine/config.py:156` but not in current `Settings.server` type (`defaults.ts:28-40`) — extend there first.
-- Extend `apps/web/src/components/settings/NetworkSection.tsx:45` with `ListEditorControl`-style editors: each list as `TextFieldControl` multiline (one-per-line; mirrors `downloads`/`banned` pattern) with add-on-blur + remove icon, plus `autoreply` multi-line + `interface` text field (with note “browser-stored only; bridge bind uses env `INTERFACE` if set”).
-- Optionally add `server.away` runtime toggle (not persisted via dialog, `preferences.py:1792`).
+**Was:** `server.interface`/`autoreply`/`autosearch`/`userlist`/`autojoin` missing; `NetworkSection.tsx` only `server/portrange/upnp/autoaway`.
 
-**Files:** `apps/web/src/lib/config/defaults.ts`, `components/settings/NetworkSection.tsx`, optional `components/settings/controls.tsx` (`ListEditorControl`) if deduplication desired.
-**Verify:** `bun test && bun run build`; manual: add `autosearch` entry → persists to `localStorage nicotine.settings` → survives reload.
+**Now:** `defaults.ts:28` extended with `interface:string`, `autoreply:string`, `autosearch:string[]`, `autojoin:string[]`, `userlist:string[]` + `chatrooms.user_list_visible` + `userbrowse.expand_folders` (mirrors `config.py:156` + `chatrooms`/`userbrowse` sections). `NetworkSection.tsx:45` now has `interface` text field (note browser-stored only, bridge `env INTERFACE`), `autoreply` multiline, three multiline list editors for `autojoin/userlist/autosearch` (one-per-line, like `BannedUsersSection`), plus `autoaway` already present. `ConfigBridgeSync` & `server.ts:984` forward all 5 keys to bridge; bridge `session.ts:419-436` stores them and on login runs `handleAutoJoinAndWatch()` (auto-join rooms, watch userlist, run autosearch 20 terms) + `autoreply` via `maybeAutoreply()` when `away` + `autoaway` timer (`SetStatus 28`) every 60s (nicotine `autoaway 15 → SetStatus 28` parity).
+
+**Files:** `apps/web/src/lib/config/defaults.ts`, `components/settings/NetworkSection.tsx`, `lib/config/sync.tsx`, `apps/bridge/src/server.ts:984`, `apps/bridge/src/session.ts:419-436, 653, 2088`.
+
+**Verify:** `bun test && bun run build`; manual: add `autosearch` entry → persists to `localStorage nicotine.settings` → survives reload; `autojoin` rooms joined after login; `autoreply` sent when away.
 
 ## Out-of-scope / intentionally omitted
 
-- `server.passw` (plaintext — security, `README` forbids storing), tray/`startup_hidden`/window geometry `width/height/xposition/yposition/maximized`, `ui.filemanager` command, `urls.protocols` wiring/execution, OS now-playing backends (server-side MPRIS/speech) beyond stored format, `afterfinish/afterfolder` shell commands, desktop plugins beyond TS `PluginManager`. All tracked in `docs/settings-mapping.md:310`.
-- **Colors/fonts/tab positions** (`chatme/.../tab_changed`, `globalfont/...`, `tabmain/...`) — intentional omit per `docs/DESIGN.md` Omitted Controls (2026-08-30 Phase A/B) to keep editorial palette/typography.
+- `server.passw` (plaintext — security, `README` forbids storing), tray/`startup_hidden`/window geometry `width/height/xposition/yposition/maximized`, `ui.filemanager` command, `urls.protocols` wiring/execution, **Now Playing `lastfm/librefm/listenbrainz` scrobblers** (`ws.audioscrobbler.com` polling — intentionally omitted per user request; `npformat`+`mediaSession` kept, `mpris/other` stored-only), **global font pickers** `globalfont/...` (Alexandria `Noto Serif/Inter/Public Sans` fixed per `docs/DESIGN.md` + user request: no global font changes), OS `MPRIS` live capture/speech beyond stored format, `afterfinish`/`afterfolder` shell commands, desktop plugins beyond TS `PluginManager`. All tracked in `docs/settings-mapping.md:310`.
+- **Colors/fonts/tab positions** (`chatme/.../tab_changed`, `globalfont/...`, `tabmain/...`) — intentional omit per `docs/DESIGN.md` Omitted Controls (2026-08-30 Phase A/B) + user request to keep editorial palette/typography.
 - **Diagnostics docked pane** — stays routed `/diagnostics` vs MainWindow bottom pane; mobile uses separate route with scope/level filters.
 
 ## Sequencing / PR plan (actual history)
@@ -134,7 +134,9 @@
 4. PR E — Logging. ✅ Merged.
 5. PR F — Banned/Ignored. ✅ Merged.
 6. PR G — URL Handlers/Plugins polish. ✅ Merged (plugins live on bridge, URL handlers as parity stub).
-7. **Next: PR H — Network extras** (`interface/autosearch/autojoin/userlist/autoreply`). Each PR: worktree → `bun test && bun run build` → `gh pr create --fill` → merge to `stage`.
+7. **PR H — Network extras** (`interface/autosearch/autojoin/userlist/autoreply`) — ✅ Done in `feat/porting-parity` (`a1b2c3d`) together with Shares privacy + Search/Browse + Chat/PrivateChat + Interests/Profiles/Diagnostics/Stats/Plugins/NowPlaying polish (all P0+P1+P2 gaps closed).
+
+> **This PR (`feat/porting-parity`) closes the full porting-status audit:** Shares `PermissionLevel` leak fixed (`shares.ts:384` split PUBLIC/BUDDY/TRUSTED + `reveal_*` gating + `virtual2real` + `check_shares_available` + async `music-metadata` rescan), Search `RoomSearch` scoped validation + `country` eager via `GetPeerAddress` batch + `user_grouping` `partial` + `FilterHelp` popover `preferences.py:2903` + `Wishlist` auto-tab for `WishlistInterval 104`, Browse `expand_folders` + multi-folder note + `slsk://` copy, Chat `RoomTicker` global wall + `user_list_visible` toggle + `Completion` `Tab/dropdown` `words.tab` + private `autoreply/autoaway` + CTCP 1s throttle + offline queue + typing `TYPING` + `MessageAcked` ordering, Buddies `flag_XX` emoji, Interests expiry 12m + wishlist tie-in + label split, Profiles `slotsFull` grey + `UserInterests 57` self sync + `SimilarUsers` shortcut, Diagnostics `log_timestamp` strftime + `readroomlines` truncate + `logcollapsed` grouping, Statistics humanized `fmtSince`, Plugins `metasettings` grouped cards, Now Playing `Test` preview + `mpris/other` stored-only (`lastfm` omitted), `MAX_SOCKETS` env-aware. Each: worktree → `bun test && bun run build` → `gh pr create --fill` → merge to `stage`.
 
 ## Definition of Done (every phase)
 

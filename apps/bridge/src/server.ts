@@ -1005,6 +1005,14 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             if (["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "groupdownloads", "groupuploads"].includes(key)) {
               tm?.setConfig?.({ [key]: value });
             }
+            if (["reveal_buddy_shares", "reveal_trusted_shares"].includes(key)) {
+              try {
+                const sdb = (session as unknown as { shareDBInstance: { getRevealFlags: ()=>{revealBuddyShares:boolean;revealTrustedShares:boolean}; setRevealFlags: (b:boolean,t:boolean)=>void } }).shareDBInstance;
+                const cur = sdb.getRevealFlags();
+                if (key === "reveal_buddy_shares") sdb.setRevealFlags(Boolean(value), cur.revealTrustedShares);
+                else sdb.setRevealFlags(cur.revealBuddyShares, Boolean(value));
+              } catch {}
+            }
           } else if (section === "server" && ["banlist", "ignorelist", "ipblocklist", "ipignorelist", "private_chatrooms"].includes(key)) {
             if (key === "private_chatrooms") (session as unknown as { setEnableRoomInvitations?: (b: boolean) => void })?.setEnableRoomInvitations?.(!!value);
             (session as unknown as { setNetworkFilters?: (o: unknown) => void })?.setNetworkFilters?.({ [key]: value });
@@ -1050,6 +1058,17 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             const enabled = Boolean(value);
             (session as unknown as { setUpnpEnabled?: (b: boolean) => void })?.setUpnpEnabled?.(enabled);
             logger.info("server", `UPnP ${enabled ? "enabled" : "disabled"} via config`, { upnp: enabled });
+          } else if (section === "server" && ["interface", "autoreply", "autosearch", "autojoin", "userlist", "autoaway"].includes(key)) {
+            if (key === "interface") (session as unknown as { setNetworkInterface?: (v:string)=>void })?.setNetworkInterface?.(String(value || ""));
+            else if (key === "autoreply") (session as unknown as { setAutoreply?: (v:string)=>void })?.setAutoreply?.(String(value || ""));
+            else if (key === "autosearch") (session as unknown as { setAutosearch?: (v:string[])=>void })?.setAutosearch?.(Array.isArray(value) ? value as string[] : []);
+            else if (key === "autojoin") (session as unknown as { setAutojoin?: (v:string[])=>void })?.setAutojoin?.(Array.isArray(value) ? value as string[] : []);
+            else if (key === "userlist") (session as unknown as { setUserlist?: (v:string[])=>void })?.setUserlist?.(Array.isArray(value) ? value as string[] : []);
+            else if (key === "autoaway") (session as unknown as { setAutoaway?: (v:number)=>void })?.setAutoaway?.(Number(value) || 15);
+            logger.debug("bridge", "network extra updated", { key, len: Array.isArray(value) ? (value as unknown[]).length : String(value).slice(0,40) });
+          } else if (section === "chatrooms" || section === "userbrowse") {
+            (session as unknown as { setChatroomsConfig?: (o:Record<string,unknown>)=>void; setUserbrowseConfig?: (o:Record<string,unknown>)=>void })?.setChatroomsConfig?.({ [key]: value });
+            (session as unknown as { setUserbrowseConfig?: (o:Record<string,unknown>)=>void })?.setUserbrowseConfig?.({ [key]: value });
           } else if (section === "logging" && ["readroomlines", "readprivatelines", "rooms_timestamp", "private_timestamp"].includes(key)) {
             // logging caps are web-only, but acknowledge
             void value;

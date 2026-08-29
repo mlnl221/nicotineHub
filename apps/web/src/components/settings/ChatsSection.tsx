@@ -26,6 +26,12 @@ export function ChatsSection() {
           onChange={(v) => setOption("server", "private_chatrooms", v)}
         />
         <ToggleControl
+          label="Show user list"
+          description="Show the user list sidebar in chat rooms (chatrooms.user_list_visible)."
+          checked={(settings as unknown as { chatrooms?: { user_list_visible?: boolean } }).chatrooms?.user_list_visible ?? true}
+          onChange={(v) => setOption("chatrooms" as unknown as never, "user_list_visible" as unknown as never, v as never)}
+        />
+        <ToggleControl
           label="Reopen private chats on startup"
           checked={pc.store}
           onChange={(v) => setOption("privatechat", "store", v)}

@@ -17,7 +17,7 @@ function PrivateChatInner() {
   const router = useRouter();
   const params = useSearchParams();
   const initialUser = params.get("user") || "";
-  const { conversations, users, activeUser, setActiveUser, sendMessage, closeAll, closeConversation } = usePrivateChat();
+  const { conversations, users, activeUser, setActiveUser, sendMessage, sendTyping, isTyping, closeAll, closeConversation } = usePrivateChat();
   const [input, setInput] = useState("");
   const { settings } = useConfig();
   const [newChatUser, setNewChatUser] = useState(initialUser);
@@ -266,6 +266,14 @@ function PrivateChatInner() {
                       );
                     })
                   )}
+                  {activeUser && isTyping(activeUser) ? (
+                    <div className="flex gap-3 max-w-[78%]">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-surface-container-high text-xs font-bold">{activeUser.slice(0,2).toUpperCase()}</div>
+                      <div className="rounded-2xl rounded-bl-sm bg-surface-container-low border border-outline-variant/20 px-4 py-3">
+                        <p className="font-body text-sm italic text-on-surface-variant">Typing…</p>
+                      </div>
+                    </div>
+                  ) : null}
                   <div ref={endRef} />
                 </div>
 
@@ -273,7 +281,7 @@ function PrivateChatInner() {
                   <div className="flex items-end gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-low p-2 focus-within:border-primary">
                     <textarea
                       value={input}
-                      onChange={(e) => setInput(e.target.value)}
+                      onChange={(e) => { setInput(e.target.value); if (activeUser && e.target.value) sendTyping(activeUser); }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey) {
                           e.preventDefault();

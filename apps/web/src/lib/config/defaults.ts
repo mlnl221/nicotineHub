@@ -37,6 +37,11 @@ export interface Settings {
     ipignorelist: Record<string, string>;
     portrange: [number, number];
     upnp: boolean;
+    interface: string;
+    autoreply: string;
+    autosearch: string[];
+    autojoin: string[];
+    userlist: string[];
   };
   ui: {
     dark_mode: boolean;
@@ -185,6 +190,12 @@ export interface Settings {
   ctcp: {
     enable: boolean;
   };
+  chatrooms: {
+    user_list_visible: boolean;
+  };
+  userbrowse: {
+    expand_folders: string;
+  };
 }
 
 export const DEFAULT_SERVER_HOST = "server.slsknet.org";
@@ -206,6 +217,11 @@ export const defaults: Settings = {
     ipignorelist: {},
     portrange: [DEFAULT_LISTEN_PORT, DEFAULT_LISTEN_PORT],
     upnp: true,
+    interface: "",
+    autoreply: "",
+    autosearch: [],
+    autojoin: [],
+    userlist: [],
   },
   ui: {
     dark_mode: false,
@@ -387,5 +403,11 @@ export const defaults: Settings = {
   },
   ctcp: {
     enable: true,
+  },
+  chatrooms: {
+    user_list_visible: true,
+  },
+  userbrowse: {
+    expand_folders: "all",
   },
 };

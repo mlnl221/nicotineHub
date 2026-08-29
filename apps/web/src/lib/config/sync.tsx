@@ -53,6 +53,19 @@ export function ConfigBridgeSync() {
         ipignorelist: settings.server.ipignorelist,
         portrange: settings.server.portrange,
         upnp: settings.server.upnp,
+        interface: settings.server.interface,
+        autoreply: settings.server.autoreply,
+        autosearch: settings.server.autosearch,
+        autojoin: settings.server.autojoin,
+        userlist: settings.server.userlist,
+        autoaway: settings.server.autoaway,
+        private_chatrooms: settings.server.private_chatrooms,
+      },
+      chatrooms: {
+        user_list_visible: (settings as unknown as { chatrooms?: { user_list_visible?: boolean } }).chatrooms?.user_list_visible ?? true,
+      },
+      userbrowse: {
+        expand_folders: (settings as unknown as { userbrowse?: { expand_folders?: string } }).userbrowse?.expand_folders ?? "all",
       },
     };
     const key = JSON.stringify(relevant);
