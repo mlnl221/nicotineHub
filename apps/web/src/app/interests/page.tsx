@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
@@ -7,7 +8,6 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { useInterests } from "@/lib/interests";
-import { useRouter as NavRouter } from "next/navigation";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { interestsMenu, interestsRecMenu, userMenu } from "@/lib/context-menu/menus";
 
@@ -70,9 +70,9 @@ export default function InterestsPage() {
             <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">{likes.length} likes • {hates.length} dislikes • Recommendations shape your discovery</p>
           </div>
           <div className="flex items-center gap-2 md:gap-4">
-            <a href="/settings?tab=user-profile#user-profile" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Profile settings">
+            <Link href="/settings?tab=user-profile#user-profile" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Profile settings">
               <span className="material-symbols-outlined">settings</span>
-            </a>
+            </Link>
           </div>
         </header>
         <div className="flex w-full max-w-screen-2xl flex-1 flex-col gap-8 md:gap-12 px-4 sm:px-6 py-6 md:py-12 md:px-10 lg:flex-row max-w-full overflow-hidden">
@@ -263,7 +263,7 @@ export default function InterestsPage() {
                   <button
                     onClick={() => {
                       const q = itemName;
-                      window.location.href = `/search?q=${encodeURIComponent(q)}`;
+                      router.push(`/search?q=${encodeURIComponent(q)}`);
                     }}
                     className="rounded-lg bg-surface-container-high px-4 py-2.5 min-h-9 font-label text-xs uppercase tracking-widest hover:bg-surface-variant"
                   >
@@ -344,7 +344,7 @@ export default function InterestsPage() {
                     {similarUsers.slice(0, 10).map((u) => (
                       <li
                         key={u.username}
-                        onClick={() => (window.location.href = `/profile/${encodeURIComponent(u.username)}`)}
+                        onClick={() => router.push(`/profile/${encodeURIComponent(u.username)}`)}
                         onContextMenu={(e) => {
                           e.preventDefault();
                           setMenuAnchor({ x: e.clientX, y: e.clientY, thing: u.username, type: "similar" });
@@ -378,13 +378,13 @@ export default function InterestsPage() {
             menuAnchor.type === "like"
               ? interestsMenu(menuAnchor.thing, {
                   onRecommend: () => fetchItemDetails(menuAnchor.thing),
-                  onSearch: () => (window.location.href = `/search?q=${encodeURIComponent(menuAnchor.thing)}`),
+                  onSearch: () => router.push(`/search?q=${encodeURIComponent(menuAnchor.thing)}`),
                   onRemove: () => removeLike(menuAnchor.thing),
                 })
               : menuAnchor.type === "hate"
                 ? interestsMenu(menuAnchor.thing, {
                     onRecommend: () => fetchItemDetails(menuAnchor.thing),
-                    onSearch: () => (window.location.href = `/search?q=${encodeURIComponent(menuAnchor.thing)}`),
+                    onSearch: () => router.push(`/search?q=${encodeURIComponent(menuAnchor.thing)}`),
                     onRemove: () => removeHate(menuAnchor.thing),
                   })
                 : menuAnchor.type === "rec"
@@ -396,7 +396,7 @@ export default function InterestsPage() {
                         onLike: () => addLike(menuAnchor.thing),
                         onDislike: () => addHate(menuAnchor.thing),
                         onRecommend: () => fetchItemDetails(menuAnchor.thing),
-                        onSearch: () => (window.location.href = `/search?q=${encodeURIComponent(menuAnchor.thing)}`),
+                        onSearch: () => router.push(`/search?q=${encodeURIComponent(menuAnchor.thing)}`),
                       }
                     )
                   : userMenu(menuAnchor.thing, "interests")

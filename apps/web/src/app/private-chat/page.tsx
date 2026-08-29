@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Suspense, useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/lib/session";
@@ -81,16 +82,16 @@ function PrivateChatInner() {
                 <span className="hidden md:inline-flex items-center gap-2 rounded-full bg-primary-fixed/20 px-3 py-1 font-label text-xs font-semibold text-primary">
                   <span className="h-2 w-2 rounded-full bg-green-500" /> {activeUser}
                 </span>
-                <button onClick={() => (window.location.href = `/profile/${encodeURIComponent(activeUser)}`)} className="hidden md:flex rounded-lg bg-surface-container-high px-4 py-2 font-label text-xs font-semibold hover:bg-surface-variant">Profile</button>
-                <button onClick={() => (window.location.href = `/browse/${encodeURIComponent(activeUser)}`)} className="hidden md:flex rounded-lg bg-surface-container-high px-4 py-2 font-label text-xs font-semibold hover:bg-surface-variant">Browse</button>
+                <button onClick={() => router.push(`/profile/${encodeURIComponent(activeUser)}`)} className="hidden md:flex rounded-lg bg-surface-container-high px-4 py-2 font-label text-xs font-semibold hover:bg-surface-variant">Profile</button>
+                <button onClick={() => router.push(`/browse/${encodeURIComponent(activeUser)}`)} className="hidden md:flex rounded-lg bg-surface-container-high px-4 py-2 font-label text-xs font-semibold hover:bg-surface-variant">Browse</button>
               </>
             ) : null}
             {users.length > 1 ? (
               <button onClick={() => { if (confirm("Close all chats?")) closeAll(); }} className="hidden md:inline-flex rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container">Close All</button>
             ) : null}
-            <a href="/settings?tab=chats#chats" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Chat settings">
+            <Link href="/settings?tab=chats#chats" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Chat settings">
               <span className="material-symbols-outlined">settings</span>
-            </a>
+            </Link>
           </div>
         </header>
 

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/lib/session";
@@ -81,9 +82,9 @@ function BrowseInner() {
             <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">{tabs.length}/10 tabs • Browse another user&apos;s shared files — {hasTabs ? `${activeTab?.username ?? tabs[0].username}` : "enter a username above"}</p>
           </div>
           <div className="flex items-center gap-2 md:gap-4">
-            <a href="/settings?tab=shares#shares" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Shares settings">
+            <Link href="/settings?tab=shares#shares" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Shares settings">
               <span className="material-symbols-outlined">settings</span>
-            </a>
+            </Link>
           </div>
         </header>
 

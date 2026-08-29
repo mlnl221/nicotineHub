@@ -11,7 +11,8 @@ export function PortChecker() {
     setChecking(true);
     setResult(null);
     try {
-      const bridgeUrl = typeof window !== "undefined" ? localStorage.getItem("nicotine.bridgeUrl") || `ws://${window.location.hostname}:8787/ws` : "ws://localhost:8787/ws";
+      const envUrl = typeof window !== "undefined" ? process.env.NEXT_PUBLIC_BRIDGE_URL : undefined;
+      const bridgeUrl = typeof window !== "undefined" ? localStorage.getItem("nicotine.bridgeUrl") || envUrl || `ws://${window.location.hostname}:${window.location.port === "3001" ? "8789" : window.location.port === "3002" ? "8790" : "8787"}/ws` : "ws://localhost:8787/ws";
       const httpBase = bridgeUrl.replace(/^ws/, "http").replace(/\/ws.*$/, "");
       const res = await fetch(`${httpBase}/health?json=1`, { cache: "no-store" });
       const j = await res.json().catch(() => ({}));

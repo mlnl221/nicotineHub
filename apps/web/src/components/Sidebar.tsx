@@ -35,7 +35,7 @@ export function Sidebar() {
   const filteredNav = mounted ? orderedNav.filter((n) => visibleMap[n.key] !== false) : orderedNav;
 
   return (
-    <nav className="fixed left-0 top-0 z-50 hidden h-full w-72 flex-col space-y-8 bg-surface-container-low/90 p-6 backdrop-blur-md dark:bg-surface-container-low/90 md:flex">
+    <nav className="fixed left-0 top-0 z-50 hidden h-full w-72 flex-col space-y-8 bg-surface-container-low/90 p-6 backdrop-blur-md dark:bg-surface-container-low/90 md:flex overflow-y-auto">
       <div>
         <div className="mb-1 font-headline text-lg font-black text-on-surface dark:text-inverse-primary">
           NICOTINE HUB
@@ -91,27 +91,27 @@ export function Sidebar() {
       </ul>
 
       <div className="space-y-2 border-t border-surface-container-high/20 pt-8">
-        <a
+        <Link
           href="/settings"
           className="flex items-center space-x-3 rounded-xl px-4 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant"
         >
           <span className="material-symbols-outlined">settings</span>
           <span className="font-label text-xs uppercase tracking-widest">Settings</span>
-        </a>
-        <a
+        </Link>
+        <Link
           href="/diagnostics"
           className="flex items-center space-x-3 rounded-xl px-4 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant"
         >
           <span className="material-symbols-outlined">monitoring</span>
           <span className="font-label text-xs uppercase tracking-widest">Diagnostics</span>
-        </a>
-        <a
+        </Link>
+        <Link
           href="/statistics"
           className="flex items-center space-x-3 rounded-xl px-4 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant"
         >
           <span className="material-symbols-outlined">bar_chart</span>
           <span className="font-label text-xs uppercase tracking-widest">Statistics</span>
-        </a>
+        </Link>
         <button
           onClick={() => logout()}
           className="flex w-full items-center space-x-3 rounded-xl px-4 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant"

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
@@ -98,8 +99,18 @@ export default function DiagnosticsPage() {
             return `${scheme}//${u.hostname}:${port}/logs?tail=500`;
           }
         } catch {}
+        const envUrl = process.env.NEXT_PUBLIC_BRIDGE_URL;
+        if (envUrl) {
+          try {
+            const u = new URL(envUrl);
+            const scheme = u.protocol === "wss:" ? "https:" : "http:";
+            const port = u.port || "8787";
+            return `${scheme}//${u.hostname}:${port}/logs?tail=500`;
+          } catch {}
+        }
         const scheme = window.location.protocol === "https:" ? "https:" : "http:";
-        return `${scheme}//${window.location.hostname}:8787/logs?tail=500`;
+        const port = window.location.port === "3001" ? "8789" : window.location.port === "3002" ? "8790" : "8787";
+        return `${scheme}//${window.location.hostname}:${port}/logs?tail=500`;
       })();
       // worktree bridge is on 8788, but http fetch above derives from bridgeUrl or hostname:8787
       // if bridgeUrl override points to 8788, we will use it
@@ -141,8 +152,18 @@ export default function DiagnosticsPage() {
             } catch { return null; }
           }
         } catch {}
+        const envUrl = process.env.NEXT_PUBLIC_BRIDGE_URL;
+        if (envUrl) {
+          try {
+            const u = new URL(envUrl);
+            u.searchParams.delete("token");
+            const scheme = u.protocol === "wss:" ? "https:" : "http:";
+            return `${scheme}//${u.hostname}:${u.port || "8787"}/health?json=1`;
+          } catch {}
+        }
         const scheme = window.location.protocol === "https:" ? "https:" : "http:";
-        return `${scheme}//${window.location.hostname}:8787/health?json=1`;
+        const port = window.location.port === "3001" ? "8789" : window.location.port === "3002" ? "8790" : "8787";
+        return `${scheme}//${window.location.hostname}:${port}/health?json=1`;
       })();
       if (!bridgeUrl) return;
       const start = performance.now();
@@ -248,9 +269,9 @@ export default function DiagnosticsPage() {
             <h1 className="font-headline text-2xl font-light tracking-tight text-on-surface dark:text-inverse-primary">Diagnostics</h1>
             <p className="font-body text-xs text-on-surface-variant dark:text-outline">System diagnostics and connection health — live logs (500 lines, persistent).</p>
           </div>
-          <a href="/search" className="hidden items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant transition-colors hover:text-primary dark:text-outline sm:flex">
+          <Link href="/search" className="hidden items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant transition-colors hover:text-primary dark:text-outline sm:flex">
             <span className="material-symbols-outlined text-[16px]">arrow_back</span> Back to search
-          </a>
+          </Link>
         </header>
 
         <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 md:gap-6 px-4 pb-6 md:px-10 md:pb-8">

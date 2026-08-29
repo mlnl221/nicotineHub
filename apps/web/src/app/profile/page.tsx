@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/lib/session";
@@ -67,9 +68,9 @@ function TabbedProfileInner() {
             <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">{tabs.length}/10 tabs • {activeTab ? `Viewing ${activeTab.username}` : "Look up any Soulseek user"}</p>
           </div>
           <div className="flex items-center gap-2 md:gap-4">
-            <a href="/settings?tab=user-profile#user-profile" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Profile settings">
+            <Link href="/settings?tab=user-profile#user-profile" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Profile settings">
               <span className="material-symbols-outlined">settings</span>
-            </a>
+            </Link>
           </div>
         </header>
         <div className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-lowest/80 backdrop-blur-xl border-b border-outline-variant/10">

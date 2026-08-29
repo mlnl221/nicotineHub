@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
@@ -44,9 +45,9 @@ export default function BuddiesPage() {
             <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">{buddies.length} buddies • {onlineCount} online • Trusted peers • watch status</p>
           </div>
           <div className="flex items-center gap-2 md:gap-4">
-            <a href="/settings?tab=network#network" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Buddies settings">
+            <Link href="/settings?tab=network#network" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Buddies settings">
               <span className="material-symbols-outlined">settings</span>
-            </a>
+            </Link>
           </div>
         </header>
           <div className="mx-auto w-full max-w-screen-2xl flex-1 px-4 sm:px-6 py-8 md:px-10 overflow-x-hidden max-w-full">
@@ -180,13 +181,13 @@ export default function BuddiesPage() {
 
                     <div className="mt-4 grid grid-cols-2 gap-2">
                       <button
-                        onClick={() => (window.location.href = `/private-chat?user=${encodeURIComponent(b.username)}`)}
+                        onClick={() => router.push(`/private-chat?user=${encodeURIComponent(b.username)}`)}
                         className="flex items-center justify-center gap-1 rounded-lg bg-primary-fixed/30 py-2 font-label text-xs font-semibold text-on-primary-fixed hover:bg-primary-container hover:text-on-primary-container"
                       >
                         <span className="material-symbols-outlined text-sm">chat_bubble</span> Chat
                       </button>
                       <button
-                        onClick={() => (window.location.href = `/profile/${encodeURIComponent(b.username)}`)}
+                        onClick={() => router.push(`/profile/${encodeURIComponent(b.username)}`)}
                         className="flex items-center justify-center gap-1 rounded-lg bg-surface-container-high py-2 font-label text-xs font-semibold text-on-surface hover:bg-surface-variant"
                       >
                         <span className="material-symbols-outlined text-sm">person</span> Profile
@@ -194,7 +195,7 @@ export default function BuddiesPage() {
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-2">
                       <button
-                        onClick={() => (window.location.href = `/browse/${encodeURIComponent(b.username)}`)}
+                        onClick={() => router.push(`/browse/${encodeURIComponent(b.username)}`)}
                         className="rounded-lg bg-surface-container-low py-2 font-label text-xs font-semibold text-primary hover:bg-surface-container"
                       >
                         Browse
