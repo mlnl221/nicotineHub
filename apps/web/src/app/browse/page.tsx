@@ -73,14 +73,17 @@ function BrowseInner() {
   return (
     <div className="flex min-h-screen max-w-[100vw] overflow-x-hidden bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
-      <TopBar title="Browse" subtitle="Browse shared files" />
+      <TopBar title="Browse" subtitle={`Browse shared files • ${tabs.length}/10 tabs`} />
       <main className="md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden bg-background pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
-        <header className="hidden md:flex sticky top-0 z-10 bg-surface-container-lowest/80 backdrop-blur-xl px-10 py-6">
-          <div className="mx-auto flex w-full max-w-screen-2xl items-end justify-between">
-            <div>
-              <h2 className="font-headline text-3xl font-bold tracking-tight text-on-surface">Browse Shares</h2>
-              <p className="mt-1 font-body text-sm text-on-surface-variant">Browse another user&apos;s shared files — {tabs.length}/10 tabs</p>
-            </div>
+        <header className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
+          <div>
+            <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Browse Shares</h2>
+            <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">{tabs.length}/10 tabs • Browse another user&apos;s shared files — {hasTabs ? `${activeTab?.username ?? tabs[0].username}` : "enter a username above"}</p>
+          </div>
+          <div className="flex items-center gap-2 md:gap-4">
+            <a href="/settings?tab=shares#shares" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Shares settings">
+              <span className="material-symbols-outlined">settings</span>
+            </a>
           </div>
         </header>
 

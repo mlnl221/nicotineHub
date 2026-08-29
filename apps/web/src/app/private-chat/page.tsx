@@ -7,6 +7,8 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { usePrivateChat } from "@/lib/privateChat";
+import { ContextMenu } from "@/components/ui/ContextMenu";
+import { privateChatMenu, userMenu } from "@/lib/context-menu/menus";
 
 function PrivateChatInner() {
   const { state } = useSession();
@@ -18,6 +20,7 @@ function PrivateChatInner() {
   const [newChatUser, setNewChatUser] = useState(initialUser);
   const [filter, setFilter] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
 
   useEffect(() => {
     if (state.status !== "connected") router.replace("/");
@@ -61,43 +64,31 @@ function PrivateChatInner() {
       <Sidebar />
       <TopBar title={topBarTitle} subtitle={topBarSubtitle} />
       <main className="md:ml-72 flex flex-1 flex-col overflow-hidden pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
-        {/* Desktop header — hidden on mobile (TopBar covers it) */}
-        <header className="hidden md:flex items-center justify-between border-b border-outline-variant/15 bg-surface-container-lowest/80 px-6 py-4 backdrop-blur-xl">
-          <div className="flex items-center gap-4">
-            <h2 className="font-headline text-xl font-bold tracking-tight text-primary">Private Chat</h2>
-            {activeUser ? (
-              <span className="hidden md:inline-flex items-center gap-2 rounded-full bg-primary-fixed/20 px-3 py-1 font-label text-xs font-semibold text-primary">
-                <span className="h-2 w-2 rounded-full bg-green-500" /> {activeUser}
-              </span>
-            ) : null}
+        <header className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
+          <div>
+            <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Private Chat</h2>
+            <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">
+              {users.length} conversations
+              {activeUser ? <span className="hidden md:inline"> • {activeUser}</span> : null}
+              <span className="md:hidden font-label text-xs"> • {activeUser || `${users.length} chats`}</span>
+            </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 md:gap-4">
+            {activeUser ? (
+              <>
+                <span className="hidden md:inline-flex items-center gap-2 rounded-full bg-primary-fixed/20 px-3 py-1 font-label text-xs font-semibold text-primary">
+                  <span className="h-2 w-2 rounded-full bg-green-500" /> {activeUser}
+                </span>
+                <button onClick={() => (window.location.href = `/profile/${encodeURIComponent(activeUser)}`)} className="hidden md:flex rounded-lg bg-surface-container-high px-4 py-2 font-label text-xs font-semibold hover:bg-surface-variant">Profile</button>
+                <button onClick={() => (window.location.href = `/browse/${encodeURIComponent(activeUser)}`)} className="hidden md:flex rounded-lg bg-surface-container-high px-4 py-2 font-label text-xs font-semibold hover:bg-surface-variant">Browse</button>
+              </>
+            ) : null}
             {users.length > 1 ? (
-              <button
-                onClick={() => {
-                  if (confirm("Close all chats?")) closeAll();
-                }}
-                className="hidden md:inline-flex rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container"
-              >
-                Close All
-              </button>
+              <button onClick={() => { if (confirm("Close all chats?")) closeAll(); }} className="hidden md:inline-flex rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container">Close All</button>
             ) : null}
-            {activeUser ? (
-              <button
-                onClick={() => (window.location.href = `/profile/${encodeURIComponent(activeUser)}`)}
-                className="rounded-lg bg-surface-container-high px-4 py-2 font-label text-xs font-semibold hover:bg-surface-variant"
-              >
-                Profile
-              </button>
-            ) : null}
-            {activeUser ? (
-              <button
-                onClick={() => (window.location.href = `/browse/${encodeURIComponent(activeUser)}`)}
-                className="rounded-lg bg-surface-container-high px-4 py-2 font-label text-xs font-semibold hover:bg-surface-variant"
-              >
-                Browse
-              </button>
-            ) : null}
+            <a href="/settings?tab=chats#chats" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Chat settings">
+              <span className="material-symbols-outlined">settings</span>
+            </a>
           </div>
         </header>
 
@@ -157,6 +148,11 @@ function PrivateChatInner() {
                     <button
                       key={u}
                       onClick={() => setActiveUser(u)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setMenuAnchor({ x: e.clientX, y: e.clientY, items: userMenu(u, "privatechat") });
+                      }}
                       className={`flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors ${isActive ? "bg-primary-fixed/20 text-primary border border-primary/20" : "hover:bg-surface-container-low"}`}
                     >
                       <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-container-high text-sm font-bold">
@@ -186,7 +182,23 @@ function PrivateChatInner() {
           </aside>
 
           {/* Center: Messages + Mobile picker */}
-          <section className="flex flex-1 flex-col overflow-hidden">
+          <section className="flex flex-1 flex-col overflow-hidden" onContextMenu={(e) => {
+            const target = e.target as HTMLElement;
+            if (target.closest("button, input, textarea, select")) return;
+            e.preventDefault();
+            setMenuAnchor({
+              x: e.clientX,
+              y: e.clientY,
+              items: privateChatMenu(activeUser, activeMessages as unknown as { username: string; message: string }[], {
+                onFind: () => {},
+                onCopyAll: () => {
+                  const text = activeMessages.map((m) => `${m.username}: ${m.message}`).join("\n");
+                  navigator.clipboard.writeText(text);
+                },
+                onClear: () => {},
+              }),
+            });
+          }}>
             {/* Mobile user picker */}
             <div className="border-b border-outline-variant/15 bg-surface-container-lowest p-3 md:hidden">
               <select
@@ -281,6 +293,7 @@ function PrivateChatInner() {
         </div>
       </main>
       <BottomNav />
+      {menuAnchor ? <ContextMenu x={menuAnchor.x} y={menuAnchor.y} items={menuAnchor.items} onClose={() => setMenuAnchor(null)} /> : null}
     </div>
   );
 }

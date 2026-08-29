@@ -7,6 +7,8 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { useRooms } from "@/lib/rooms";
+import { ContextMenu } from "@/components/ui/ContextMenu";
+import { chatRoomMenu, userMenu } from "@/lib/context-menu/menus";
 
 export default function ChatRoomsPage() {
   const { state } = useSession();
@@ -15,6 +17,7 @@ export default function ChatRoomsPage() {
   const [joinInput, setJoinInput] = useState("");
   const [sayInput, setSayInput] = useState("");
   const [filter, setFilter] = useState("");
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
 
   useEffect(() => {
     if (state.status !== "connected") router.replace("/");
@@ -50,34 +53,19 @@ export default function ChatRoomsPage() {
       <Sidebar />
       <TopBar title={activeRoom || "Chat Rooms"} subtitle={activeRoom ? `${activeUsers.length} users • ${roomList.length} public rooms` : `${joinedArray.length} joined • ${roomList.length} public`} />
       <main className="md:ml-72 flex flex-1 flex-col overflow-hidden pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
-        <header className="hidden md:flex items-center justify-between border-b border-outline-variant/15 bg-surface-container-lowest/80 px-6 py-4 backdrop-blur-xl">
-          <div className="flex items-center gap-4">
-            <h2 className="font-headline text-xl font-bold tracking-tight text-primary">Chat Rooms</h2>
-            {activeRoom ? (
-              <span className="inline-flex items-center gap-2 rounded-full bg-primary-fixed/20 px-3 py-1 font-label text-xs font-semibold text-primary">
-                <span className="material-symbols-outlined text-[16px]">tag</span> {activeRoom}
-              </span>
-            ) : null}
+        <header className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
+          <div>
+            <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Chat Rooms</h2>
+            <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">
+              {activeRoom ? `${activeUsers.length} users • ${activeRoom}` : `${joinedArray.length} joined • ${roomList.length} public`}
+              <span className="hidden md:inline"> • Monitoring rooms</span>
+            </p>
           </div>
-          <div className="flex items-center gap-2">
-            {joinedRooms.size > 0 ? (
-              <button
-                onClick={() => {
-                  if (confirm("Close all rooms? Leave all joined rooms.")) closeAll();
-                }}
-                className="rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container"
-              >
-                Close All
-              </button>
-            ) : null}
-            {activeRoom ? (
-              <button
-                onClick={() => leaveRoom(activeRoom)}
-                className="rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container"
-              >
-                Leave
-              </button>
-            ) : null}
+          <div className="flex items-center gap-2 md:gap-4">
+            {activeRoom ? <span className="hidden md:inline-flex items-center gap-2 rounded-full bg-primary-fixed/20 px-3 py-1 font-label text-xs font-semibold text-primary"><span className="material-symbols-outlined text-[16px]">tag</span> {activeRoom}</span> : null}
+            {joinedRooms.size > 0 ? <button onClick={() => { if (confirm("Close all rooms? Leave all joined rooms.")) closeAll(); }} className="hidden md:inline-flex rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container">Close All</button> : null}
+            {activeRoom ? <button onClick={() => leaveRoom(activeRoom)} className="hidden md:inline-flex rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container">Leave</button> : null}
+            <a href="/settings?tab=chats#chats" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Chat settings"><span className="material-symbols-outlined">settings</span></a>
           </div>
         </header>
 
@@ -134,6 +122,15 @@ export default function ChatRoomsPage() {
                       <li key={r.name}>
                         <button
                           onClick={() => setActiveRoom(r.name)}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setMenuAnchor({
+                              x: e.clientX,
+                              y: e.clientY,
+                              items: [{ id: "leave", label: "Leave Room", icon: "logout", danger: true, action: () => leaveRoom(r.name) }],
+                            });
+                          }}
                           className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm ${activeRoom === r.name ? "bg-primary-fixed/20 text-primary font-semibold" : "hover:bg-surface-container-low text-on-surface-variant"}`}
                         >
                           <span className="flex items-center gap-2 truncate">
@@ -176,7 +173,21 @@ export default function ChatRoomsPage() {
           </aside>
 
           {/* Center: Messages */}
-          <section className="flex flex-1 flex-col overflow-hidden bg-surface-container-lowest/30">
+          <section className="flex flex-1 flex-col overflow-hidden bg-surface-container-lowest/30" onContextMenu={(e) => {
+            const t = e.target as HTMLElement;
+            if (t.closest("button, input, textarea, select")) return;
+            e.preventDefault();
+            setMenuAnchor({
+              x: e.clientX,
+              y: e.clientY,
+              items: chatRoomMenu(activeRoom, activeRoom ? "chat" : "activity", {
+                onFind: () => {},
+                onCopyAll: () => navigator.clipboard.writeText(activeMessages.map((m) => `${m.username}: ${m.message}`).join("\n")),
+                onClear: () => {},
+                onLeave: () => activeRoom && leaveRoom(activeRoom),
+              }),
+            });
+          }}>
             {/* Mobile room picker */}
             <div className="border-b border-outline-variant/15 bg-surface p-3 md:hidden">
               <select
@@ -302,6 +313,11 @@ export default function ChatRoomsPage() {
                           <button
                             key={u}
                             onClick={() => (window.location.href = `/profile/${encodeURIComponent(u)}`)}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setMenuAnchor({ x: e.clientX, y: e.clientY, items: userMenu(u, "chatrooms") });
+                            }}
                             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-surface-container-low"
                           >
                             <span className="flex h-6 w-6 items-center justify-center rounded bg-surface-container-high text-[10px] font-bold">
@@ -320,6 +336,7 @@ export default function ChatRoomsPage() {
         </div>
       </main>
       <BottomNav />
+      {menuAnchor ? <ContextMenu x={menuAnchor.x} y={menuAnchor.y} items={menuAnchor.items} onClose={() => setMenuAnchor(null)} /> : null}
     </div>
   );
 }

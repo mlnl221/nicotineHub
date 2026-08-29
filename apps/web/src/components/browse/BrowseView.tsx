@@ -6,6 +6,8 @@ import { useBrowseTabs } from "@/lib/browse-tabs";
 import type { BrowseTab } from "@/lib/browse-tabs";
 import { useTransfers } from "@/lib/transfers";
 import { isDemo } from "@/lib/demo";
+import { ContextMenu } from "@/components/ui/ContextMenu";
+import { browseFolderMenu, browseFileMenu } from "@/lib/context-menu/menus";
 
 const PAGE_SIZE = 50;
 
@@ -25,6 +27,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [fileQuery, setFileQuery] = useState("");
   const [propsFile, setPropsFile] = useState<null | { name: string; size: number; ext: string; attrs: Array<[number, number]>; folder: string }>(null);
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
 
   // auto-select first folder when folders load
   useEffect(() => {
@@ -168,6 +171,10 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                       setSelectedFolder(f.name);
                       openFolder(tab.id, f.name);
                     }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setMenuAnchor({ x: e.clientX, y: e.clientY, items: browseFolderMenu(username, f.name, false) });
+                    }}
                     className={`flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors ${selectedFolder === f.name ? "bg-primary-fixed/20 text-primary border border-primary/10" : "hover:bg-surface-container-low text-on-surface-variant"}`}
                   >
                     <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>folder</span>
@@ -246,7 +253,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                         const bitrate = attrsMap.get(0);
                         const length = attrsMap.get(1);
                         return (
-                          <li key={file.name} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-container-low/60">
+                          <li key={file.name} onContextMenu={(e) => { e.preventDefault(); const shortName = file.name.split(/[\\\/]/).pop() || file.name; const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : `${activeFolder!.name}\\${shortName}`; setMenuAnchor({ x: e.clientX, y: e.clientY, items: browseFileMenu(username, { path: vp, filename: shortName }, false) }); }} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-container-low/60">
                             <span className="material-symbols-outlined text-outline text-[20px]">audio_file</span>
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-body text-sm font-medium text-on-surface">{shortName}</p>
@@ -292,6 +299,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
         </div>
       </div>
 
+      {menuAnchor ? <ContextMenu x={menuAnchor.x} y={menuAnchor.y} items={menuAnchor.items} onClose={() => setMenuAnchor(null)} /> : null}
       {propsFile ? (
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 p-4" onClick={() => setPropsFile(null)}>
           <div className="w-full max-w-md rounded-2xl bg-surface-container-lowest p-6 shadow-xl max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>

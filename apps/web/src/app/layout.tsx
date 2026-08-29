@@ -12,6 +12,7 @@ import { ToastHost } from "@/components/ToastHost";
 import { NowPlayingSync } from "@/components/NowPlayingSync";
 import { WebVitals } from "@/components/WebVitals";
 import { Footer } from "@/components/Footer";
+import { GlobalContextMenu } from "@/components/ui/GlobalContextMenu";
 
 export const metadata: Metadata = {
   title: "Nicotine Hub",
@@ -77,6 +78,7 @@ export default function RootLayout({
                     {children}
                     <Footer />
                     <ToastHost />
+                    <GlobalContextMenu />
                   </TransfersProvider>
                 </StatisticsProvider>
               </WishlistProvider>

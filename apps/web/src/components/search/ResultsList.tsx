@@ -110,6 +110,11 @@ export function ResultsList({ rows, onRowTap }: ResultsListProps) {
                   <li key={`${row.user}:${row.path}:${i}`}>
                     <button
                       type="button"
+                      data-row-user={row.user}
+                      data-row-path={row.path}
+                      data-row-filename={row.filename}
+                      data-row-folder={row.folder}
+                      data-row-size={String(row.size)}
                       onClick={() => onRowTap(row)}
                       className="flex w-full items-center gap-3 border-t border-outline-variant/15 px-4 py-2.5 text-left transition-colors active:bg-surface-container max-w-full overflow-hidden"
                     >

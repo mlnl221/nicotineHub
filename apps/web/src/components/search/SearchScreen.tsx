@@ -13,15 +13,21 @@ import { SearchBar } from "./SearchBar";
 import { SearchTabs } from "./SearchTabs";
 import { FilterBar } from "./FilterBar";
 import { ResultsList } from "./ResultsList";
+import { ContextMenu } from "@/components/ui/ContextMenu";
+import { searchResultMenu, searchTabMenu } from "@/lib/context-menu/menus";
+import { useContextMenu } from "@/lib/context-menu/useContextMenu";
 
 export function SearchScreen() {
-  const { activeTab, activeId, startSearch, stopSearch, setFilters, clearFilters } = useSearches();
+  const { activeTab, activeId, tabs, setActive, closeTab, startSearch, stopSearch, setFilters, clearFilters } = useSearches();
   const { requestDownload } = useTransfers();
   const { settings } = useConfig();
   const router = useRouter();
   const [showFilters, setShowFilters] = useState(false);
   const [sheetRow, setSheetRow] = useState<SearchRow | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const ctxMenu = useContextMenu();
+  const [menuRow, setMenuRow] = useState<SearchRow | null>(null);
+  const [tabMenuAnchor, setTabMenuAnchor] = useState<{ x: number; y: number; tab: import("@/lib/search").SearchTab } | null>(null);
 
   const deferredRows = useDeferredValue(activeTab?.rows ?? []);
   const deferredFilters = useDeferredValue(activeTab?.filters ?? null);
@@ -98,8 +104,30 @@ export function SearchScreen() {
   };
 
   return (
-    <div className="flex min-h-screen max-w-full overflow-x-hidden flex-col bg-surface-container-low dark:bg-inverse-surface">
-      <header className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-low/95 backdrop-blur dark:bg-inverse-surface/95">
+    <div className="flex min-h-screen max-w-full overflow-x-hidden flex-col bg-surface-container-low dark:bg-inverse-surface" data-custom-menu>
+      <header className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
+        <div className="min-w-0 flex-1">
+          <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Search</h2>
+          <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">
+            {activeTab ? (
+              <>
+                {visibleRows.length} of {activeTab.total} results
+                {activeTab.status === "searching" ? " · searching…" : ""}
+                {activeTab.mode !== "global" ? ` · ${activeTab.mode}${activeTab.target ? `:${activeTab.target}` : ""}` : ""}
+                <span className="hidden md:inline"> • {tabs.length} tabs</span>
+              </>
+            ) : (
+              <>Find files across the network • {tabs.length} tabs</>
+            )}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 md:gap-4 shrink-0">
+          <a href="/settings?tab=searches#searches" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Search settings">
+            <span className="material-symbols-outlined">settings</span>
+          </a>
+        </div>
+      </header>
+      <div className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-low/95 backdrop-blur dark:bg-inverse-surface/95 border-b border-outline-variant/10">
         <SearchBar
           onSearch={startSearch}
           onToggleFilters={() => setShowFilters((v) => !v)}
@@ -107,7 +135,19 @@ export function SearchScreen() {
           searching={activeTab?.status === "searching"}
           onStop={() => activeId && stopSearch(activeId)}
         />
-        <SearchTabs />
+        <div
+          onContextMenu={(e) => {
+            const target = e.target as HTMLElement;
+            const pill = target.closest("[data-tab-id]") as HTMLElement | null;
+            if (pill?.dataset.tabId) {
+              e.preventDefault();
+              const tab = tabs.find((t) => t.id === pill.dataset.tabId);
+              if (tab) setTabMenuAnchor({ x: e.clientX, y: e.clientY, tab });
+            }
+          }}
+        >
+          <SearchTabs />
+        </div>
         {showFilters && activeTab ? (
           <FilterBar
             filters={activeTab.filters}
@@ -115,7 +155,7 @@ export function SearchScreen() {
             onClear={() => activeId && clearFilters(activeId)}
           />
         ) : null}
-      </header>
+      </div>
 
       {activeTab ? (
         <div className="flex items-center justify-between gap-2 px-4 py-2 font-label text-xs text-on-surface-variant max-w-full overflow-hidden">
@@ -130,7 +170,23 @@ export function SearchScreen() {
       ) : null}
 
       {activeTab ? (
-        <ResultsList rows={visibleRows} onRowTap={setSheetRow} />
+        <div
+          onContextMenu={(e) => {
+            const rowEl = (e.target as HTMLElement).closest("[data-row-user]") as HTMLElement | null;
+            if (rowEl?.dataset.rowUser) {
+              e.preventDefault();
+              const user = rowEl.dataset.rowUser;
+              const path = rowEl.dataset.rowPath || "";
+              const filename = rowEl.dataset.rowFilename || "";
+              const folder = rowEl.dataset.rowFolder || "";
+              const size = Number(rowEl.dataset.rowSize || "0");
+              setMenuRow({ user, path, filename, folder, size, fileType: "", slotFree: false, speed: 0, inQueue: 0, quality: 0, length: 0, private: false, attributes: {} });
+              ctxMenu.open(e);
+            }
+          }}
+        >
+          <ResultsList rows={visibleRows} onRowTap={setSheetRow} />
+        </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4 py-8">
           <div className="flex flex-col items-center gap-3 text-center">
@@ -239,6 +295,41 @@ export function SearchScreen() {
         <div className="fixed bottom-[calc(76px+env(safe-area-inset-bottom,0px))] md:bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-full bg-inverse-surface px-4 py-2 text-center font-label text-xs text-inverse-on-surface shadow-lg">
           {toast}
         </div>
+      ) : null}
+      {ctxMenu.anchor && menuRow ? (
+        <ContextMenu
+          x={ctxMenu.anchor.x}
+          y={ctxMenu.anchor.y}
+          items={searchResultMenu(menuRow, {
+            onDownload: () => {
+              if (menuRow) {
+                requestDownload({ username: menuRow.user, virtualPath: menuRow.path, size: menuRow.size, fileName: menuRow.filename });
+                flash(`Queued "${menuRow.filename}"`);
+              }
+            },
+          })}
+          onClose={() => {
+            ctxMenu.close();
+            setMenuRow(null);
+          }}
+        />
+      ) : null}
+      {tabMenuAnchor ? (
+        <ContextMenu
+          x={tabMenuAnchor.x}
+          y={tabMenuAnchor.y}
+          items={searchTabMenu(tabMenuAnchor.tab, {
+            onCopy: () => {
+              navigator.clipboard.writeText(tabMenuAnchor.tab.query);
+              flash("Search term copied");
+            },
+            onSearchAgain: () => startSearch(tabMenuAnchor.tab.query, { mode: tabMenuAnchor.tab.mode, target: tabMenuAnchor.tab.target }),
+            onEdit: () => flash("Edit tab — use Search bar"),
+            onClose: () => closeTab(tabMenuAnchor.tab.id),
+            onCloseAll: () => tabs.forEach((t) => closeTab(t.id)),
+          })}
+          onClose={() => setTabMenuAnchor(null)}
+        />
       ) : null}
     </div>
   );

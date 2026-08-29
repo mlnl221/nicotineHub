@@ -8,6 +8,8 @@ import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { useInterests } from "@/lib/interests";
 import { useRouter as NavRouter } from "next/navigation";
+import { ContextMenu } from "@/components/ui/ContextMenu";
+import { interestsMenu, interestsRecMenu, userMenu } from "@/lib/context-menu/menus";
 
 export default function InterestsPage() {
   const { state } = useSession();
@@ -32,6 +34,7 @@ export default function InterestsPage() {
   const [likeInput, setLikeInput] = useState("");
   const [hateInput, setHateInput] = useState("");
   const [showItemModal, setShowItemModal] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; thing: string; type: "like" | "hate" | "rec" | "similar" } | null>(null);
 
   useEffect(() => {
     if (state.status !== "connected") router.replace("/");
@@ -59,23 +62,31 @@ export default function InterestsPage() {
   return (
     <div className="flex min-h-screen bg-background font-body text-on-surface antialiased">
       <Sidebar />
-      <TopBar title="Interests" />
+      <TopBar title="Interests" subtitle={`${likes.length} likes • ${hates.length} dislikes`} />
       <main className="md:ml-72 flex min-h-screen flex-1 flex-col pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 overflow-x-hidden max-w-full">
+        <header className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
+          <div>
+            <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Interests</h2>
+            <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">{likes.length} likes • {hates.length} dislikes • Recommendations shape your discovery</p>
+          </div>
+          <div className="flex items-center gap-2 md:gap-4">
+            <a href="/settings?tab=user-profile#user-profile" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Profile settings">
+              <span className="material-symbols-outlined">settings</span>
+            </a>
+          </div>
+        </header>
         <div className="flex w-full max-w-screen-2xl flex-1 flex-col gap-8 md:gap-12 px-4 sm:px-6 py-6 md:py-12 md:px-10 lg:flex-row max-w-full overflow-hidden">
           {/* Left Column */}
           <div className="flex flex-1 flex-col space-y-8 md:space-y-12">
-            <header className="space-y-3">
+            <div className="space-y-2">
               <div className="flex items-center space-x-3">
-                <span className="material-symbols-outlined text-primary text-3xl">interests</span>
-                <h1 className="font-headline text-3xl md:text-4xl font-bold tracking-tight text-on-surface">Interests</h1>
+                <span className="material-symbols-outlined text-primary text-2xl">interests</span>
+                <h3 className="font-headline text-xl font-bold tracking-tight text-on-surface">Your Interests</h3>
               </div>
-              <p className="max-w-2xl font-body text-sm md:text-base leading-relaxed text-on-surface-variant">
+              <p className="max-w-2xl font-body text-sm leading-relaxed text-on-surface-variant">
                 Add things you like and dislike. Your likes and dislikes affect the recommendations you receive and help you find similar users — just like in Nicotine+.
               </p>
-              <p className="font-label text-xs uppercase tracking-widest text-outline">
-                {likes.length} likes • {hates.length} dislikes
-              </p>
-            </header>
+            </div>
 
             <div className="grid grid-cols-1 gap-6 md:gap-8 md:grid-cols-2">
               {/* Likes */}
@@ -105,7 +116,7 @@ export default function InterestsPage() {
                         title="Tap for recommendations. Long-press to remove."
                         onContextMenu={(e) => {
                           e.preventDefault();
-                          removeLike(thing);
+                          setMenuAnchor({ x: e.clientX, y: e.clientY, thing, type: "like" });
                         }}
                       >
                         <span>{thing}</span>
@@ -166,6 +177,10 @@ export default function InterestsPage() {
                     hates.map((thing) => (
                       <div
                         key={thing}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setMenuAnchor({ x: e.clientX, y: e.clientY, thing, type: "hate" });
+                        }}
                         className="chip flex cursor-pointer items-center rounded-full border border-error/20 bg-error-container text-on-error-container px-4 py-2 min-h-9 font-label text-xs gap-1.5 opacity-90"
                       >
                         <span>{thing}</span>
@@ -298,6 +313,10 @@ export default function InterestsPage() {
                       key={r.thing}
                       className="group flex cursor-pointer items-start space-x-4"
                       onClick={() => fetchItemDetails(r.thing)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setMenuAnchor({ x: e.clientX, y: e.clientY, thing: r.thing, type: "rec" });
+                      }}
                     >
                       <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-surface-container-high group-hover:bg-primary-container transition-colors">
                         <span className="material-symbols-outlined text-sm text-on-surface-variant group-hover:text-on-primary-container">
@@ -326,6 +345,10 @@ export default function InterestsPage() {
                       <li
                         key={u.username}
                         onClick={() => (window.location.href = `/profile/${encodeURIComponent(u.username)}`)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setMenuAnchor({ x: e.clientX, y: e.clientY, thing: u.username, type: "similar" });
+                        }}
                         className="flex cursor-pointer items-center justify-between rounded-lg bg-surface-container-lowest p-3 hover:bg-surface-container-high transition-colors"
                       >
                         <span className="font-body text-sm font-medium truncate">{u.username}</span>
@@ -347,6 +370,40 @@ export default function InterestsPage() {
         </div>
       </main>
       <BottomNav />
+      {menuAnchor ? (
+        <ContextMenu
+          x={menuAnchor.x}
+          y={menuAnchor.y}
+          items={
+            menuAnchor.type === "like"
+              ? interestsMenu(menuAnchor.thing, {
+                  onRecommend: () => fetchItemDetails(menuAnchor.thing),
+                  onSearch: () => (window.location.href = `/search?q=${encodeURIComponent(menuAnchor.thing)}`),
+                  onRemove: () => removeLike(menuAnchor.thing),
+                })
+              : menuAnchor.type === "hate"
+                ? interestsMenu(menuAnchor.thing, {
+                    onRecommend: () => fetchItemDetails(menuAnchor.thing),
+                    onSearch: () => (window.location.href = `/search?q=${encodeURIComponent(menuAnchor.thing)}`),
+                    onRemove: () => removeHate(menuAnchor.thing),
+                  })
+                : menuAnchor.type === "rec"
+                  ? interestsRecMenu(
+                      menuAnchor.thing,
+                      likes.includes(menuAnchor.thing),
+                      hates.includes(menuAnchor.thing),
+                      {
+                        onLike: () => addLike(menuAnchor.thing),
+                        onDislike: () => addHate(menuAnchor.thing),
+                        onRecommend: () => fetchItemDetails(menuAnchor.thing),
+                        onSearch: () => (window.location.href = `/search?q=${encodeURIComponent(menuAnchor.thing)}`),
+                      }
+                    )
+                  : userMenu(menuAnchor.thing, "interests")
+          }
+          onClose={() => setMenuAnchor(null)}
+        />
+      ) : null}
     </div>
   );
 }
