@@ -37,8 +37,8 @@ export function TopBar({ title = "Nicotine Hub", subtitle, showBack, backHref }:
             <span className="material-symbols-outlined text-[20px] text-on-surface-variant">arrow_back</span>
           </Link>
         ) : (
-          <Link href="/search" className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-on-primary font-headline font-black text-sm shrink-0">
-            N
+          <Link href="/search" className="flex h-8 w-8 items-center justify-center rounded-lg bg-white p-0.5 shadow-sm ring-1 ring-black/5 shrink-0">
+            <img src="/icon-512.png" alt="" width={32} height={32} className="h-full w-full rounded-md object-contain" />
           </Link>
         )}
         <div className="min-w-0 flex-1 overflow-hidden">

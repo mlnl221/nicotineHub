@@ -30,12 +30,14 @@ export default function Home() {
       <main className="relative z-10 flex w-full max-w-md flex-col items-center">
         {/* Logo and header */}
         <div className="mb-8 flex w-full flex-col items-center text-center">
-          <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-xl bg-primary shadow-lg shadow-primary/20">
-            <span className="font-headline text-3xl font-black text-on-primary">N</span>
-          </div>
-          <h1 className="mb-2 font-headline text-3xl md:text-4xl font-bold tracking-tight text-on-surface dark:text-inverse-on-surface">
-            Nicotine Hub
-          </h1>
+          <img
+            src="/logo.png"
+            alt="Nicotine Hub"
+            width={220}
+            height={120}
+            className="mb-4 h-auto w-[220px] max-w-[70vw] object-contain drop-shadow-[0_4px_24px_rgba(9,76,178,0.12)]"
+          />
+          <h1 className="sr-only">Nicotine Hub</h1>
           <p className="font-body text-sm text-on-surface-variant dark:text-outline-variant">
             Enter any username and password to try the demo.
           </p>
