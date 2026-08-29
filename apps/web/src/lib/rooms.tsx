@@ -190,5 +190,14 @@ export function useRooms() {
     [send],
   );
 
-  return { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say };
+  const closeAll = useCallback(() => {
+    joinedRooms.forEach((_, room) => {
+      send({ type: "chat:room", action: "leave", room });
+    });
+    setJoinedRooms(new Map());
+    setMessages(new Map());
+    setActiveRoom(null);
+  }, [joinedRooms, send]);
+
+  return { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, closeAll };
 }

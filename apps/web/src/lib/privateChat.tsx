@@ -68,5 +68,19 @@ export function usePrivateChat() {
 
   const users = Array.from(conversations.keys());
 
-  return { conversations, users, activeUser, setActiveUser, sendMessage };
+  const closeConversation = (username: string) => {
+    setConversations((prev) => {
+      const next = new Map(prev);
+      next.delete(username);
+      return next;
+    });
+    if (activeUser === username) setActiveUser(null);
+  };
+
+  const closeAll = () => {
+    setConversations(new Map());
+    setActiveUser(null);
+  };
+
+  return { conversations, users, activeUser, setActiveUser, sendMessage, closeConversation, closeAll };
 }
