@@ -1,25 +1,80 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useConfig } from "@/lib/config/provider";
 import { Sidebar } from "@/components/Sidebar";
 import { NetworkSection } from "@/components/settings/NetworkSection";
 import { UiSection } from "@/components/settings/UiSection";
 import { SearchesSection } from "@/components/settings/SearchesSection";
 import { NotificationsSection } from "@/components/settings/NotificationsSection";
+import { SharesSection } from "@/components/settings/SharesSection";
+import { DownloadsSection } from "@/components/settings/DownloadsSection";
+import { UploadsSection } from "@/components/settings/UploadsSection";
+import { UserProfileSection } from "@/components/settings/UserProfileSection";
+import { ChatsSection } from "@/components/settings/ChatsSection";
+import { NowPlayingSection } from "@/components/settings/NowPlayingSection";
+import { LoggingSection } from "@/components/settings/LoggingSection";
+import { BannedUsersSection } from "@/components/settings/BannedUsersSection";
+import { IgnoredUsersSection } from "@/components/settings/IgnoredUsersSection";
+import { UrlHandlersSection } from "@/components/settings/UrlHandlersSection";
+import { PluginsSection } from "@/components/settings/PluginsSection";
 
-type TabId = "network" | "appearance" | "searches" | "notifications";
+type TabId =
+  | "network"
+  | "appearance"
+  | "shares"
+  | "downloads"
+  | "uploads"
+  | "searches"
+  | "user-profile"
+  | "chats"
+  | "now-playing"
+  | "logging"
+  | "banned-users"
+  | "ignored-users"
+  | "url-handlers"
+  | "plugins"
+  | "notifications";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "network", label: "Network", icon: "dns" },
   { id: "appearance", label: "Appearance", icon: "palette" },
+  { id: "shares", label: "Shares", icon: "folder" },
+  { id: "downloads", label: "Downloads", icon: "download" },
+  { id: "uploads", label: "Uploads", icon: "upload" },
   { id: "searches", label: "Searches", icon: "search" },
+  { id: "user-profile", label: "User Profile", icon: "person" },
+  { id: "chats", label: "Chats", icon: "chat" },
+  { id: "now-playing", label: "Now Playing", icon: "music_note" },
+  { id: "logging", label: "Logging", icon: "article" },
+  { id: "banned-users", label: "Banned Users", icon: "block" },
+  { id: "ignored-users", label: "Ignored Users", icon: "person_off" },
+  { id: "url-handlers", label: "URL Handlers", icon: "link" },
+  { id: "plugins", label: "Plugins", icon: "extension" },
   { id: "notifications", label: "Notifications", icon: "notifications" },
 ];
+
+const VALID_TABS = new Set<string>(TABS.map((t) => t.id));
 
 export default function SettingsPage() {
   const { resetAll } = useConfig();
   const [tab, setTab] = useState<TabId>("network");
+
+  // Deep-link via ?tab= / #tab — sync to URL and survive reload (settings-plan.md Phase B)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get("tab");
+    const fromHash = window.location.hash.replace(/^#/, "");
+    const initial = fromQuery || fromHash;
+    if (initial && VALID_TABS.has(initial)) setTab(initial as TabId);
+  }, []);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", tab);
+    url.hash = tab;
+    window.history.replaceState(null, "", url.toString());
+  }, [tab]);
 
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
@@ -67,6 +122,7 @@ export default function SettingsPage() {
               return (
                 <button
                   key={t.id}
+                  id={`tab-${t.id}`}
                   onClick={() => setTab(t.id)}
                   className={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 font-label text-xs uppercase tracking-widest transition-all ${
                     active
@@ -85,8 +141,30 @@ export default function SettingsPage() {
             <NetworkSection />
           ) : tab === "appearance" ? (
             <UiSection />
+          ) : tab === "shares" ? (
+            <SharesSection />
+          ) : tab === "downloads" ? (
+            <DownloadsSection />
+          ) : tab === "uploads" ? (
+            <UploadsSection />
           ) : tab === "searches" ? (
             <SearchesSection />
+          ) : tab === "user-profile" ? (
+            <UserProfileSection />
+          ) : tab === "chats" ? (
+            <ChatsSection />
+          ) : tab === "now-playing" ? (
+            <NowPlayingSection />
+          ) : tab === "logging" ? (
+            <LoggingSection />
+          ) : tab === "banned-users" ? (
+            <BannedUsersSection />
+          ) : tab === "ignored-users" ? (
+            <IgnoredUsersSection />
+          ) : tab === "url-handlers" ? (
+            <UrlHandlersSection />
+          ) : tab === "plugins" ? (
+            <PluginsSection />
           ) : (
             <NotificationsSection />
           )}

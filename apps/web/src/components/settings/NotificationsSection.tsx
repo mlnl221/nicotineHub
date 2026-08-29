@@ -19,6 +19,12 @@ export function NotificationsSection() {
         onChange={(v) => setOption("notifications", "notification_window_title", v)}
       />
       <ToggleControl
+        label="Tab colors"
+        description="Highlight tabs with notification colors (mirrors notification_tab_colors)."
+        checked={n.notification_tab_colors}
+        onChange={(v) => setOption("notifications", "notification_tab_colors", v)}
+      />
+      <ToggleControl
         label="Sound"
         checked={n.notification_popup_sound}
         onChange={(v) => setOption("notifications", "notification_popup_sound", v)}

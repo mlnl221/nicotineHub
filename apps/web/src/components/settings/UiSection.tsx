@@ -74,6 +74,49 @@ export function UiSection() {
         checked={ui.reverse_file_paths}
         onChange={(v) => setOption("ui", "reverse_file_paths", v)}
       />
+      <ToggleControl
+        label="Spell check"
+        description="Browser-native spellcheck for chat/search inputs."
+        checked={ui.spellcheck}
+        onChange={(v) => setOption("ui", "spellcheck", v)}
+      />
+      <ToggleControl
+        label="Header bar"
+        description="Use compact header bar (desktop GTK). Visible as option for PWA parity."
+        checked={ui.header_bar}
+        onChange={(v) => setOption("ui", "header_bar", v)}
+      />
+      <ToggleControl
+        label="Tab close buttons"
+        checked={ui.tabclosers}
+        onChange={(v) => setOption("ui", "tabclosers", v)}
+      />
+      <ToggleControl
+        label="Restore previous tab on close"
+        checked={ui.tab_select_previous}
+        onChange={(v) => setOption("ui", "tab_select_previous", v)}
+      />
+      <SelectControl
+        label="Buddy list placement"
+        value={ui.buddylistinchatrooms}
+        onChange={(v) => setOption("ui", "buddylistinchatrooms", v)}
+        options={[
+          { value: "tab", label: "Separate Buddies tab" },
+          { value: "chatrooms", label: "Sidebar in Chat Rooms" },
+          { value: "always", label: "Always visible sidebar" },
+        ]}
+      />
+      <SelectControl
+        label="On close"
+        description="Close dialog behavior (desktop exitdialog)."
+        value={ui.exitdialog}
+        onChange={(v) => setOption("ui", "exitdialog", v)}
+        options={[
+          { value: 0, label: "Quit" },
+          { value: 1, label: "Show confirmation" },
+          { value: 2, label: "Run in background" },
+        ]}
+      />
     </SectionCard>
   );
 }
