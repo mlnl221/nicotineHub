@@ -96,18 +96,26 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     const unsub = subscribe((msg) => {
       if (msg.type === "search:result") {
         const searchId = (msg as { searchId: string }).searchId;
+        const rows = (msg as { rows: SearchRow[] }).rows || [];
+        // Eager country fetch: trigger GetPeerAddress for responders to populate SearchRow.country via bridge cache + future peer-address country (porting-status country eager parity)
+        if (rows.length) {
+          const uniq = Array.from(new Set(rows.map((r) => r.user).filter(Boolean))).slice(0, 20);
+          for (const u of uniq) {
+            try { send({ type: "userinfo", action: "peerAddress", username: u } as unknown as never); } catch {}
+          }
+        }
         const isWishlist = typeof searchId === "string" && searchId.startsWith("wishlist:");
         setTabs((prev) => {
           const exists = prev.some((t) => t.id === searchId);
           if (isWishlist && !exists) {
             // Auto-create wishlist tab on interval hit (needs UI tab for wishlist:*)
             const term = searchId.split(":")[1] || searchId;
-            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [...msg.rows], total: msg.rows.length, filters: emptyFilters() };
+            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [...rows], total: rows.length, filters: emptyFilters() };
             setActiveId(searchId);
             return [...prev, wlTab];
           }
           return prev.map((t) =>
-            t.id === searchId ? { ...t, rows: [...t.rows, ...msg.rows], total: t.total + msg.rows.length } : t,
+            t.id === searchId ? { ...t, rows: [...t.rows, ...rows], total: t.total + rows.length } : t,
           );
         });
       } else if (msg.type === "search:end") {
@@ -132,7 +140,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       }
     });
     return unsub;
-  }, [subscribe]);
+  }, [subscribe, send]);
 
   const startSearch = useCallback(
     (query: string, opts?: { mode?: SearchMode; target?: string }) => {
