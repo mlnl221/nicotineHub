@@ -125,3 +125,33 @@
 .progress-glow {
   box-shadow: 0 0 10px rgba(9, 76, 178, 0.5);
 }
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.pb-safe-full {
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+}
+
+/* Hide scrollbar but keep scroll */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.btn-glow {
+  box-shadow: 0 4px 20px rgba(9, 76, 178, 0.3);
+}
+
+.ghost-border-dashed {
+  border: 1px dashed rgba(195, 198, 213, 0.3);
+}
+.dark .ghost-border-dashed {
+  border-color: rgba(67, 70, 83, 0.4);
+}

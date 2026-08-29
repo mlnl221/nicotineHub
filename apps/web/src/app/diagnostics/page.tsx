@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { useTransfers } from "@/lib/transfers";
 import { Sidebar } from "@/components/Sidebar";
+import { TopBar } from "@/components/mobile/TopBar";
+import { BottomNav } from "@/components/mobile/BottomNav";
 import type { DiagEntry, DiagLevel, DiagnosticsHealth } from "@/lib/protocol";
 
 const LEVELS: DiagLevel[] = ["debug", "info", "warn", "error"];
@@ -236,6 +238,7 @@ export default function DiagnosticsPage() {
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
+      <TopBar title="Diagnostics" />
       <main className="relative ml-72 flex min-h-screen flex-1 flex-col overflow-hidden">
         <div className="pointer-events-none absolute inset-0 opacity-20" style={{ background: "radial-gradient(circle at 50% 0%, rgba(51,102,204,0.12) 0%, transparent 60%)" }} />
         <header className="relative z-10 flex w-full items-center justify-between px-6 py-4 sm:px-10 sm:py-6">
@@ -340,6 +343,7 @@ export default function DiagnosticsPage() {
           </section>
         </div>
       </main>
+      <BottomNav />
     </div>
   );
 }

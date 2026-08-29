@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
+import { TopBar } from "@/components/mobile/TopBar";
+import { BottomNav } from "@/components/mobile/BottomNav";
 import Link from "next/link";
 
 const RECENT_BROWSE_KEY = "nicotine.recentBrowse";
@@ -53,8 +55,9 @@ export default function BrowseSharesPage() {
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
-      <main className="ml-72 flex min-h-screen flex-1 flex-col overflow-hidden bg-background">
-        <header className="sticky top-0 z-10 bg-surface-container-lowest/80 backdrop-blur-xl px-10 py-6">
+      <TopBar title="Browse" subtitle="Browse shared files" />
+      <main className="md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden bg-background pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+        <header className="hidden md:flex sticky top-0 z-10 bg-surface-container-lowest/80 backdrop-blur-xl px-10 py-6">
           <div className="mx-auto flex max-w-screen-2xl items-end justify-between">
             <div>
               <h2 className="font-headline text-3xl font-bold tracking-tight text-on-surface">Browse Shares</h2>
@@ -62,7 +65,7 @@ export default function BrowseSharesPage() {
             </div>
           </div>
         </header>
-        <div className="mx-auto w-full max-w-xl flex-1 p-10">
+        <div className="mx-auto w-full max-w-xl flex-1 p-6 md:p-10">
           <div className="rounded-xl bg-surface-container-lowest p-8 shadow-sm ring-1 ring-outline-variant/15">
             <label className="font-label text-xs uppercase tracking-widest text-on-surface-variant">Username</label>
             <div className="mt-3 flex gap-2">
@@ -118,6 +121,7 @@ export default function BrowseSharesPage() {
           ) : null}
         </div>
       </main>
+      <BottomNav />
     </div>
   );
 }

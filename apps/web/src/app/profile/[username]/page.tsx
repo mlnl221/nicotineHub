@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
+import { TopBar } from "@/components/mobile/TopBar";
+import { BottomNav } from "@/components/mobile/BottomNav";
 import { useUserInfo } from "@/lib/userinfo";
 import { humanSpeed } from "@/lib/format";
 import { useBuddies } from "@/lib/buddies";
@@ -231,7 +233,8 @@ function ProfileInner({ username }: { username: string }) {
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
-      <main className="relative ml-72 flex min-h-screen flex-1 flex-col overflow-hidden">
+      <TopBar title="Profile" />
+      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <header className="sticky top-0 z-40 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-10 py-8 flex flex-col gap-4 border-b border-transparent shadow-sm shadow-on-surface/5">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-4 min-w-0">

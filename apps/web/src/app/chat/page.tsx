@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
+import { TopBar } from "@/components/mobile/TopBar";
+import { BottomNav } from "@/components/mobile/BottomNav";
 import { useRooms } from "@/lib/rooms";
 
 export default function ChatRoomsPage() {
@@ -46,8 +48,9 @@ export default function ChatRoomsPage() {
   return (
     <div className="flex h-screen overflow-hidden bg-surface-container-lowest font-body text-on-surface">
       <Sidebar />
-      <main className="ml-72 flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-outline-variant/15 bg-surface-container-lowest/80 px-6 py-4 backdrop-blur-xl">
+      <TopBar title={activeRoom || "Chat Rooms"} subtitle={activeRoom ? `${activeUsers.length} users • ${roomList.length} public rooms` : `${joinedArray.length} joined • ${roomList.length} public`} />
+      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+        <header className="hidden md:flex items-center justify-between border-b border-outline-variant/15 bg-surface-container-lowest/80 px-6 py-4 backdrop-blur-xl">
           <div className="flex items-center gap-4">
             <h2 className="font-headline text-xl font-bold tracking-tight text-primary">Chat Rooms</h2>
             {activeRoom ? (
@@ -316,6 +319,7 @@ export default function ChatRoomsPage() {
           </section>
         </div>
       </main>
+      <BottomNav />
     </div>
   );
 }

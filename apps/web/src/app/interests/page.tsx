@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
+import { TopBar } from "@/components/mobile/TopBar";
+import { BottomNav } from "@/components/mobile/BottomNav";
 import { useInterests } from "@/lib/interests";
 import { useRouter as NavRouter } from "next/navigation";
 
@@ -57,44 +59,47 @@ export default function InterestsPage() {
   return (
     <div className="flex min-h-screen bg-background font-body text-on-surface antialiased">
       <Sidebar />
-      <main className="ml-72 flex min-h-screen flex-1 flex-col">
+      <TopBar title="Interests" />
+      <main className="md:ml-72 flex min-h-screen flex-1 flex-col pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <div className="flex w-full max-w-screen-2xl flex-1 flex-col gap-12 px-6 py-12 md:px-10 lg:flex-row">
-          {/* Left Column: Interests Matrix */}
-          <div className="flex flex-1 flex-col space-y-12">
-            <header className="space-y-4">
+          {/* Left Column */}
+          <div className="flex flex-1 flex-col space-y-8 md:space-y-12">
+            <header className="space-y-3">
               <div className="flex items-center space-x-3">
-                <span className="material-symbols-outlined text-tertiary text-3xl">account_tree</span>
-                <h1 className="font-headline text-4xl font-light tracking-tight text-on-surface">Affinity Matrix</h1>
+                <span className="material-symbols-outlined text-primary text-3xl">interests</span>
+                <h1 className="font-headline text-3xl md:text-4xl font-bold tracking-tight text-on-surface">Interests</h1>
               </div>
-              <p className="max-w-2xl font-body text-lg leading-relaxed text-on-surface-variant">
-                Curate your scholarly profile. These semantic vectors inform your discovery algorithms and peer-to-peer
-                network routing.
+              <p className="max-w-2xl font-body text-sm md:text-base leading-relaxed text-on-surface-variant">
+                Add things you like and dislike. Your likes and dislikes affect the recommendations you receive and help you find similar users — just like in Nicotine+.
+              </p>
+              <p className="font-label text-xs uppercase tracking-widest text-outline">
+                {likes.length} likes • {hates.length} dislikes
               </p>
             </header>
 
-            <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-6 md:gap-8 md:grid-cols-2">
               {/* Likes */}
-              <section className="relative overflow-hidden rounded-xl bg-surface-container-lowest p-8 shadow-sm ring-1 ring-outline-variant/15">
+              <section className="relative overflow-hidden rounded-xl bg-surface-container-lowest p-6 md:p-8 shadow-sm ring-1 ring-outline-variant/15">
                 <div className="absolute inset-0 bg-gradient-to-b from-transparent to-surface-container-low/50 pointer-events-none" />
                 <div className="relative flex items-center justify-between border-b border-surface-container-highest pb-4 mb-6">
-                  <h2 className="flex items-center font-headline text-xl font-medium text-on-surface">
+                  <h2 className="flex items-center font-headline text-lg md:text-xl font-semibold text-on-surface">
                     <span className="material-symbols-outlined mr-2 text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>
                       add_circle
                     </span>
-                    Vectors of Interest
+                    I Like
                   </h2>
-                  <span className="font-label text-xs uppercase tracking-widest text-outline">Positive</span>
+                  <span className="font-label text-xs uppercase tracking-widest text-outline">Likes</span>
                 </div>
-                <div className="relative flex flex-wrap gap-3">
+                <div className="relative flex flex-wrap gap-2.5">
                   {likes.length === 0 ? (
-                    <p className="font-body text-sm text-outline">No interests yet. Add one below.</p>
+                    <p className="font-body text-sm text-outline">No likes yet. Add one below — e.g. an artist, genre, or tag.</p>
                   ) : (
                     likes.map((thing) => (
                       <button
                         key={thing}
                         onClick={() => fetchItemDetails(thing)}
-                        className="chip flex cursor-pointer items-center rounded-lg border border-primary/20 bg-surface-container-low px-4 py-2 font-body text-sm text-on-surface transition-all hover:-translate-y-0.5"
-                        title="Click for recommendations for this item. Long-press to remove."
+                        className="chip flex cursor-pointer items-center rounded-full border border-primary/20 bg-primary text-on-primary px-5 py-2.5 font-label text-sm gap-1.5 shadow-[0_2px_8px_rgba(9,76,178,0.15)] transition-all active:scale-95 hover:opacity-90"
+                        title="Tap for recommendations. Long-press to remove."
                         onContextMenu={(e) => {
                           e.preventDefault();
                           removeLike(thing);
@@ -109,78 +114,84 @@ export default function InterestsPage() {
                             removeLike(thing);
                           }}
                           onKeyDown={(e) => e.key === "Enter" && removeLike(thing)}
-                          className="material-symbols-outlined ml-2 text-sm text-primary"
+                          className="material-symbols-outlined ml-1 text-[16px] opacity-80"
                         >
                           close
                         </span>
                       </button>
                     ))
                   )}
-                  <div className="mt-4 flex w-full items-center">
+                  <button
+                    onClick={() => document.getElementById("like-input")?.focus()}
+                    className="hidden"
+                    aria-hidden
+                  />
+                  <div className="mt-3 flex w-full items-center">
                     <input
+                      id="like-input"
                       value={likeInput}
                       onChange={(e) => setLikeInput(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && handleLikeAdd()}
-                      placeholder="Add semantic vector..."
-                      className="w-full rounded-l-lg border border-outline-variant/30 bg-surface-container-lowest px-4 py-2 font-body text-sm text-on-surface placeholder:text-outline-variant focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                      placeholder="Add a like…"
+                      className="w-full rounded-l-full border border-outline-variant/30 bg-surface-container-lowest px-4 py-2.5 font-body text-sm text-on-surface placeholder:text-outline-variant focus:border-primary focus:ring-1 focus:ring-primary outline-none"
                     />
                     <button
                       onClick={handleLikeAdd}
-                      className="rounded-r-lg bg-primary px-4 py-2 text-on-primary transition-colors hover:bg-primary-container"
+                      className="rounded-r-full bg-primary px-5 py-2.5 text-on-primary transition-colors hover:bg-primary-container active:scale-95"
                     >
-                      <span className="material-symbols-outlined text-sm">add</span>
+                      <span className="material-symbols-outlined text-[18px]">add</span>
                     </button>
                   </div>
                 </div>
               </section>
 
               {/* Hates */}
-              <section className="relative overflow-hidden rounded-xl bg-surface-container-lowest p-8 shadow-sm ring-1 ring-outline-variant/15">
+              <section className="relative overflow-hidden rounded-xl bg-surface-container-lowest p-6 md:p-8 shadow-sm ring-1 ring-outline-variant/15">
                 <div className="absolute inset-0 bg-gradient-to-b from-transparent to-surface-container-low/50 pointer-events-none" />
                 <div className="relative flex items-center justify-between border-b border-surface-container-highest pb-4 mb-6">
-                  <h2 className="flex items-center font-headline text-xl font-medium text-on-surface">
+                  <h2 className="flex items-center font-headline text-lg md:text-xl font-semibold text-on-surface">
                     <span className="material-symbols-outlined mr-2 text-error" style={{ fontVariationSettings: "'FILL' 1" }}>
                       do_not_disturb_on
                     </span>
-                    Excluded Nodes
+                    I Dislike
                   </h2>
-                  <span className="font-label text-xs uppercase tracking-widest text-outline">Negative</span>
+                  <span className="font-label text-xs uppercase tracking-widest text-outline">Dislikes</span>
                 </div>
-                <div className="relative flex flex-wrap gap-3">
+                <div className="relative flex flex-wrap gap-2.5">
                   {hates.length === 0 ? (
-                    <p className="font-body text-sm text-outline">No exclusions. Add one below.</p>
+                    <p className="font-body text-sm text-outline">No dislikes yet. Add one below.</p>
                   ) : (
                     hates.map((thing) => (
                       <div
                         key={thing}
-                        className="chip flex cursor-pointer items-center rounded-lg border border-error/20 bg-surface-container-low px-4 py-2 font-body text-sm text-on-surface opacity-80"
+                        className="chip flex cursor-pointer items-center rounded-full border border-error/20 bg-error-container text-on-error-container px-4 py-2 font-label text-xs gap-1.5 opacity-90"
                       >
-                        <s className="text-on-surface-variant">{thing}</s>
+                        <span>{thing}</span>
                         <span
                           role="button"
                           tabIndex={0}
                           onClick={() => removeHate(thing)}
                           onKeyDown={(e) => e.key === "Enter" && removeHate(thing)}
-                          className="material-symbols-outlined ml-2 text-sm text-error"
+                          className="material-symbols-outlined ml-1 text-[16px] text-on-error-container/80"
                         >
                           close
                         </span>
                       </div>
                     ))
                   )}
-                  <div className="mt-4 flex w-full items-center">
+                  <div className="mt-3 flex w-full items-center">
                     <input
                       value={hateInput}
                       onChange={(e) => setHateInput(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && handleHateAdd()}
-                      placeholder="Add exclusion vector..."
-                      className="w-full rounded-l-lg border border-outline-variant/30 bg-surface-container-lowest px-4 py-2 font-body text-sm text-on-surface placeholder:text-outline-variant focus:border-error focus:ring-1 focus:ring-error outline-none"
+                      placeholder="Add a dislike…"
+                      className="w-full rounded-l-full border border-outline-variant/30 bg-surface-container-lowest px-4 py-2.5 font-body text-sm text-on-surface placeholder:text-outline-variant focus:border-error focus:ring-1 focus:ring-error outline-none"
                     />
                     <button
                       onClick={handleHateAdd}
-                      className="rounded-r-lg bg-surface-container-high px-4 py-2 text-error transition-colors hover:bg-error hover:text-on-error"
+                      className="rounded-r-full bg-surface-container-high px-5 py-2.5 text-error transition-colors hover:bg-error hover:text-on-error active:scale-95"
                     >
-                      <span className="material-symbols-outlined text-sm">add</span>
+                      <span className="material-symbols-outlined text-[18px]">add</span>
                     </button>
                   </div>
                 </div>
@@ -261,13 +272,13 @@ export default function InterestsPage() {
 
           {/* Right Column: Recommendations Panel */}
           <aside className="w-full lg:w-96 flex-shrink-0">
-            <div className="sticky top-6 rounded-xl bg-surface-container-low/60 p-8 backdrop-blur-sm ghost-border">
-              <div className="mb-6 flex items-center justify-between">
-                <h3 className="font-headline text-xl font-medium text-on-surface">Curated Discoveries</h3>
+            <div className="sticky top-6 rounded-xl bg-surface-container-lowest md:bg-surface-container-low/60 p-6 md:p-8 backdrop-blur-sm ghost-border">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="font-headline text-xl font-semibold text-on-surface">Recommendations</h3>
                 <span className="material-symbols-outlined text-tertiary">auto_awesome</span>
               </div>
               <p className="mb-6 border-b border-surface-container-highest pb-2 font-label text-xs uppercase tracking-widest text-on-surface-variant">
-                {likes.length === 0 ? "Popular Interests" : "Based on Affinity Vectors"}
+                {likes.length === 0 ? "Global recommendations" : "Based on your likes"}
               </p>
 
               {loading ? (
@@ -326,14 +337,15 @@ export default function InterestsPage() {
 
               <button
                 onClick={refresh}
-                className="mt-8 w-full rounded-lg bg-surface-container-highest py-3 font-label text-sm text-on-surface hover:bg-surface-variant transition-colors"
+                className="mt-8 w-full rounded-full bg-surface-container-highest py-3 font-label text-sm font-semibold text-on-surface hover:bg-surface-variant transition-colors active:scale-95"
               >
-                Refresh Discovery Algorithm
+                Refresh Recommendations
               </button>
             </div>
           </aside>
         </div>
       </main>
+      <BottomNav />
     </div>
   );
 }

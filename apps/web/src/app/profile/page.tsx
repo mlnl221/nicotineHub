@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
+import { TopBar } from "@/components/mobile/TopBar";
+import { BottomNav } from "@/components/mobile/BottomNav";
 
 const RECENT_KEY = "nicotine.recentProfiles";
 
@@ -41,7 +43,8 @@ export default function ProfileLookup() {
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
-      <main className="relative ml-72 flex min-h-screen flex-1 flex-col items-center justify-center px-6">
+      <TopBar title="Profiles" />
+      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col items-center justify-center px-6 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <div className="w-full max-w-md">
           <h2 className="font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">
             User Profiles
@@ -103,6 +106,7 @@ export default function ProfileLookup() {
           ) : null}
         </div>
       </main>
+      <BottomNav />
     </div>
   );
 }

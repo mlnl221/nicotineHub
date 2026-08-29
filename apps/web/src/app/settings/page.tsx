@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useConfig } from "@/lib/config/provider";
 import { Sidebar } from "@/components/Sidebar";
+import { TopBar } from "@/components/mobile/TopBar";
+import { BottomNav } from "@/components/mobile/BottomNav";
 import { NetworkSection } from "@/components/settings/NetworkSection";
 import { UiSection } from "@/components/settings/UiSection";
 import { SearchesSection } from "@/components/settings/SearchesSection";
@@ -93,6 +95,7 @@ export default function SettingsPage() {
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
+      <TopBar title="Settings" />
 
       <main className="relative ml-72 flex min-h-screen flex-1 flex-col overflow-hidden">
         <div
@@ -250,6 +253,7 @@ export default function SettingsPage() {
           </div>
         </div>
       </main>
+      <BottomNav />
     </div>
   );
 }

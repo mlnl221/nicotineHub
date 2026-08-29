@@ -6,6 +6,8 @@ import { useSession } from "@/lib/session";
 import { SearchProvider } from "@/lib/search";
 import { SearchScreen } from "@/components/search/SearchScreen";
 import { Sidebar } from "@/components/Sidebar";
+import { TopBar } from "@/components/mobile/TopBar";
+import { BottomNav } from "@/components/mobile/BottomNav";
 
 export default function SearchPage() {
   const { state } = useSession();
@@ -20,11 +22,13 @@ export default function SearchPage() {
   return (
     <div className="flex min-h-screen bg-surface-container-low dark:bg-inverse-surface">
       <Sidebar />
-      <main className="ml-72 flex min-h-screen flex-1 flex-col bg-surface-container-low dark:bg-inverse-surface">
+      <TopBar title="Search" subtitle="Find files across the network" />
+      <main className="md:ml-72 flex min-h-screen flex-1 flex-col bg-surface-container-low dark:bg-inverse-surface pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <SearchProvider>
           <SearchScreen />
         </SearchProvider>
       </main>
+      <BottomNav />
     </div>
   );
 }

@@ -4,6 +4,8 @@ import { Suspense, useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
+import { TopBar } from "@/components/mobile/TopBar";
+import { BottomNav } from "@/components/mobile/BottomNav";
 import { usePrivateChat } from "@/lib/privateChat";
 
 function PrivateChatInner() {
@@ -51,12 +53,16 @@ function PrivateChatInner() {
     setNewChatUser("");
   };
 
+  const topBarTitle = activeUser ? activeUser : "Private Chat";
+  const topBarSubtitle = activeUser ? "Private message" : `${users.length} conversations`;
+
   return (
     <div className="flex h-screen overflow-hidden bg-surface-container-lowest font-body text-on-surface">
       <Sidebar />
-      <main className="ml-72 flex flex-1 flex-col overflow-hidden">
-        {/* Top bar */}
-        <header className="flex items-center justify-between border-b border-outline-variant/15 bg-surface-container-lowest/80 px-6 py-4 backdrop-blur-xl">
+      <TopBar title={topBarTitle} subtitle={topBarSubtitle} />
+      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+        {/* Desktop header — hidden on mobile (TopBar covers it) */}
+        <header className="hidden md:flex items-center justify-between border-b border-outline-variant/15 bg-surface-container-lowest/80 px-6 py-4 backdrop-blur-xl">
           <div className="flex items-center gap-4">
             <h2 className="font-headline text-xl font-bold tracking-tight text-primary">Private Chat</h2>
             {activeUser ? (
@@ -274,6 +280,7 @@ function PrivateChatInner() {
           </section>
         </div>
       </main>
+      <BottomNav />
     </div>
   );
 }

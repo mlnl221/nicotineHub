@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
+import { TopBar } from "@/components/mobile/TopBar";
+import { BottomNav } from "@/components/mobile/BottomNav";
 import { useBrowse } from "@/lib/browse";
 import { useTransfers } from "@/lib/transfers";
 
@@ -55,7 +57,8 @@ export default function BrowseUserPage() {
   return (
     <div className="flex min-h-screen bg-background font-body text-on-surface antialiased">
       <Sidebar />
-      <main className="ml-72 flex min-h-screen flex-1 flex-col overflow-hidden">
+      <TopBar title="Browse" />
+      <main className="md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         {/* Header breadcrumbs */}
         <header className="sticky top-0 z-10 border-b border-surface-container-highest/20 bg-surface-container-lowest/80 backdrop-blur-xl px-6 py-4 md:px-8">
           <nav className="flex items-center gap-1 font-body text-xs overflow-x-auto">
@@ -291,6 +294,7 @@ export default function BrowseUserPage() {
           </div>
         </div>
       ) : null}
+      <BottomNav />
     </div>
   );
 }

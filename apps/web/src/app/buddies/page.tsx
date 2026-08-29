@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
+import { TopBar } from "@/components/mobile/TopBar";
+import { BottomNav } from "@/components/mobile/BottomNav";
 import { useBuddies } from "@/lib/buddies";
 
 export default function BuddiesPage() {
@@ -31,7 +33,8 @@ export default function BuddiesPage() {
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
-      <main className="ml-72 flex min-h-screen flex-1 flex-col overflow-hidden">
+      <TopBar title="Buddies" subtitle="Trusted peers • watch status" />
+      <main className="md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <div className="mx-auto w-full max-w-screen-2xl flex-1 px-6 py-8 md:px-10">
           <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
@@ -192,6 +195,7 @@ export default function BuddiesPage() {
           )}
         </div>
       </main>
+      <BottomNav />
     </div>
   );
 }

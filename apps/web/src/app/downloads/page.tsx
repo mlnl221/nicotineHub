@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
+import { TopBar } from "@/components/mobile/TopBar";
+import { BottomNav } from "@/components/mobile/BottomNav";
 import { useTransfers } from "@/lib/transfers";
 import { TransferCard } from "@/components/transfers/TransferCard";
 
@@ -28,28 +30,29 @@ function DownloadsInner() {
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
-      <main className="relative ml-72 flex min-h-screen flex-1 flex-col overflow-hidden">
-        <header className="sticky top-0 z-40 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-10 py-8 flex flex-col md:flex-row md:justify-between md:items-end gap-4 border-b border-transparent shadow-sm shadow-on-surface/5">
+      <TopBar title="Transfers" />
+      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+        <header className="sticky top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
           <div>
-            <h2 className="font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Downloads &amp; Uploads</h2>
-            <p className="font-body text-on-surface-variant dark:text-outline text-sm mt-1">Monitoring {activeCount} active connections</p>
+            <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Downloads &amp; Uploads</h2>
+            <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">{activeCount} active • <span className="md:hidden font-label text-xs">{humanSpeed(totalDown)} ↓ • {humanSpeed(totalUp)} ↑</span><span className="hidden md:inline">Monitoring {activeCount} connections</span></p>
           </div>
-          <div className="flex items-center gap-4">
-            <div data-testid="download-speed" className="bg-surface-container-low dark:bg-surface-container-high px-4 py-2 rounded-lg flex items-center gap-3">
-              <span className="material-symbols-outlined text-primary">arrow_downward</span>
-              <span className="font-label font-semibold text-sm">{humanSpeed(totalDown)}</span>
+          <div className="flex items-center gap-2 md:gap-4">
+            <div data-testid="download-speed" className="hidden md:flex bg-surface-container-low dark:bg-surface-container-high px-4 py-2 rounded-full md:rounded-lg items-center gap-2">
+              <span className="material-symbols-outlined text-primary text-[18px]">arrow_downward</span>
+              <span className="font-label font-semibold text-xs md:text-sm">{humanSpeed(totalDown)}</span>
             </div>
-            <div data-testid="upload-speed" className="bg-surface-container-low dark:bg-surface-container-high px-4 py-2 rounded-lg flex items-center gap-3">
-              <span className="material-symbols-outlined text-tertiary">arrow_upward</span>
-              <span className="font-label font-semibold text-sm">{humanSpeed(totalUp)}</span>
+            <div data-testid="upload-speed" className="hidden md:flex bg-surface-container-low dark:bg-surface-container-high px-4 py-2 rounded-full md:rounded-lg items-center gap-2">
+              <span className="material-symbols-outlined text-tertiary text-[18px]">arrow_upward</span>
+              <span className="font-label font-semibold text-xs md:text-sm">{humanSpeed(totalUp)}</span>
             </div>
-            <a href="/settings" className="bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors flex items-center justify-center" aria-label="Settings">
+            <a href="/settings" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Settings">
               <span className="material-symbols-outlined">settings</span>
             </a>
           </div>
         </header>
 
-        <div className="p-10 space-y-8 max-w-screen-2xl mx-auto w-full">
+        <div className="p-4 md:p-10 space-y-6 md:space-y-8 max-w-screen-2xl mx-auto w-full">
           <section className="bg-surface dark:bg-surface-container-low rounded-xl p-6 relative overflow-hidden h-64 flex flex-col justify-between ghost-border">
             <div className="z-10 relative">
               <h3 className="font-label text-sm uppercase tracking-widest text-on-surface-variant dark:text-outline mb-1">Network Throughput</h3>
@@ -147,6 +150,7 @@ function DownloadsInner() {
           </div>
         </div>
       </main>
+      <BottomNav />
     </div>
   );
 }
