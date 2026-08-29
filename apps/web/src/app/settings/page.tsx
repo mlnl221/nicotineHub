@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useConfig } from "@/lib/config/provider";
 import { Sidebar } from "@/components/Sidebar";
 import { NetworkSection } from "@/components/settings/NetworkSection";
@@ -54,9 +54,27 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "notifications", label: "Notifications", icon: "notifications" },
 ];
 
+const VALID_TABS = new Set<string>(TABS.map((t) => t.id));
+
 export default function SettingsPage() {
   const { resetAll } = useConfig();
   const [tab, setTab] = useState<TabId>("network");
+
+  // Deep-link via ?tab= / #tab — sync to URL and survive reload (settings-plan.md Phase B)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get("tab");
+    const fromHash = window.location.hash.replace(/^#/, "");
+    const initial = fromQuery || fromHash;
+    if (initial && VALID_TABS.has(initial)) setTab(initial as TabId);
+  }, []);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", tab);
+    url.hash = tab;
+    window.history.replaceState(null, "", url.toString());
+  }, [tab]);
 
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
@@ -104,6 +122,7 @@ export default function SettingsPage() {
               return (
                 <button
                   key={t.id}
+                  id={`tab-${t.id}`}
                   onClick={() => setTab(t.id)}
                   className={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 font-label text-xs uppercase tracking-widest transition-all ${
                     active

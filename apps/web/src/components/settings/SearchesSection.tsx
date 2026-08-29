@@ -7,6 +7,7 @@ import {
   NumberControl,
   ToggleControl,
   TextFieldControl,
+  SelectControl,
 } from "@/components/settings/controls";
 
 export function SearchesSection() {
@@ -69,6 +70,41 @@ export function SearchesSection() {
           checked={s.enable_history}
           onChange={(v) => setOption("searches", "enable_history", v)}
         />
+        <ToggleControl
+          label="Filters visible by default"
+          checked={s.filters_visible}
+          onChange={(v) => setOption("searches", "filters_visible", v)}
+        />
+        <SelectControl
+          label="Expand results"
+          value={s.expand_results}
+          onChange={(v) => setOption("searches", "expand_results", v)}
+          options={[
+            { value: "all", label: "Expand all" },
+            { value: "none", label: "Collapse all" },
+          ]}
+        />
+        <SelectControl
+          label="Grouping"
+          value={s.group_searches}
+          onChange={(v) => setOption("searches", "group_searches", v)}
+          options={[
+            { value: "ungrouped", label: "Ungrouped" },
+            { value: "folder_grouping", label: "By folder" },
+            { value: "user_grouping", label: "By user" },
+          ]}
+        />
+        {s.history.length > 0 ? (
+          <div className="py-3">
+            <button
+              type="button"
+              onClick={() => setOption("searches", "history", [])}
+              className="font-label text-xs uppercase tracking-widest text-error hover:underline"
+            >
+              Clear search history ({s.history.length})
+            </button>
+          </div>
+        ) : null}
       </SectionCard>
 
       <SectionCard

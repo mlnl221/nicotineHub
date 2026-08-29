@@ -44,6 +44,11 @@ export interface Settings {
     usernamehotspots: boolean;
     usernamestyle: "bold" | "italic" | "underline" | "normal" | "hyperlinks" | "none";
     spellcheck: boolean;
+    header_bar: boolean;
+    tabclosers: boolean;
+    tab_select_previous: boolean;
+    buddylistinchatrooms: "tab" | "chatrooms" | "always";
+    exitdialog: number;
   };
   notifications: {
     notification_window_title: boolean;
@@ -68,6 +73,9 @@ export interface Settings {
     history: string[];
     search_results: boolean;
     private_search_results: boolean;
+    filters_visible: boolean;
+    expand_results: string;
+    group_searches: string;
   };
   transfers: {
     shared: SharedFolder[];
@@ -198,6 +206,11 @@ export const defaults: Settings = {
     usernamehotspots: true,
     usernamestyle: "bold",
     spellcheck: true,
+    header_bar: true,
+    tabclosers: true,
+    tab_select_previous: true,
+    buddylistinchatrooms: "tab",
+    exitdialog: 1,
   },
   notifications: {
     notification_window_title: true,
@@ -232,6 +245,9 @@ export const defaults: Settings = {
     history: [],
     search_results: true,
     private_search_results: false,
+    filters_visible: false,
+    expand_results: "all",
+    group_searches: "folder_grouping",
   },
   transfers: {
     shared: [],
