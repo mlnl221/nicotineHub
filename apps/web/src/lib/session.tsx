@@ -82,6 +82,57 @@ const PONG_TIMEOUT_MS = 5_000;
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 
+// Homelab: persist creds for auto-login after reconnect/reload.
+// Use sessionStorage (ephemeral) + cookie fallback (30d, SameSite Lax) —
+// localStorage intentionally not used for password (README security note).
+// For homelab convenience we auto-login if any creds are present.
+const EPHEMERAL_KEY = "nicotine.ephemeralCreds";
+const COOKIE_NAME = "nicotine_creds";
+
+function saveCreds(req: Omit<LoginRequest, "type">) {
+  try {
+    const data = JSON.stringify(req);
+    sessionStorage.setItem(EPHEMERAL_KEY, data);
+    const b64 = btoa(unescape(encodeURIComponent(data)));
+    const isSecure = typeof window !== "undefined" && window.location.protocol === "https:";
+    document.cookie = `${COOKIE_NAME}=${b64}; Path=/; SameSite=Lax; Max-Age=2592000${isSecure ? "; Secure" : ""}`;
+  } catch {}
+}
+function loadCreds(): Omit<LoginRequest, "type"> | null {
+  try {
+    const raw = sessionStorage.getItem(EPHEMERAL_KEY);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as Omit<LoginRequest, "type">;
+        if (parsed?.username && parsed?.password) return parsed;
+      } catch {}
+    }
+    const match = document.cookie
+      .split(";")
+      .map((s) => s.trim())
+      .find((s) => s.startsWith(COOKIE_NAME + "="));
+    if (match) {
+      const b64 = match.split("=").slice(1).join("=");
+      try {
+        const json = decodeURIComponent(escape(atob(b64)));
+        const parsed = JSON.parse(json) as Omit<LoginRequest, "type">;
+        if (parsed?.username && parsed?.password) {
+          // Repopulate sessionStorage for faster next load
+          try { sessionStorage.setItem(EPHEMERAL_KEY, JSON.stringify(parsed)); } catch {}
+          return parsed;
+        }
+      } catch {}
+    }
+  } catch {}
+  return null;
+}
+function clearCreds() {
+  try { sessionStorage.removeItem(EPHEMERAL_KEY); } catch {}
+  try { document.cookie = `${COOKIE_NAME}=; Path=/; Max-Age=0`; } catch {}
+  // Also clear any legacy localStorage password if ever set
+  try { localStorage.removeItem("nicotine.rememberedCreds"); } catch {}
+}
+
 export function SessionProvider({ children }: { children: ReactNode }) {
   // Hydration-safe: always start idle on server + first client render.
   // Hydrate from sessionStorage after mount so Sidebar/TopBar don't mismatch
@@ -102,6 +153,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       } else if (sessionStorage.getItem("__mockLoggedIn") === "1") setState({ status: "connected", user: "tester" });
     } catch {}
   }, []);
+
+  // Homelab auto-login ref — actual effect is after login() is defined to avoid TDZ
+  const autoLoginAttempted = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
   const generation = useRef(0);
   const listeners = useRef<Set<(msg: BridgeOutboundMessage) => void>>(new Set());
@@ -142,6 +196,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       sessionStorage.removeItem("__mockTransfers");
       if (isDemo) clearDemoStorage();
     } catch {}
+    clearCreds();
     teardown();
     lastLogin.current = null;
     setState({ status: "idle" });
@@ -203,14 +258,30 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             reconnectAttempts.current = 0;
             shouldReconnect.current = true;
           } else {
-            // auth failures should NOT auto-reconnect (invalid pass etc)
+            // auth failures should NOT auto-reconnect (invalid pass etc) — also clear persisted creds so we don't loop with bad password
             const isAuthFailure = /INVALIDPASS|INVALIDUSERNAME|EMPTYPASSWORD|INVALIDVERSION/i.test(data.error || "");
+            if (isAuthFailure) {
+              clearCreds();
+              lastLogin.current = null;
+            }
             shouldReconnect.current = !isAuthFailure;
             setState((s) => ({ ...s, status: "failed", error: data.error }));
             clearHeartbeat();
             if (shouldReconnect.current) scheduleReconnect();
           }
           break;
+        case "server:reconnect": {
+          // Bridge is reconnecting Soulseek TCP (e.g. after listening port change via portrange)
+          // Keep UI in connecting state so user sees progress; Web WS stays open
+          const err = (data as unknown as { error?: string }).error;
+          if (err) {
+            // reconnect-failed after 15 attempts — surface but keep creds for manual retry
+            setState((s) => ({ ...s, status: "failed", error: err }));
+          } else if (stateRef.current.status === "connected") {
+            setState((s) => ({ ...s, status: "connecting" }));
+          }
+          break;
+        }
         case "error":
           if (stateRef.current.status !== "connected") {
             setState((s) => ({ ...s, status: "failed", error: data.error }));
@@ -232,6 +303,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     ws.onclose = () => {
       if (generation.current !== gen) return;
       clearHeartbeat();
+      // Homelab: restore creds if lastLogin was lost (e.g. reload before WS open)
+      if (!lastLogin.current) {
+        const creds = loadCreds();
+        if (creds?.username && creds?.password) {
+          lastLogin.current = creds;
+          shouldReconnect.current = true;
+        }
+      }
       if (shouldReconnect.current && lastLogin.current) {
         setState((s) => s.status === "connected" ? { ...s, status: "connecting" } : s);
         scheduleReconnect();
@@ -247,6 +326,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const scheduleReconnect = useCallback(() => {
     if (reconnectTimer.current) return;
+    // Homelab: if lastLogin is null but creds exist (e.g. after reload), restore
+    if (!lastLogin.current) {
+      const creds = loadCreds();
+      if (creds?.username && creds?.password) {
+        lastLogin.current = creds;
+        shouldReconnect.current = true;
+      }
+    }
     if (!shouldReconnect.current || !lastLogin.current) return;
     const attempt = reconnectAttempts.current++;
     const base = Math.min(RECONNECT_MAX_MS, RECONNECT_MIN_MS * Math.pow(2, attempt));
@@ -254,6 +341,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const delay = Math.max(RECONNECT_MIN_MS, Math.round(base + jitter));
     reconnectTimer.current = setTimeout(() => {
       reconnectTimer.current = null;
+      if (!lastLogin.current) {
+        const creds = loadCreds();
+        if (creds?.username && creds?.password) {
+          lastLogin.current = creds;
+          shouldReconnect.current = true;
+        }
+      }
       if (!shouldReconnect.current || !lastLogin.current) return;
       // respect offline
       if (typeof navigator !== "undefined" && !navigator.onLine) {
@@ -266,6 +360,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     (req: Omit<LoginRequest, "type">) => {
+      // Persist creds for homelab auto-login (sessionStorage + cookie)
+      // Do this before demo check so demo also gets ephemeral creds? No — demo creds are fake, don't persist real pass
+      if (!isDemo && req.username && req.password) {
+        saveCreds(req);
+      }
       // Demo: accept any username/password, no bridge
       if (isDemo) {
         const user = req.username.trim() || "demo";
@@ -303,6 +402,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [connectSocket, clearReconnect],
   );
 
+  // Homelab auto-login: if any creds are present (sessionStorage or cookie), auto-login on mount/reload
+  // This handles port-change reconnect that restarts bridge/Docker and page reload, without requiring
+  // user to re-enter password. For homelab convenience we auto-login if any creds are present.
+  useEffect(() => {
+    if (isDemo) return;
+    if (autoLoginAttempted.current) return;
+    autoLoginAttempted.current = true;
+    const timer = setTimeout(() => {
+      if (stateRef.current.status !== "idle") return;
+      try {
+        if (sessionStorage.getItem("__mockLoggedIn")) return;
+      } catch {}
+      const creds = loadCreds();
+      if (creds?.username && creds?.password) {
+        if (stateRef.current.status === "idle" || stateRef.current.status === "failed") {
+          login(creds);
+        }
+      }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [login]);
+
   const send = useCallback((msg: BridgeInboundMessage) => {
     if (isDemo) {
       const handled = handleDemoSend(msg, listeners.current, stateRef.current.user);
@@ -326,9 +447,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // online / visibility handlers for reconnect
+  // online / visibility handlers for reconnect — homelab: also restore from storage if needed
   useEffect(() => {
+    const ensureCreds = () => {
+      if (!lastLogin.current) {
+        const creds = loadCreds();
+        if (creds?.username && creds?.password) {
+          lastLogin.current = creds;
+          shouldReconnect.current = true;
+        }
+      }
+    };
     const onOnline = () => {
+      ensureCreds();
       if (shouldReconnect.current && lastLogin.current && (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN)) {
         clearReconnect();
         reconnectAttempts.current = 0;
@@ -336,6 +467,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
     };
     const onVis = () => {
+      ensureCreds();
       if (document.visibilityState === "visible" && shouldReconnect.current && lastLogin.current) {
         const ws = socketRef.current;
         if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
