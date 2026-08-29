@@ -334,6 +334,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     return new Response("Not found", { status: 404 });
   },
   websocket: {
+    perMessageDeflate: true,
     open(ws) {
       ws.data = {};
       logger.info("bridge", "ws open", { ip: (ws as unknown as { remoteAddress?: string }).remoteAddress });

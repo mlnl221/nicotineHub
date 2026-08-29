@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { SessionProvider } from "@/lib/session";
 import { ConfigProvider } from "@/lib/config/provider";
 import { TransfersProvider } from "@/lib/transfers";
+import { WebVitals } from "@/components/WebVitals";
 
 export const metadata: Metadata = {
   title: "Nicotine Hub",
@@ -64,6 +65,7 @@ export default function RootLayout({
             </SessionProvider>
           </ConfigProvider>
         </ThemeProvider>
+        <WebVitals />
       </body>
     </html>
   );

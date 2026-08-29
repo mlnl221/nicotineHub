@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSearches } from "@/lib/search";
 import { applyFilters } from "@/lib/filter";
@@ -21,9 +21,43 @@ export function SearchScreen() {
 
   const deferredRows = useDeferredValue(activeTab?.rows ?? []);
   const deferredFilters = useDeferredValue(activeTab?.filters ?? null);
+  // Comlink worker for >500 rows — keeps main thread responsive, parity with pynicotine filter semantics via same applyFilters
+  const [workerRows, setWorkerRows] = useState<SearchRow[] | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const workerApiRef = useRef<{ apply: (rows: SearchRow[], f: import("@/lib/protocol").FilterState) => Promise<SearchRow[]> } | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (deferredRows.length <= 500) { setWorkerRows(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!workerRef.current) {
+          const w = new Worker(new URL("@/lib/filter.worker.ts", import.meta.url));
+          workerRef.current = w;
+          const Comlink = await import("comlink");
+          workerApiRef.current = Comlink.wrap(w) as unknown as { apply: (r: SearchRow[], f: import("@/lib/protocol").FilterState) => Promise<SearchRow[]> };
+        }
+        if (!deferredFilters || !activeTab) return;
+        const res = await workerApiRef.current!.apply(deferredRows, deferredFilters);
+        if (!cancelled) setWorkerRows(res);
+      } catch {
+        if (!cancelled) setWorkerRows(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [deferredRows, deferredFilters, activeTab]);
+
+  useEffect(() => {
+    return () => { workerRef.current?.terminate(); workerRef.current = null; workerApiRef.current = null; };
+  }, []);
+
   const visibleRows = useMemo(
-    () => (activeTab && deferredFilters ? applyFilters(deferredRows, deferredFilters) : activeTab ? applyFilters(activeTab.rows, activeTab.filters) : []),
-    [activeTab, deferredRows, deferredFilters],
+    () => {
+      if (workerRows !== null && deferredRows.length > 500) return workerRows;
+      return activeTab && deferredFilters ? applyFilters(deferredRows, deferredFilters) : activeTab ? applyFilters(activeTab.rows, activeTab.filters) : [];
+    },
+    [activeTab, deferredRows, deferredFilters, workerRows],
   );
   const isStale = activeTab ? deferredRows !== activeTab.rows || deferredFilters !== activeTab.filters : false;
 

@@ -1,13 +1,17 @@
 "use client";
 
 import { useEffect } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { SearchProvider } from "@/lib/search";
-import { SearchScreen } from "@/components/search/SearchScreen";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
+
+const SearchScreen = dynamic(() => import("@/components/search/SearchScreen").then((m) => m.SearchScreen), {
+  loading: () => <div className="flex flex-1 items-center justify-center p-10"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>,
+});
 
 export default function SearchPage() {
   const { state } = useSession();

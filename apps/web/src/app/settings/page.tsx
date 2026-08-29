@@ -1,25 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { useConfig } from "@/lib/config/provider";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
-import { NetworkSection } from "@/components/settings/NetworkSection";
-import { UiSection } from "@/components/settings/UiSection";
-import { SearchesSection } from "@/components/settings/SearchesSection";
-import { NotificationsSection } from "@/components/settings/NotificationsSection";
-import { SharesSection } from "@/components/settings/SharesSection";
-import { DownloadsSection } from "@/components/settings/DownloadsSection";
-import { UploadsSection } from "@/components/settings/UploadsSection";
-import { UserProfileSection } from "@/components/settings/UserProfileSection";
-import { ChatsSection } from "@/components/settings/ChatsSection";
-import { NowPlayingSection } from "@/components/settings/NowPlayingSection";
-import { LoggingSection } from "@/components/settings/LoggingSection";
-import { BannedUsersSection } from "@/components/settings/BannedUsersSection";
-import { IgnoredUsersSection } from "@/components/settings/IgnoredUsersSection";
-import { UrlHandlersSection } from "@/components/settings/UrlHandlersSection";
-import { PluginsSection } from "@/components/settings/PluginsSection";
+
+const NetworkSection = dynamic(() => import("@/components/settings/NetworkSection").then((m) => m.NetworkSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const UiSection = dynamic(() => import("@/components/settings/UiSection").then((m) => m.UiSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const SearchesSection = dynamic(() => import("@/components/settings/SearchesSection").then((m) => m.SearchesSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const NotificationsSection = dynamic(() => import("@/components/settings/NotificationsSection").then((m) => m.NotificationsSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const SharesSection = dynamic(() => import("@/components/settings/SharesSection").then((m) => m.SharesSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const DownloadsSection = dynamic(() => import("@/components/settings/DownloadsSection").then((m) => m.DownloadsSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const UploadsSection = dynamic(() => import("@/components/settings/UploadsSection").then((m) => m.UploadsSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const UserProfileSection = dynamic(() => import("@/components/settings/UserProfileSection").then((m) => m.UserProfileSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const ChatsSection = dynamic(() => import("@/components/settings/ChatsSection").then((m) => m.ChatsSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const NowPlayingSection = dynamic(() => import("@/components/settings/NowPlayingSection").then((m) => m.NowPlayingSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const LoggingSection = dynamic(() => import("@/components/settings/LoggingSection").then((m) => m.LoggingSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const BannedUsersSection = dynamic(() => import("@/components/settings/BannedUsersSection").then((m) => m.BannedUsersSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const IgnoredUsersSection = dynamic(() => import("@/components/settings/IgnoredUsersSection").then((m) => m.IgnoredUsersSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const UrlHandlersSection = dynamic(() => import("@/components/settings/UrlHandlersSection").then((m) => m.UrlHandlersSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const PluginsSection = dynamic(() => import("@/components/settings/PluginsSection").then((m) => m.PluginsSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
 
 type TabId =
   | "network"
