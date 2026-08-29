@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { Suspense, useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
 import { usePrivateChat } from "@/lib/privateChat";
 
-export default function PrivateChatPage() {
+function PrivateChatInner() {
   const { state } = useSession();
   const router = useRouter();
   const params = useSearchParams();
@@ -242,5 +242,13 @@ export default function PrivateChatPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function PrivateChatPage() {
+  return (
+    <Suspense fallback={<div className="flex h-screen items-center justify-center font-body text-sm text-on-surface-variant">Loading…</div>}>
+      <PrivateChatInner />
+    </Suspense>
   );
 }

@@ -155,7 +155,7 @@ export default function InterestsPage() {
                         key={thing}
                         className="chip flex cursor-pointer items-center rounded-lg border border-error/20 bg-surface-container-low px-4 py-2 font-body text-sm text-on-surface opacity-80"
                       >
-                        <strike className="text-on-surface-variant">{thing}</strike>
+                        <s className="text-on-surface-variant">{thing}</s>
                         <span
                           role="button"
                           tabIndex={0}
