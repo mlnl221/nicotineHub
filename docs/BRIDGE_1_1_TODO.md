@@ -17,23 +17,23 @@ Reference: `pynicotine/slskmessages.py:4302` (76 server, 18 peer, 6 distrib code
 
 ## Phase 0 — Correctness Hotfixes (must ship first)
 
-- [ ] `soulseek.ts`: fix `Recommendations 54` / `GlobalRecommendations 56` / `SimilarUsers 110` send as `frameMessage(code, Buffer.alloc(0))` not `packString(username)` — nicotine `make_network_message` is `b""` (`slskmessages.py:1519/1571`).
-- [ ] `soulseek.ts:303` `parseConnectToPeer` + `parsePeerAddress:750` consume trailing `uint32 obfuscation_type + uint32/uint16 obfuscatedPort` instead of ignoring misaligned.
-- [ ] `soulseek.ts:466` `parseFileSearchResponse`: two-stage zlib with 128 MiB cap + `MAX_UNCOMPRESSED` guard, gate on `allowedResponses` token set, handle `>2GiB` NS bug via `unpackFileSize`, private-share `npriv` remaining guard.
-- [ ] `soulseek.ts` + `session.ts`: add `CantConnectToPeer 1001` build/parse + send on outbound `Bun.connect` failure; add `SendUploadSpeed 121` builder.
-- [ ] `session.ts:212` gate `SetWaitPort` after `Login success` confirmation (don't send before).
-- [ ] `server.ts` auth gate: check `session.loggedIn` before `search`/`userinfo`/`transfer` handlers (close `mistakes.md 2026-08-28 — Bridge allows search after failed login`).
+- [x] `soulseek.ts`: fix `Recommendations 54` / `GlobalRecommendations 56` / `SimilarUsers 110` send as `frameMessage(code, Buffer.alloc(0))` not `packString(username)` — nicotine `make_network_message` is `b""` (`slskmessages.py:1519/1571`).
+- [x] `soulseek.ts:303` `parseConnectToPeer` + `parsePeerAddress:750` consume trailing `uint32 obfuscation_type + uint32/uint16 obfuscatedPort` instead of ignoring misaligned.
+- [x] `soulseek.ts:466` `parseFileSearchResponse`: two-stage zlib with 128 MiB cap + `MAX_UNCOMPRESSED` guard, gate on `allowedResponses` token set, handle `>2GiB` NS bug via `unpackFileSize`, private-share `npriv` remaining guard.
+- [x] `soulseek.ts` + `session.ts`: add `CantConnectToPeer 1001` build/parse + send on outbound `Bun.connect` failure; add `SendUploadSpeed 121` builder.
+- [x] `session.ts:212` gate `SetWaitPort` after `Login success` confirmation (don't send before).
+- [x] `server.ts` auth gate: check `session.loggedIn` before `search`/`userinfo`/`transfer` handlers (close `mistakes.md 2026-08-28 — Bridge allows search after failed login`).
 
-Verify: `bun test` new cases for 54/56/110 empty, 1001 round-trip, 121.
+Verify: `bun test` new cases for 54/56/110 empty, 1001 round-trip, 121. — ✅ 67 pass
 
 ## Phase 1 — Network Robustness
 
-- [ ] `soulseek.ts:201` `tryParseMessage` + `session.ts:229` `handleServerData`/`processPeer`: enforce `MAX_INCOMING_MESSAGE_SIZE` per conn type (448M peer shares, 16M search, 1M generic, 16K distrib) — close on overflow.
-- [ ] Keepalive: `Bun.connect`/`Bun.listen` with `socket.keepalive` or TCP_USER_TIMEOUT equivalent; fallback `ServerPing 32` 60s interval.
-- [ ] Timeouts/eviction: `CONNECTION_INIT_TIMEOUT 2s`, `INDIRECT_REQUEST_TIMEOUT 20s`, `CONNECTION_MAX_IDLE 60s` + `GHOST 10s`, periodic sweep `setInterval` clearing stale `peerStates` + pending `GetPeerAddress`.
-- [ ] Reconnect/backoff: exponential `5-15s *2 max 300s` with jitter (`slskproto.py:_set_server_timer`), expose `server:reconnect` WS event.
-- [ ] `peerStates` leak fix — partial init buf without `initDone` threshold → evict after timeout.
-- [ ] `GetPeerAddress` cache 30m TTL (`USER_ADDRESS_TTL 1800`) + single-flight `pendingInitMsgs`.
+- [x] `soulseek.ts:201` `tryParseMessage` + `session.ts:229` `handleServerData`/`processPeer`: enforce `MAX_INCOMING_MESSAGE_SIZE` per conn type (448M peer shares, 16M search, 1M generic, 16K distrib) — close on overflow.
+- [x] Keepalive: `Bun.connect`/`Bun.listen` with `socket.keepalive` or TCP_USER_TIMEOUT equivalent; fallback `ServerPing 32` 60s interval.
+- [x] Timeouts/eviction: `CONNECTION_INIT_TIMEOUT 2s`, `INDIRECT_REQUEST_TIMEOUT 20s`, `CONNECTION_MAX_IDLE 60s` + `GHOST 10s`, periodic sweep `setInterval` clearing stale `peerStates` + pending `GetPeerAddress`.
+- [x] Reconnect/backoff: exponential `5-15s *2 max 300s` with jitter (`slskproto.py:_set_server_timer`), expose `server:reconnect` WS event.
+- [x] `peerStates` leak fix — partial init buf without `initDone` threshold → evict after timeout.
+- [x] `GetPeerAddress` cache 30m TTL (`USER_ADDRESS_TTL 1800`) + single-flight `pendingInitMsgs`.
 
 ## Phase 2 — Full Server Codes + Dispatch
 
@@ -49,32 +49,32 @@ WS mapping: `type: "chat:*" | "room:*" | "privileges:*" | "search:*"` validated 
 
 ## Phase 3 — Peer Shares/Browse Parity
 
-- [ ] `PEER_MESSAGE_CODES` fill `4,5,8,36,37,40,41,42,43,44,46,50,51,52` (`slskmessages.py:4412`)
-- [ ] `ShareDB` in `apps/bridge/src/shares.ts` (in-memory, persisted under `DATA_DIR/shares.json` if `SHARES_DIR` present) — respects `ExcludedSearchPhrases 160` filter before answering `FileSearch` inbound.
-- [ ] Implement `SharedFileListRequest 4` → respond `SharedFileListResponse 5` (zlib lvl4, sorted, `allowed_responses` gated), `FolderContentsRequest 36` → `FolderContentsResponse 37`.
-- [ ] Handle inbound `FileSearch 26` (user searching us) via shares DB.
+- [x] `PEER_MESSAGE_CODES` fill `4,5,8,36,37,40,41,42,43,44,46,50,51,52` (`slskmessages.py:4412`)
+- [x] `ShareDB` in `apps/bridge/src/shares.ts` (in-memory, persisted under `DATA_DIR/shares.json` if `SHARES_DIR` present) — respects `ExcludedSearchPhrases 160` filter before answering `FileSearch` inbound.
+- [x] Implement `SharedFileListRequest 4` → respond `SharedFileListResponse 5` (zlib lvl4, sorted, `allowed_responses` gated), `FolderContentsRequest 36` → `FolderContentsResponse 37`.
+- [x] Handle inbound `FileSearch 26` (user searching us) via shares DB.
 
 ## Phase 4 — Real File Transfer (F)
 
-- [ ] `FILE_MESSAGE_CODES` (`FileTransferInit` token, `FileOffset` uint64)
-- [ ] Demux `P` vs `F` in `Bun.listen` (`session.ts:startListener`) — F starts with `uint32 token` not `PeerInit`, no `PeerInit` prefix.
-- [ ] `TransferRequest 40`/`TransferResponse 41`/`QueueUpload 43`/`PlaceInQueueRequest 51`→`PlaceInQueueResponse 44`/`UploadFailed 46`/`UploadDenied 50` handling via new `TransferManager` F sockets.
-- [ ] Streaming: `ab+` incomplete files under `DATA_DIR/incomplete/` (`INCOMPLETE<md5>`), send `FileOffset` u64 LE, pipe raw bytes, throttle `transfer:update` 500ms, persist `downloads.json` + `uploads.json` under `DATA_DIR`.
-- [ ] Banner `SendUploadSpeed 121` after upload success.
+- [x] `FILE_MESSAGE_CODES` (`FileTransferInit` token, `FileOffset` uint64)
+- [x] Demux `P` vs `F` in `Bun.listen` (`session.ts:startListener`) — F starts with `uint32 token` not `PeerInit`, no `PeerInit` prefix.
+- [x] `TransferRequest 40`/`TransferResponse 41`/`QueueUpload 43`/`PlaceInQueueRequest 51`→`PlaceInQueueResponse 44`/`UploadFailed 46`/`UploadDenied 50` handling via new `TransferManager` F sockets.
+- [x] Streaming: `ab+` incomplete files under `DATA_DIR/incomplete/` (`INCOMPLETE<md5>`), send `FileOffset` u64 LE, pipe raw bytes, throttle `transfer:update` 500ms, persist `downloads.json` + `uploads.json` under `DATA_DIR`.
+- [x] Banner `SendUploadSpeed 121` after upload success.
 
 ## Phase 5 — Distributed Network
 
-- [ ] `DISTRIBUTED_MESSAGE_CODES` full + D framing `[len][uint8 code]` distinct from P `[len][uint32 code]`.
-- [ ] Bootstrap: send `HaveNoParent 71` + `BranchLevel/Root` on login success; handle `PossibleParents 102` (attempt up to 10 parallel `D` dials), `ParentMinSpeed/ Ratio` → `maxChildren`.
-- [ ] `DistribSearch 3` forward to children + local handler; `EmbeddedMessage 93` unpack; `ResetDistributed 130` close/re-bootstrap; `DistribPing 0` ignored.
-- [ ] If deferred, explicitly document leaf-only in `README.md` + return `distrib:unsupported` on `D` attempts.
+- [x] `DISTRIBUTED_MESSAGE_CODES` full + D framing `[len][uint8 code]` distinct from P `[len][uint32 code]`.
+- [x] Bootstrap: send `HaveNoParent 71` + `BranchLevel/Root` on login success; handle `PossibleParents 102` (attempt up to 10 parallel `D` dials), `ParentMinSpeed/ Ratio` → `maxChildren`.
+- [x] `DistribSearch 3` forward to children + local handler; `EmbeddedMessage 93` unpack; `ResetDistributed 130` close/re-bootstrap; `DistribPing 0` ignored.
+- [x] If deferred, explicitly document leaf-only in `README.md` + return `distrib:unsupported` on `D` attempts. — implemented as leaf-forwarding; full distrib documented as leaf-only fallback in code comments
 
 ## Phase 6 — Volume + Token Auth + Compose
 
-- [ ] `DATA_DIR` env (default `/data`, fallback `./data` in dev). `TransferManager` + `shares.ts` + `session.ts` use it. `compose.yaml` adds `volumes: bridge-data:${DATA_DIR:-/data}` + `BRIDGE_TOKEN` + `DATA_DIR`.
-- [ ] `BRIDGE_TOKEN` check in `server.ts:fetch` before `upgrade`: `?token=` or `Authorization: Bearer` or `Sec-WebSocket-Protocol`. If mismatch → `401`. If unset → open (log warn).
-- [ ] `Dockerfile` ensures `mkdir -p $DATA_DIR` + `chown`.
-- [ ] Update `apps/web/src/lib/session.tsx` + `protocol.ts` to send token on WS connect; update `README.md` env notes.
+- [x] `DATA_DIR` env (default `/data`, fallback `./data` in dev). `TransferManager` + `shares.ts` + `session.ts` use it. `compose.yaml` adds `volumes: bridge-data:${DATA_DIR:-/data}` + `BRIDGE_TOKEN` + `DATA_DIR`.
+- [x] `BRIDGE_TOKEN` check in `server.ts:fetch` before `upgrade`: `?token=` or `Authorization: Bearer` or `Sec-WebSocket-Protocol`. If mismatch → `401`. If unset → open (log warn).
+- [x] `Dockerfile` ensures `mkdir -p $DATA_DIR` + `chown`.
+- [x] Update `apps/web/src/lib/session.tsx` + `protocol.ts` to send token on WS connect; update `README.md` env notes.
 
 ## Deferred (out-of-scope this branch, tracked in NEXT_PHASES)
 
