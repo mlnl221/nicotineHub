@@ -117,6 +117,28 @@ export function UiSection() {
           { value: 2, label: "Run in background" },
         ]}
       />
+      <div className="rounded-xl bg-surface-container-low p-4">
+        <h4 className="font-label text-xs font-bold uppercase tracking-widest">Visible sections</h4>
+        <p className="font-body text-xs text-on-surface-variant">Choose which nav items appear in sidebar / bottom nav. Order below controls sidebar order.</p>
+        <div className="mt-3 space-y-2">
+          {(ui.modes_order || []).map((id, idx) => {
+            const label: Record<string, string> = { search: "Search", browse: "Browse", downloads: "Downloads", uploads: "Uploads", chat: "Chat Rooms", privateChat: "Private Chat", buddies: "Buddies", interests: "Interests", profile: "Profile" };
+            const visible = ui.modes_visible?.[id] !== false;
+            return (
+              <div key={id} className="flex items-center justify-between rounded-lg bg-surface-container-lowest px-3 py-2 ghost-border">
+                <label className="flex items-center gap-2 font-body text-sm cursor-pointer">
+                  <input type="checkbox" checked={visible} onChange={(e) => setOption("ui", "modes_visible", { ...(ui.modes_visible || {}), [id]: e.target.checked })} className="rounded" />
+                  <span>{label[id] || id}</span>
+                </label>
+                <div className="flex items-center gap-1">
+                  <button disabled={idx===0} onClick={() => { const arr=[...(ui.modes_order||[])]; const t=arr[idx-1]; arr[idx-1]=arr[idx]; arr[idx]=t; setOption("ui","modes_order",arr); }} className="rounded px-2 py-1 text-xs disabled:opacity-30 hover:bg-surface-container-high">↑</button>
+                  <button disabled={idx=== (ui.modes_order||[]).length-1} onClick={() => { const arr=[...(ui.modes_order||[])]; const t=arr[idx+1]; arr[idx+1]=arr[idx]; arr[idx]=t; setOption("ui","modes_order",arr); }} className="rounded px-2 py-1 text-xs disabled:opacity-30 hover:bg-surface-container-high">↓</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </SectionCard>
   );
 }

@@ -7,7 +7,8 @@
   "description": "WebSocket bridge that speaks the Soulseek (SLSK) protocol for login.",
   "scripts": {
     "dev": "bun --watch src/server.ts",
-    "build": "bun build src/server.ts --target=bun --outdir dist --format=esm",
+    "build": "bun build src/server.ts --target=bun --outdir dist --format=esm && mkdir -p dist/data && cp -n src/data/ip_country_data.csv dist/data/ip_country_data.csv 2>/dev/null || echo 'GeoIP csv not found locally — docker will fetch at build'",
+    "fetch:geoip": "mkdir -p src/data && curl -fsSL https://raw.githubusercontent.com/nicotine-plus/nicotine-plus/master/pynicotine/external/data/ip_country_data.csv -o src/data/ip_country_data.csv || wget -qO src/data/ip_country_data.csv https://raw.githubusercontent.com/nicotine-plus/nicotine-plus/master/pynicotine/external/data/ip_country_data.csv || echo 'fetch failed'",
     "start": "bun run dist/server.js",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit"

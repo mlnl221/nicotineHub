@@ -49,6 +49,8 @@ export interface Settings {
     tab_select_previous: boolean;
     buddylistinchatrooms: "tab" | "chatrooms" | "always";
     exitdialog: number;
+    modes_visible: Record<string, boolean>;
+    modes_order: string[];
   };
   notifications: {
     notification_window_title: boolean;
@@ -212,6 +214,18 @@ export const defaults: Settings = {
     tab_select_previous: true,
     buddylistinchatrooms: "tab",
     exitdialog: 1,
+    modes_visible: {
+      search: true,
+      browse: true,
+      downloads: true,
+      uploads: true,
+      chat: true,
+      privateChat: true,
+      buddies: true,
+      interests: true,
+      profile: true,
+    },
+    modes_order: ["search", "browse", "downloads", "uploads", "chat", "privateChat", "buddies", "interests", "profile"],
   },
   notifications: {
     notification_window_title: true,

@@ -34,6 +34,13 @@ export function StatisticsProvider({ children }: { children: React.ReactNode }) 
     setTimeout(() => setLoading(false), 1200);
   }, [send, state.status]);
 
+  const reset = useCallback(() => {
+    if (state.status !== "connected") return;
+    send({ type: "statistics:reset" } as unknown as never);
+    setLoading(true);
+    setTimeout(() => setLoading(false), 800);
+  }, [send, state.status]);
+
   useEffect(() => {
     const unsub = subscribe((msg) => {
       const m = msg as unknown as { type: string; total?: StatsData; session?: StatsData };
@@ -42,19 +49,22 @@ export function StatisticsProvider({ children }: { children: React.ReactNode }) 
         if (m.session) setSessionStat(m.session);
         setLoading(false);
       }
+      if ((m as unknown as { type: string }).type === "statistics:reset:ok") {
+        refresh();
+      }
     });
     return unsub;
-  }, [subscribe]);
+  }, [subscribe, refresh]);
 
   useEffect(() => {
     if (state.status === "connected") refresh();
   }, [state.status, refresh]);
 
-  return <StatsContext.Provider value={{ total, session: sessionStat, refresh, loading }}>{children}</StatsContext.Provider>;
+  return <StatsContext.Provider value={{ total, session: sessionStat, refresh, reset, loading } as StatsApi & { reset: () => void }}>{children}</StatsContext.Provider>;
 }
 
 export function useStatistics() {
   const ctx = useContext(StatsContext);
   if (!ctx) throw new Error("useStatistics must be used within StatisticsProvider");
-  return ctx;
+  return ctx as StatsApi & { reset: () => void };
 }

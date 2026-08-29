@@ -6,20 +6,7 @@ import { useConfig } from "@/lib/config/provider";
 import type { ChatEvent } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
 import { mockPrivateConversations } from "@/lib/demo/fixtures";
-
-function applyWordsPrivate(text: string, cfg: { censorwords: boolean; censored: string[]; replacewords: boolean; autoreplaced: Record<string, string> }): string {
-  let out = text;
-  if (cfg.replacewords && cfg.autoreplaced) {
-    for (const [from, to] of Object.entries(cfg.autoreplaced)) out = out.split(from).join(to);
-  }
-  if (cfg.censorwords && cfg.censored.length) {
-    for (const pat of cfg.censored) {
-      if (!pat) continue;
-      try { const re = new RegExp(pat, "gi"); out = out.replace(re, "*".repeat(pat.length)); } catch { out = out.split(pat).join("*".repeat(pat.length)); }
-    }
-  }
-  return out;
-}
+import { censorText, replaceText, truncateMessages } from "@/lib/chatFormat";
 
 export interface PrivateMessage {
   id: string;
@@ -39,7 +26,6 @@ export function usePrivateChat() {
   const activeUserRef = useRef(activeUser);
   activeUserRef.current = activeUser;
 
-  // Demo: seed 2 fake private chats (jazzcat + vinyl_hunter) — per-mount seed (hook is per-page)
   useEffect(() => {
     if (!isDemo) return;
     if (state.status !== "connected") return;
@@ -50,12 +36,10 @@ export function usePrivateChat() {
       next.set(username, msgs.map((m) => ({ ...m })));
     }
     setConversations(next);
-    // default to first conversation
     const first = Object.keys(seeded)[0];
     if (first) setActiveUser(first);
   }, [state.status, conversations.size]);
 
-  // Demo: clear on logout
   useEffect(() => {
     if (!isDemo) return;
     if (state.status !== "idle") return;
@@ -69,8 +53,7 @@ export function usePrivateChat() {
       if (msg.type !== "chat:event") return;
       const ev = (msg as unknown as { event: ChatEvent }).event;
       if (ev.type !== "private-message" || !ev.username || !ev.message) return;
-      const filtered = applyWordsPrivate(ev.message, { censorwords: settings.words.censorwords, censored: settings.words.censored, replacewords: false, autoreplaced: {} });
-      const display = settings.words.censorwords ? filtered : ev.message;
+      const display = settings.words.censorwords ? censorText(ev.message, settings.words.censored) : ev.message;
       const pm: PrivateMessage = {
         id: `${ev.msgId ?? Date.now()}-${ev.username}`,
         username: ev.username,
@@ -82,21 +65,21 @@ export function usePrivateChat() {
       setConversations((prev) => {
         const next = new Map(prev);
         const arr = next.get(ev.username!) || [];
-        next.set(ev.username!, [...arr, pm]);
+        next.set(ev.username!, truncateMessages([...arr, pm], settings.logging.readprivatelines || 200));
         return next;
       });
     });
     return unsub;
-  }, [state.status, subscribe, settings.words.censorwords, settings.words.censored]);
+  }, [state.status, subscribe, settings.words.censorwords, settings.words.censored, settings.logging.readprivatelines]);
 
   const sendMessage = useCallback(
     (username: string, message: string) => {
       if (!message.trim()) return;
       let out = message.trim();
       if (out.startsWith("/me ")) out = `* ${out.slice(4)}`;
-      // CTCP VERSION spam filter rate 1s simplified: allow if enabled
       if (!settings.ctcp.enable && out.includes("\u0001VERSION")) return;
-      out = applyWordsPrivate(out, { censorwords: settings.words.censorwords, censored: settings.words.censored, replacewords: settings.words.replacewords, autoreplaced: settings.words.autoreplaced });
+      if (settings.words.replacewords) out = replaceText(out, settings.words.autoreplaced);
+      if (settings.words.censorwords) out = censorText(out, settings.words.censored);
       const pm: PrivateMessage = {
         id: `self-${Date.now()}`,
         username,
@@ -107,11 +90,10 @@ export function usePrivateChat() {
       setConversations((prev) => {
         const next = new Map(prev);
         const arr = next.get(username) || [];
-        next.set(username, [...arr, pm]);
+        next.set(username, truncateMessages([...arr, pm], settings.logging.readprivatelines || 200));
         return next;
       });
       send({ type: "chat:private", action: "send", username, message: out });
-      // Also store if privatechat.store true — persist list
       try {
         if (settings.privatechat.store) {
           const stored = JSON.parse(localStorage.getItem("nicotine.privatechats") || "[]");
@@ -119,7 +101,7 @@ export function usePrivateChat() {
         }
       } catch {}
     },
-    [send, settings.words, settings.ctcp.enable, settings.privatechat.store],
+    [send, settings.words, settings.ctcp.enable, settings.privatechat.store, settings.logging.readprivatelines],
   );
 
   const users = Array.from(conversations.keys());

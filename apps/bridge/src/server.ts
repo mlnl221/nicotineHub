@@ -130,9 +130,10 @@ const UserInfoRequestSchema = z.object({ type: z.literal("userinfo") }).and(User
 
 const ChatRoomSchema = z.object({
   type: z.literal("chat:room"),
-  action: z.enum(["join", "leave", "say", "ticker", "setTicker"]),
+  action: z.enum(["join", "leave", "say", "ticker", "setTicker", "addOperator", "removeOperator", "cancelMembership", "cancelOwnership"]),
   room: z.string().min(1).max(64),
   message: z.string().max(5000).optional(),
+  username: z.string().max(64).optional(),
 });
 const ChatPrivateSchema = z.object({
   type: z.literal("chat:private"),
@@ -172,6 +173,9 @@ const WishlistUpdateSchema = z.object({
 
 const StatsRequestSchema = z.object({
   type: z.literal("statistics:request"),
+});
+const StatsResetSchema = z.object({
+  type: z.literal("statistics:reset"),
 });
 
 function defaultProfile(username: string) {
@@ -499,6 +503,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
               pluginManager.userStatsNotification(event.stats.username, event.stats);
             } else if (event.type === "peer-address" && event.peerAddress) {
               pluginManager.userResolveNotification(event.username ?? "", event.peerAddress.ip ?? "", event.peerAddress.port ?? 0);
+              // geoblock re-check for pending uploads
+              try { (ws.data.transfers as unknown as { handlePeerAddressResolved?: (u:string, ip:string)=>void })?.handlePeerAddressResolved?.(event.username ?? "", event.peerAddress.ip ?? ""); } catch {}
             }
             logger.debug("server", "user event", { type: event.type, username: event.username });
             try { ws.send(JSON.stringify({ type: "userinfo:event", event })); } catch {}
@@ -550,6 +556,16 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
               else if (event.type === "browse-folder") ws.send(JSON.stringify({ type: "browse:folder", username: event.username, folder: event.folder, token: event.token, files: event.files }));
               else if (event.type === "browse-error") ws.send(JSON.stringify({ type: event.type === "browse-error" && (event as { token?: number }).token !== undefined ? "browse:folder" : "browse:shares", username: event.username, error: event.error, ...(event as { folder?: string; token?: number }) }));
             } catch {}
+          },
+          onWishlistEvent: (event) => {
+            if (event.type === "result" && event.rows && event.rows.length) {
+              try { ws.send(JSON.stringify({ type: "search:result", searchId: event.searchId, token: event.token, rows: event.rows })); } catch {}
+            } else if (event.type === "end" && event.reason) {
+              try { ws.send(JSON.stringify({ type: "search:end", searchId: event.searchId, reason: event.reason })); } catch {}
+            } else if (event.type === "result" && (!event.rows || event.rows.length === 0)) {
+              // start notification
+              try { ws.send(JSON.stringify({ type: "search:start", searchId: event.searchId, token: event.token })); } catch {}
+            }
           },
           onTransferEvent: (event) => {
             // plugin transfer hooks
@@ -800,7 +816,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           const finalMsg = (out?.[1] as string) ?? message;
           session.sayChatroom(room, finalMsg);
           pluginManager.outgoingPublicChatNotification(room, finalMsg);
-        } else if (action === "setTicker" && message) session.setRoomTicker(room, message);
+        } else if (action === "setTicker" && message !== undefined) session.setRoomTicker(room, message);
+        else if (action === "addOperator" && result.data.username) session.addRoomOperator(room, result.data.username);
+        else if (action === "removeOperator" && result.data.username) session.removeRoomOperator(room, result.data.username);
+        else if (action === "cancelMembership") session.cancelRoomMembership(room);
+        else if (action === "cancelOwnership") session.cancelRoomOwnership(room);
         else if (action === "ticker") { /* server pushes tickers, no client send needed */ }
         return;
       }
@@ -900,9 +920,13 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             if (["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "groupdownloads", "groupuploads"].includes(key)) {
               tm?.setConfig?.({ [key]: value });
             }
-          } else if (section === "server" && ["banlist", "ignorelist", "ipblocklist", "ipignorelist"].includes(key)) {
+          } else if (section === "server" && ["banlist", "ignorelist", "ipblocklist", "ipignorelist", "private_chatrooms"].includes(key)) {
+            if (key === "private_chatrooms") (session as unknown as { setEnableRoomInvitations?: (b: boolean) => void })?.setEnableRoomInvitations?.(!!value);
             (session as unknown as { setNetworkFilters?: (o: unknown) => void })?.setNetworkFilters?.({ [key]: value });
             if (key === "banlist" || key === "ipblocklist") tm?.setConfig?.({ [key]: value });
+          } else if (section === "logging" && ["readroomlines", "readprivatelines", "rooms_timestamp", "private_timestamp"].includes(key)) {
+            // logging caps are web-only, but acknowledge
+            void value;
           }
           logger.debug("bridge", "config update", { section, key });
           ws.send(JSON.stringify({ type: "config:updated", section, key }));
@@ -926,6 +950,16 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const tm = ws.data.transfers as unknown as { getStatsSummary?: () => unknown } | undefined;
         const summary = tm?.getStatsSummary?.() ?? { total: null, session: null };
         ws.send(JSON.stringify({ type: "statistics:response", ...summary as Record<string, unknown> }));
+        return;
+      }
+      if (data.type === "statistics:reset") {
+        const result = StatsResetSchema.safeParse(parsed);
+        if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid statistics:reset")); return; }
+        const tm = ws.data.transfers as unknown as { resetStats?: () => void; getStatsSummary?: () => unknown } | undefined;
+        try { tm?.resetStats?.(); } catch {}
+        const summary = tm?.getStatsSummary?.() ?? { total: null, session: null };
+        ws.send(JSON.stringify({ type: "statistics:response", ...summary as Record<string, unknown> }));
+        ws.send(JSON.stringify({ type: "statistics:reset:ok" }));
         return;
       }
 

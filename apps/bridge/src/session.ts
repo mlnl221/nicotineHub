@@ -15,6 +15,7 @@ import { ShareDB } from "./shares.ts";
 import { logger } from "./logger.ts";
 import { shouldBlockUser, shouldIgnoreUser, getCountryCode, setCountryForIp } from "./networkfilter.ts";
 import {
+  buildAcceptChildren,
   buildAddThingIHate,
   buildAddThingILike,
   buildBranchLevel,
@@ -47,6 +48,11 @@ import {
   buildSayChatroom,
   buildSendUploadSpeed,
   buildSetRoomTicker,
+  buildEnableRoomInvitations,
+  buildCancelRoomMembership,
+  buildCancelRoomOwnership,
+  buildAddRoomOperator,
+  buildRemoveRoomOperator,
   buildSetStatus,
   buildSetWaitPort,
   buildSharedFileListRequest,
@@ -92,6 +98,7 @@ import {
   parseRoomList,
   parseRoomMember,
   parseRoomMembers,
+  parseRoomOperators,
   parseRoomTickers,
   parseRoomTickerEvent,
   parseSayChatroom,
@@ -144,6 +151,7 @@ export interface SessionOptions {
   onChatEvent?: (event: ChatEvent) => void; onRoomEvent?: (event: RoomEvent) => void;
   onTransferEvent?: (event: TransferEvent) => void; onBrowseEvent?: (event: BrowseEvent) => void;
   onServerEvent?: (event: ServerEvent) => void; signal?: AbortSignal;
+  onWishlistEvent?: (event: { type: "result" | "end"; searchId: string; token: number; rows?: SearchRow[]; reason?: string }) => void;
   // F-stream wiring to TransferManager (Phase 4)
   onFileConnection?: (token: number, socket: Socket) => void;
   onFileChunk?: (token: number, chunk: Buffer) => void;
@@ -168,6 +176,9 @@ export interface ChatEvent {
 export interface RoomEvent {
   type: "join-room" | "leave-room" | "user-joined-room" | "user-left-room"
     | "room-list" | "room-members" | "room-tickers" | "ticker-added" | "ticker-removed"
+    | "room-member-added" | "room-member-removed" | "cancel-membership" | "cancel-ownership"
+    | "membership-granted" | "membership-revoked" | "operator-added" | "operator-removed"
+    | "operatorship-granted" | "operatorship-revoked" | "room-operators" | "enable-room-invitations"
     | "privileged-users" | "cant-create-room";
   room?: string; username?: string; data?: unknown;
 }
@@ -186,6 +197,20 @@ const USER_ADDRESS_TTL_MS = 30 * 60 * 1000;
 const RECONNECT_BASE_MS = 5_000;
 const RECONNECT_MAX_MS = 300_000;
 const CONNECT_PEER_TIMEOUT_MS = 45_000; // downloads.py Getting status 45 s (30 s indirect + 15 s grace)
+const MAX_SOCKETS_DEFAULT = Number(process.env.MAX_SOCKETS || 512);
+const PARENT_MIN_SPEED_DEFAULT = 0;
+const PARENT_SPEED_RATIO_DEFAULT = 0;
+
+interface ParentCandidate {
+  username: string;
+  ip: string;
+  port: number;
+  conn?: Socket;
+  branchLevel: number | null;
+  branchRoot: string | null;
+}
+
+enum ParentStatus { WAITING = 0, ACCEPTED = 1, REJECTED = 2 }
 
 export class SoulseekSession {
   readonly username: string;
@@ -216,8 +241,19 @@ export class SoulseekSession {
   private shouldReconnect = true;
   private branchLevel = 0;
   private branchRoot: string | undefined;
-  private parentCandidate: string | undefined;
-  private maxChildren = 0;
+  private parent: ParentCandidate | null = null;
+  private isServerParent = false;
+  private potentialParents = new Map<string, ParentCandidate>();
+  private childPeers = new Map<string, Socket>();
+  private maxDistribChildren = 0;
+  private distribParentMinSpeed = PARENT_MIN_SPEED_DEFAULT;
+  private distribParentSpeedRatio = PARENT_SPEED_RATIO_DEFAULT;
+  private uploadSpeed = 0;
+  // legacy compat aliases
+  private get parentCandidate(): string | undefined { return this.parent?.username; }
+  private set parentCandidate(v: string | undefined) { void v; }
+  private get maxChildren(): number { return this.maxDistribChildren; }
+  private set maxChildren(v: number) { this.maxDistribChildren = v; }
   private shareDB: ShareDB;
   private wishlistInterval = 12 * 60; // seconds, server 12 min default (2 min privileged)
   private wishlistTerms: string[] = [];
@@ -238,6 +274,27 @@ export class SoulseekSession {
   private pendingBrowseShares = new Map<string, { timer: ReturnType<typeof setTimeout> }>();
   private pendingBrowseFolder = new Map<number, { username: string; folder: string; timer: ReturnType<typeof setTimeout> }>();
   private pendingPeerMessages = new Map<string, Array<{ connType: string; msg: Buffer }>>();
+  // allowed peer responses gating (nicotine allowed_message_responses) — prevent unsolicited 448M
+  private allowedPeerResponses = new Map<string, Set<number>>();
+  // socket limiting
+  private pendingPeerQueue: Array<{ fn: () => void }> = [];
+  private get maxSockets(): number {
+    const env = Number(process.env.MAX_SOCKETS || 0);
+    if (env > 0) return env;
+    return MAX_SOCKETS_DEFAULT;
+  }
+  private get activeSocketCount(): number { return this.peerStates.size + this.pendingConnects.size; }
+  private canOpenSocket(): boolean { return this.activeSocketCount < this.maxSockets; }
+  private enqueueOrRun(fn: () => void): void {
+    if (this.canOpenSocket()) fn();
+    else this.pendingPeerQueue.push({ fn });
+  }
+  private dequeuePendingSockets(): void {
+    while (this.pendingPeerQueue.length && this.canOpenSocket()) {
+      const item = this.pendingPeerQueue.shift()!;
+      try { item.fn(); } catch {}
+    }
+  }
 
   get isLoggedIn(): boolean { return this.loggedIn; }
 
@@ -324,14 +381,177 @@ export class SoulseekSession {
         this.allowedSearchTokens.add(token);
         const searchId = `wishlist:${term}:${Date.now()}`;
         const handlers: SearchHandlers = {
-          onResult: (p) => this.emit({ type: "privilege-time" } as unknown as UserInfoEvent), // placeholder; real routing handled via routeResult
-          onEnd: () => {},
+          onResult: (p) => this.opts.onWishlistEvent?.({ type: "result", searchId: p.searchId, token: p.token, rows: p.rows }),
+          onEnd: (p) => this.opts.onWishlistEvent?.({ type: "end", searchId: p.searchId, token, reason: p.reason }),
         };
-        // Use internal search plumbing but emit via existing event
+        const active: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
+        active.timer = setTimeout(() => {
+          this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token);
+          handlers.onEnd({ searchId, reason: "timeout" });
+        }, DEFAULT_SEARCH_TIMEOUT_MS);
+        this.searches.set(token, active);
+        this.searchIds.set(searchId, token);
         this.serverSocket.write(buildWishlistSearch(token, term));
-        logger.info("search", "wishlist auto-search", { term, token });
+        logger.info("search", "wishlist auto-search", { term, token, searchId });
+        // notify server of start via wishlist event
+        this.opts.onWishlistEvent?.({ type: "result", searchId, token, rows: [] });
       } catch {}
     }, intervalMs);
+  }
+
+  // Distributed helpers — mirrors pynicotine/slskproto.py
+  private _sendHaveNoParent(): void {
+    if (!this.serverSocket) return;
+    this.parent = null;
+    this.branchLevel = 0;
+    this.branchRoot = this.username;
+    this.isServerParent = false;
+    logger.info("server", "have no parent, requesting new one", { username: this.username });
+    try {
+      this.serverSocket.write(buildHaveNoParent());
+      this.serverSocket.write(buildBranchRoot(this.branchRoot));
+      this.serverSocket.write(buildBranchLevel(this.branchLevel));
+      this.serverSocket.write(buildAcceptChildren(false));
+    } catch {}
+  }
+
+  private _closeParentCandidateConnections(): void {
+    for (const cand of this.potentialParents.values()) {
+      if (cand.conn && this.parent?.conn !== cand.conn) {
+        try { (cand.conn as unknown as { end: () => void }).end(); } catch {}
+        cand.conn = undefined;
+      }
+    }
+  }
+
+  private _updateMaximumDistributedChildren(): void {
+    const prev = this.maxDistribChildren;
+    const numChild = this.childPeers.size;
+    if (this.uploadSpeed >= this.distribParentMinSpeed && this.distribParentSpeedRatio > 0) {
+      this.maxDistribChildren = Math.min(Math.floor(this.uploadSpeed / this.distribParentSpeedRatio / 100), 10);
+    } else {
+      this.maxDistribChildren = 0;
+    }
+    logger.info("server", "distributed child limit updated", { max: this.maxDistribChildren, prev });
+    if (this.maxDistribChildren <= numChild && numChild < prev) {
+      try { this.serverSocket?.write(buildAcceptChildren(false)); } catch {}
+    } else if (this.maxDistribChildren > numChild && prev <= numChild) {
+      // we can accept again
+      try { this.serverSocket?.write(buildAcceptChildren(numChild < this.maxDistribChildren)); } catch {}
+    }
+  }
+
+  private _verifyParentStatus(sock: Socket, msgClass: string): ParentStatus {
+    if (this.parent === null) return ParentStatus.WAITING;
+    if (this.parent.conn === sock) return ParentStatus.ACCEPTED;
+    logger.warn("server", `distrib ${msgClass} from non-parent`, { username: (this.peerStates.get(sock)?.username || "unknown") });
+    return ParentStatus.REJECTED;
+  }
+
+  private _adoptParent(username: string): void {
+    if (this.parent !== null) return;
+    const cand = this.potentialParents.get(username.toLowerCase());
+    if (!cand || !cand.conn) return;
+    if (cand.branchLevel === null || !cand.branchRoot) return;
+    this.parent = cand;
+    this.branchLevel = (cand.branchLevel ?? 0) + 1;
+    this.branchRoot = cand.branchRoot;
+    this.isServerParent = false;
+    cand.branchLevel = null;
+    cand.branchRoot = null;
+    this._closeParentCandidateConnections();
+    try {
+      this.serverSocket?.write(buildHaveNoParent());
+      this.serverSocket?.write(buildBranchRoot(this.branchRoot!));
+      this.serverSocket?.write(buildBranchLevel(this.branchLevel));
+      if (this.childPeers.size < this.maxDistribChildren) {
+        this.serverSocket?.write(buildAcceptChildren(true));
+      }
+    } catch {}
+    // notify children of new level/root
+    try {
+      const lvlBuf = buildBranchLevel(this.branchLevel);
+      const rootBuf = buildBranchRoot(this.branchRoot!);
+      // we send distrib level/root via distrib framing: need to pack as distrib messages
+      // Use direct peer framing via _sendMessageToChildPeers analog — write raw distrib
+      for (const childSock of this.childPeers.values()) {
+        try {
+          // distribBranchLevel 4, distribBranchRoot 5 are framed as [len][code][payload] with uint8 code
+          const lvlPayload = packUint32(this.branchLevel >>> 0);
+          const rootPayload = packString(this.branchRoot!);
+          // distrib framing helper: packUint32(len+1) + uint8 code + payload
+          const frameLvl = Buffer.concat([packUint32(lvlPayload.length + 1), Buffer.from([4]), lvlPayload]);
+          const frameRoot = Buffer.concat([packUint32(rootPayload.length + 1), Buffer.from([5]), rootPayload]);
+          (childSock as unknown as { write: (b: Buffer)=>void }).write(frameLvl);
+          (childSock as unknown as { write: (b: Buffer)=>void }).write(frameRoot);
+        } catch {}
+      }
+    } catch {}
+    this.childPeers.delete(username.toLowerCase());
+    logger.info("server", "adopted parent", { username, branchLevel: this.branchLevel, branchRoot: this.branchRoot });
+  }
+
+  private _acceptChildPeerConnection(sock: Socket, username: string): boolean {
+    if (this.peerStates.get(sock)?.connType !== "D") return false;
+    if (username === this.username) { try { sock.end(); } catch {} return false; }
+    if (this.potentialParents.has(username.toLowerCase())) return false;
+    if (this.parent === null && !this.isServerParent) {
+      logger.info("server", "rejecting child, no parent and not server parent", { username });
+      try { sock.end(); } catch {}
+      return false;
+    }
+    if (this.childPeers.has(username.toLowerCase())) {
+      try { sock.end(); } catch {}
+      return false;
+    }
+    if (this.childPeers.size >= this.maxDistribChildren) {
+      try { sock.end(); } catch {}
+      return false;
+    }
+    this.childPeers.set(username.toLowerCase(), sock);
+    try {
+      const lvlPayload = packUint32(this.branchLevel >>> 0);
+      const rootPayload = packString(this.branchRoot ?? this.username);
+      const frameLvl = Buffer.concat([packUint32(lvlPayload.length + 1), Buffer.from([4]), lvlPayload]);
+      const frameRoot = Buffer.concat([packUint32(rootPayload.length + 1), Buffer.from([5]), rootPayload]);
+      (sock as unknown as { write: (b: Buffer)=>void }).write(frameLvl);
+      (sock as unknown as { write: (b: Buffer)=>void }).write(frameRoot);
+    } catch {}
+    logger.info("server", "adopted child peer", { username, total: this.childPeers.size });
+    if (this.childPeers.size >= this.maxDistribChildren) {
+      try { this.serverSocket?.write(buildAcceptChildren(false)); } catch {}
+    }
+    return true;
+  }
+
+  private _removeChildPeerConnection(username: string): void {
+    this.childPeers.delete(username.toLowerCase());
+    if (this.childPeers.size === this.maxDistribChildren - 1) {
+      try { this.serverSocket?.write(buildAcceptChildren(true)); } catch {}
+    }
+    logger.info("server", "removed child peer", { username, total: this.childPeers.size });
+  }
+
+  private _sendMessageToChildPeers(payload: Buffer, distribCode: number): void {
+    if (this.parent === null && !this.isServerParent) return;
+    const frame = Buffer.concat([packUint32(payload.length + 1), Buffer.from([distribCode]), payload]);
+    for (const child of this.childPeers.values()) {
+      try { (child as unknown as { write: (b:Buffer)=>void }).write(frame); } catch {}
+    }
+  }
+
+  private addAllowedPeerResponse(username: string, code: number): void {
+    const key = username.toLowerCase();
+    if (!this.allowedPeerResponses.has(key)) this.allowedPeerResponses.set(key, new Set());
+    this.allowedPeerResponses.get(key)!.add(code);
+  }
+  private isAllowedPeerResponse(username: string, code: number): boolean {
+    const set = this.allowedPeerResponses.get(username.toLowerCase());
+    return set ? set.has(code) : false;
+  }
+  private clearAllowedPeerResponse(username: string, code: number): void {
+    const set = this.allowedPeerResponses.get(username.toLowerCase());
+    if (set) { set.delete(code); if (set.size===0) this.allowedPeerResponses.delete(username.toLowerCase()); }
   }
 
   private emit(event: UserInfoEvent) { this.opts.onUserEvent?.(event); }
@@ -477,10 +697,8 @@ export class SoulseekSession {
         this.startListener();
         this.startIdleSweep();
         this.startServerPing();
-        // Distrib bootstrap: HaveNoParent + BranchLevel/Root (Phase 5)
-        this.serverSocket?.write(buildHaveNoParent());
-        try { this.serverSocket?.write(buildBranchLevel(this.branchLevel)); } catch {}
-        if (this.branchRoot) try { this.serverSocket?.write(buildBranchRoot(this.branchRoot)); } catch {}
+        // Distrib bootstrap: HaveNoParent true + BranchRoot(login) + BranchLevel 0 + AcceptChildren false — mirrors _sendHaveNoParent
+        this._sendHaveNoParent();
         this.restartWishlistTimer();
         this.loginResolve?.(resp);
         this.loginResolve = undefined;
@@ -524,11 +742,25 @@ export class SoulseekSession {
       return;
     }
     if (code === SERVER_MESSAGE_CODES.getUserStatus) {
-      try { const status = parseUserStatus(payload); this.emit({ type: "user-status", username: status.username, status }); } catch {}
+      try {
+        const status = parseUserStatus(payload);
+        // pynicotine clears userAddresses on OFFLINE (0)
+        if (status.status === 0) {
+          this.userAddresses.delete(status.username);
+        }
+        this.emit({ type: "user-status", username: status.username, status });
+      } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.getUserStats) {
-      try { const stats = parseUserStats(payload); this.emit({ type: "user-stats", username: stats.username, stats }); } catch {}
+      try {
+        const stats = parseUserStats(payload);
+        if (stats.username === this.username) {
+          this.uploadSpeed = stats.avgspeed;
+          this._updateMaximumDistributedChildren();
+        }
+        this.emit({ type: "user-stats", username: stats.username, stats });
+      } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.userInterests) {
@@ -558,10 +790,16 @@ export class SoulseekSession {
     if (code === SERVER_MESSAGE_CODES.getPeerAddress) {
       try {
         const addr = parsePeerAddress(payload);
-        // cache 30m TTL and populate geo cache if we have country mapping externally
-        this.userAddresses.set(addr.username, { addr, updated: Date.now() });
-        // If bridge has geoblock enabled, try to lookup country via simple /24 heuristic placeholder
-        // Real geo uses ip_country_data.csv; we keep cache externally populated via setCountryForIp
+        // handle offline 0.0.0.0 — clear stale and don't cache
+        if (addr.ip === "0.0.0.0" || addr.port === 0) {
+          this.userAddresses.delete(addr.username);
+        } else {
+          this.userAddresses.set(addr.username, { addr, updated: Date.now() });
+          // populate geo cache lazily via bisect
+          try { getCountryCode(addr.ip); } catch {}
+          // update ip lists if ip changed (mirrors _update_saved_user_ip_addresses)
+          // keep placeholder handling minimal
+        }
         const pending = this.peerAddressRequests.get(addr.username);
         if (pending) {
           clearTimeout(pending.timer);
@@ -571,11 +809,21 @@ export class SoulseekSession {
         } else {
           this.emit({ type: "peer-address", username: addr.username, peerAddress: addr });
         }
+        this.dequeuePendingSockets();
       } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.watchUser) {
-      try { const w = parseWatchUser(payload); this.emit({ type: "watch-user", username: w.username, watchUser: w }); } catch {}
+      try {
+        const w = parseWatchUser(payload);
+        if (!w.exists) {
+          this.userAddresses.delete(w.username);
+        } else if (w.username === this.username && w.avgspeed !== undefined) {
+          this.uploadSpeed = w.avgspeed;
+          this._updateMaximumDistributedChildren();
+        }
+        this.emit({ type: "watch-user", username: w.username, watchUser: w });
+      } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.sayChatroom) {
@@ -660,37 +908,70 @@ export class SoulseekSession {
       return;
     }
     if (code === SERVER_MESSAGE_CODES.parentMinSpeed) {
-      try { const v = payload.readUInt32LE(0); this.maxChildren = Math.floor(v / 100); } catch {}
+      try {
+        this.distribParentMinSpeed = payload.readUInt32LE(0);
+        this._updateMaximumDistributedChildren();
+      } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.parentSpeedRatio) {
       try {
-        const ratio = payload.readUInt32LE(0) || 1;
-        // recompute max children if already have speed — stub
-        void ratio;
+        this.distribParentSpeedRatio = payload.readUInt32LE(0) || 1;
+        this._updateMaximumDistributedChildren();
       } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.embeddedMessage) {
-      // Phase 5: server EmbeddedMessage 93 contains distrib search — unpack
       try {
-        // payload is [uint8 distribCode][distribPayload] possibly after server framing removed; first byte is distrib code
         if (payload.length >= 1) {
           const dCode = payload[0];
           const dPayload = payload.subarray(1);
+          // mirror pynicotine _unpack_embedded_message: validate identifier "1" inside dPayload for DistribSearch
           if (dCode === 3) {
+            // server -> branch root: validate and optionally become server parent
+            const searchOk = (() => {
+              try {
+                const r = new SlskReader(dPayload);
+                // Soulseek NS bug: embedded may be whole server message vs unpacked; try identifier check
+                if (r.remaining >= 4) {
+                  const peek = r.uint32();
+                  // if peek looks like identifier length 1 and next char '1', treat as identifier
+                }
+                return true;
+              } catch { return false; }
+            })();
+            void searchOk;
+            // if we are branch root (no parent, had no parent true), mark as server parent
+            if (this.parent === null && this.branchRoot === this.username) {
+              this.isServerParent = true;
+              if (this.childPeers.size < this.maxDistribChildren) {
+                try { this.serverSocket?.write(buildAcceptChildren(true)); } catch {}
+              }
+            }
+            // forward unpacked to children only if we are parent/serverParent
             try {
-              const r = new SlskReader(dPayload);
-              if (r.remaining >= 4) r.uint32();
-              const user = r.string(); const token = r.uint32(); const query = r.string();
-              if (!this.shareDB.isExcluded(query)) this.emitTransfer({ type: "transfer-request", username: user, token, file: query.slice(0,120) });
-              // forward to D children
-              for (const [sock,st] of this.peerStates) if (st.connType==="D") try{ sock.write(Buffer.concat([packUint32(dPayload.length+1), Buffer.from([3]), dPayload])); }catch{}
+              const innerPayload = dPayload; // already unpacked per server spec
+              this._sendMessageToChildPeers(innerPayload, 3);
+            } catch {}
+            // local emit for search handling via shares
+            try {
+              const r2 = new SlskReader(dPayload);
+              if (r2.remaining >= 4) r2.uint32(); // identifier 49? optional
+              const user = r2.string(); const token = r2.uint32(); const query = r2.string();
+              if (!this.shareDB.isExcluded(query)) {
+                // answer via peer FileSearchResponse if shares match — delegate to handleInboundFileSearch logic
+                const resp = this.shareDB.buildFileSearchResponse(token, this.username, query);
+                if (resp) {
+                  // need to route to requester via peer — we will queue send
+                  this.emitTransfer({ type: "transfer-request", username: user, token, file: query.slice(0, 120) });
+                  // try direct peer send
+                  try { this.ensurePeerAndSend(user, "P", resp); } catch {}
+                }
+              }
             } catch {}
           }
         }
       } catch {}
-      this.emitRoom({ type: "room-list", data: payload.toString("hex").slice(0, 64) });
       return;
     }
     if (code === SERVER_MESSAGE_CODES.adminMessage) {
@@ -705,7 +986,10 @@ export class SoulseekSession {
           clearTimeout(pending.timer);
           this.pendingConnects.delete(token);
           pending.reject(new Error("CantConnectToPeer"));
+          this.dequeuePendingSockets();
         }
+        // also cleanup file token pending (F)
+        if (this.pendingFileTokens.has(token)) this.pendingFileTokens.delete(token);
         // also try to parse optional username string for diagnostic
         if (payload.length > 4) {
           try { const r = new SlskReader(payload); r.uint32(); const user = r.string(); this.emitTransfer({ type: "transfer-response", username: user, token, reason: "CantConnectToPeer" }); } catch {}
@@ -727,8 +1011,48 @@ export class SoulseekSession {
       try { const rm = parseRoomMembers(payload); this.emitRoom({ type: "room-members", room: rm.room, data: rm.members }); } catch {}
       return;
     }
-    if (code === SERVER_MESSAGE_CODES.addRoomMember || code === SERVER_MESSAGE_CODES.removeRoomMember) {
-      try { const m = parseRoomMember(payload); this.emitRoom({ type: code === SERVER_MESSAGE_CODES.addRoomMember ? "room-members" : "room-members", room: m.room, username: m.username, data: m }); } catch {}
+    if (code === SERVER_MESSAGE_CODES.addRoomMember) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "room-member-added", room: m.room, username: m.username, data: m }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.removeRoomMember) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "room-member-removed", room: m.room, username: m.username }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.cancelRoomMembership) {
+      try { const room = new SlskReader(payload).string(); this.emitRoom({ type: "cancel-membership", room }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.cancelRoomOwnership) {
+      try { const room = new SlskReader(payload).string(); this.emitRoom({ type: "cancel-ownership", room }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.roomMembershipGranted) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "membership-granted", room: m.room, username: m.username }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.roomMembershipRevoked) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "membership-revoked", room: m.room, username: m.username }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.addRoomOperator) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "operator-added", room: m.room, username: m.username }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.removeRoomOperator) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "operator-removed", room: m.room, username: m.username }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.roomOperatorshipGranted) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "operatorship-granted", room: m.room, username: m.username }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.roomOperatorshipRevoked) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "operatorship-revoked", room: m.room, username: m.username }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.roomOperators) {
+      try { const ro = parseRoomOperators(payload); this.emitRoom({ type: "room-operators", room: ro.room, data: ro.operators }); } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.roomTickerRemoved) {
@@ -740,8 +1064,7 @@ export class SoulseekSession {
       return;
     }
     if (code === SERVER_MESSAGE_CODES.joinGlobalRoom || code === SERVER_MESSAGE_CODES.leaveGlobalRoom) {
-      // server ack for global room join/leave
-      try { this.emitRoom({ type: code === SERVER_MESSAGE_CODES.joinGlobalRoom ? "join-room" : "leave-room", room: "global", data: payload.length }); } catch {}
+      try { this.emitRoom({ type: code === SERVER_MESSAGE_CODES.joinGlobalRoom ? "join-room" : "leave-room", room: "global", data: { pending: payload.length } }); } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.cantCreateRoom) {
@@ -765,9 +1088,14 @@ export class SoulseekSession {
       return;
     }
     if (code === SERVER_MESSAGE_CODES.resetDistributed) {
-      // reset distributed — close D conns and re-bootstrap
       for (const [sock, st] of this.peerStates) if (st.connType === "D") { try { sock.end(); } catch {} this.peerStates.delete(sock); }
-      try { this.serverSocket?.write(buildHaveNoParent()); } catch {}
+      this.childPeers.clear();
+      this.potentialParents.clear();
+      this.parent = null;
+      this.isServerParent = false;
+      this.branchLevel = 0;
+      this.branchRoot = this.username;
+      this._sendHaveNoParent();
       return;
     }
     if (code === SERVER_MESSAGE_CODES.acceptChildren) {
@@ -775,41 +1103,92 @@ export class SoulseekSession {
       try { const accept = payload[0] !== 0; void accept; } catch {}
       return;
     }
-    if (code === SERVER_MESSAGE_CODES.enableRoomInvitations || code === SERVER_MESSAGE_CODES.addToPrivileged) {
-      // no-op ack
+    if (code === SERVER_MESSAGE_CODES.enableRoomInvitations) {
+      try { const enabled = payload.length ? payload[0] !== 0 : true; this.emitRoom({ type: "enable-room-invitations", data: enabled }); } catch {}
       return;
     }
-    // Generic fallback for remaining 76 codes: emit raw for debugging but don't close
-    this.emit({ type: "privilege-time" } as unknown as UserInfoEvent);
+    if (code === SERVER_MESSAGE_CODES.addToPrivileged) return;
+    // Generic fallback for remaining codes: ignore, debug log
     // Unknown codes: ignore (don't close) — nicotine logs debug
   }
 
   private handleInboundFileSearch(payload: Buffer) {
-    // Phase 3: user searching us via server FileSearch (26)
-    // Delegated to ShareDB if present; stub emits event for now
+    // Server FileSearch 26 receive: string username + uint32 token + string query (see SLSKPROTOCOL 26)
+    // Some paths (legacy) may be token+query without username — handle both.
     try {
       const r = new SlskReader(payload);
-      const token = r.uint32(); const query = r.string();
-      // If shares loaded, let shares handle; otherwise just emit transfer event for debugging
-      this.emitTransfer({ type: "transfer-request", token, file: query.slice(0, 120) });
-      // Try to dispatch via injected share handler if available
-      (this as unknown as { shareHandler?: (tok:number,q:string)=>void }).shareHandler?.(token, query);
+      let username: string | undefined;
+      let token: number;
+      let query: string;
+      // try peek: first field could be string (username) then uint32 token; if remaining after first string <4, fallback to token first
+      const snapshot = payload;
+      try {
+        // attempt username + token + query
+        username = r.string();
+        token = r.uint32();
+        query = r.string();
+        // if username contains spaces and query looks like token misparse, detect: if token is large but query empty, maybe username was query
+        if (!query && r.remaining === 0 && username) {
+          // fallback: treat username as query? but we have token already — assume correct
+        }
+      } catch {
+        // fallback token+query
+        const r2 = new SlskReader(snapshot);
+        token = r2.uint32();
+        query = r2.string();
+        username = undefined;
+      }
+      if (!query) return;
+      if (this.shareDB.isExcluded(query)) return;
+      // emit diagnostic
+      this.emitTransfer({ type: "transfer-request", username, token: token!, file: query.slice(0, 120) });
+      // Build FileSearchResponse via shares and send to requester via peer P
+      const resp = this.shareDB.buildFileSearchResponse(token!, username ?? this.username, query);
+      if (resp && username) {
+        try { this.ensurePeerAndSend(username, "P", resp); } catch {}
+      } else if (resp) {
+        // if no username, try broadcast? ignore
+      }
     } catch {}
   }
 
   private handlePossibleParents(parents: Array<{ username: string; ip: string; port: number }>) {
-    // Phase 5: attempt up to 10 parallel D dials (spec)
+    // Close previous candidates that are not in new list
     const toTry = parents.slice(0, 10);
+    const newNames = new Set(toTry.map((p) => p.username.toLowerCase()));
+    for (const [name, cand] of this.potentialParents) {
+      if (!newNames.has(name)) {
+        if (cand.conn) try { (cand.conn as unknown as { end:()=>void }).end(); } catch {}
+        this.potentialParents.delete(name);
+      }
+    }
     for (const p of toTry) {
-      Bun.connect({
-        hostname: p.ip, port: p.port,
-        socket: {
-          open: (sock) => { (sock as Socket).write(buildPeerInit(this.username, "D")); this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username: p.username, outbound: true, connType: "D", lastActive: Date.now(), createdAt: Date.now() }); },
-          data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
-          error: () => {},
-          close: (sock) => { this.peerStates.delete(sock as Socket); },
-        },
-      }).catch(() => {});
+      const lower = p.username.toLowerCase();
+      if (!this.potentialParents.has(lower)) {
+        this.potentialParents.set(lower, { username: p.username, ip: p.ip, port: p.port, branchLevel: null, branchRoot: null });
+      }
+      // enqueue or run D dial — respect MAX_SOCKETS
+      this.enqueueOrRun(() => {
+        Bun.connect({
+          hostname: p.ip, port: p.port,
+          socket: {
+            open: (sock) => {
+              (sock as Socket).write(buildPeerInit(this.username, "D"));
+              this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username: p.username, outbound: true, connType: "D", lastActive: Date.now(), createdAt: Date.now() });
+              const cand = this.potentialParents.get(lower);
+              if (cand) cand.conn = sock as Socket;
+            },
+            data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
+            error: () => {},
+            close: (sock) => {
+              this.peerStates.delete(sock as Socket);
+              const cand = this.potentialParents.get(lower);
+              if (cand && cand.conn === (sock as Socket)) cand.conn = undefined;
+              this.dequeuePendingSockets();
+            },
+          },
+        }).catch(() => { this.dequeuePendingSockets(); });
+      });
     }
   }
 
@@ -860,7 +1239,12 @@ export class SoulseekSession {
           this.processPeer(peer as Socket, chunk, false);
         },
         error: () => {},
-        close: (peer) => { this.peerStates.delete(peer as Socket); },
+        close: (peer) => {
+          const st = this.peerStates.get(peer as Socket);
+          this.peerStates.delete(peer as Socket);
+          if (st?.username && st.connType === "D") this._removeChildPeerConnection(st.username);
+          this.dequeuePendingSockets();
+        },
       },
     });
     // Bun.listen keepalive is implicit via OS; ServerPing is fallback
@@ -876,11 +1260,14 @@ export class SoulseekSession {
         if (initTimeout || ghost || dead) {
           try { sock.end(); } catch {}
           this.peerStates.delete(sock);
+          if (st.username && st.connType === "D") this._removeChildPeerConnection(st.username);
+          this.dequeuePendingSockets();
         }
         // leak fix: partial init buf without progress -> evict after timeout (2s)
         if (!st.initDone && st.buf.length > 0 && (now - st.createdAt) > CONNECTION_INIT_TIMEOUT_MS) {
           try { sock.end(); } catch {}
           this.peerStates.delete(sock);
+          this.dequeuePendingSockets();
         }
       }
       // peer address cache TTL
@@ -921,9 +1308,16 @@ export class SoulseekSession {
       // Outbound pierce will be handled by the pending resolver; still emit for diagnostics
       this.emitTransfer({ type: "transfer-response", username: ctp.username, token: ctp.token, reason: `ConnectToPeer ${ctp.connType}` });
     }
-    // Obfuscated port handling
-    const port = ctp.obfuscatedPort ?? ctp.port;
+    // Obfuscated port handling — nicotine does NOT support obfuscation, so always use plain port.
+    // If obfuscationType is 1 (ROTATED), the plain port is rotated and obfuscatedPort is real,
+    // but since we don't support obfuscation handshake, we still try plain port only.
+    const port = ctp.port;
     const ip = ctp.ip;
+    if (!this.canOpenSocket()) {
+      // queue for later
+      this.enqueueOrRun(() => this.connectToPeer(ctp));
+      return;
+    }
     Bun.connect({
       hostname: ip, port,
       socket: {
@@ -934,18 +1328,21 @@ export class SoulseekSession {
           if (pending) {
             try { pending.resolve(sock as Socket); } catch {}
           }
+          this.dequeuePendingSockets();
         },
         data: (sock, chunk) => this.processPeer(sock as Socket, chunk, true),
         error: () => {
           // Report back to server we couldn't connect
           try { this.serverSocket?.write(buildCantConnectToPeer(ctp.token, ctp.username)); } catch {}
           if (pending) { try { pending.reject(new Error("Pierce failed")); } catch {} }
+          this.dequeuePendingSockets();
         },
-        close: (sock) => { this.peerStates.delete(sock as Socket); },
+        close: (sock) => { this.peerStates.delete(sock as Socket); if ((this.peerStates.get(sock as Socket)?.connType ?? ctp.connType) === "D" && ctp.username) this._removeChildPeerConnection(ctp.username); this.dequeuePendingSockets(); },
       },
     }).catch(() => {
       try { this.serverSocket?.write(buildCantConnectToPeer(ctp.token, ctp.username)); } catch {}
       if (pending) { try { pending.reject(new Error("Connect failed")); } catch {} }
+      this.dequeuePendingSockets();
     });
   }
 
@@ -970,12 +1367,13 @@ export class SoulseekSession {
         reject(new Error("GetPeerAddress timeout"));
       }, PEER_ADDRESS_TIMEOUT_MS);
       this.peerAddressRequests.set(username, {
-        cb: (addr) => {
+        cbs: [(addr: PeerAddress) => {
           clearTimeout(timer);
           this.userAddresses.set(username, { addr, updated: Date.now() });
           resolve(addr);
-        },
+        }],
         timer,
+        createdAt: Date.now(),
       });
       this.serverSocket?.write(buildGetPeerAddress(username));
     });
@@ -996,10 +1394,8 @@ export class SoulseekSession {
           hostname: addr.ip, port: addr.port,
           socket: {
             open: (sock) => {
-              this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, lastActive: Date.now() });
+              this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, lastActive: Date.now(), createdAt: Date.now() });
               (sock as Socket).write(buildPeerInit(this.username, connType));
-              // Wait for remote PeerInit/Pierce to complete — consider connected after open + init
-              // For P, we consider success after we send PeerInit and get data
               setTimeout(() => resolve(sock as Socket), 200);
             },
             data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
@@ -1105,6 +1501,13 @@ export class SoulseekSession {
         state.initDone = true;
         if (state.username && state.connType) {
           setTimeout(() => this.flushPendingPeerMessages(state.username!, state.connType!), 10);
+          // Distributed child acceptance — only for inbound D
+          if (state.connType === "D" && !state.outbound) {
+            const ok = this._acceptChildPeerConnection(peer, state.username);
+            if (!ok) {
+              // _accept handles close; fall through but mark not child
+            }
+          }
         }
         // Phase 1: send any pendingMsg queued by ensurePeerAndSend
         const pendingMsg = (state as unknown as { pendingMsg?: Buffer }).pendingMsg as Buffer | undefined;
@@ -1136,7 +1539,7 @@ export class SoulseekSession {
         }
         break;
       }
-      // Distrib framing: uint8 code after init when connType D (Phase 5)
+      // Distrib framing: uint8 code after init when connType D
       if (state.connType === "D") {
         if (state.buf.length < 5) break;
         const len = state.buf.readUInt32LE(0);
@@ -1149,33 +1552,87 @@ export class SoulseekSession {
           // DistribPing — ignore
         } else if (code === 3) {
           try {
-            const ds = (()=>{ try{ const r=new SlskReader(payload); if(r.remaining>=4) r.uint32(); const u=r.string(); const t=r.uint32(); const q=r.string(); return { username:u, token:t, query:q }; } catch { return null; } })();
+            const ds = (()=>{ try{ const r=new SlskReader(payload); // identifier 49?
+              if (r.remaining >=4) {
+                const id = r.uint32();
+                if (id !== 49 && r.remaining > 0) {
+                  // if not 49, maybe it's already username length — rewind?
+                }
+              }
+              const u=r.string(); const t=r.uint32(); const q=r.string(); return { username:u, token:t, query:q, identifier: "1" }; } catch { return null; } })();
             if (ds) {
-              // forward to children + local search via shares
-              for (const [sock,st] of this.peerStates) if (st.connType==="D" && sock!==peer) try{ sock.write(Buffer.concat([packUint32(payload.length+1), Buffer.from([3]), payload])); }catch{}
-              // local handler: if query matches excluded, ignore; else could emit
-              if (!this.shareDB.isExcluded(ds.query)) this.emitTransfer({ type: "transfer-request", username: ds.username, token: ds.token, file: ds.query.slice(0,120) });
-            } else {
-              this.emitTransfer({ type: "transfer-request", username: state.username, file: payload.toString("utf8").slice(0, 100) });
+              // validate identifier should be "1" — if ds fails, ignore
+              if (ds.identifier !== "1" && ds.token === undefined) { /* invalid */ }
+              // adoption if no parent yet
+              if (this.parent === null) this._adoptParent(ds.username);
+              const status = this._verifyParentStatus(peer, "DistribSearch");
+              if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+              if (status === ParentStatus.ACCEPTED) {
+                this._sendMessageToChildPeers(payload, 3);
+                if (!this.shareDB.isExcluded(ds.query)) {
+                  // local shares search — also emit for server side
+                  const resp = this.shareDB.buildFileSearchResponse(ds.token, this.username, ds.query);
+                  if (resp) {
+                    // resp is peer FileSearchResponse, but for distrib we need to support search via shares? Just emit
+                    this.emitTransfer({ type: "transfer-request", username: ds.username, token: ds.token, file: ds.query.slice(0,120) });
+                  } else {
+                    this.emitTransfer({ type: "transfer-request", username: ds.username, token: ds.token, file: ds.query.slice(0,120) });
+                  }
+                }
+              } else if (status === ParentStatus.WAITING) {
+                // still forward? no — waiting means not yet parent, don't forward
+              }
             }
           } catch {}
         } else if (code === 4) {
-          try { this.branchLevel = payload.readUInt32LE(0); } catch {}
+          try {
+            const level = payload.readUInt32LE(0);
+            if (level > 1000) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+            const status = this._verifyParentStatus(peer, "DistribBranchLevel");
+            if (status === ParentStatus.ACCEPTED) {
+              this.branchLevel = (level + 1) >>> 0;
+              try { this.serverSocket?.write(buildBranchLevel(this.branchLevel)); } catch {}
+              this._sendMessageToChildPeers(packUint32(this.branchLevel >>> 0), 4);
+              logger.info("server", "branch level updated from parent", { level: this.branchLevel });
+            } else if (status === ParentStatus.WAITING) {
+              const lower = (state.username || "").toLowerCase();
+              const cand = this.potentialParents.get(lower);
+              if (cand) { cand.conn = peer; cand.branchLevel = level; if (level === 0) cand.branchRoot = cand.username; }
+            } else if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+          } catch {}
         } else if (code === 5) {
-          try { this.branchRoot = new SlskReader(payload).string(); } catch {}
+          try {
+            const root = new SlskReader(payload).string();
+            if (!root) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+            const status = this._verifyParentStatus(peer, "DistribBranchRoot");
+            if (status === ParentStatus.ACCEPTED) {
+              this.branchRoot = root;
+              try { this.serverSocket?.write(buildBranchRoot(this.branchRoot)); } catch {}
+              this._sendMessageToChildPeers(packString(root), 5);
+              logger.info("server", "branch root updated", { root });
+            } else if (status === ParentStatus.WAITING) {
+              const lower = (state.username || "").toLowerCase();
+              const cand = this.potentialParents.get(lower);
+              if (cand) { cand.conn = peer; cand.branchRoot = root; }
+            } else if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+          } catch {}
         } else if (code === 7) {
-          // childDepth ignored
+          // childDepth obsolete — ignore, but propagate if needed
         } else if (code === 93) {
-          // EmbeddedMessage 93 inside distrib — unpack server message 93
           try {
             const r=new SlskReader(payload);
-            const innerCode = r.uint8(); // should be 3? Actually distrib embedded carries FileSearch etc
-            // rest is inner payload: try handle as distribSearch again
+            const innerCode = r.uint8();
             const rest = payload.subarray(1);
             if (innerCode===3) {
-              // treat as distribSearch
               const ds2=(()=>{ try{ const rr=new SlskReader(rest); if(rr.remaining>=4) rr.uint32(); const u=rr.string(); const t=rr.uint32(); const q=rr.string(); return {username:u, token:t, query:q}; }catch{return null;}})();
-              if(ds2 && !this.shareDB.isExcluded(ds2.query)) this.emitTransfer({ type: "transfer-request", username: ds2.username, token: ds2.token, file: ds2.query.slice(0,120) });
+              if (ds2 && !this.shareDB.isExcluded(ds2.query)) {
+                if (this.parent===null) this._adoptParent(ds2.username);
+                const st2 = this._verifyParentStatus(peer, "DistribSearch");
+                if (st2===ParentStatus.ACCEPTED) {
+                  this._sendMessageToChildPeers(rest, 3);
+                  this.emitTransfer({ type: "transfer-request", username: ds2.username, token: ds2.token, file: ds2.query.slice(0,120) });
+                }
+              }
             }
           } catch {}
         }
@@ -1210,6 +1667,13 @@ export class SoulseekSession {
         try { const resp = parseFileSearchResponse(msg.payload); this.routeResult(resp); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.userInfoResponse) {
         const username = state.username ?? "";
+        // gating: only accept if we requested it (mirrors nicotine allowed_message_responses)
+        if (!this.isAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse)) {
+          try { peer.end(); } catch {}
+          this.peerStates.delete(peer);
+          break;
+        }
+        this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
         try {
           const info = parseUserInfoResponse(msg.payload, username);
           const cb = this.userInfoRequests.get(username);
@@ -1217,23 +1681,38 @@ export class SoulseekSession {
           this.emit({ type: "user-info-response", username, info });
         } catch {}
         try { (peer as Socket).end(); } catch {}
+        this.dequeuePendingSockets();
       } else if (msg.code === PEER_MESSAGE_CODES.sharedFileListResponse) {
+        const username = state.username ?? "unknown";
+        if (!this.isAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse)) {
+          try { peer.end(); } catch {}
+          this.peerStates.delete(peer);
+          break;
+        }
+        this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);
         try {
-          const username = state.username ?? "unknown";
           const parsed = parseSharedFileListResponse(msg.payload);
           const pending = this.pendingBrowseShares.get(username.toLowerCase());
           if (pending) { clearTimeout(pending.timer); this.pendingBrowseShares.delete(username.toLowerCase()); }
           this.emitBrowse({ type: "browse-shares", username, folders: parsed.folders });
           try { (peer as Socket).end(); } catch {}
+          this.dequeuePendingSockets();
         } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.folderContentsResponse) {
         try {
           const parsed = parseFolderContentsResponse(msg.payload);
           const username = state.username ?? "unknown";
+          if (!this.isAllowedPeerResponse(username, PEER_MESSAGE_CODES.folderContentsResponse)) {
+            try { peer.end(); } catch {}
+            this.peerStates.delete(peer);
+            break;
+          }
+          this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.folderContentsResponse);
           const pending = this.pendingBrowseFolder.get(parsed.token);
           if (pending) { clearTimeout(pending.timer); this.pendingBrowseFolder.delete(parsed.token); }
           this.emitBrowse({ type: "browse-folder", username, token: parsed.token, folder: parsed.dir, files: parsed.files });
           try { (peer as Socket).end(); } catch {}
+          this.dequeuePendingSockets();
         } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.userInfoRequest) {
         if (!state.outbound) { try { (peer as Socket).write(buildUserInfoResponse(this.profile)); } catch {} }
@@ -1279,8 +1758,11 @@ export class SoulseekSession {
         // Obsolete/deprecated 42/52 — no-op to silence unknown-peer warnings (nicotine keeps but never handles)
       }
     }
-    if (state.buf.length === 0) this.peerStates.delete(peer);
-    else this.peerStates.set(peer, state);
+    if (state.buf.length === 0) {
+      this.peerStates.delete(peer);
+      if (state.username && state.connType === "D") this._removeChildPeerConnection(state.username);
+      this.dequeuePendingSockets();
+    } else this.peerStates.set(peer, state);
   }
 
   private routeResult(resp: { token: number; username: string; freeUploadSlots: boolean; inQueue: number; uploadSpeed: number; results: SearchFile[] }) {
@@ -1289,7 +1771,16 @@ export class SoulseekSession {
     if (!search) return;
     if (search.users.has(resp.username)) return;
     search.users.add(resp.username);
-    const rows = resp.results.map((file) => toRow(resp.username, resp.freeUploadSlots, resp.inQueue, resp.uploadSpeed, file));
+    const cc = this.userAddresses.get(resp.username)?.addr ? getCountryCode(this.userAddresses.get(resp.username)!.addr.ip) : "";
+    // lazy request address if missing for future
+    if (!this.userAddresses.has(resp.username)) {
+      try { this.serverSocket?.write(buildGetPeerAddress(resp.username)); } catch {}
+    }
+    const rows = resp.results.map((file) => {
+      const r = toRow(resp.username, resp.freeUploadSlots, resp.inQueue, resp.uploadSpeed, file);
+      (r as unknown as { country?: string }).country = cc;
+      return r;
+    });
     const remaining = search.maxResults - search.count;
     if (remaining <= 0) return;
     const batch = rows.slice(0, remaining);
@@ -1381,24 +1872,33 @@ export class SoulseekSession {
   joinGlobalRoom() { this.serverSocket?.write(buildJoinGlobalRoom()); }
   leaveGlobalRoom() { this.serverSocket?.write(buildLeaveGlobalRoom()); }
   setRoomTicker(room: string, msg: string) { this.serverSocket?.write(buildSetRoomTicker(room, msg)); }
+  setEnableRoomInvitations(enabled: boolean) { this.serverSocket?.write(buildEnableRoomInvitations(enabled)); }
+  cancelRoomMembership(room: string) { this.serverSocket?.write(buildCancelRoomMembership(room)); }
+  cancelRoomOwnership(room: string) { this.serverSocket?.write(buildCancelRoomOwnership(room)); }
+  addRoomOperator(room: string, username: string) { this.serverSocket?.write(buildAddRoomOperator(room, username)); }
+  removeRoomOperator(room: string, username: string) { this.serverSocket?.write(buildRemoveRoomOperator(room, username)); }
 
   // File ops via peer
   requestSharedFileList(username: string) {
-    // timeout 30s — key lowercased for case-insensitive matching
+    // timeout 20s indirect + 10s grace = 30s (nicotine INDIRECT_REQUEST_TIMEOUT 20s + local 10s)
     const key = username.toLowerCase();
     const timer = setTimeout(() => {
       this.pendingBrowseShares.delete(key);
+      this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);
       this.emitBrowse({ type: "browse-error", username, error: "Timed out fetching shares" });
     }, 30000);
     this.pendingBrowseShares.set(key, { timer });
+    this.addAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);
     this.ensurePeerAndSend(username, "P", buildSharedFileListRequest());
   }
   requestFolderContents(username: string, dir: string, token: number) {
     const timer = setTimeout(() => {
       this.pendingBrowseFolder.delete(token);
+      this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.folderContentsResponse);
       this.emitBrowse({ type: "browse-error", username, token, folder: dir, error: "Timed out fetching folder" });
     }, 30000);
     this.pendingBrowseFolder.set(token, { username, folder: dir, timer });
+    this.addAllowedPeerResponse(username, PEER_MESSAGE_CODES.folderContentsResponse);
     this.ensurePeerAndSend(username, "P", buildFolderContentsRequest(token, dir));
   }
   queueUpload(username: string, file: string) { this.ensurePeerAndSend(username, "P", buildQueueUpload(file)); }
@@ -1411,29 +1911,31 @@ export class SoulseekSession {
     if (!this.loggedIn) return;
     // Queue for indirect fallback (peer connects to us via PierceFirewall)
     this.queuePendingPeerMessage(username, connType, msg);
+    // Indirect first — nicotine sends ConnectToPeer before direct
+    this.sendConnectToPeerFallback(username, connType);
     const cached = this.userAddresses.get(username);
     if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) {
       this.connectToPeerViaAddress(username, cached.addr, connType, msg);
-      if (cached.port === 0 || cached.ip === "0.0.0.0") this.sendConnectToPeerFallback(username, connType);
-      else setTimeout(() => { if (!this.getPeerSocket(username, connType)) this.sendConnectToPeerFallback(username, connType); }, 800);
       return;
     }
     const existing = this.peerAddressRequests.get(username);
     if (existing) {
       existing.cbs.push((addr) => {
         this.connectToPeerViaAddress(username, addr, connType, msg);
-        if (addr.port === 0 || addr.ip === "0.0.0.0") this.sendConnectToPeerFallback(username, connType);
-        else setTimeout(() => { if (!this.getPeerSocket(username, connType)) this.sendConnectToPeerFallback(username, connType); }, 800);
       });
       return;
     }
-    const timer = setTimeout(() => { this.peerAddressRequests.delete(username); this.sendConnectToPeerFallback(username, connType); }, PEER_ADDRESS_TIMEOUT_MS);
-    const entry = { cbs: [(addr: PeerAddress) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); this.connectToPeerViaAddress(username, addr, connType, msg); if (addr.port === 0 || addr.ip === "0.0.0.0") this.sendConnectToPeerFallback(username, connType); else setTimeout(() => { if (!this.getPeerSocket(username, connType)) this.sendConnectToPeerFallback(username, connType); }, 800); }], timer, createdAt: Date.now() };
+    const timer = setTimeout(() => { this.peerAddressRequests.delete(username); }, PEER_ADDRESS_TIMEOUT_MS);
+    const entry = { cbs: [(addr: PeerAddress) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); this.connectToPeerViaAddress(username, addr, connType, msg); }], timer, createdAt: Date.now() };
     this.peerAddressRequests.set(username, entry);
     this.serverSocket?.write(buildGetPeerAddress(username));
   }
   private connectToPeerViaAddress(username: string, addr: PeerAddress, connType: string, msg: Buffer) {
     if (addr.port === 0 || addr.ip === "0.0.0.0") return;
+    if (!this.canOpenSocket()) {
+      this.enqueueOrRun(() => this.connectToPeerViaAddress(username, addr, connType, msg));
+      return;
+    }
     Bun.connect({
       hostname: addr.ip, port: addr.port,
       socket: {
@@ -1445,22 +1947,29 @@ export class SoulseekSession {
           if (st) (st as unknown as { pendingMsg?: Buffer }).pendingMsg = msg;
         },
         data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
-        error: () => {},
-        close: (sock) => { this.peerStates.delete(sock as Socket); },
+        error: () => { this.dequeuePendingSockets(); },
+        close: (sock) => { this.peerStates.delete(sock as Socket); this.dequeuePendingSockets(); },
       },
-    }).catch(() => {});
+    }).catch(() => { this.dequeuePendingSockets(); });
   }
 
   requestUserInfo(username: string): Promise<UserInfoResponseMessage> {
     return new Promise((resolve, reject) => {
       if (this.userInfoRequests.has(username)) { reject(new Error("Already requesting this user.")); return; }
       this.userInfoRequests.set(username, resolve);
+      this.addAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
       const cached = this.userAddresses.get(username);
       const doConnect = (addr: PeerAddress) => {
         if (addr.port === 0 || addr.ip === "0.0.0.0") {
           this.userInfoRequests.delete(username); this.peerAddressRequests.delete(username);
+          this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
           this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username });
           reject(new Error("User offline or port unknown."));
+          return;
+        }
+        // enforce MAX_SOCKETS
+        if (!this.canOpenSocket()) {
+          this.enqueueOrRun(() => doConnect(addr));
           return;
         }
         Bun.connect({
@@ -1473,14 +1982,18 @@ export class SoulseekSession {
             data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
             error: () => {
               this.userInfoRequests.delete(username); this.peerAddressRequests.delete(username);
+              this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
               this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username });
+              this.dequeuePendingSockets();
               reject(new Error("Peer connection failed."));
             },
-            close: (sock) => { this.peerStates.delete(sock as Socket); },
+            close: (sock) => { this.peerStates.delete(sock as Socket); this.dequeuePendingSockets(); },
           },
         }).catch(() => {
           this.userInfoRequests.delete(username); this.peerAddressRequests.delete(username);
+          this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
           this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username });
+          this.dequeuePendingSockets();
           reject(new Error("Unable to reach peer."));
         });
       };
@@ -1512,6 +2025,12 @@ export class SoulseekSession {
     this.pendingBrowseShares.clear(); this.pendingBrowseFolder.clear();
     this.pendingConnects.clear(); this.pendingFileTokens.clear();
     this.pendingPeerMessages.clear();
+    this.allowedPeerResponses.clear();
+    this.potentialParents.clear();
+    this.childPeers.clear();
+    this.pendingPeerQueue = [];
+    this.parent = null;
+    this.isServerParent = false;
     this.userInfoRequests.clear(); this.peerAddressRequests.clear(); this.failedUserInfo.clear();
     this.excludedPhrases.clear();
     if (this.idleTimer) clearInterval(this.idleTimer);

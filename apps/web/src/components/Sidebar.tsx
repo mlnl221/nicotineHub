@@ -5,30 +5,34 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useSession } from "@/lib/session";
 import { useTransfers } from "@/lib/transfers";
+import { useConfig } from "@/lib/config/provider";
 
 const NAV = [
-  { icon: "search_check", label: "Search Files", href: "/search" },
-  { icon: "downloading", label: "Downloads", href: "/downloads" },
-  { icon: "upload", label: "Uploads", href: "/uploads" },
-  { icon: "forum", label: "Private Chat", href: "/private-chat" },
-  { icon: "folder_managed", label: "Browse Shares", href: "/browse" },
-  { icon: "account_circle", label: "User Profiles", href: "/profile" },
-  { icon: "group", label: "Buddies", href: "/buddies" },
-  { icon: "groups", label: "Chat Rooms", href: "/chat" },
-  { icon: "interests", label: "Interests", href: "/interests" },
+  { icon: "search_check", label: "Search Files", href: "/search", key: "search" },
+  { icon: "downloading", label: "Downloads", href: "/downloads", key: "downloads" },
+  { icon: "upload", label: "Uploads", href: "/uploads", key: "uploads" },
+  { icon: "forum", label: "Private Chat", href: "/private-chat", key: "privateChat" },
+  { icon: "folder_managed", label: "Browse Shares", href: "/browse", key: "browse" },
+  { icon: "account_circle", label: "User Profiles", href: "/profile", key: "profile" },
+  { icon: "group", label: "Buddies", href: "/buddies", key: "buddies" },
+  { icon: "groups", label: "Chat Rooms", href: "/chat", key: "chat" },
+  { icon: "interests", label: "Interests", href: "/interests", key: "interests" },
 ];
 
 export function Sidebar() {
   const { logout, state } = useSession();
   const pathname = usePathname();
-  // Hydration-safe: TransfersProvider now starts [] then hydrates after mount; gate counts + isActive until mounted
-  // to avoid Sidebar.tsx:79 badge " (2)" mismatch (server 0 vs client localStorage 2). Also fixes conditional hook try/catch.
+  const { settings } = useConfig();
   const { downloads, uploads } = useTransfers();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const downloadsCount = mounted ? downloads.length : 0;
   const uploadsCount = mounted ? uploads.length : 0;
   const displayUser = mounted ? (state.user ?? "System Administrator") : "System Administrator";
+  const visibleMap = settings.ui.modes_visible || {};
+  const order = settings.ui.modes_order || NAV.map((n) => n.key);
+  const orderedNav = [...NAV].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+  const filteredNav = mounted ? orderedNav.filter((n) => visibleMap[n.key] !== false) : orderedNav;
 
   return (
     <nav className="fixed left-0 top-0 z-50 hidden h-full w-72 flex-col space-y-8 bg-surface-container-low/90 p-6 backdrop-blur-md dark:bg-surface-container-low/90 md:flex">
@@ -56,7 +60,7 @@ export function Sidebar() {
       </button>
 
       <ul className="mt-8 flex-1 space-y-2">
-        {NAV.map((item) => {
+        {filteredNav.map((item) => {
           const isActive = mounted ? (pathname === item.href || (item.href !== "#" && pathname.startsWith(item.href))) : false;
           const badge =
             item.label === "Downloads" && downloadsCount > 0 ? ` (${downloadsCount})`
