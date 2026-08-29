@@ -54,6 +54,18 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "notifications", label: "Notifications", icon: "notifications" },
 ];
 
+type TabGroup = { label: string; tabs: TabId[] };
+
+const TAB_GROUPS: TabGroup[] = [
+  { label: "Connection", tabs: ["network"] },
+  { label: "Interface", tabs: ["appearance", "notifications"] },
+  { label: "Transfers", tabs: ["shares", "downloads", "uploads"] },
+  { label: "Search & Users", tabs: ["searches", "user-profile", "banned-users", "ignored-users"] },
+  { label: "Chat & Playback", tabs: ["chats", "now-playing"] },
+  { label: "System", tabs: ["logging", "url-handlers", "plugins"] },
+];
+
+const TAB_MAP = new Map(TABS.map((t) => [t.id, t] as const));
 const VALID_TABS = new Set<string>(TABS.map((t) => t.id));
 
 export default function SettingsPage() {
@@ -76,6 +88,8 @@ export default function SettingsPage() {
     window.history.replaceState(null, "", url.toString());
   }, [tab]);
 
+  const activeTab = TAB_MAP.get(tab);
+
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
@@ -89,7 +103,7 @@ export default function SettingsPage() {
           }}
         />
 
-        <header className="relative z-10 flex w-full items-center justify-between px-10 py-6">
+        <header className="relative z-10 flex w-full items-center justify-between px-4 py-5 lg:px-8 lg:py-6">
           <a
             href="/search"
             className="flex items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant transition-colors hover:text-primary dark:text-outline dark:hover:text-primary-fixed"
@@ -107,67 +121,133 @@ export default function SettingsPage() {
           </button>
         </header>
 
-        <div className="relative z-10 mx-auto w-full max-w-3xl flex-1 flex-col px-10 pt-6 pb-16">
-          <h1 className="mb-1 font-headline text-4xl font-light tracking-tight text-on-surface dark:text-inverse-primary">
+        <div className="relative z-10 mx-auto w-full max-w-6xl flex-1 px-4 pt-2 pb-16 lg:px-8 lg:pt-2">
+          <h1 className="mb-1 font-headline text-3xl font-light tracking-tight text-on-surface dark:text-inverse-primary lg:text-4xl">
             Settings
           </h1>
-          <p className="mb-8 font-body text-sm text-on-surface-variant dark:text-outline">
+          <p className="mb-6 font-body text-sm text-on-surface-variant dark:text-outline">
             Preferences for this browser client. Stored locally in your browser.
           </p>
 
-          {/* Tab bar */}
-          <div className="mb-8 flex gap-2 overflow-x-auto pb-1">
-            {TABS.map((t) => {
-              const active = tab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  id={`tab-${t.id}`}
-                  onClick={() => setTab(t.id)}
-                  className={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 font-label text-xs uppercase tracking-widest transition-all ${
-                    active
-                      ? "bg-primary text-on-primary"
-                      : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high dark:bg-surface-variant dark:text-outline dark:hover:bg-surface-container-highest"
-                  }`}
-                >
-                  <span className="material-symbols-outlined text-[16px]">{t.icon}</span>
-                  {t.label}
-                </button>
-              );
-            })}
+          {/* Mobile dropdown — grouped select */}
+          <div className="mb-6 lg:hidden">
+            <label htmlFor="settings-tab-select" className="sr-only">
+              Select settings section
+            </label>
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant dark:text-outline">
+                <span className="material-symbols-outlined text-[20px]">{activeTab?.icon}</span>
+              </span>
+              <select
+                id="settings-tab-select"
+                value={tab}
+                onChange={(e) => setTab(e.target.value as TabId)}
+                className="w-full appearance-none rounded-2xl bg-surface-container-lowest py-3 pl-10 pr-10 font-label text-sm font-medium text-on-surface ghost-border transition-colors focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:bg-surface-container-high dark:text-inverse-on-surface"
+              >
+                {TAB_GROUPS.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.tabs.map((id) => {
+                      const t = TAB_MAP.get(id);
+                      if (!t) return null;
+                      return (
+                        <option key={t.id} value={t.id}>
+                          {t.label}
+                        </option>
+                      );
+                    })}
+                  </optgroup>
+                ))}
+              </select>
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant dark:text-outline">
+                <span className="material-symbols-outlined text-[20px]">expand_more</span>
+              </span>
+            </div>
           </div>
 
-          {tab === "network" ? (
-            <NetworkSection />
-          ) : tab === "appearance" ? (
-            <UiSection />
-          ) : tab === "shares" ? (
-            <SharesSection />
-          ) : tab === "downloads" ? (
-            <DownloadsSection />
-          ) : tab === "uploads" ? (
-            <UploadsSection />
-          ) : tab === "searches" ? (
-            <SearchesSection />
-          ) : tab === "user-profile" ? (
-            <UserProfileSection />
-          ) : tab === "chats" ? (
-            <ChatsSection />
-          ) : tab === "now-playing" ? (
-            <NowPlayingSection />
-          ) : tab === "logging" ? (
-            <LoggingSection />
-          ) : tab === "banned-users" ? (
-            <BannedUsersSection />
-          ) : tab === "ignored-users" ? (
-            <IgnoredUsersSection />
-          ) : tab === "url-handlers" ? (
-            <UrlHandlersSection />
-          ) : tab === "plugins" ? (
-            <PluginsSection />
-          ) : (
-            <NotificationsSection />
-          )}
+          <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
+            {/* Desktop left nav — sticky grouped vertical list */}
+            <nav
+              aria-label="Settings sections"
+              className="hidden shrink-0 lg:block lg:w-64 lg:self-start"
+            >
+              <div className="sticky top-6 max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl bg-surface-container-low p-2 shadow-sm dark:bg-surface-container-high">
+                <div role="tablist" aria-orientation="vertical" className="space-y-4 py-1">
+                  {TAB_GROUPS.map((group) => (
+                    <div key={group.label}>
+                      <div className="px-3 pb-1.5 pt-3 font-label text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant/70 dark:text-outline">
+                        {group.label}
+                      </div>
+                      <div className="space-y-1">
+                        {group.tabs.map((id) => {
+                          const t = TAB_MAP.get(id);
+                          if (!t) return null;
+                          const active = tab === t.id;
+                          return (
+                            <button
+                              key={t.id}
+                              id={`tab-${t.id}`}
+                              role="tab"
+                              aria-selected={active}
+                              onClick={() => setTab(t.id)}
+                              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left font-label text-sm transition-all ${
+                                active
+                                  ? "bg-primary text-on-primary shadow-sm"
+                                  : "text-on-surface-variant hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant/60"
+                              }`}
+                              style={active ? ({ fontVariationSettings: "'FILL' 1" } as React.CSSProperties) : undefined}
+                            >
+                              <span
+                                className="material-symbols-outlined text-[18px] shrink-0"
+                                style={active ? { fontVariationSettings: "'FILL' 1" } : undefined}
+                              >
+                                {t.icon}
+                              </span>
+                              <span className={active ? "font-medium" : ""}>{t.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </nav>
+
+            {/* Content */}
+            <div className="min-w-0 flex-1">
+              {tab === "network" ? (
+                <NetworkSection />
+              ) : tab === "appearance" ? (
+                <UiSection />
+              ) : tab === "shares" ? (
+                <SharesSection />
+              ) : tab === "downloads" ? (
+                <DownloadsSection />
+              ) : tab === "uploads" ? (
+                <UploadsSection />
+              ) : tab === "searches" ? (
+                <SearchesSection />
+              ) : tab === "user-profile" ? (
+                <UserProfileSection />
+              ) : tab === "chats" ? (
+                <ChatsSection />
+              ) : tab === "now-playing" ? (
+                <NowPlayingSection />
+              ) : tab === "logging" ? (
+                <LoggingSection />
+              ) : tab === "banned-users" ? (
+                <BannedUsersSection />
+              ) : tab === "ignored-users" ? (
+                <IgnoredUsersSection />
+              ) : tab === "url-handlers" ? (
+                <UrlHandlersSection />
+              ) : tab === "plugins" ? (
+                <PluginsSection />
+              ) : (
+                <NotificationsSection />
+              )}
+            </div>
+          </div>
         </div>
       </main>
     </div>
