@@ -35,6 +35,8 @@ export interface Settings {
     ignorelist: string[];
     ipblocklist: Record<string, string>;
     ipignorelist: Record<string, string>;
+    portrange: [number, number];
+    upnp: boolean;
   };
   ui: {
     dark_mode: boolean;
@@ -189,6 +191,8 @@ export const DEFAULT_SERVER_HOST = "server.slsknet.org";
 export const DEFAULT_SERVER_PORT = 2242;
 
 // Mirrors pynicotine/config.py defaults (browser-relevant subset)
+export const DEFAULT_LISTEN_PORT = 62904;
+
 export const defaults: Settings = {
   server: {
     server: { host: DEFAULT_SERVER_HOST, port: DEFAULT_SERVER_PORT },
@@ -200,6 +204,8 @@ export const defaults: Settings = {
     ignorelist: [],
     ipblocklist: {},
     ipignorelist: {},
+    portrange: [DEFAULT_LISTEN_PORT, DEFAULT_LISTEN_PORT],
+    upnp: true,
   },
   ui: {
     dark_mode: false,

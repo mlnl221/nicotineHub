@@ -16,7 +16,7 @@ export function PortChecker() {
       const httpBase = bridgeUrl.replace(/^ws/, "http").replace(/\/ws.*$/, "");
       const res = await fetch(`${httpBase}/health?json=1`, { cache: "no-store" });
       const j = await res.json().catch(() => ({}));
-      if (res.ok) setResult({ ok: true, msg: `Bridge reachable at ${httpBase} — listen port ${j.listenPort ?? 2234}. Ensure ${j.listenPort ?? 2234} is port-forwarded for incoming searches.` });
+      if (res.ok) setResult({ ok: true, msg: `Bridge reachable at ${httpBase} — listen port ${j.listenPort ?? 62904}. Ensure ${j.listenPort ?? 62904} is port-forwarded (TCP+UDP) for incoming searches.` });
       else setResult({ ok: false, msg: `Health check failed: ${res.status}` });
     } catch (e) {
       setResult({ ok: false, msg: `Cannot reach bridge. Check NEXT_PUBLIC_BRIDGE_URL / localStorage.nicotine.bridgeUrl. ${(e as Error).message}` });
@@ -32,7 +32,7 @@ export function PortChecker() {
         <span className={`h-2 w-2 rounded-full ${state.status === "connected" ? "bg-green-500" : "bg-outline"}`} />
       </div>
       <p className="mb-3 text-xs text-on-surface-variant">
-        Search results require a reachable inbound peer listener. Default <code>LISTEN_PORT 2234</code> must be port-forwarded (see README).
+        Search results require a reachable inbound peer listener. Default <code>LISTEN_PORT 62904</code> must be port-forwarded (TCP+UDP, see README) — edit in Settings → Network.
       </p>
       <button
         onClick={check}
