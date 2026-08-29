@@ -63,17 +63,103 @@ export function isGeoblocked(
   return blocked.includes(upper);
 }
 
-// Simple GeoIP lookup via env-provided mapping or fallback.
-// nicotine uses external/data/ip_country_data.csv bisect. We implement a minimal
-// in-memory map that can be populated at runtime; otherwise returns "".
+// GeoIP lookup — mirrors pynicotine/networkfilter.py _populate_ip_country_data + get_country_code
+// Uses pynicotine/external/data/ip_country_data.csv (bisect_left on uint32 ip). Falls back to
+// manual setCountryForIp cache when CSV not available.
+import { existsSync, readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
 const ipCountryCache = new Map<string, string>();
+let ipRangeValues: number[] = [];
+let ipRangeCountries: string[] = [];
+let loadedIpCountryData = false;
+
+function populateIpCountryData(): void {
+  if (loadedIpCountryData) return;
+  // resolve csv — try multiple locations (bundled src/data, external fallback)
+  const candidates = [
+    join(dirname(fileURLToPath(import.meta.url)), "data", "ip_country_data.csv"),
+    join(process.cwd(), "apps/bridge/src/data/ip_country_data.csv"),
+    join(process.cwd(), "src/data/ip_country_data.csv"),
+    join(dirname(fileURLToPath(import.meta.url)), "..", "data", "ip_country_data.csv"),
+  ];
+  let found: string | undefined;
+  for (const p of candidates) {
+    if (existsSync(p)) { found = p; break; }
+  }
+  // also try relative to file dir walking up
+  if (!found) {
+    try {
+      const { existsSync: es } = require("node:fs");
+      const tryPaths = [
+        "/home/magnus/projects/nicotine_mobile/apps/bridge/src/data/ip_country_data.csv",
+      ];
+      for (const p of tryPaths) if (es(p)) { found = p; break; }
+    } catch {}
+  }
+  if (!found) {
+    loadedIpCountryData = true;
+    return;
+  }
+  try {
+    const content = readFileSync(found, "utf8");
+    let first = true;
+    for (const rawLine of content.split("\n")) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      if (first) {
+        ipRangeValues = line.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
+        first = false;
+        continue;
+      }
+      ipRangeCountries = line.split(",").map((s) => s.trim());
+      break;
+    }
+  } catch {}
+  loadedIpCountryData = true;
+}
+
+function bisectLeft(arr: number[], target: number): number {
+  let lo = 0, hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (arr[mid] < target) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+function ipToUint32(ip: string): number | null {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  const nums = parts.map((p) => parseInt(p, 10));
+  if (nums.some((n) => isNaN(n) || n < 0 || n > 255)) return null;
+  // network order like inet_aton -> big-endian uint32
+  return ((nums[0] * 256 + nums[1]) * 256 + nums[2]) * 256 + nums[3];
+}
 
 export function setCountryForIp(ip: string, countryCode: string) {
   ipCountryCache.set(ip, countryCode.toUpperCase());
 }
 
 export function getCountryCode(ip: string): string {
-  return ipCountryCache.get(ip) || "";
+  const cached = ipCountryCache.get(ip);
+  if (cached) return cached;
+  if (!loadedIpCountryData) populateIpCountryData();
+  if (!ipRangeCountries.length || !ipRangeValues.length) return "";
+  const num = ipToUint32(ip);
+  if (num === null) return "";
+  const idx = bisectLeft(ipRangeValues, num);
+  if (idx >= ipRangeCountries.length) return "";
+  return ipRangeCountries[idx] || "";
+}
+
+export function _resetIpCountryDataForTests(): void {
+  loadedIpCountryData = false;
+  ipRangeValues = [];
+  ipRangeCountries = [];
+  ipCountryCache.clear();
 }
 
 export function shouldBlockUser(opts: {

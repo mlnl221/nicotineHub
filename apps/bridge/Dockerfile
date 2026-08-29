@@ -31,6 +31,7 @@ ENV NODE_ENV=production
 ENV DATA_DIR=/data
 WORKDIR /app
 COPY --from=builder /app/apps/bridge/dist ./dist
+COPY apps/bridge/src/data/ip_country_data.csv ./dist/data/ip_country_data.csv
 COPY COPYING ./COPYING
 COPY LICENSES ./LICENSES
 COPY ATTRIBUTION.md ./ATTRIBUTION.md

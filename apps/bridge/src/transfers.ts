@@ -754,7 +754,17 @@ export class TransferManager {
   }
 
   handleTransferRequest(direction: number, token: number, file: string, size?: number | bigint) {
-    // Remote wants to upload to us (direction 1) → we are downloader
+    // Legacy direction 0 = download from peer (slskd/Museek) — treat as QueueUpload
+    if (direction === 0) {
+      // find or create queued upload? For interop, treat as queue-upload request from peer that wants our file
+      // but direction 0 here means peer wants to download from us via TransferRequest not QueueUpload — handle as upload
+      // Reuse queue logic: if file matches a queued download awaiting upload? Instead treat as handleQueueUpload if we have shares
+      // Simplest: if we are the uploader (peer wants file), handle as queue upload
+      // Check if any transfer with this file is queued as upload? fallback to ignore but try to handle
+      // We treat direction 0 with file as peer wanting to download -> queue upload
+      try { this.handleQueueUpload("unknown", file); } catch {}
+      return;
+    }
     if (direction !== 1) return;
     // Find queued transfer by file
     let target: BridgeTransfer | undefined;
@@ -961,7 +971,7 @@ export class TransferManager {
   handleFileChunk(token: number, chunk: Buffer) {
     const t = this.getByToken(token);
     if (!t) return;
-    // Upload path: awaiting offset from downloader (8 bytes uint64 LE)
+    // Upload path: awaiting offset from downloader (8 bytes uint64 LE) — handle >2GiB -1 sentinel (0xFFFFFFFFFFFFFFFF)
     if (t.isUpload) {
       const awaiting = (t as unknown as { _uploadAwaitingOffset?: boolean })._uploadAwaitingOffset;
       if (awaiting) {
@@ -969,7 +979,11 @@ export class TransferManager {
         buf = Buffer.concat([buf, chunk]);
         (t as unknown as { _uploadOffsetBuf?: Buffer })._uploadOffsetBuf = buf;
         if (buf.length < 8) return;
-        const offset = Number(buf.readBigUInt64LE(0));
+        const rawOffset = buf.readBigUInt64LE(0);
+        // clamp -1 sentinel (NS bug for >2GiB files where hi=0xffffffff) — treat as 0 resume
+        let offset: number;
+        if (rawOffset === 0xFFFFFFFFFFFFFFFFn || rawOffset === 0xFFFFFFFFn) offset = 0;
+        else offset = rawOffset <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(rawOffset) : Number(rawOffset & BigInt(Number.MAX_SAFE_INTEGER));
         (t as unknown as { _uploadAwaitingOffset?: boolean })._uploadAwaitingOffset = false;
         const remaining = buf.subarray(8);
         // stall timer cleared on successful offset
