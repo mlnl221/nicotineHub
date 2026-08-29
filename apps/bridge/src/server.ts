@@ -426,6 +426,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     return new Response("Not found", { status: 404 });
   },
   websocket: {
+    perMessageDeflate: true,
     open(ws) {
       ws.data = {};
       (ws.data as unknown as Record<string, unknown>).pluginManager = pluginManager;

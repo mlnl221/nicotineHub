@@ -40,6 +40,8 @@ export class ShareDB {
   private shareFilters: string[] = [".*", ".*\\", "@eaDir\\", "#recycle\\", "#snapshot\\", "desktop.ini", "Thumbs.db"];
   private fileFilterRegexes: RegExp[] = [];
   private folderFilterRegexes: RegExp[] = [];
+  private fileMtimes = new Map<string, number>(); // realPath -> mtimeMs for incremental rescan (pynicotine shares.py:616)
+  private watchers: Array<ReturnType<typeof import("node:fs").watch>> = [];
 
   constructor(opts?: { dataDir?: string; shareFilters?: string[] }) {
     this.dataDir = opts?.dataDir || defaultDataDir();
@@ -54,6 +56,25 @@ export class ShareDB {
         this.persist();
       }
     }
+    // fs.watch incremental — debounce 2s, mirrors pynicotine Scanner rescanning
+    try {
+      const dirs = this.resolveSharedDirs();
+      for (const d of dirs) {
+        if (!existsSync(d)) continue;
+        try {
+          const { watch } = require("node:fs") as typeof import("node:fs");
+          const w = watch(d, { recursive: true } as unknown as { recursive: boolean }, () => {
+            const now = Date.now();
+            const last = (this as unknown as { _watchDebounce?: number })._watchDebounce || 0;
+            if (now - last < 2000) return;
+            (this as unknown as { _watchDebounce: number })._watchDebounce = now;
+            // incremental: only re-scan if >2s since last
+            this.rescanAsync().catch(() => {});
+          });
+          this.watchers.push(w as unknown as ReturnType<typeof import("node:fs").watch>);
+        } catch {}
+      }
+    } catch {}
   }
 
   private load() {
@@ -157,15 +178,19 @@ export class ShareDB {
     return false;
   }
 
-  /** FS scanner — walks real dirs under SHARED_DIRS or DATA_DIR/shared */
+  /** FS scanner — walks real dirs under SHARED_DIRS or DATA_DIR/shared (incremental via mtime like pynicotine) */
   scanFsShares(sharedDirs?: string[]): ShareFolder[] {
     const dirs = sharedDirs || this.resolveSharedDirs();
     const folders: ShareFolder[] = [];
+    // build prev map realPath -> ShareFile for mtime reuse (shares.py:616)
+    const prevByName = new Map<string, ShareFile>();
+    for (const fo of this.folders) for (const f of fo.files) prevByName.set(f.name, f);
+    // also build reverse virtual -> real via walk prefix later; for now keep prev mtimes
     for (const realDir of dirs) {
       if (!existsSync(realDir)) continue;
       try {
         const virtualBase = basename(realDir);
-        this.walkDir(realDir, virtualBase, folders);
+        this.walkDir(realDir, virtualBase, folders, prevByName);
       } catch {}
     }
     return folders;
@@ -179,7 +204,7 @@ export class ShareDB {
     return candidates.filter(p => existsSync(p));
   }
 
-  private walkDir(realPath: string, virtualPath: string, out: ShareFolder[]) {
+  private walkDir(realPath: string, virtualPath: string, out: ShareFolder[], prevByName?: Map<string, ShareFile>) {
     let entries: string[];
     try { entries = readdirSync(realPath); } catch { return; }
     // Check folder filter against virtual path (with trailing \)
@@ -193,7 +218,7 @@ export class ShareDB {
       if (st.isDirectory()) {
         const subVirtual = `${virtualPath}\\${ent}`;
         if (this.isFolderFiltered(`${subVirtual}\\`) || this.isFolderFiltered(subVirtual)) continue;
-        this.walkDir(full, subVirtual, out);
+        this.walkDir(full, subVirtual, out, prevByName);
       } else if (st.isFile()) {
         if (this.isFileFiltered(ent) || this.isFileFiltered(`${virtualPath}\\${ent}`)) continue;
         // Skip hidden files on Win32 hidden attr — plain dotfile check for unix
@@ -202,8 +227,18 @@ export class ShareDB {
           // we already filtered via regex, so keep dotfiles unless explicitly filtered
         }
         const ext = extname(ent).slice(1).toLowerCase();
+        const vName = `${virtualPath}\\${ent}`;
+        const mtime = st.mtimeMs;
+        const prevMtime = this.fileMtimes.get(full);
+        // pynicotine: if mtime == old_mtimes.get(path) and path in old_files → reuse, skip TinyTag parse
+        if (prevMtime !== undefined && prevMtime === mtime && prevByName?.has(vName)) {
+          const prev = prevByName.get(vName)!;
+          files.push({ ...prev, size: st.size }); // keep attrs, update size if changed
+          continue;
+        }
+        this.fileMtimes.set(full, mtime);
         const attrs = this.buildAttrs(full, ext, st.size);
-        files.push({ name: `${virtualPath}\\${ent}`, size: st.size, ext, attrs });
+        files.push({ name: vName, size: st.size, ext, attrs });
       }
     }
     if (files.length) out.push({ name: virtualPath, files: files.sort((a,b)=> a.name.localeCompare(b.name)) });
@@ -243,6 +278,9 @@ export class ShareDB {
     try { entries = readdirSync(realPath); } catch { return; }
     const folderTest = `${virtualPath}\\`;
     if (this.isFolderFiltered(folderTest) || this.isFolderFiltered(virtualPath)) return;
+    // prev map for async reuse
+    const prevByName = new Map<string, ShareFile>();
+    for (const fo of this.folders) for (const f of fo.files) prevByName.set(f.name, f);
     const files: ShareFile[] = [];
     for (const ent of entries) {
       const full = join(realPath, ent);
@@ -255,8 +293,17 @@ export class ShareDB {
       } else if (st.isFile()) {
         if (this.isFileFiltered(ent) || this.isFileFiltered(`${virtualPath}\\${ent}`)) continue;
         const ext = extname(ent).slice(1).toLowerCase();
+        const vName = `${virtualPath}\\${ent}`;
+        const mtime = st.mtimeMs;
+        const prevMtime = this.fileMtimes.get(full);
+        if (prevMtime !== undefined && prevMtime === mtime && prevByName.has(vName)) {
+          const prev = prevByName.get(vName)!;
+          files.push({ ...prev, size: st.size });
+          continue;
+        }
+        this.fileMtimes.set(full, mtime);
         const attrs = await this.buildAttrsAsync(full, ext);
-        files.push({ name: `${virtualPath}\\${ent}`, size: st.size, ext, attrs });
+        files.push({ name: vName, size: st.size, ext, attrs });
       }
     }
     if (files.length) out.push({ name: virtualPath, files: files.sort((a,b)=> a.name.localeCompare(b.name)) });
