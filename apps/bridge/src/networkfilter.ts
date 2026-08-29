@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2001-2026 Nicotine+ Contributors
+// SPDX-FileCopyrightText: 2025-2026 nicotine-mobile Contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions based on nicotine-plus pynicotine/networkfilter.py
+
 /**
  * Network filter — bans, IP blocks, geo-blocking. Mirrors pynicotine/networkfilter.py.
  * Handles username bans, IP wildcard bans, and country geo-blocking.

@@ -115,6 +115,29 @@ export function Sidebar() {
           <span className="material-symbols-outlined">logout</span>
           <span className="font-label text-xs uppercase tracking-widest">Logoff</span>
         </button>
+        <div className="pt-4 text-[10px] leading-relaxed text-on-surface-variant/60 dark:text-outline/60">
+          <p className="font-label uppercase tracking-widest">GPL-3.0-or-later</p>
+          <p>
+            Based on{" "}
+            <a href="https://github.com/nicotine-plus/nicotine-plus" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">
+              Nicotine+
+            </a>
+            . Not affiliated with{" "}
+            <a href="https://www.slsknet.org/" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">
+              Soulseek
+            </a>
+            .
+          </p>
+          <p className="mt-1">
+            <a href="https://github.com/mlnl221/nicotineHub" target="_blank" rel="noopener noreferrer" className="underline decoration-dotted hover:text-primary">
+              Source
+            </a>{" "}
+            •{" "}
+            <a href="https://github.com/mlnl221/nicotineHub/blob/main/ATTRIBUTION.md" target="_blank" rel="noopener noreferrer" className="underline decoration-dotted hover:text-primary">
+              Attribution
+            </a>
+          </p>
+        </div>
       </div>
     </nav>
   );

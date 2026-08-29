@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2001-2026 Nicotine+ Contributors
+// SPDX-FileCopyrightText: 2025-2026 nicotine-mobile Contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions based on nicotine-plus pynicotine/pluginsystem.py
+
 /**
  * PluginManager — TS port of pynicotine/pluginsystem.py PluginHandler.
  * Manages discovery, load/unload, settings persistence, command + event dispatch.

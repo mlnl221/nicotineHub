@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2001-2026 Nicotine+ Contributors
+// SPDX-FileCopyrightText: 2025-2026 nicotine-mobile Contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions based on nicotine-plus pynicotine/plugins/spamfilter/__init__.py
+
 /**
  * Spamfilter — port of pynicotine/plugins/spamfilter/__init__.py
  * Demonstrates zap event handling + settings/metasettings.

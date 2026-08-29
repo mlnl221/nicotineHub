@@ -1,7 +1,8 @@
 {
   "name": "@nicotine/bridge",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "description": "WebSocket bridge that speaks the Soulseek (SLSK) protocol for login.",
   "scripts": {

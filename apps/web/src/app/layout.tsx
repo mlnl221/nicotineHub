@@ -11,6 +11,7 @@ import { StatisticsProvider } from "@/lib/statistics";
 import { ToastHost } from "@/components/ToastHost";
 import { NowPlayingSync } from "@/components/NowPlayingSync";
 import { WebVitals } from "@/components/WebVitals";
+import { Footer } from "@/components/Footer";
 
 export const metadata: Metadata = {
   title: "Nicotine Hub",
@@ -74,6 +75,7 @@ export default function RootLayout({
                     <ConfigBridgeSync />
                     <NowPlayingSync />
                     {children}
+                    <Footer />
                     <ToastHost />
                   </TransfersProvider>
                 </StatisticsProvider>
