@@ -3,6 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   ...(process.env.VERCEL ? {} : { output: "standalone" as const }),
+  // Shave Docker build time: lint/typecheck done via separate `bun run typecheck` / CI, not in `next build`
+  eslint: { ignoreDuringBuilds: true },
+  typescript: { ignoreBuildErrors: true },
   compress: true,
   images: {
     formats: ["image/avif", "image/webp"],
