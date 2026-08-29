@@ -231,6 +231,114 @@ export interface UploadControlRequest {
 }
 
 /* ------------------------------------------------------------------ *
+ * Chat — private + rooms
+ * ------------------------------------------------------------------ */
+
+export interface ChatEvent {
+  type: "say-chatroom" | "private-message" | "private-message-acked" | "global-room-message";
+  room?: string;
+  username?: string;
+  message?: string;
+  msgId?: number;
+  timestamp?: number;
+}
+
+export interface RoomEvent {
+  type:
+    | "join-room"
+    | "leave-room"
+    | "user-joined-room"
+    | "user-left-room"
+    | "room-list"
+    | "room-members"
+    | "room-tickers"
+    | "ticker-added"
+    | "ticker-removed"
+    | "privileged-users"
+    | "cant-create-room"
+    | "admin-message";
+  room?: string;
+  username?: string;
+  data?: unknown;
+}
+
+export interface ChatEventMessage {
+  type: "chat:event";
+  event: ChatEvent;
+}
+
+export interface RoomEventMessage {
+  type: "room:event";
+  event: RoomEvent;
+}
+
+export interface ChatRoomRequest {
+  type: "chat:room";
+  action: "join" | "leave" | "say" | "ticker" | "setTicker";
+  room: string;
+  message?: string;
+}
+
+export interface ChatPrivateRequest {
+  type: "chat:private";
+  action: "send" | "ack";
+  username: string;
+  message?: string;
+  msgId?: number;
+}
+
+export interface ChatGlobalRequest {
+  type: "chat:global";
+  action: "join" | "leave";
+}
+
+/* ------------------------------------------------------------------ *
+ * Browse shares
+ * ------------------------------------------------------------------ */
+
+export interface BrowseFile {
+  name: string;
+  size: number;
+  ext: string;
+  attrs: Array<[number, number]>;
+}
+
+export interface BrowseFolder {
+  name: string;
+  files: BrowseFile[];
+}
+
+export interface BrowseSharesMessage {
+  type: "browse:shares";
+  username: string;
+  folders: BrowseFolder[];
+  error?: string;
+}
+
+export interface BrowseFolderMessage {
+  type: "browse:folder";
+  token: number;
+  username: string;
+  folder: string;
+  files: BrowseFile[];
+  error?: string;
+}
+
+export interface BrowseSharesRequest {
+  type: "browse";
+  action: "shares";
+  username: string;
+}
+
+export interface BrowseFolderRequest {
+  type: "browse";
+  action: "folder";
+  username: string;
+  folder: string;
+  token?: number;
+}
+
+/* ------------------------------------------------------------------ *
  * User info / profiles
  * ------------------------------------------------------------------ */
 
@@ -421,6 +529,10 @@ export type BridgeOutboundMessage =
   | UserInfoEventMessage
   | UserInfoResponseOutbound
   | UserInfoFailedOutbound
+  | ChatEventMessage
+  | RoomEventMessage
+  | BrowseSharesMessage
+  | BrowseFolderMessage
   | ServerReconnectMessage
   | ServerReconnectFailedMessage
   | DiagnosticsInitMessage
@@ -435,6 +547,11 @@ export type BridgeInboundMessage =
   | DownloadRequest
   | DownloadControlRequest
   | UploadControlRequest
+  | ChatRoomRequest
+  | ChatPrivateRequest
+  | ChatGlobalRequest
+  | BrowseSharesRequest
+  | BrowseFolderRequest
   | UserinfoRequestMessage
   | DiagnosticsClearRequest
   | DiagnosticsSubscribeRequest

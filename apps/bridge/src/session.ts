@@ -64,6 +64,7 @@ import {
   parseConnectToPeer,
   parseExcludedSearchPhrases,
   parseFileSearchResponse,
+  parseFolderContentsResponse,
   parseGlobalRoomMessage,
   parseItemRecommendations,
   parseItemSimilarUsers,
@@ -79,6 +80,7 @@ import {
   parsePrivilegedUsers,
   parseQueueUpload,
   parseRecommendations,
+  parseSharedFileListResponse,
   SlskReader,
   parseRoomList,
   parseRoomMember,
@@ -97,6 +99,7 @@ import {
   tryParseMessage,
   PEER_MESSAGE_CODES,
   SERVER_MESSAGE_CODES,
+  type BrowseFolderEntry,
   type LoginResponse,
   type PeerAddress,
   type SearchFile,
@@ -119,11 +122,21 @@ export interface SearchHandlers { onResult: (p: SearchResultPayload) => void; on
 interface ActiveSearch extends SearchHandlers { searchId: string; timer?: ReturnType<typeof setTimeout>; users: Set<string>; count: number; maxResults: number; }
 interface PeerState { buf: Buffer; initDone: boolean; username?: string; outbound?: boolean; connType?: string; lastActive: number; isFileConn?: boolean; fileToken?: number; createdAt: number; }
 export type ServerEvent = { type: "reconnect"; attempt: number; delay: number } | { type: "reconnect-failed"; error: string };
+export interface BrowseEvent {
+  type: "browse-shares" | "browse-folder" | "browse-error";
+  username: string;
+  folders?: import("./soulseek.ts").BrowseFolderEntry[];
+  folder?: string;
+  token?: number;
+  files?: import("./soulseek.ts").BrowseFileEntry[];
+  error?: string;
+}
 export interface SessionOptions {
   username: string; password: string; host?: string; port?: number; listenPort: number;
   profile: UserInfoResponseMessage; dataDir?: string; onUserEvent?: (event: UserInfoEvent) => void;
   onChatEvent?: (event: ChatEvent) => void; onRoomEvent?: (event: RoomEvent) => void;
-  onTransferEvent?: (event: TransferEvent) => void; onServerEvent?: (event: ServerEvent) => void; signal?: AbortSignal;
+  onTransferEvent?: (event: TransferEvent) => void; onBrowseEvent?: (event: BrowseEvent) => void;
+  onServerEvent?: (event: ServerEvent) => void; signal?: AbortSignal;
 }
 export interface UserInfoEvent {
   type: "user-status" | "user-stats" | "user-interests" | "recommendations" | "global-recommendations"
@@ -195,7 +208,10 @@ export class SoulseekSession {
   private parentCandidate: string | undefined;
   private maxChildren = 0;
   private shareDB: ShareDB;
-  private pendingFileTokens = new Set<number>();
+
+  // pending browse tracking
+  private pendingBrowseShares = new Map<string, { timer: ReturnType<typeof setTimeout> }>();
+  private pendingBrowseFolder = new Map<number, { username: string; folder: string; timer: ReturnType<typeof setTimeout> }>();
 
   get isLoggedIn(): boolean { return this.loggedIn; }
 
@@ -203,6 +219,7 @@ export class SoulseekSession {
   private emitChat(event: ChatEvent) { this.opts.onChatEvent?.(event); }
   private emitRoom(event: RoomEvent) { this.opts.onRoomEvent?.(event); }
   private emitTransfer(event: TransferEvent) { this.opts.onTransferEvent?.(event); }
+  private emitBrowse(event: BrowseEvent) { this.opts.onBrowseEvent?.(event); }
   private emitServer(event: ServerEvent) { this.opts.onServerEvent?.(event); }
 
   setProfile(profile: UserInfoResponseMessage) { this.profile = { ...this.profile, ...profile }; }
@@ -1037,6 +1054,24 @@ export class SoulseekSession {
           this.emit({ type: "user-info-response", username, info });
         } catch {}
         try { (peer as Socket).end(); } catch {}
+      } else if (msg.code === PEER_MESSAGE_CODES.sharedFileListResponse) {
+        try {
+          const username = state.username ?? "unknown";
+          const parsed = parseSharedFileListResponse(msg.payload);
+          const pending = this.pendingBrowseShares.get(username);
+          if (pending) { clearTimeout(pending.timer); this.pendingBrowseShares.delete(username); }
+          this.emitBrowse({ type: "browse-shares", username, folders: parsed.folders });
+          try { (peer as Socket).end(); } catch {}
+        } catch {}
+      } else if (msg.code === PEER_MESSAGE_CODES.folderContentsResponse) {
+        try {
+          const parsed = parseFolderContentsResponse(msg.payload);
+          const username = state.username ?? "unknown";
+          const pending = this.pendingBrowseFolder.get(parsed.token);
+          if (pending) { clearTimeout(pending.timer); this.pendingBrowseFolder.delete(parsed.token); }
+          this.emitBrowse({ type: "browse-folder", username, token: parsed.token, folder: parsed.dir, files: parsed.files });
+          try { (peer as Socket).end(); } catch {}
+        } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.userInfoRequest) {
         if (!state.outbound) { try { (peer as Socket).write(buildUserInfoResponse(this.profile)); } catch {} }
       } else if (msg.code === PEER_MESSAGE_CODES.sharedFileListRequest) {
@@ -1171,9 +1206,20 @@ export class SoulseekSession {
 
   // File ops via peer
   requestSharedFileList(username: string) {
+    // timeout 30s
+    const timer = setTimeout(() => {
+      this.pendingBrowseShares.delete(username);
+      this.emitBrowse({ type: "browse-error", username, error: "Timed out fetching shares" });
+    }, 30000);
+    this.pendingBrowseShares.set(username, { timer });
     this.ensurePeerAndSend(username, "P", buildSharedFileListRequest());
   }
   requestFolderContents(username: string, dir: string, token: number) {
+    const timer = setTimeout(() => {
+      this.pendingBrowseFolder.delete(token);
+      this.emitBrowse({ type: "browse-error", username, token, folder: dir, error: "Timed out fetching folder" });
+    }, 30000);
+    this.pendingBrowseFolder.set(token, { username, folder: dir, timer });
     this.ensurePeerAndSend(username, "P", buildFolderContentsRequest(token, dir));
   }
   queueUpload(username: string, file: string) { this.ensurePeerAndSend(username, "P", buildQueueUpload(file)); }
@@ -1274,6 +1320,9 @@ export class SoulseekSession {
     this.searchIds.clear(); this.allowedSearchTokens.clear();
     for (const { timer } of this.peerAddressRequests.values()) clearTimeout(timer);
     for (const { timer } of this.pendingConnects.values()) clearTimeout(timer);
+    for (const { timer } of this.pendingBrowseShares.values()) clearTimeout(timer);
+    for (const { timer } of this.pendingBrowseFolder.values()) clearTimeout(timer);
+    this.pendingBrowseShares.clear(); this.pendingBrowseFolder.clear();
     this.pendingConnects.clear(); this.pendingFileTokens.clear();
     this.userInfoRequests.clear(); this.peerAddressRequests.clear(); this.failedUserInfo.clear();
     this.excludedPhrases.clear();
