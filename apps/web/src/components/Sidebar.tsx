@@ -46,9 +46,13 @@ export function Sidebar() {
       </div>
 
       <div className="flex items-center space-x-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-container">
-          <span className="font-headline text-sm font-bold text-on-primary">N</span>
-        </div>
+        <img
+          src="/icon-512.png"
+          alt=""
+          width={40}
+          height={40}
+          className="h-10 w-10 rounded-xl object-contain bg-white p-1 shadow-sm ring-1 ring-black/5 dark:bg-white"
+        />
         <div className="font-label text-sm font-semibold text-primary dark:text-inverse-primary" suppressHydrationWarning>
           {displayUser}
         </div>

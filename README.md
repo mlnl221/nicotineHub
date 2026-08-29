@@ -1,7 +1,7 @@
 <h1 align="center">Nicotine Hub</h1>
 
 <p align="center">
-  <img src="apps/web/public/icon-512.png" alt="Nicotine Hub logo" width="140" height="140" />
+  <img src="apps/web/public/logo.png" alt="Nicotine Hub logo" width="220" />
 </p>
 
 <p align="center">
