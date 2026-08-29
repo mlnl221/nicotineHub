@@ -82,24 +82,25 @@ const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<SessionState>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        if (isDemo) {
-          const saved = sessionStorage.getItem("__mockLoggedIn");
-          if (saved) {
-            try {
-              const parsed = JSON.parse(saved) as { user?: string };
-              if (parsed?.user) return { status: "connected", user: parsed.user };
-            } catch {
-              if (saved === "1") return { status: "connected", user: "demo" };
-            }
+  // Hydration-safe: always start idle on server + first client render.
+  // Hydrate from sessionStorage after mount so Sidebar/TopBar don't mismatch
+  // (was: conditional initializer read sessionStorage during render → Sidebar badge (2) / user "demo" vs "System Administrator").
+  const [state, setState] = useState<SessionState>({ status: "idle" });
+  useEffect(() => {
+    try {
+      if (isDemo) {
+        const saved = sessionStorage.getItem("__mockLoggedIn");
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved) as { user?: string };
+            if (parsed?.user) { setState({ status: "connected", user: parsed.user }); return; }
+          } catch {
+            if (saved === "1") { setState({ status: "connected", user: "demo" }); return; }
           }
-        } else if (sessionStorage.getItem("__mockLoggedIn") === "1") return { status: "connected", user: "tester" };
-      } catch {}
-    }
-    return { status: "idle" };
-  });
+        }
+      } else if (sessionStorage.getItem("__mockLoggedIn") === "1") setState({ status: "connected", user: "tester" });
+    } catch {}
+  }, []);
   const socketRef = useRef<WebSocket | null>(null);
   const generation = useRef(0);
   const listeners = useRef<Set<(msg: BridgeOutboundMessage) => void>>(new Set());

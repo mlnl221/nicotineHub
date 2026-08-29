@@ -40,15 +40,12 @@ function isActive(pathname: string, href: string) {
 export function BottomNav() {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
+  const { downloads, uploads } = useTransfers();
   const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
-  let transferCount = 0;
-  try {
-    const t = useTransfers();
-    if (mounted) transferCount = t.downloads.length + t.uploads.length;
-  } catch {}
+  useEffect(() => setMounted(true), []);
+  const transferCount = mounted ? downloads.length + uploads.length : 0;
 
-  const moreActive = MORE.some((i) => isActive(pathname, i.href));
+  const moreActive = mounted && MORE.some((i) => isActive(pathname, i.href));
 
   return (
     <>
@@ -68,7 +65,7 @@ export function BottomNav() {
           <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-outline-variant/40" />
           <div className="grid grid-cols-3 gap-2 p-2">
             {MORE.map((item) => {
-              const active = isActive(pathname, item.href);
+              const active = mounted ? isActive(pathname, item.href) : false;
               return (
                 <Link
                   key={item.href}
@@ -90,7 +87,7 @@ export function BottomNav() {
       <nav className="fixed bottom-0 left-0 right-0 z-50 flex flex-col rounded-t-xl bg-surface-container-lowest/80 backdrop-blur-xl shadow-[0_-4px_20px_rgba(0,0,0,0.06)] border-t border-outline-variant/10 dark:bg-surface-container-low/90 md:hidden overflow-hidden max-w-[100vw]">
         <div className="flex items-center gap-0 px-1 sm:px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] w-full max-w-full">
           {PRIMARY.map((item) => {
-            const active = isActive(pathname, item.href);
+            const active = mounted ? isActive(pathname, item.href) : false;
             const showBadge = item.href === "/downloads" && transferCount > 0;
             return (
               <Link
