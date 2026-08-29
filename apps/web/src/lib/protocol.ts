@@ -398,6 +398,7 @@ export interface UserInfoEvent {
     | "peer-address"
     | "watch-user"
     | "privileged-users"
+    | "check-privileges"
     | "user-info-response"
     | "user-info-failed";
   username?: string;
@@ -416,6 +417,7 @@ export interface UserInfoEvent {
     country?: string;
   };
   privilegedUsers?: string[];
+  checkPrivileges?: number;
   peerAddress?: { ip?: string; port?: number };
 }
 
@@ -442,11 +444,13 @@ export interface UserInfoFailedOutbound {
 
 export type UserinfoRequestMessage =
   | { type: "userinfo"; action: "watch" | "unwatch" | "get" | "interests"; username: string }
-  | { type: "userinfo"; action: "recommendations" | "globalRecommendations" | "similarUsers" }
+  | { type: "userinfo"; action: "recommendations" | "globalRecommendations" | "similarUsers" | "checkPrivileges" }
   | { type: "userinfo"; action: "itemRecommendations" | "itemSimilarUsers"; item: string }
   | { type: "userinfo"; action: "addLike" | "removeLike" | "addHate" | "removeHate"; thing: string }
   | { type: "userinfo"; action: "givePrivileges"; username: string; days: number }
   | { type: "userinfo"; action: "setStatus"; status: number }
+  | { type: "userinfo"; action: "changePassword"; password: string }
+  | { type: "userinfo"; action: "reportShares"; dirs: number; files: number }
   | {
       type: "userinfo";
       action: "setProfile";

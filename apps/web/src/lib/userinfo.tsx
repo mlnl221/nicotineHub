@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSession } from "@/lib/session";
 import type {
   UserInfoEvent,
@@ -16,18 +16,30 @@ export interface UserProfile {
   stats?: UserInfoStats;
   interests?: UserInfoInterests;
   info?: UserInfoProfile;
+  country?: string;
+  watchUser?: { exists: boolean; status?: number; avgspeed?: number; files?: number; dirs?: number; country?: string };
 }
 
 /**
  * Subscribe to a user's profile data via the bridge. Sends `watch` (status +
  * stats), `interests`, and `get` (full peer UserInfoResponse) on mount and
- * unwatches on unmount. Returns the merged profile plus loading/error flags.
+ * unwatches on unmount. Returns the merged profile plus loading/error flags
+ * and a refresh() helper.
  */
 export function useUserInfo(username: string) {
   const { send, subscribe, state } = useSession();
   const [profile, setProfile] = useState<UserProfile>({ username });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    if (state.status !== "connected") return;
+    setLoading(true);
+    setError(null);
+    send({ type: "userinfo", action: "watch", username });
+    send({ type: "userinfo", action: "interests", username });
+    send({ type: "userinfo", action: "get", username });
+  }, [username, state.status, send]);
 
   useEffect(() => {
     if (state.status !== "connected") return;
@@ -77,6 +89,16 @@ export function useUserInfo(username: string) {
         case "user-interests":
           setProfile((p) => ({ ...p, interests: ev.interests }));
           break;
+        case "watch-user":
+          setProfile((p) => ({ ...p, watchUser: ev.watchUser, country: ev.watchUser?.country || p.country }));
+          if (ev.watchUser?.exists) {
+            setProfile((p) => ({
+              ...p,
+              status: ev.watchUser?.status !== undefined ? { username, status: ev.watchUser!.status!, privileged: p.status?.privileged || false } : p.status,
+            }));
+          }
+          setLoading(false);
+          break;
         case "user-info-response":
           setProfile((p) => ({ ...p, info: ev.info }));
           setLoading(false);
@@ -100,5 +122,5 @@ export function useUserInfo(username: string) {
     };
   }, [username, state.status, send, subscribe]);
 
-  return { profile, loading, error };
+  return { profile, loading, error, refresh };
 }

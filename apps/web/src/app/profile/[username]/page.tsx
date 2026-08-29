@@ -30,6 +30,23 @@ function base64ToBlob(b64: string, mime: string): Blob {
   return new Blob([bytes], { type: mime });
 }
 
+function linkify(text: string) {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(urlRegex);
+  return parts.map((part, i) => {
+    if (urlRegex.test(part)) {
+      // reset regex lastIndex
+      urlRegex.lastIndex = 0;
+      return (
+        <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-primary underline hover:text-primary-container">
+          {part}
+        </a>
+      );
+    }
+    return part;
+  });
+}
+
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="bg-surface-container-low dark:bg-surface-container-high rounded-xl p-5 flex flex-col gap-2 ghost-border">
@@ -45,8 +62,8 @@ function StatCard({ label, value }: { label: string; value: string }) {
 
 function ProfileInner({ username }: { username: string }) {
   const router = useRouter();
-  const { state, send } = useSession();
-  const { profile, loading, error } = useUserInfo(username);
+  const { state, send, subscribe } = useSession();
+  const { profile, loading, error, refresh } = useUserInfo(username);
   const { allBuddies, addBuddy, removeBuddy } = useBuddies();
   const { settings, setOption } = useConfig();
   const [toast, setToast] = useState<string | null>(null);
@@ -54,14 +71,20 @@ function ProfileInner({ username }: { username: string }) {
     if (typeof window === "undefined") return true;
     try {
       const v = localStorage.getItem("nicotine.showPictures");
-      return v === null ? true : v !== "false";
+      if (v !== null) return v !== "false";
+      const cfg = localStorage.getItem("nicotine.settings");
+      if (cfg) {
+        const parsed = JSON.parse(cfg);
+        if (typeof parsed?.userinfo?.picture_visible === "boolean") return parsed.userinfo.picture_visible;
+      }
+      return true;
     } catch {
       return true;
     }
   });
   const [giftOpen, setGiftOpen] = useState(false);
   const [giftDays, setGiftDays] = useState("30");
-  const [banOpen, setBanOpen] = useState(false);
+  const [privilegesLeft, setPrivilegesLeft] = useState<number | null>(null);
 
   const flash = (msg: string) => {
     setToast(msg);
@@ -74,8 +97,40 @@ function ProfileInner({ username }: { username: string }) {
     } catch {}
   }, [showPic]);
 
+  // Also sync with config picture_visible
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("nicotine.settings");
+      if (raw) {
+        const cfg = JSON.parse(raw);
+        if (cfg?.userinfo?.picture_visible !== showPic) {
+          cfg.userinfo = { ...(cfg.userinfo || {}), picture_visible: showPic };
+          localStorage.setItem("nicotine.settings", JSON.stringify(cfg));
+        }
+      }
+    } catch {}
+  }, [showPic]);
+
+  // Fetch privileges left for gift button disabled state
+  useEffect(() => {
+    if (state.status !== "connected") return;
+    send({ type: "userinfo", action: "checkPrivileges" });
+    const unsub = subscribe((msg) => {
+      if (msg.type !== "userinfo:event") return;
+      const ev = msg.event as unknown as { type: string; checkPrivileges?: number };
+      if (ev.type === "check-privileges" && typeof ev.checkPrivileges === "number") {
+        setPrivilegesLeft(ev.checkPrivileges);
+      }
+      if (ev.type === "privileged-users" && Array.isArray((ev as unknown as { privilegedUsers: string[] }).privilegedUsers)) {
+        // also handle
+      }
+    });
+    return unsub;
+  }, [state.status, send, subscribe]);
+
   const statusLabel =
     profile.status?.status === 2 ? "Online" : profile.status?.status === 1 ? "Away" : "Offline";
+  const statusColor = profile.status?.status === 2 ? "text-green-600" : profile.status?.status === 1 ? "text-yellow-600" : "text-outline";
 
   const isOwn = state.user !== undefined && state.user === username;
   const isBuddy = allBuddies.some((b) => b.username.toLowerCase() === username.toLowerCase());
@@ -83,6 +138,7 @@ function ProfileInner({ username }: { username: string }) {
   const isBanned = bannedList.includes(username);
   const ignoredList: string[] = (settings.server as unknown as { ignorelist?: string[] }).ignorelist || [];
   const isIgnored = ignoredList.includes(username);
+  const country = profile.country || profile.watchUser?.country;
 
   const handleCopyPic = async () => {
     if (!profile.info?.pic) return;
@@ -105,7 +161,9 @@ function ProfileInner({ username }: { username: string }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${username}.${mime === "image/svg+xml" ? "svg" : mime === "image/jpeg" ? "jpg" : "png"}`;
+    const ext = mime === "image/svg+xml" ? "svg" : mime === "image/jpeg" ? "jpg" : "png";
+    const ts = new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");
+    a.download = `${username}_${ts}.${ext}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -116,7 +174,8 @@ function ProfileInner({ username }: { username: string }) {
     if (!profile.info?.pic) return;
     const mime = guessMime(profile.info.pic);
     const blob = base64ToBlob(profile.info.pic, mime);
-    const file = new File([blob], `${username}.${mime === "image/svg+xml" ? "svg" : "png"}`, { type: mime });
+    const ext = mime === "image/svg+xml" ? "svg" : mime === "image/jpeg" ? "jpg" : "png";
+    const file = new File([blob], `${username}.${ext}`, { type: mime });
     try {
       // @ts-ignore
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -148,28 +207,11 @@ function ProfileInner({ username }: { username: string }) {
     const next = isBanned ? bannedList.filter((x) => x !== username) : [...bannedList, username];
     setOption("server", "banlist", next);
     flash(isBanned ? "Unbanned" : "Banned");
-    setBanOpen(false);
   };
   const handleIgnoreToggle = () => {
     const next = isIgnored ? ignoredList.filter((x) => x !== username) : [...ignoredList, username];
     setOption("server", "ignorelist", next);
     flash(isIgnored ? "Unignored" : "Ignored");
-  };
-
-  const handleGift = async () => {
-    const days = parseInt(giftDays, 10);
-    if (!days || days < 1 || days > 3650) {
-      flash("Days must be 1-3650");
-      return;
-    }
-    // Use raw WS via session send
-    try {
-      // We will use fetch to bridge? Instead use window dispatch to trigger userinfo action
-      // Use direct WebSocket via session if available: we can use useSession send
-      // But we are inside ProfileInner, we have access to useSession via hook? Add it
-      flash("Privilege gift requires active session - use chat");
-      setGiftOpen(false);
-    } catch {}
   };
 
   return (
@@ -202,7 +244,12 @@ function ProfileInner({ username }: { username: string }) {
                   {username}
                 </h2>
                 <div className="mt-1 flex flex-wrap items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant dark:text-outline">
-                  <span>{statusLabel}</span>
+                  <span className={statusColor}>{statusLabel}</span>
+                  {country ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-2 py-0.5 text-[11px] normal-case tracking-normal">
+                      <span className="material-symbols-outlined text-[12px]">public</span> {country}
+                    </span>
+                  ) : null}
                   {profile.status?.privileged ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-tertiary-container px-2 py-0.5 text-tertiary-on-container dark:bg-tertiary-fixed/30 dark:text-tertiary-fixed">
                       <span className="material-symbols-outlined text-[14px]" style={{ fontVariationSettings: "'FILL' 1" }}>
@@ -210,6 +257,9 @@ function ProfileInner({ username }: { username: string }) {
                       </span>
                       Privileged
                     </span>
+                  ) : null}
+                  {privilegesLeft !== null && privilegesLeft > 0 ? (
+                    <span className="rounded-full bg-tertiary-container/50 px-2 py-0.5 text-[10px]">{Math.floor(privilegesLeft/86400)}d left</span>
                   ) : null}
                   {isBuddy ? (
                     <span className="rounded-full bg-primary-container/20 px-2 py-0.5 text-primary text-[10px]">Buddy</span>
@@ -267,18 +317,31 @@ function ProfileInner({ username }: { username: string }) {
 
         <div className="p-10 space-y-8 max-w-screen-2xl mx-auto w-full">
           {error ? (
-            <div className="bg-tertiary-fixed/30 dark:bg-tertiary-container/20 rounded-xl p-5 flex gap-3 items-start">
-              <span className="material-symbols-outlined text-tertiary text-xl">info</span>
-              <p className="font-body text-sm text-on-tertiary-container dark:text-tertiary-fixed">
-                {error} The user may be offline or unreachable.
-              </p>
+            <div className="bg-error-container/50 dark:bg-tertiary-container/20 rounded-xl p-5 flex gap-3 items-start">
+              <span className="material-symbols-outlined text-error text-xl">info</span>
+              <div className="flex-1">
+                <p className="font-body text-sm text-on-error-container dark:text-tertiary-fixed">
+                  {error} The user may be offline or unreachable.
+                </p>
+                <button
+                  onClick={refresh}
+                  className="mt-3 inline-flex items-center gap-1 rounded-full bg-surface-container-lowest px-3 py-1.5 font-label text-xs hover:bg-surface-container-high"
+                >
+                  <span className="material-symbols-outlined text-[16px]">refresh</span> Retry
+                </button>
+              </div>
             </div>
           ) : null}
 
           {loading && !error ? (
-            <div className="flex items-center gap-3 font-body text-on-surface-variant">
-              <span className="material-symbols-outlined animate-spin">progress_activity</span>
-              Loading profile…
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center gap-3 font-body text-on-surface-variant">
+                <span className="material-symbols-outlined animate-spin">progress_activity</span>
+                Loading profile…
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-container-high">
+                <div className="h-full w-1/3 animate-pulse bg-primary" style={{ animationDuration: "1s" }} />
+              </div>
             </div>
           ) : null}
 
@@ -290,7 +353,13 @@ function ProfileInner({ username }: { username: string }) {
                 label="Avg Speed"
                 value={profile.stats.avgspeed ? humanSpeed(profile.stats.avgspeed) : "—"}
               />
-              <StatCard label="Upload Slots" value={profile.info?.slotsavail ? "Open" : "Full"} />
+              <StatCard label="Upload Slots" value={profile.info ? `${profile.info.totalupl} total / ${profile.info.slotsavail ? "Open" : "Full"}` : "—"} />
+              {profile.info && profile.info.queuesize > 0 ? (
+                <StatCard label="Queued Uploads" value={profile.info.queuesize.toString()} />
+              ) : null}
+              {profile.info && profile.info.uploadallowed !== undefined ? (
+                <StatCard label="Queue Slots" value={profile.info.uploadallowed.toString()} />
+              ) : null}
             </section>
           ) : null}
 
@@ -300,7 +369,7 @@ function ProfileInner({ username }: { username: string }) {
                 Description
               </h3>
               <p className="font-body text-sm text-on-surface dark:text-on-surface whitespace-pre-wrap break-words">
-                {profile.info.descr}
+                {linkify(profile.info.descr)}
               </p>
             </section>
           ) : null}
@@ -376,7 +445,8 @@ function ProfileInner({ username }: { username: string }) {
                   </button>
                   <button
                     onClick={() => setGiftOpen(true)}
-                    className="rounded-xl bg-tertiary-container px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest text-on-tertiary-container hover:bg-tertiary"
+                    disabled={privilegesLeft !== null && privilegesLeft <= 0}
+                    className="rounded-xl bg-tertiary-container px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest text-on-tertiary-container hover:bg-tertiary disabled:opacity-50"
                   >
                     Gift Privileges
                   </button>
@@ -390,7 +460,7 @@ function ProfileInner({ username }: { username: string }) {
                 </button>
               )}
               <button
-                onClick={() => window.location.reload()}
+                onClick={refresh}
                 className="rounded-xl bg-surface-container-low px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest hover:bg-surface-container-high"
               >
                 Refresh
@@ -398,7 +468,7 @@ function ProfileInner({ username }: { username: string }) {
             </div>
             {giftOpen ? (
               <div className="mt-6 rounded-xl bg-surface-container-high p-4">
-                <h4 className="font-label text-xs uppercase tracking-widest mb-2">Gift privileges</h4>
+                <h4 className="font-label text-xs uppercase tracking-widest mb-2">Gift privileges {privilegesLeft !== null ? `(${Math.floor(privilegesLeft/86400)} days left)` : ""}</h4>
                 <div className="flex gap-2">
                   <input
                     type="number"
@@ -454,7 +524,7 @@ function saveRecent(username: string) {
 export default function ProfilePage() {
   const params = useParams<{ username: string }>();
   const username = decodeURIComponent(params.username ?? "");
-  const { state, send } = useSession();
+  const { state } = useSession();
   const router = useRouter();
 
   useEffect(() => {
