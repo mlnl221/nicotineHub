@@ -239,9 +239,9 @@ export default function DiagnosticsPage() {
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Diagnostics" />
-      <main className="relative ml-72 flex min-h-screen flex-1 flex-col overflow-hidden">
+      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <div className="pointer-events-none absolute inset-0 opacity-20" style={{ background: "radial-gradient(circle at 50% 0%, rgba(51,102,204,0.12) 0%, transparent 60%)" }} />
-        <header className="relative z-10 flex w-full items-center justify-between px-6 py-4 sm:px-10 sm:py-6">
+        <header className="relative z-10 hidden md:flex w-full items-center justify-between px-4 py-3 md:px-10 md:py-6">
           <div>
             <h1 className="font-headline text-2xl font-light tracking-tight text-on-surface dark:text-inverse-primary">Diagnostics</h1>
             <p className="font-body text-xs text-on-surface-variant dark:text-outline">System diagnostics and connection health — live logs (500 lines, persistent).</p>
@@ -251,7 +251,7 @@ export default function DiagnosticsPage() {
           </a>
         </header>
 
-        <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-6 pb-8 sm:px-10">
+        <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 md:gap-6 px-4 pb-6 md:px-10 md:pb-8">
           {/* Health cards */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <HealthCard title="Bridge" icon="dns">

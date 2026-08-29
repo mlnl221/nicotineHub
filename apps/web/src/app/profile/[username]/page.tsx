@@ -235,7 +235,7 @@ function ProfileInner({ username }: { username: string }) {
       <Sidebar />
       <TopBar title="Profile" />
       <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
-        <header className="sticky top-0 z-40 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-10 py-8 flex flex-col gap-4 border-b border-transparent shadow-sm shadow-on-surface/5">
+        <header className="sticky top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex flex-col gap-3 md:gap-4 border-b border-outline-variant/10">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-4 min-w-0">
               {profile.info?.pic && showPic ? (
@@ -351,7 +351,7 @@ function ProfileInner({ username }: { username: string }) {
           ) : null}
         </header>
 
-        <div className="p-10 space-y-8 max-w-screen-2xl mx-auto w-full">
+        <div className="p-4 md:p-10 space-y-6 md:space-y-8 max-w-screen-2xl mx-auto w-full">
           {error ? (
             <div className="bg-error-container/50 dark:bg-tertiary-container/20 rounded-xl p-5 flex gap-3 items-start">
               <span className="material-symbols-outlined text-error text-xl">info</span>
@@ -536,6 +536,7 @@ function ProfileInner({ username }: { username: string }) {
           </section>
         </div>
       </main>
+      <BottomNav />
 
       {toast ? (
         <div className="fixed bottom-6 left-1/2 z-40 -translate-x-1/2 rounded-full bg-inverse-surface px-4 py-2 font-label text-xs text-inverse-on-surface shadow-lg">

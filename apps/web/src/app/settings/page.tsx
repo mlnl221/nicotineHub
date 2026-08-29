@@ -97,7 +97,7 @@ export default function SettingsPage() {
       <Sidebar />
       <TopBar title="Settings" />
 
-      <main className="relative ml-72 flex min-h-screen flex-1 flex-col overflow-hidden">
+      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <div
           className="pointer-events-none absolute inset-0 opacity-20"
           style={{
@@ -106,7 +106,7 @@ export default function SettingsPage() {
           }}
         />
 
-        <header className="relative z-10 flex w-full items-center justify-between px-4 py-5 lg:px-8 lg:py-6">
+        <header className="relative z-10 hidden md:flex w-full items-center justify-between px-4 py-3 md:px-8 md:py-6">
           <a
             href="/search"
             className="flex items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant transition-colors hover:text-primary dark:text-outline dark:hover:text-primary-fixed"
@@ -124,8 +124,8 @@ export default function SettingsPage() {
           </button>
         </header>
 
-        <div className="relative z-10 mx-auto w-full max-w-6xl flex-1 px-4 pt-2 pb-16 lg:px-8 lg:pt-2">
-          <h1 className="mb-1 font-headline text-3xl font-light tracking-tight text-on-surface dark:text-inverse-primary lg:text-4xl">
+        <div className="relative z-10 mx-auto w-full max-w-6xl flex-1 px-4 pt-4 pb-6 md:px-8 md:pt-2 md:pb-8">
+          <h1 className="mb-1 font-headline text-3xl font-bold tracking-tight text-on-surface dark:text-inverse-primary md:text-4xl">
             Settings
           </h1>
           <p className="mb-6 font-body text-sm text-on-surface-variant dark:text-outline">
@@ -133,7 +133,7 @@ export default function SettingsPage() {
           </p>
 
           {/* Mobile dropdown — grouped select */}
-          <div className="mb-6 lg:hidden">
+          <div className="mb-6 md:hidden">
             <label htmlFor="settings-tab-select" className="sr-only">
               Select settings section
             </label>
@@ -167,13 +167,13 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
+          <div className="flex flex-col gap-6 md:flex-row md:gap-8">
             {/* Desktop left nav — sticky grouped vertical list */}
             <nav
               aria-label="Settings sections"
-              className="hidden shrink-0 lg:block lg:w-64 lg:self-start"
+              className="hidden shrink-0 md:block md:w-64 md:self-start"
             >
-              <div className="sticky top-6 max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl bg-surface-container-low p-2 shadow-sm dark:bg-surface-container-high">
+              <div className="sticky top-6 max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl bg-surface-container-low p-2 shadow-sm dark:bg-surface-container-high hide-scrollbar">
                 <div role="tablist" aria-orientation="vertical" className="space-y-4 py-1">
                   {TAB_GROUPS.map((group) => (
                     <div key={group.label}>

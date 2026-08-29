@@ -8,6 +8,7 @@ import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { useTransfers } from "@/lib/transfers";
 import { TransferCard } from "@/components/transfers/TransferCard";
+import { ThroughputChart } from "@/components/transfers/ThroughputChart";
 
 function humanSpeed(bps: number): string {
   if (!bps) return "—";
@@ -53,21 +54,7 @@ function DownloadsInner() {
         </header>
 
         <div className="p-4 md:p-10 space-y-6 md:space-y-8 max-w-screen-2xl mx-auto w-full">
-          <section className="bg-surface dark:bg-surface-container-low rounded-xl p-6 relative overflow-hidden h-64 flex flex-col justify-between ghost-border">
-            <div className="z-10 relative">
-              <h3 className="font-label text-sm uppercase tracking-widest text-on-surface-variant dark:text-outline mb-1">Network Throughput</h3>
-              <div className="font-headline text-2xl font-semibold dark:text-on-surface">Real-time Bandwidth</div>
-              <p className="font-label text-xs text-outline mt-1">Live chart in Phase 6 — placeholder</p>
-            </div>
-            <div className="absolute inset-0 w-full h-full opacity-40 pointer-events-none" style={{ background: "linear-gradient(180deg, transparent 0%, rgba(9, 76, 178, 0.05) 100%)" }}>
-              <svg className="w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 100">
-                <path d="M0,80 Q25,60 50,70 T100,40 L100,100 L0,100 Z" fill="rgba(9, 76, 178, 0.1)"></path>
-                <path d="M0,80 Q25,60 50,70 T100,40" fill="none" stroke="#094cb2" strokeWidth="0.5"></path>
-                <path d="M0,90 Q30,85 60,95 T100,80 L100,100 L0,100 Z" fill="rgba(109, 94, 0, 0.1)"></path>
-                <path d="M0,90 Q30,85 60,95 T100,80" fill="none" stroke="#6d5e00" strokeWidth="0.5"></path>
-              </svg>
-            </div>
-          </section>
+          <ThroughputChart />
 
           {/* Mobile tab switcher */}
           <div className="flex xl:hidden rounded-xl bg-surface-container-low p-1 gap-1">

@@ -28,25 +28,25 @@ function UploadsInner() {
       <Sidebar />
       <TopBar title="Transfers" />
       <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
-        <header className="sticky top-0 z-40 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-10 py-8 flex flex-col md:flex-row md:justify-between md:items-end gap-4 border-b border-transparent shadow-sm shadow-on-surface/5">
+        <header className="sticky top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
           <div>
-            <h2 className="font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Uploads</h2>
-            <p className="font-body text-on-surface-variant dark:text-outline text-sm mt-1">Monitoring {activeCount} active connections • Uploads visible even when shares not configured (nicotine+ parity)</p>
+            <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Uploads</h2>
+            <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">{activeCount} active • <span className="md:hidden font-label text-xs">{humanSpeed(totalDown)} ↓ • {humanSpeed(totalUp)} ↑</span><span className="hidden md:inline">Monitoring {activeCount} connections — Uploads visible even when shares not configured</span></p>
           </div>
-          <div className="flex items-center gap-4">
-            <div data-testid="download-speed" className="bg-surface-container-low dark:bg-surface-container-high px-4 py-2 rounded-lg flex items-center gap-3">
-              <span className="material-symbols-outlined text-primary">arrow_downward</span>
-              <span className="font-label font-semibold text-sm">{humanSpeed(totalDown)}</span>
+          <div className="flex items-center gap-2 md:gap-4">
+            <div data-testid="download-speed" className="hidden md:flex bg-surface-container-low dark:bg-surface-container-high px-4 py-2 rounded-full md:rounded-lg items-center gap-2">
+              <span className="material-symbols-outlined text-primary text-[18px]">arrow_downward</span>
+              <span className="font-label font-semibold text-xs md:text-sm">{humanSpeed(totalDown)}</span>
             </div>
-            <div data-testid="upload-speed" className="bg-surface-container-low dark:bg-surface-container-high px-4 py-2 rounded-lg flex items-center gap-3">
-              <span className="material-symbols-outlined text-tertiary">arrow_upward</span>
-              <span className="font-label font-semibold text-sm">{humanSpeed(totalUp)}</span>
+            <div data-testid="upload-speed" className="hidden md:flex bg-surface-container-low dark:bg-surface-container-high px-4 py-2 rounded-full md:rounded-lg items-center gap-2">
+              <span className="material-symbols-outlined text-tertiary text-[18px]">arrow_upward</span>
+              <span className="font-label font-semibold text-xs md:text-sm">{humanSpeed(totalUp)}</span>
             </div>
-            <a href="/downloads" className="font-label text-sm font-semibold text-primary hover:underline">Downloads</a>
+            <a href="/downloads" className="hidden md:inline font-label text-sm font-semibold text-primary hover:underline">Downloads</a>
           </div>
         </header>
 
-        <div className="p-10 space-y-8 max-w-screen-2xl mx-auto w-full">
+        <div className="p-4 md:p-10 space-y-6 md:space-y-8 max-w-screen-2xl mx-auto w-full">
           <section data-testid="uploads-section" className="bg-surface dark:bg-surface-container-low rounded-xl p-6 ghost-border flex flex-col gap-4">
             <h3 className="font-headline text-xl font-semibold flex items-center gap-2">
               <span className="material-symbols-outlined text-tertiary">upload</span>
