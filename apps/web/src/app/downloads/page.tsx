@@ -9,6 +9,7 @@ import { BottomNav } from "@/components/mobile/BottomNav";
 import { useTransfers } from "@/lib/transfers";
 import { TransferCard } from "@/components/transfers/TransferCard";
 import { ThroughputChart } from "@/components/transfers/ThroughputChart";
+import { isDemo } from "@/lib/demo";
 
 function humanSpeed(bps: number): string {
   if (!bps) return "—";
@@ -54,6 +55,12 @@ function DownloadsInner() {
         </header>
 
         <div className="p-4 md:p-10 space-y-6 md:space-y-8 max-w-screen-2xl mx-auto w-full">
+          {isDemo ? (
+            <div className="rounded-xl bg-tertiary-fixed/20 dark:bg-tertiary-container/20 px-4 py-3 flex items-center gap-3 ghost-border">
+              <span className="material-symbols-outlined text-tertiary">info</span>
+              <p className="font-label text-xs font-semibold text-on-tertiary-container dark:text-tertiary-fixed">Demo — downloads &amp; uploads are disabled on Vercel. Search, chat, profiles &amp; browse are mocked.</p>
+            </div>
+          ) : null}
           <ThroughputChart />
 
           {/* Mobile tab switcher */}

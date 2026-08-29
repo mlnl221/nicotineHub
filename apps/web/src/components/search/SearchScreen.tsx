@@ -6,6 +6,7 @@ import { useSearches } from "@/lib/search";
 import { applyFilters } from "@/lib/filter";
 import { useTransfers } from "@/lib/transfers";
 import type { SearchRow } from "@/lib/protocol";
+import { isDemo } from "@/lib/demo";
 import { SearchBar } from "./SearchBar";
 import { SearchTabs } from "./SearchTabs";
 import { FilterBar } from "./FilterBar";
@@ -120,8 +121,13 @@ export function SearchScreen() {
             </div>
             <SheetAction
               icon="download"
-              label="Download"
+              label={isDemo ? "Download (disabled in demo)" : "Download"}
               onClick={() => {
+                if (isDemo) {
+                  flash("Demo — downloads are disabled on Vercel.");
+                  setSheetRow(null);
+                  return;
+                }
                 if (sheetRow) {
                   requestDownload({ username: sheetRow.user, virtualPath: sheetRow.path, size: sheetRow.size, fileName: sheetRow.filename });
                   flash(`Queued "${sheetRow.filename}" — see Downloads`);

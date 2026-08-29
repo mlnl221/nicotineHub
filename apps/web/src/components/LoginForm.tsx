@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useSession } from "@/lib/session";
 import { useConfig } from "@/lib/config/provider";
 import { DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT } from "@/lib/config/defaults";
+import { isDemo } from "@/lib/demo";
 
 export function LoginForm() {
   const { login, logout, state } = useSession();
@@ -163,11 +164,17 @@ export function LoginForm() {
 
         {/* Security warning */}
         <div className="mt-6 px-2 text-center">
-          <p className="font-body text-[11px] leading-relaxed text-on-surface-variant/60">
-            Your username and password are sent directly to the Soulseek server using its native
-            protocol, which is <span className="font-semibold text-error/70">not encrypted</span>.
-            Only use credentials you trust. We do not store your password.
-          </p>
+          {isDemo ? (
+            <p className="font-body text-[11px] leading-relaxed text-on-surface-variant/60">
+              Demo mode — no server connection. Enter any username/password to explore mocked data. No credentials are sent anywhere.
+            </p>
+          ) : (
+            <p className="font-body text-[11px] leading-relaxed text-on-surface-variant/60">
+              Your username and password are sent directly to the Soulseek server using its native
+              protocol, which is <span className="font-semibold text-error/70">not encrypted</span>.
+              Only use credentials you trust. We do not store your password.
+            </p>
+          )}
         </div>
       </div>
     </form>

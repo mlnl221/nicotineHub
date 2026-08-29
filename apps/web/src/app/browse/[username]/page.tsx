@@ -8,6 +8,7 @@ import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { useBrowse } from "@/lib/browse";
 import { useTransfers } from "@/lib/transfers";
+import { isDemo } from "@/lib/demo";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -225,15 +226,18 @@ export default function BrowseUserPage() {
                               <span className="material-symbols-outlined text-[16px]">info</span>
                             </button>
                             <button
+                              disabled={isDemo}
+                              title={isDemo ? "Downloads disabled in demo" : "Download"}
                               onClick={() => {
+                                if (isDemo) return;
                                 const virtualPath = `${activeFolder.name}\\\\${shortName}`;
                                 // If file.name already contains full path, prefer it
                                 const vp = file.name.includes("\\\\") || file.name.includes("/") ? file.name : virtualPath;
                                 requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName });
                               }}
-                              className="rounded-full bg-primary px-4 py-2 font-label text-xs font-bold text-on-primary hover:bg-primary-container"
+                              className={`rounded-full px-4 py-2 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline cursor-not-allowed" : "bg-primary text-on-primary hover:bg-primary-container"}`}
                             >
-                              Download
+                              {isDemo ? "Disabled" : "Download"}
                             </button>
                           </li>
                         );
@@ -279,15 +283,18 @@ export default function BrowseUserPage() {
             </div>
             <div className="mt-6 flex gap-2">
               <button
+                disabled={isDemo}
+                title={isDemo ? "Downloads disabled in demo" : "Download"}
                 onClick={() => {
+                  if (isDemo) return;
                   const shortName = propsFile.name.split("\\").pop() || propsFile.name;
                   const vp = propsFile.name.includes("\\") ? propsFile.name : `${propsFile.folder}\\${shortName}`;
                   requestDownload({ username, virtualPath: vp, size: propsFile.size, fileName: shortName });
                   setPropsFile(null);
                 }}
-                className="flex-1 rounded-xl bg-primary py-3 font-label text-xs font-bold text-on-primary"
+                className={`flex-1 rounded-xl py-3 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline cursor-not-allowed" : "bg-primary text-on-primary"}`}
               >
-                Download
+                {isDemo ? "Disabled in demo" : "Download"}
               </button>
               <button onClick={() => setPropsFile(null)} className="rounded-xl bg-surface-container-high px-6 py-3 font-label text-xs">Close</button>
             </div>

@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { SessionProvider } from "@/lib/session";
 import { ConfigProvider } from "@/lib/config/provider";
 import { TransfersProvider } from "@/lib/transfers";
+import { DemoBanner } from "@/components/DemoBanner";
 
 export const metadata: Metadata = {
   title: "Nicotine Hub",
@@ -57,6 +58,7 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-dvh bg-surface-container-low font-body text-on-surface antialiased selection:bg-primary/30 dark:bg-inverse-surface dark:text-inverse-on-surface">
+        <DemoBanner />
         <ThemeProvider>
           <ConfigProvider>
             <SessionProvider>
