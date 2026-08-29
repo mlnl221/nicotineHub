@@ -52,6 +52,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   const counter = useRef(0);
   const tabsRef = useRef<SearchTab[]>([]);
   tabsRef.current = tabs;
+  const lastQuery = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     const unsub = subscribe((msg) => {
@@ -76,6 +77,16 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     (query: string, opts?: { mode?: SearchMode; target?: string }) => {
       const mode = opts?.mode ?? "global";
       const target = opts?.target?.trim();
+      const key = `${mode}:${target ?? ""}:${query.trim().toLowerCase()}`;
+      const now = Date.now();
+      const last = lastQuery.current.get(key);
+      if (last && now - last < 2000) return; // debounce identical query 2s
+      lastQuery.current.set(key, now);
+      // prune map
+      if (lastQuery.current.size > 100) {
+        const oldest = [...lastQuery.current.entries()].sort((a,b)=>a[1]-b[1])[0]?.[0];
+        if (oldest) lastQuery.current.delete(oldest);
+      }
       const id = `s${++counter.current}`;
       setTabs((prev) => [
         ...prev,

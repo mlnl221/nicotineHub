@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SearchRow } from "@/lib/protocol";
 import { humanLength, humanQuality, humanSize } from "@/lib/format";
+
+const PAGE_SIZE = 50;
 
 function fileTypeIcon(ext: string): string {
   const e = ext.toLowerCase();
@@ -25,18 +27,46 @@ interface ResultsListProps {
 }
 
 export function ResultsList({ rows, onRowTap }: ResultsListProps) {
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // reset when filter/query changes (rows identity)
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [rows]);
+
+  // infinite scroll: when sentinel enters viewport, grow by 50
+  useEffect(() => {
+    if (visibleCount >= rows.length) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((v) => Math.min(v + PAGE_SIZE, rows.length));
+        }
+      },
+      { rootMargin: "400px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visibleCount, rows.length]);
+
+  const sliced = useMemo(() => rows.slice(0, visibleCount), [rows, visibleCount]);
+
   const groups = useMemo(() => {
     const map = new Map<string, SearchRow[]>();
-    for (const row of rows) {
+    for (const row of sliced) {
       const key = row.folder || "(root)";
       const list = map.get(key);
       if (list) list.push(row);
       else map.set(key, [row]);
     }
     return [...map.entries()];
-  }, [rows]);
+  }, [sliced]);
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const hasMore = visibleCount < rows.length;
 
   if (rows.length === 0) {
     return (
@@ -120,6 +150,34 @@ export function ResultsList({ rows, onRowTap }: ResultsListProps) {
           </div>
         );
       })}
+      {/* Controls — default 50, LOAD ALL option */}
+      {hasMore ? (
+        <div className="flex flex-col items-center gap-2 py-4">
+          <p className="font-label text-xs text-on-surface-variant">
+            Showing {Math.min(visibleCount, rows.length)} of {rows.length}
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setVisibleCount((v) => Math.min(v + PAGE_SIZE, rows.length))}
+              className="rounded-full bg-surface-container-high px-4 py-2 font-label text-xs font-semibold text-on-surface"
+            >
+              Load 50 more
+            </button>
+            <button
+              type="button"
+              onClick={() => setVisibleCount(rows.length)}
+              className="rounded-full bg-primary px-4 py-2 font-label text-xs font-bold text-on-primary"
+            >
+              Load all ({rows.length - visibleCount} remaining)
+            </button>
+          </div>
+        </div>
+      ) : rows.length > PAGE_SIZE ? (
+        <p className="py-3 text-center font-label text-xs text-outline">All {rows.length} results shown (max 2500)</p>
+      ) : null}
+      {/* Infinite scroll sentinel */}
+      {hasMore ? <div ref={sentinelRef} className="h-px" aria-hidden /> : null}
     </div>
   );
 }

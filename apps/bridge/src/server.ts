@@ -50,6 +50,22 @@ const StopMessageSchema = z.object({
   type: z.literal("search:stop"),
   searchId: z.string().min(1).max(64),
 });
+const SearchPageSchema = z.object({
+  type: z.literal("search:page"),
+  searchId: z.string().min(1).max(64),
+  offset: z.number().int().min(0).max(2500),
+  limit: z.number().int().min(1).max(100),
+});
+const BrowsePageSchema = z.object({
+  type: z.literal("browse:page"),
+  username: z.string().min(1).max(64),
+  offset: z.number().int().min(0).max(100000),
+  limit: z.number().int().min(1).max(200),
+});
+const PingSchema = z.object({
+  type: z.literal("ping"),
+  ts: z.number().optional(),
+});
 
 const ProfileSchema = z.object({
   descr: z.string().max(10000),
@@ -131,6 +147,35 @@ const LISTEN_PORT = Number(process.env.LISTEN_PORT || 2234);
 const PORT = Number(process.env.PORT || 8787);
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || "";
 const DATA_DIR = process.env.DATA_DIR || "/data";
+
+// ── 5-minute in-memory caches (per-process, ephemeral) ──
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
+const BROWSE_CACHE_TTL_MS = 5 * 60 * 1000;
+const USERINFO_CACHE_TTL_MS = 5 * 60 * 1000;
+const SEARCH_CACHE_MAX = 100;
+const searchCache = new Map<string, { rows: unknown[]; total: number; ts: number }>();
+const browseCache = new Map<string, { folders: unknown[]; ts: number }>();
+const userInfoCache = new Map<string, { data: unknown; ts: number }>();
+
+function cacheKeySearch(query: string, mode = "global", target = ""): string {
+  return `${mode}:${target.toLowerCase()}:${query.trim().toLowerCase()}`;
+}
+function getCachedSearch(key: string): { rows: unknown[]; total: number } | null {
+  const e = searchCache.get(key);
+  if (!e) return null;
+  if (Date.now() - e.ts > SEARCH_CACHE_TTL_MS) { searchCache.delete(key); return null; }
+  return { rows: e.rows, total: e.total };
+}
+function setCachedSearch(key: string, rows: unknown[], total: number) {
+  if (searchCache.size >= SEARCH_CACHE_MAX) {
+    const first = searchCache.keys().next().value as string | undefined;
+    if (first) searchCache.delete(first);
+  }
+  searchCache.set(key, { rows: [...rows], total, ts: Date.now() });
+}
+// Exported for session.ts integration (optional)
+export const bridgeCaches = { searchCache, browseCache, userInfoCache, getCachedSearch, setCachedSearch };
+// ─────────────────────────────────────────────────────────
 
 // Ensure data volume exists (dev fallback to /tmp if /data not writable)
 try {
@@ -280,7 +325,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           "Content-Disposition": `attachment; filename="${(fileName || "download").replace(/"/g, "")}"`,
         };
         // Let Bun handle range/streaming
-        return new Response(file as unknown as BodyInit, { headers });
+        return new Response(file as unknown as never, { headers });
       } catch {
         return new Response("Not found", { status: 404 });
       }
@@ -358,9 +403,20 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             try { ws.send(JSON.stringify({ type: "room:event", event })); } catch {}
           },
           onBrowseEvent: (event) => {
-            logger.debug("browse", "browse event", { type: event.type, username: event.username, folder: (event as { folder?: string }).folder });
+            logger.debug("server", "browse event", { type: event.type, username: event.username, folder: (event as { folder?: string }).folder });
             try {
-              if (event.type === "browse-shares") ws.send(JSON.stringify({ type: "browse:shares", username: event.username, folders: event.folders }));
+              if (event.type === "browse-shares") {
+                // cache full shares for 5m paging
+                try { browseCache.set(event.username.toLowerCase(), { folders: event.folders as unknown[], ts: Date.now() }); } catch {}
+                // trim API response: cap initial payload to 200 folders, client pages 50 at a time
+                const all = (event.folders as unknown[]) || [];
+                const page = all.slice(0, 200);
+                const hasMore = all.length > 200;
+                ws.send(JSON.stringify({ type: "browse:shares", username: event.username, folders: page as never, total: all.length, hasMore, offset: 0 }));
+                // stash full result on ws for browse:page
+                (ws.data as unknown as Record<string, unknown>)._browseFull = all;
+                (ws.data as unknown as Record<string, unknown>)._browseUser = event.username;
+              }
               else if (event.type === "browse-folder") ws.send(JSON.stringify({ type: "browse:folder", username: event.username, folder: event.folder, token: event.token, files: event.files }));
               else if (event.type === "browse-error") ws.send(JSON.stringify({ type: event.type === "browse-error" && (event as { token?: number }).token !== undefined ? "browse:folder" : "browse:shares", username: event.username, error: event.error, ...(event as { folder?: string; token?: number }) }));
             } catch {}
@@ -392,7 +448,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           },
           onServerEvent: (event) => {
             logger.info("server", "server reconnect", event as unknown as Record<string, unknown>);
-            try { ws.send(JSON.stringify({ type: "server:reconnect", ...event })); } catch {}
+            try {
+              const { type: _t, ...rest } = event as unknown as Record<string, unknown> & { type: string };
+              ws.send(JSON.stringify({ type: "server:reconnect", ...(rest as Record<string, unknown>), attempt: (event as unknown as { attempt?: number }).attempt, delay: (event as unknown as { delay?: number }).delay, error: (event as unknown as { error?: string }).error }));
+            } catch {}
           },
         });
         ws.data.session = session;
@@ -423,14 +482,28 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid search message.")); return; }
         const session = requireLogin(); if (!session) return;
         const { searchId, query } = result.data;
+        // 5m memory cache: serve instantly if hit (still run live search for freshness is deferred to avoid double stream)
+        const cKey = cacheKeySearch(query, "global", "");
+        const hit = getCachedSearch(cKey);
+        if (hit && hit.rows.length) {
+          logger.info("search", "cache hit", { searchId, query: query.slice(0,80), rows: hit.rows.length });
+          ws.send(JSON.stringify({ type: "search:start", searchId, token: 0 }));
+          // send cached as single batch with flag
+          ws.send(JSON.stringify({ type: "search:result", searchId, token: 0, rows: hit.rows, cached: true }));
+          ws.send(JSON.stringify({ type: "search:end", searchId, reason: "max_results" }));
+          return;
+        }
         logger.info("search", "search request", { searchId, query: query.slice(0,80) });
+        const accRows: unknown[] = [];
         const token = session.search(query, searchId, {
           onResult: (p) => {
             logger.debug("search", "search result", { searchId, rows: p.rows?.length });
+            for (const r of p.rows) accRows.push(r);
             ws.send(JSON.stringify({ type: "search:result", ...p }));
           },
           onEnd: (p) => {
             logger.info("search", "search end", { searchId, reason: p.reason });
+            if (accRows.length) setCachedSearch(cKey, accRows, accRows.length);
             ws.send(JSON.stringify({ type: "search:end", ...p }));
           },
         });
@@ -478,6 +551,39 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const result = StopMessageSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid stop message.")); return; }
         ws.data.session?.cancelSearch(result.data.searchId);
+        return;
+      }
+      if (data.type === "search:page") {
+        const result = SearchPageSchema.safeParse(parsed);
+        if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid search:page.")); return; }
+        // client pagination is local — server just acks (no-op), search results already buffered client-side
+        ws.send(JSON.stringify({ type: "search:page", searchId: result.data.searchId, offset: result.data.offset, limit: result.data.limit, rows: [], total: 0, hasMore: false }));
+        return;
+      }
+      if (data.type === "browse:page") {
+        const result = BrowsePageSchema.safeParse(parsed);
+        if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid browse:page.")); return; }
+        const full = ((ws.data as unknown as Record<string, unknown>)._browseFull as unknown[] | undefined) || [];
+        const owner = ((ws.data as unknown as Record<string, unknown>)._browseUser as string | undefined) || result.data.username;
+        if (owner.toLowerCase() !== result.data.username.toLowerCase()) {
+          // try cache
+          const cached = browseCache.get(result.data.username.toLowerCase());
+          if (cached && Date.now() - cached.ts < BROWSE_CACHE_TTL_MS) {
+            const slice = cached.folders.slice(result.data.offset, result.data.offset + result.data.limit);
+            ws.send(JSON.stringify({ type: "browse:shares", username: result.data.username, folders: slice as never, total: cached.folders.length, hasMore: result.data.offset + result.data.limit < cached.folders.length, offset: result.data.offset }));
+            return;
+          }
+          ws.send(errorMessage("No cached browse for that user."));
+          return;
+        }
+        const slice = full.slice(result.data.offset, result.data.offset + result.data.limit);
+        ws.send(JSON.stringify({ type: "browse:shares", username: owner, folders: slice as never, total: full.length, hasMore: result.data.offset + result.data.limit < full.length, offset: result.data.offset }));
+        return;
+      }
+      if (data.type === "ping") {
+        const result = PingSchema.safeParse(parsed);
+        if (!result.success) { ws.send(JSON.stringify({ type: "pong", ts: Date.now() })); return; }
+        ws.send(JSON.stringify({ type: "pong", ts: result.data.ts ?? Date.now() }));
         return;
       }
 
@@ -596,11 +702,21 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         switch (msg.action) {
           case "watch": session.watchUser(msg.username); break;
           case "unwatch": session.unwatchUser(msg.username); break;
-          case "get":
+          case "get": {
+            const cached = userInfoCache.get(msg.username.toLowerCase());
+            if (cached && Date.now() - cached.ts < USERINFO_CACHE_TTL_MS) {
+              ws.send(JSON.stringify(cached.data));
+              break;
+            }
             session.requestUserInfo(msg.username)
-              .then((info) => ws.send(JSON.stringify({ type: "user-info-response", username: info.username, descr: info.descr, pic: info.pic ? info.pic.toString("base64") : null, totalupl: info.totalupl, queuesize: info.queuesize, slotsavail: info.slotsavail, uploadallowed: info.uploadallowed })))
+              .then((info) => {
+                const payload = { type: "user-info-response" as const, username: info.username, descr: info.descr, pic: info.pic ? info.pic.toString("base64") : null, totalupl: info.totalupl, queuesize: info.queuesize, slotsavail: info.slotsavail, uploadallowed: info.uploadallowed };
+                userInfoCache.set(msg.username.toLowerCase(), { data: payload, ts: Date.now() });
+                ws.send(JSON.stringify(payload));
+              })
               .catch(() => ws.send(JSON.stringify({ type: "user-info-failed", username: msg.username })));
             break;
+          }
           case "interests": session.requestUserInterests(msg.username); break;
           case "recommendations": session.requestRecommendations(); break;
           case "globalRecommendations": session.requestGlobalRecommendations(); break;

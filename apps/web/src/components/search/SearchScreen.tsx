@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSearches } from "@/lib/search";
 import { applyFilters } from "@/lib/filter";
@@ -19,10 +19,13 @@ export function SearchScreen() {
   const [sheetRow, setSheetRow] = useState<SearchRow | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  const deferredRows = useDeferredValue(activeTab?.rows ?? []);
+  const deferredFilters = useDeferredValue(activeTab?.filters ?? null);
   const visibleRows = useMemo(
-    () => (activeTab ? applyFilters(activeTab.rows, activeTab.filters) : []),
-    [activeTab],
+    () => (activeTab && deferredFilters ? applyFilters(deferredRows, deferredFilters) : activeTab ? applyFilters(activeTab.rows, activeTab.filters) : []),
+    [activeTab, deferredRows, deferredFilters],
   );
+  const isStale = activeTab ? deferredRows !== activeTab.rows || deferredFilters !== activeTab.filters : false;
 
   const activeFilterCount = useMemo(() => {
     if (!activeTab) return 0;
@@ -83,6 +86,7 @@ export function SearchScreen() {
             {activeTab.status === "searching" ? " · searching…" : ""}
             {activeTab.reason === "max_results" ? " · limit reached" : ""}
             {activeTab.mode !== "global" ? ` · ${activeTab.mode}${activeTab.target ? `:${activeTab.target}` : ""}` : ""}
+            {isStale ? " · filtering…" : ""}
           </span>
         </div>
       ) : null}

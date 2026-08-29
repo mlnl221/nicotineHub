@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
+import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
@@ -90,6 +91,20 @@ function ProfileInner({ username }: { username: string }) {
   const [ipInfo, setIpInfo] = useState<{ ip: string; port: number; country?: string } | null>(null);
   const [loadingIp, setLoadingIp] = useState(false);
   const [showIp, setShowIp] = useState(false);
+
+  // memoize object URL for data: pic to avoid atob on each render + enable browser cache
+  const picObjectUrl = useMemo(() => {
+    if (!profile.info?.pic || !showPic) return null;
+    try {
+      const mime = guessMime(profile.info.pic);
+      const blob = base64ToBlob(profile.info.pic, mime);
+      return URL.createObjectURL(blob);
+    } catch { return null; }
+  }, [profile.info?.pic, showPic]);
+
+  useEffect(() => {
+    return () => { if (picObjectUrl) URL.revokeObjectURL(picObjectUrl); };
+  }, [picObjectUrl]);
 
   const flash = (msg: string) => {
     setToast(msg);
@@ -239,10 +254,13 @@ function ProfileInner({ username }: { username: string }) {
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-4 min-w-0">
               {profile.info?.pic && showPic ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={profilePicSrc(profile.info.pic)}
+                <Image
+                  src={picObjectUrl ?? profilePicSrc(profile.info.pic)}
                   alt={`${username} profile picture`}
+                  width={64}
+                  height={64}
+                  unoptimized
+                  loading="lazy"
                   className="h-16 w-16 rounded-full object-cover bg-surface-container-highest"
                 />
               ) : profile.info?.pic && !showPic ? (

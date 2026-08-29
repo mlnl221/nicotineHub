@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
@@ -8,6 +8,8 @@ import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { useBrowse } from "@/lib/browse";
 import { useTransfers } from "@/lib/transfers";
+
+const PAGE_SIZE = 50;
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -47,6 +49,40 @@ export default function BrowseUserPage() {
     const q = fileQuery.toLowerCase();
     return activeFolder.files.filter((f) => f.name.toLowerCase().includes(q));
   }, [activeFolder, fileQuery]);
+
+  // pagination — 50 at a time, LOAD ALL option
+  const [visibleFolderCount, setVisibleFolderCount] = useState(PAGE_SIZE);
+  const [visibleFileCount, setVisibleFileCount] = useState(PAGE_SIZE);
+  const folderSentinel = useRef<HTMLDivElement | null>(null);
+  const fileSentinel = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => { setVisibleFolderCount(PAGE_SIZE); }, [filteredFolders.length, query]);
+  useEffect(() => { setVisibleFileCount(PAGE_SIZE); }, [visibleFiles.length, activeFolder?.name, fileQuery]);
+
+  useEffect(() => {
+    if (visibleFolderCount >= filteredFolders.length) return;
+    const el = folderSentinel.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting) setVisibleFolderCount((v) => Math.min(v + PAGE_SIZE, filteredFolders.length));
+    }, { rootMargin: "300px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visibleFolderCount, filteredFolders.length]);
+
+  useEffect(() => {
+    if (visibleFileCount >= visibleFiles.length) return;
+    const el = fileSentinel.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting) setVisibleFileCount((v) => Math.min(v + PAGE_SIZE, visibleFiles.length));
+    }, { rootMargin: "300px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visibleFileCount, visibleFiles.length]);
+
+  const pagedFolders = useMemo(() => filteredFolders.slice(0, visibleFolderCount), [filteredFolders, visibleFolderCount]);
+  const pagedFiles = useMemo(() => visibleFiles.slice(0, visibleFileCount), [visibleFiles, visibleFileCount]);
 
   if (state.status !== "connected" || !username) return null;
 
@@ -119,24 +155,36 @@ export default function BrowseUserPage() {
               ) : filteredFolders.length === 0 ? (
                 <p className="p-4 font-body text-sm text-outline">No folders found.</p>
               ) : (
-                filteredFolders.map((f) => (
-                  <button
-                    key={f.name}
-                    onClick={() => {
-                      setSelectedFolder(f.name);
-                      openFolder(f.name);
-                    }}
-                    className={`flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors ${selectedFolder === f.name ? "bg-primary-fixed/20 text-primary border border-primary/10" : "hover:bg-surface-container-low text-on-surface-variant"}`}
-                  >
-                    <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                      folder
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-body text-sm font-medium">{f.name.split("\\\\").pop() || f.name}</p>
-                      <p className="truncate font-label text-[11px] text-on-surface-variant">{f.files.length} files</p>
+                <>
+                  {pagedFolders.map((f) => (
+                    <button
+                      key={f.name}
+                      onClick={() => {
+                        setSelectedFolder(f.name);
+                        openFolder(f.name);
+                      }}
+                      className={`flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors ${selectedFolder === f.name ? "bg-primary-fixed/20 text-primary border border-primary/10" : "hover:bg-surface-container-low text-on-surface-variant"}`}
+                    >
+                      <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                        folder
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-body text-sm font-medium">{f.name.split("\\\\").pop() || f.name}</p>
+                        <p className="truncate font-label text-[11px] text-on-surface-variant">{f.files.length} files</p>
+                      </div>
+                    </button>
+                  ))}
+                  {visibleFolderCount < filteredFolders.length ? (
+                    <div className="flex flex-col items-center gap-2 py-3">
+                      <span className="font-label text-xs text-outline">{visibleFolderCount} of {filteredFolders.length} folders</span>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => setVisibleFolderCount((v) => Math.min(v + PAGE_SIZE, filteredFolders.length))} className="rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs">Load 50 more</button>
+                        <button type="button" onClick={() => setVisibleFolderCount(filteredFolders.length)} className="rounded-full bg-primary px-3 py-1.5 font-label text-xs font-bold text-on-primary">Load all</button>
+                      </div>
                     </div>
-                  </button>
-                ))
+                  ) : null}
+                  {visibleFolderCount < filteredFolders.length ? <div ref={folderSentinel} className="h-px" aria-hidden /> : null}
+                </>
               )}
             </div>
           </aside>
@@ -194,13 +242,14 @@ export default function BrowseUserPage() {
                   <span className="font-label text-xs text-on-surface-variant">{visibleFiles.length} files</span>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                  {visibleFiles.length === 0 ? (
+                    {visibleFiles.length === 0 ? (
                     <p className="p-6 font-body text-sm text-outline">
                       No files match &quot;{fileQuery}&quot; in this folder.
                     </p>
                   ) : (
+                    <>
                     <ul className="divide-y divide-surface-container-highest/30">
-                      {visibleFiles.map((file) => {
+                      {pagedFiles.map((file) => {
                         const shortName = file.name.split(/[\\\/]/).pop() || file.name;
                         const attrsMap = new Map(file.attrs);
                         const bitrate = attrsMap.get(0);
@@ -239,6 +288,17 @@ export default function BrowseUserPage() {
                         );
                       })}
                     </ul>
+                    {visibleFileCount < visibleFiles.length ? (
+                      <div className="flex flex-col items-center gap-2 py-3">
+                        <span className="font-label text-xs text-outline">{visibleFileCount} of {visibleFiles.length} files</span>
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => setVisibleFileCount((v) => Math.min(v + PAGE_SIZE, visibleFiles.length))} className="rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs">Load 50 more</button>
+                          <button type="button" onClick={() => setVisibleFileCount(visibleFiles.length)} className="rounded-full bg-primary px-3 py-1.5 font-label text-xs font-bold text-on-primary">Load all</button>
+                        </div>
+                      </div>
+                    ) : null}
+                    {visibleFileCount < visibleFiles.length ? <div ref={fileSentinel} className="h-px" aria-hidden /> : null}
+                    </>
                   )}
                 </div>
               </div>

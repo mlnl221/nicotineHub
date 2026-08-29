@@ -1,9 +1,46 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { useConfig } from "@/lib/config/provider";
 import { SectionCard, TextFieldControl, ToggleControl } from "@/components/settings/controls";
 import { useSession } from "@/lib/session";
+
+async function resizeToWebp(file: File, max = 512, quality = 0.8): Promise<string> {
+  // SVG: return raw data URL (no rasterize) but guard size
+  if (file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg")) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result ?? ""));
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(file);
+    });
+  }
+  const bitmap = await createImageBitmap(file);
+  let { width, height } = bitmap;
+  if (width > max || height > max) {
+    const scale = Math.min(max / width, max / height);
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas unsupported");
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  // try webp first, fallback to jpeg
+  let dataUrl: string;
+  try {
+    dataUrl = canvas.toDataURL("image/webp", quality);
+    // if webp not supported, it falls back to png — detect huge size
+    if (dataUrl.length > 700_000) dataUrl = canvas.toDataURL("image/jpeg", quality);
+  } catch {
+    dataUrl = canvas.toDataURL("image/jpeg", quality);
+  }
+  bitmap.close();
+  return dataUrl;
+}
 
 function extractBase64(dataUrl: string): string | undefined {
   if (!dataUrl) return undefined;
@@ -89,15 +126,24 @@ export function UserProfileSection() {
               alert("Image too large (max 5MB)");
               return;
             }
-            const reader = new FileReader();
-            reader.onload = () => setOption("userinfo", "pic", String(reader.result ?? ""));
-            reader.readAsDataURL(f);
+            try {
+              const dataUrl = await resizeToWebp(f, 512, 0.8);
+              // ensure still under ~600KB base64
+              if (dataUrl.length > 800_000) {
+                alert("Compressed image still too large, try a smaller file.");
+                return;
+              }
+              setOption("userinfo", "pic", dataUrl);
+            } catch {
+              const reader = new FileReader();
+              reader.onload = () => setOption("userinfo", "pic", String(reader.result ?? ""));
+              reader.readAsDataURL(f);
+            }
           }}
         />
         {u.pic ? (
           <div className="mt-3 flex items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={u.pic} alt="Profile preview" className="h-16 w-16 rounded-xl object-cover ghost-border" />
+            <Image src={u.pic} alt="Profile preview" width={64} height={64} unoptimized className="h-16 w-16 rounded-xl object-cover ghost-border" />
             <button
               type="button"
               onClick={() => setOption("userinfo", "pic", "")}
