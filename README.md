@@ -65,7 +65,8 @@ See `docs/architecture.md` for `SHARED_DIRS`, `UPLOAD_LIMIT`, `DISTRIB` etc.
 
 ## Docs
 
-- `docs/architecture.md` — bridge & protocol details
-- `docs/TRANSFERS.md` — transfers spec
+- `docs/architecture.md` — bridge, search & protocol details
 - `docs/DESIGN.md` — UI tokens
+- `docs/settings-mapping.md` — Nicotine+ settings reference (authoritative)
+- `docs/settings-plan.md` — remaining settings phases
 - `AGENTS.md` — agent conventions

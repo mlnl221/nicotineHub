@@ -1,6 +1,6 @@
 /**
  * Full-parity result filtering, mirroring nicotine's filter bar.
- * See docs/search/filters.md for the exact syntax.
+ * See docs/architecture.md Search filters for the exact syntax.
  */
 import type { FilterState, SearchRow } from "@/lib/protocol";
 

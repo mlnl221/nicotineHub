@@ -15,7 +15,7 @@
 
 ## Conventions for all phases
 
-- Follow `docs/workflow.md`: git worktree per phase, `bun test && bun run build` before PR, `gh pr create --fill`.
+- Follow `AGENTS.md` workflow: git worktree per phase, `bun test && bun run build` before PR, `gh pr create --fill`.
 - Each new setting key added to `defaults.ts` must stay in sync with `docs/settings-mapping.md` and `pynicotine/config.py`.
 - Desktop-only keys are omitted per `settings-mapping.md:310` (password, `portrange`/`upnp`, tray/window geometry, `filemanager`, `urls.protocols` handlers, OS now-playing backends, `afterfinish`/`afterfolder` shell commands).
 - Browser constraints are surfaced in-app with a `StubNotice`-style callout rather than hiding tabs silently — see `docs/settings-mapping.md:123` for File System Access API, localStorage/IndexedDB, `mediaSession` notes.

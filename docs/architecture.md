@@ -23,8 +23,12 @@ Reference: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plu
 
 ## Search
 
-- `FileSearch 26` (global), `UserSearch 42`, `RoomSearch 120`, `WishlistSearch 103` / `WishlistInterval 104`, `ExcludedSearchPhrases 160` filtering.
-- `FileSearchResponse 9` over `P`: zlib (two-stage) with 16M compressed / 128M decompressed caps, `>2GiB` NS sentinel fix, private block (≤10000), token gate (`allowedSearchTokens`), `MAX_DISPLAYED_RESULTS 2500`.
+- Modes: `FileSearch 26` (global), `UserSearch 42`, `RoomSearch 120`, `WishlistSearch 103` / `WishlistInterval 104`, `ExcludedSearchPhrases 160` gated.
+- Flow: browser `search:start {query,mode}` → bridge allocates `uint32` token (`allowedSearchTokens` gate, incr wrapping at `2^32`) → `FileSearch` to server → server floods via `DistribSearch 3` → peers connect back over `P` and send `FileSearchResponse 9`.
+- `FileSearchResponse 9` over `P`: `[len][code 9][zlib(payload)]`, two-stage inflate 16M compressed / 128M decompressed, flat file list (`\`-split for folder grouping, sorted by name when `n>1`), `>2GiB` NS sentinel fix, private block (≤10000), `slotFree`/`avgspeed`/`inQueue` header, token-matched then `MAX_DISPLAYED_RESULTS 2500` cap + per-user dedup.
+- Query hygiene: split on space, drop bare `-word` before transmit (reapplied client-side as `excluded_words`), preserve `"exact phrase"`/`*partial`, `min_search_chars 3`. Attributes: `0 bitrate kbps`, `1 duration s`, `2 VBR`, `4 sampleRate Hz`, `5 bitDepth bits` (combos `{0,1,2}` lossy, `{1,4,5}` FLAC/WAV, `{0,1,4,5}` WV).
+- Filters (live, nicotine parity, `docs/settings-mapping.md` defilter): `filterin/filterout` regex on path+username, `filtersize` (`< <= == != >= >`, bare `= → ==`, `k/m/g` binary, `MiB`/`B` decimal, `>10.5m <1g`), `filterbr` kbps, `filterlength` sec or `HH:MM:SS` (`>6:00 <12:00`), `filtertype` `flac wav` / `!mp3` / generic `audio/image/video/document/text/archive/executable`, `filtercc` `US !DE` / `,`/`;`/`-` split, `filterslot` (free slot only), `filterpublic` (hide private). Live on keystroke, clear/restore toggle, history 50.
+- Connect-back: direct `PeerInit 1` (`string user`+`string type P`+`uint32 0`, framing `[len][u8 code][payload]`) vs indirect `ConnectToPeer 18` relay + `PierceFireWall 0` (`uint32 token`). `P`/`S` framing `[len][uint32 code][payload]`, `D`/`PeerInit` `[len][uint8 code][payload]`.
 
 ## Transfers (F)
 
