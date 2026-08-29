@@ -24,6 +24,8 @@ import {
   packUint32,
 } from "./soulseek.ts";
 import { logger } from "./logger.ts";
+import { shouldBlockUser, getCountryCode } from "./networkfilter.ts";
+import { StatsManager } from "./statistics.ts";
 
 export type TransferStatus =
   | "Queued"
@@ -100,9 +102,14 @@ function getIncompletePath(virtualPath: string, username: string, incompleteDir:
   return join(incompleteDir, prefix + safeBase);
 }
 
-function getFinishedPath(virtualPath: string, downloadsDir: string): string {
+function getFinishedPath(virtualPath: string, downloadsDir: string, username?: string, usernamesubfolders?: boolean): string {
+  let dir = downloadsDir;
+  if (usernamesubfolders && username) {
+    dir = join(downloadsDir, username.replace(/[/\\]/g, "_"));
+    try { mkdirSync(dir, { recursive: true }); } catch {}
+  }
   const base = fileNameOf(virtualPath).replace(/[/\\]/g, "_") || "file";
-  let dest = join(downloadsDir, base);
+  let dest = join(dir, base);
   // avoid conflict "(1)" loop
   let counter = 1;
   let candidate = dest;
@@ -110,7 +117,7 @@ function getFinishedPath(virtualPath: string, downloadsDir: string): string {
     const dot = base.lastIndexOf(".");
     const name = dot >= 0 ? base.slice(0, dot) : base;
     const ext = dot >= 0 ? base.slice(dot) : "";
-    candidate = join(downloadsDir, `${name} (${counter})${ext}`);
+    candidate = join(dir, `${name} (${counter})${ext}`);
     counter++;
     if (counter > 1000) break;
   }
@@ -130,6 +137,44 @@ export class TransferManager {
   private downloadsDir: string;
   private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; connectPeer: (u: string, t: string) => Promise<Socket> } | undefined;
   private tokenCounter = Math.floor(Math.random() * 900000) + 10000;
+  private statsManager: StatsManager;
+  private userUpdateCounter = new Map<string, number>();
+  private globalUpdateCounter = 0;
+  // Config mirrors nicotine transfers.* — updated via setConfig from server.ts WS
+  private config = {
+    uploadslots: 3,
+    useupslots: true,
+    uploadlimit: 1000,
+    uploadlimitalt: 100,
+    use_upload_speed_limit: "unlimited" as "unlimited" | "primary" | "alternative",
+    downloadlimit: 1000,
+    downloadlimitalt: 100,
+    use_download_speed_limit: "unlimited" as "unlimited" | "primary" | "alternative",
+    uploadbandwidth: 50,
+    fifoqueue: false,
+    limitby: true,
+    queuelimit: 10000,
+    filelimit: 100,
+    friendsnolimits: false,
+    preferfriends: false,
+    autoclear_downloads: false,
+    autoclear_uploads: false,
+    usernamesubfolders: false,
+    downloadfilters: [] as [string, number][],
+    enablefilters: false,
+    groupdownloads: "folder_grouping",
+    groupuploads: "folder_grouping",
+    banlist: [] as string[],
+    ipblocklist: {} as Record<string, string>,
+    usecustomban: false,
+    customban: "Banned, don't bother retrying",
+    geoblock: false,
+    geoblockcc: [""] as string[],
+    usecustomgeoblock: false,
+    customgeoblock: "Sorry, your country is blocked",
+    buddies: [] as string[],
+    privilegedUsers: [] as string[],
+  };
 
   constructor(opts: {
     dataDir?: string;
@@ -149,6 +194,7 @@ export class TransferManager {
     this.dataDir = opts.dataDir || process.env.DATA_DIR || "/data";
     this.incompleteDir = process.env.INCOMPLETE_DIR || join(this.dataDir, "incomplete");
     this.downloadsDir = process.env.DOWNLOADS_DIR || join(this.dataDir, "downloads");
+    this.statsManager = new StatsManager({ dataDir: this.dataDir });
 
     try {
       for (const p of [this.dataDir, this.incompleteDir, this.downloadsDir, join(this.dataDir, "uploads")]) {
@@ -167,6 +213,62 @@ export class TransferManager {
 
   setSessionGetter(getter: () => ReturnType<TransferManager["sessionGetter"]>) {
     this.sessionGetter = getter;
+  }
+
+  setConfig(partial: Partial<typeof this.config>) {
+    Object.assign(this.config, partial);
+  }
+
+  getStatsSummary() {
+    return {
+      total: this.statsManager.getTotal(),
+      session: this.statsManager.getSession(),
+    };
+  }
+
+  clearFinished(type: "downloads" | "uploads" | "all" = "all") {
+    const toDelete: string[] = [];
+    for (const [id, t] of this.transfers) {
+      if (t.status !== "Finished") continue;
+      if (type === "downloads" && t.isUpload) continue;
+      if (type === "uploads" && !t.isUpload) continue;
+      toDelete.push(id);
+    }
+    for (const id of toDelete) {
+      this.transfers.delete(id);
+      this.onRemoved(id);
+    }
+    if (toDelete.length) this.persist();
+    this.emitStats();
+  }
+
+  private isFilteredDownload(username: string, virtualPath: string): boolean {
+    if (!this.config.enablefilters || !this.config.downloadfilters.length) return false;
+    const base = virtualPath.split("\\").pop() || virtualPath;
+    for (const [pattern, escaped] of this.config.downloadfilters) {
+      try {
+        const regex = escaped ? new RegExp(pattern) : new RegExp(`^${pattern.replace(/\./g, "\\.").replace(/\*/g, ".*").replace(/\?/g, ".")}$`, "i");
+        // For wildcard mode (escaped=1 means already regex? nicotine: 1=escaped)
+        // nicotine downloadfilters: (pattern, escaped) where escaped=1 means regex, 0=wildcard
+        // We treat escaped===1 as regex, else convert wildcard
+        const testRegex = escaped ? new RegExp(pattern) : new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`, "i");
+        if (testRegex.test(base) || testRegex.test(virtualPath)) return true;
+      } catch {}
+    }
+    return false;
+  }
+
+  private isBuddy(username: string): boolean {
+    return this.config.buddies.includes(username);
+  }
+
+  private isPrivileged(username: string): boolean {
+    return this.config.privilegedUsers.includes(username);
+  }
+
+  private shouldUseBuddyLimits(username: string): boolean {
+    if (!this.config.friendsnolimits) return false;
+    return this.isBuddy(username) || this.isPrivileged(username);
   }
 
   private get session() {
@@ -296,17 +398,29 @@ export class TransferManager {
   getFilePathForToken(token: number): string | null {
     const t = this.getByToken(token);
     if (!t || t.status !== "Finished" || !t._downloadUrl) return null;
-    // _downloadUrl is /files/:token, file is in downloadsDir
+    // Try stored path first
+    const stored = (t as unknown as { _incompletePath?: string })._incompletePath;
+    if (stored && existsSync(stored)) return stored;
     // Reconstruct finished path
-    const finished = getFinishedPath(t.virtualPath, this.downloadsDir);
-    // Actually we stored via moveFinished; find existing file with fileName
     const byName = join(this.downloadsDir, t.fileName);
     if (existsSync(byName)) return byName;
+    if (this.config.usernamesubfolders && t.username) {
+      const sub = join(this.downloadsDir, t.username.replace(/[/\\]/g, "_"), t.fileName);
+      if (existsSync(sub)) return sub;
+    }
     // Try scan downloads dir for fileName
     try {
       const files = readdirSync(this.downloadsDir);
       const match = files.find((f) => f === t.fileName || f.startsWith(t.fileName.replace(/\.[^.]+$/, "")));
       if (match) return join(this.downloadsDir, match);
+      // scan subfolders if usernamesubfolders
+      if (this.config.usernamesubfolders && t.username) {
+        try {
+          const subFiles = readdirSync(join(this.downloadsDir, t.username.replace(/[/\\]/g, "_")));
+          const m2 = subFiles.find((f) => f === t.fileName);
+          if (m2) return join(this.downloadsDir, t.username.replace(/[/\\]/g, "_"), m2);
+        } catch {}
+      }
     } catch {}
     return null;
   }
@@ -325,6 +439,22 @@ export class TransferManager {
       this.emit(existing);
       return existing;
     }
+    // Download filter check (nicotine downloadfilters)
+    if (this.isFilteredDownload(username, virtualPath)) {
+      const token = this.tokenCounter++ >>> 0;
+      if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
+      const t: BridgeTransfer = {
+        id, username, virtualPath, fileName: fileName ?? fileNameOf(virtualPath),
+        size: size || 1_000_000, current: 0, speed: 0, avgSpeed: 0, timeLeft: null,
+        status: "Filtered", queuePosition: null, isUpload: false, token,
+      };
+      this.transfers.set(id, t);
+      this.emit(t);
+      this.emitStats();
+      this.persist();
+      logger.info("transfer", "download filtered", { username, virtualPath });
+      return t;
+    }
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     const t: BridgeTransfer = {
@@ -342,7 +472,11 @@ export class TransferManager {
       isUpload: false,
       token,
     };
+    // Track for FIFO/RoundRobin
+    this.globalUpdateCounter++;
+    this.userUpdateCounter.set(username, this.globalUpdateCounter);
     this.transfers.set(id, t);
+    this.statsManager.recordDownloadStarted(t.size);
     this.emit(t);
     this.emitStats();
     this.persist();
@@ -437,11 +571,47 @@ export class TransferManager {
     }
   }
 
-  // ---- Phase 4: upload serving (minimal FIFO) ----
+  // ---- Phase 4: upload serving (FIFO/Round Robin with buddy/privileged) ----
 
   /** Handle incoming QueueUpload from peer (they want to download from us). */
   handleQueueUpload(username: string, virtualPath: string) {
     const id = `${username}::${virtualPath}`;
+    // 0. Ban/Geoblock check before queuing (nicotine networkfilter.py)
+    // Use cached peer address country if available via pending; fallback to global filter check
+    const peerIp = ""; // ip unknown at this stage — check after GetPeerAddress if needed
+    const country = getCountryCode(peerIp);
+    const block = shouldBlockUser({
+      username,
+      ip: peerIp,
+      countryCode: country,
+      banlist: this.config.banlist,
+      ipblocklist: this.config.ipblocklist,
+      geoblock: this.config.geoblock,
+      geoblockcc: this.config.geoblockcc,
+    });
+    // Note: ip empty → ipblock not triggered; we will re-check with real IP in session hook
+    // Simple username ban check here
+    if (this.config.banlist.includes(username)) {
+      const banMsg = this.config.usecustomban ? this.config.customban : "Banned, don't bother retrying";
+      const t: BridgeTransfer = {
+        id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Banned", queuePosition: null, isUpload: true,
+      };
+      this.transfers.set(id, t);
+      this.emit(t);
+      logger.info("transfer", "upload denied banned", { username, banMsg });
+      return t;
+    }
+    if (block.blocked && block.reason === "Geoblocked") {
+      const msg = this.config.usecustomgeoblock ? this.config.customgeoblock : "Sorry, your country is blocked";
+      const t: BridgeTransfer = {
+        id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Banned", queuePosition: null, isUpload: true,
+      };
+      this.transfers.set(id, t);
+      this.emit(t);
+      logger.info("transfer", "upload denied geoblocked", { username, country });
+      return t;
+    }
+
     // 1. already queued?
     if (this.transfers.has(id)) {
       const existing = this.transfers.get(id)!;
@@ -450,10 +620,13 @@ export class TransferManager {
         return existing;
       }
     }
-    // 2. queue limit check (filelimit 100 / queuelimit 10000 MB)
+    // 2. queue limit check (filelimit / queuelimit) — respects friendsnolimits
+    const bypassLimits = this.shouldUseBuddyLimits(username);
     const queuedUploads = [...this.transfers.values()].filter((t) => t.isUpload && t.status === "Queued").length;
     const totalQueuedMB = [...this.transfers.values()].filter((t) => t.isUpload && t.status === "Queued").reduce((s, t) => s + t.size, 0) / (1024 * 1024);
-    if (queuedUploads >= 100) {
+    const effectiveFileLimit = bypassLimits ? Infinity : (this.config.filelimit || 100);
+    const effectiveQueueLimit = bypassLimits ? Infinity : (this.config.queuelimit || 10000);
+    if (queuedUploads >= effectiveFileLimit) {
       const t: BridgeTransfer = {
         id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Too many files", queuePosition: null, isUpload: true,
       };
@@ -461,7 +634,7 @@ export class TransferManager {
       this.emit(t);
       return t;
     }
-    if (totalQueuedMB >= 10000) {
+    if (totalQueuedMB >= effectiveQueueLimit) {
       const t: BridgeTransfer = {
         id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Too many megabytes", queuePosition: null, isUpload: true,
       };
@@ -501,19 +674,64 @@ export class TransferManager {
   }
 
   private checkUploadQueue() {
-    // Guard: is_new_upload_accepted — uploadslots 2, useupslots true
+    // Determine max active uploads: useupslots ? uploadslots fixed, else auto via bandwidth (simplified to 2*uploadslots/3 fixed)
+    const maxActive = this.config.useupslots ? Math.max(1, this.config.uploadslots || 3) : Math.max(1, Math.ceil(this.config.uploadbandwidth / 30));
     const activeUploads = [...this.transfers.values()].filter((t) => t.isUpload && t.status === "Transferring").length;
-    if (activeUploads >= 2) return;
-    // Pick earliest queued upload (FIFO)
-    const candidate = [...this.transfers.values()].find((t) => t.isUpload && t.status === "Queued");
+    if (activeUploads >= maxActive) return;
+
+    // Select candidate: FIFO vs Round Robin
+    const queued = [...this.transfers.values()].filter((t) => t.isUpload && t.status === "Queued");
+    if (!queued.length) return;
+
+    // Privileged/buddy prioritization: prefer privileged, then buddies if preferfriends
+    const isPriv = (u: string) => this.isPrivileged(u);
+    const isBuddy = (u: string) => this.isBuddy(u);
+    // Sort by priority then by policy
+    let candidate: BridgeTransfer | undefined;
+    // First, privileged users always first
+    const privilegedQueued = queued.filter((t) => isPriv(t.username));
+    const buddyQueued = queued.filter((t) => !isPriv(t.username) && isBuddy(t.username));
+    const normalQueued = queued.filter((t) => !isPriv(t.username) && !isBuddy(t.username));
+
+    const pickFrom = (list: BridgeTransfer[]): BridgeTransfer | undefined => {
+      if (!list.length) return undefined;
+      if (this.config.fifoqueue) {
+        // FIFO: earliest arrival (insertion order = Map order)
+        return list[0];
+      } else {
+        // Round Robin: oldest user_update_counter
+        let oldest: BridgeTransfer | undefined;
+        let oldestCounter = Infinity;
+        for (const t of list) {
+          const c = this.userUpdateCounter.get(t.username) ?? Infinity;
+          if (c < oldestCounter) { oldestCounter = c; oldest = t; }
+        }
+        return oldest ?? list[0];
+      }
+    };
+
+    if (this.config.preferfriends) {
+      candidate = pickFrom(privilegedQueued) || pickFrom(buddyQueued) || pickFrom(normalQueued);
+    } else {
+      // Without preferfriends, privileged still first, then FIFO/RoundRobin across all
+      candidate = pickFrom(privilegedQueued) || pickFrom(queued);
+      if (!candidate && !this.config.fifoqueue) {
+        // Round Robin across all if no privileged
+        candidate = pickFrom(queued);
+      }
+      if (!candidate) candidate = queued[0];
+    }
+
     if (!candidate) return;
     // Validate online (stub assume online)
     candidate.status = "Transferring";
     candidate._startTime = Date.now();
+    // Update counter for round robin
+    this.globalUpdateCounter++;
+    this.userUpdateCounter.set(candidate.username, this.globalUpdateCounter);
     this.emit(candidate);
     this.emitStats();
-    // In real nicotine+ we'd send TransferRequest(UPLOAD, token, file, size) and wait for TransferResponse
-    // For Phase 4 minimal, we simulate TransferRequest emission via session
+    this.statsManager.recordUploadStarted();
     const token = this.tokenCounter++ >>> 0;
     candidate.token = token;
     try { this.session?.transferRequest?.(candidate.username, 1, token, candidate.virtualPath, BigInt(candidate.size || 0)); } catch {}
@@ -593,14 +811,22 @@ export class TransferManager {
   }
 
   // Bandwidth limiter — token bucket approximation (nicotine slskproto.py Limetr)
-  // Env UPLOAD_LIMIT / DOWNLOAD_LIMIT in KB/s (0 = unlimited)
+  // Env UPLOAD_LIMIT / DOWNLOAD_LIMIT in KB/s (0 = unlimited) + config use_*_speed_limit
   private getUploadLimit(): number {
-    const raw = Number(process.env.UPLOAD_LIMIT || process.env.UPLOADLIMIT || 0);
-    return raw > 0 ? raw * 1024 : 0;
+    const envRaw = Number(process.env.UPLOAD_LIMIT || process.env.UPLOADLIMIT || 0);
+    if (envRaw > 0) return envRaw * 1024;
+    const cfg = this.config;
+    if (cfg.use_upload_speed_limit === "unlimited") return 0;
+    const limit = cfg.use_upload_speed_limit === "alternative" ? cfg.uploadlimitalt : cfg.uploadlimit;
+    return limit > 0 ? limit * 1024 : 0;
   }
   private getDownloadLimit(): number {
-    const raw = Number(process.env.DOWNLOAD_LIMIT || process.env.DOWNLOADLIMIT || 0);
-    return raw > 0 ? raw * 1024 : 0;
+    const envRaw = Number(process.env.DOWNLOAD_LIMIT || process.env.DOWNLOADLIMIT || 0);
+    if (envRaw > 0) return envRaw * 1024;
+    const cfg = this.config;
+    if (cfg.use_download_speed_limit === "unlimited") return 0;
+    const limit = cfg.use_download_speed_limit === "alternative" ? cfg.downloadlimitalt : cfg.downloadlimit;
+    return limit > 0 ? limit * 1024 : 0;
   }
   private limiterDelay(bytes: number, limitBps: number): number {
     if (!limitBps) return 0;
@@ -800,10 +1026,25 @@ export class TransferManager {
           t.current = fileSize || t.size;
           t.status = "Finished";
           t.speed = 0;
+          this.statsManager.recordUploadCompleted(t.size || fileSize);
           this.emit(t);
           this.emitStats();
+          if (this.config.autoclear_uploads) {
+            setTimeout(() => {
+              if (this.transfers.has(t.id) && t.status === "Finished") {
+                this.transfers.delete(t.id);
+                this.onRemoved(t.id);
+                this.emitStats();
+                this.persist();
+              }
+            }, 100);
+          } else {
+            this.persist();
+          }
           try { socket.end(); } catch {}
           try { this.session?.sendUploadSpeed(t.avgSpeed || 0); } catch {}
+          // try next queued upload
+          setTimeout(() => this.checkUploadQueue(), 100);
           return;
         }
         const toSend = Math.min(dummyChunk.length, remaining - sent);
@@ -855,10 +1096,24 @@ export class TransferManager {
         t.status = "Finished";
         t.speed = 0;
         t.current = fileSize;
+        this.statsManager.recordUploadCompleted(fileSize);
         this.emit(t);
         this.emitStats();
+        if (this.config.autoclear_uploads) {
+          setTimeout(() => {
+            if (this.transfers.has(t.id) && t.status === "Finished") {
+              this.transfers.delete(t.id);
+              this.onRemoved(t.id);
+              this.emitStats();
+              this.persist();
+            }
+          }, 100);
+        } else {
+          this.persist();
+        }
         try { socket.end(); } catch {}
         try { this.session?.sendUploadSpeed(t.avgSpeed || 0); } catch {}
+        setTimeout(() => this.checkUploadQueue(), 100);
       });
       rs.on("error", () => {
         t.status = "File read error.";
@@ -873,6 +1128,7 @@ export class TransferManager {
   }
 
   private async prepareIncompleteFile(t: BridgeTransfer): Promise<number> {
+    // Handle usernamesubfolders for incomplete as well? Keep incomplete flat, finished will respect subfolders
     const incompletePath = getIncompletePath(t.virtualPath, t.username, this.incompleteDir);
     t._incompletePath = incompletePath;
     try {
@@ -884,7 +1140,6 @@ export class TransferManager {
       const stat = statSync(incompletePath);
       let offset = stat.size;
       // size_changed → truncate to 0 (nicotine truncates to 0 and restarts; we truncate to 0)
-      // Alternative would be ftruncate to t.size, but 0 is safer for mismatch
       if (offset > t.size) {
         try { const { ftruncateSync } = require("node:fs"); ftruncateSync(fd, 0); offset = 0; } catch {}
       }
@@ -901,13 +1156,11 @@ export class TransferManager {
     try { const { closeSync } = require("node:fs"); if (t._fileHandle !== undefined) { try { closeSync(t._fileHandle); } catch {} t._fileHandle = undefined; } } catch {}
     const stall = (t as unknown as { _stallTimer?: Timer })._stallTimer;
     if (stall) clearTimeout(stall);
-    // Move to downloads dir with collision handling
+    // Move to downloads dir with collision handling + usernamesubfolders
     try {
-      const dest = getFinishedPath(t.virtualPath, this.downloadsDir);
+      const dest = getFinishedPath(t.virtualPath, this.downloadsDir, t.username, this.config.usernamesubfolders);
       renameSync(t._incompletePath!, dest);
       t._downloadUrl = `/files/${t.token}`;
-      // keep actual path for serving
-      // Store dest in _incompletePath for serving
       t._incompletePath = dest;
     } catch {
       t.status = "Download folder error";
@@ -920,14 +1173,24 @@ export class TransferManager {
     t.speed = 0;
     t.timeLeft = null;
     t.queuePosition = null;
-    // Send upload speed update (nicotine+ bookkeeping)
     try { this.session?.sendUploadSpeed(t.avgSpeed || 0); } catch {}
+    this.statsManager.recordDownloadCompleted(t.size);
     this.emit(t);
     this.emitFinished(t);
     this.emitStats();
     this.persist();
+    // Autoclear downloads if configured (nicotine autoclear_downloads)
+    if (this.config.autoclear_downloads) {
+      setTimeout(() => {
+        if (this.transfers.has(t.id) && t.status === "Finished") {
+          this.transfers.delete(t.id);
+          this.onRemoved(t.id);
+          this.emitStats();
+          this.persist();
+        }
+      }, 100);
+    }
     try { socket.end(); } catch {}
-    // Cleanup poll
     if (t._pollTimer) { clearInterval(t._pollTimer); t._pollTimer = undefined; }
   }
 
@@ -945,7 +1208,8 @@ export class TransferManager {
       const step = Math.min(chunk * 0.5, cur.size - cur.current);
       cur.current += step;
       const elapsed = (Date.now() - (cur._startTime ?? Date.now())) / 1000;
-      cur.speed = step * 2;
+      const dlLimit = this.getDownloadLimit();
+      cur.speed = dlLimit ? Math.min(step * 2, dlLimit) : step * 2;
       cur.avgSpeed = elapsed > 0 ? cur.current / elapsed : cur.speed;
       cur.timeLeft = cur.speed > 0 ? Math.ceil((cur.size - cur.current) / cur.speed) : null;
       if (cur.current >= cur.size) {
@@ -955,9 +1219,19 @@ export class TransferManager {
         cur.timeLeft = null;
         clearInterval(cur._timer!);
         cur._timer = undefined;
-        // Simulate moveFinished for stub
         cur._downloadUrl = `/files/${cur.token}`;
+        this.statsManager.recordDownloadCompleted(cur.size);
         this.emitFinished(cur);
+        if (this.config.autoclear_downloads) {
+          setTimeout(() => {
+            if (this.transfers.has(cur.id) && cur.status === "Finished") {
+              this.transfers.delete(cur.id);
+              this.onRemoved(cur.id);
+              this.emitStats();
+              this.persist();
+            }
+          }, 100);
+        }
       }
       this.emit(cur);
       this.emitStats();

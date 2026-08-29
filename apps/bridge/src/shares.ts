@@ -37,9 +37,14 @@ export class ShareDB {
   private dataDir: string;
   private lastShareRequests = new Map<string, number>(); // flood protection 0.4s per nicotine shares.py:1342
   private static readonly SHARE_THROTTLE_MS = 400;
+  private shareFilters: string[] = [".*", ".*\\", "@eaDir\\", "#recycle\\", "#snapshot\\", "desktop.ini", "Thumbs.db"];
+  private fileFilterRegexes: RegExp[] = [];
+  private folderFilterRegexes: RegExp[] = [];
 
-  constructor(opts?: { dataDir?: string }) {
+  constructor(opts?: { dataDir?: string; shareFilters?: string[] }) {
     this.dataDir = opts?.dataDir || defaultDataDir();
+    if (opts?.shareFilters) this.setShareFilters(opts.shareFilters);
+    else this.compileShareFilters();
     this.load();
     // Auto-scan if folders empty and shared dirs exist on FS
     if (this.folders.length === 0) {
@@ -59,14 +64,20 @@ export class ShareDB {
       if (existsSync(alt)) {
         try {
           const raw = JSON.parse(readFileSync(alt, "utf8"));
-          if (Array.isArray(raw.folders)) this.folders = raw.folders;
+          if (Array.isArray(raw.folders)) {
+            this.folders = raw.folders;
+            if (Array.isArray(raw.shareFilters)) { this.shareFilters = raw.shareFilters; this.compileShareFilters(); }
+          }
         } catch {}
       }
       return;
     }
     try {
       const raw = JSON.parse(readFileSync(p, "utf8"));
-      if (Array.isArray(raw.folders)) this.folders = raw.folders;
+      if (Array.isArray(raw.folders)) {
+        this.folders = raw.folders;
+        if (Array.isArray(raw.shareFilters)) { this.shareFilters = raw.shareFilters; this.compileShareFilters(); }
+      }
       else if (Array.isArray(raw)) this.folders = raw;
     } catch {}
   }
@@ -75,11 +86,52 @@ export class ShareDB {
     try {
       const p = sharesPath();
       mkdirSync(join(p, ".."), { recursive: true });
-      writeFileSync(p, JSON.stringify({ folders: this.folders }, null, 2));
+      writeFileSync(p, JSON.stringify({ folders: this.folders, shareFilters: this.shareFilters }, null, 2));
       // also mirror to DATA_DIR/shares.json
       const alt = join(this.dataDir, "shares.json");
-      if (alt !== p) writeFileSync(alt, JSON.stringify({ folders: this.folders }, null, 2));
+      if (alt !== p) writeFileSync(alt, JSON.stringify({ folders: this.folders, shareFilters: this.shareFilters }, null, 2));
     } catch {}
+  }
+
+  setShareFilters(filters: string[]) {
+    this.shareFilters = filters.slice();
+    this.compileShareFilters();
+    this.persist();
+  }
+
+  getShareFilters(): string[] { return [...this.shareFilters]; }
+
+  private compileShareFilters() {
+    this.fileFilterRegexes = [];
+    this.folderFilterRegexes = [];
+    for (const pat of this.shareFilters) {
+      if (!pat) continue;
+      // Trailing \ indicates folder filter (nicotine shares.py: share_filters with trailing \)
+      const isFolder = pat.endsWith("\\");
+      try {
+        const regex = new RegExp(pat, "i");
+        if (isFolder) this.folderFilterRegexes.push(regex);
+        else this.fileFilterRegexes.push(regex);
+      } catch {
+        // invalid regex — skip (nicotine validates via new RegExp("(" + pattern + ")")
+        try {
+          const regex = new RegExp(`(${pat})`, "i");
+          if (isFolder) this.folderFilterRegexes.push(regex);
+          else this.fileFilterRegexes.push(regex);
+        } catch {}
+      }
+    }
+  }
+
+  isFileFiltered(fileName: string): boolean {
+    for (const re of this.fileFilterRegexes) if (re.test(fileName)) return true;
+    return false;
+  }
+
+  isFolderFiltered(folderName: string): boolean {
+    // folder filters tested against virtual path + real folder name
+    for (const re of this.folderFilterRegexes) if (re.test(folderName)) return true;
+    return false;
   }
 
   setFolders(folders: ShareFolder[]) {
@@ -130,14 +182,25 @@ export class ShareDB {
   private walkDir(realPath: string, virtualPath: string, out: ShareFolder[]) {
     let entries: string[];
     try { entries = readdirSync(realPath); } catch { return; }
+    // Check folder filter against virtual path (with trailing \)
+    const folderTest = `${virtualPath}\\`;
+    if (this.isFolderFiltered(folderTest) || this.isFolderFiltered(virtualPath)) return;
     const files: ShareFile[] = [];
     for (const ent of entries) {
       const full = join(realPath, ent);
       let st;
       try { st = statSync(full); } catch { continue; }
       if (st.isDirectory()) {
-        this.walkDir(full, `${virtualPath}\\${ent}`, out);
+        const subVirtual = `${virtualPath}\\${ent}`;
+        if (this.isFolderFiltered(`${subVirtual}\\`) || this.isFolderFiltered(subVirtual)) continue;
+        this.walkDir(full, subVirtual, out);
       } else if (st.isFile()) {
+        if (this.isFileFiltered(ent) || this.isFileFiltered(`${virtualPath}\\${ent}`)) continue;
+        // Skip hidden files on Win32 hidden attr — plain dotfile check for unix
+        if (ent.startsWith(".")) {
+          // honour share filter ".*": already matches dotfiles via regex; if not filtered, still skip hidden if share_filters contains ".*"
+          // we already filtered via regex, so keep dotfiles unless explicitly filtered
+        }
         const ext = extname(ent).slice(1).toLowerCase();
         const attrs = this.buildAttrs(full, ext, st.size);
         files.push({ name: `${virtualPath}\\${ent}`, size: st.size, ext, attrs });
@@ -178,14 +241,19 @@ export class ShareDB {
   private async walkDirAsync(realPath: string, virtualPath: string, out: ShareFolder[]) {
     let entries: string[];
     try { entries = readdirSync(realPath); } catch { return; }
+    const folderTest = `${virtualPath}\\`;
+    if (this.isFolderFiltered(folderTest) || this.isFolderFiltered(virtualPath)) return;
     const files: ShareFile[] = [];
     for (const ent of entries) {
       const full = join(realPath, ent);
       let st;
       try { st = statSync(full); } catch { continue; }
       if (st.isDirectory()) {
-        await this.walkDirAsync(full, `${virtualPath}\\${ent}`, out);
+        const subVirtual = `${virtualPath}\\${ent}`;
+        if (this.isFolderFiltered(`${subVirtual}\\`) || this.isFolderFiltered(subVirtual)) continue;
+        await this.walkDirAsync(full, subVirtual, out);
       } else if (st.isFile()) {
+        if (this.isFileFiltered(ent) || this.isFileFiltered(`${virtualPath}\\${ent}`)) continue;
         const ext = extname(ent).slice(1).toLowerCase();
         const attrs = await this.buildAttrsAsync(full, ext);
         files.push({ name: `${virtualPath}\\${ent}`, size: st.size, ext, attrs });

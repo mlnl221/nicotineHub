@@ -7,6 +7,8 @@ import { applyFilters } from "@/lib/filter";
 import { useTransfers } from "@/lib/transfers";
 import type { SearchRow } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
+import { useConfig } from "@/lib/config/provider";
+import { WishlistManager } from "@/components/WishlistManager";
 import { SearchBar } from "./SearchBar";
 import { SearchTabs } from "./SearchTabs";
 import { FilterBar } from "./FilterBar";
@@ -15,6 +17,7 @@ import { ResultsList } from "./ResultsList";
 export function SearchScreen() {
   const { activeTab, activeId, startSearch, stopSearch, setFilters, clearFilters } = useSearches();
   const { requestDownload } = useTransfers();
+  const { settings } = useConfig();
   const router = useRouter();
   const [showFilters, setShowFilters] = useState(false);
   const [sheetRow, setSheetRow] = useState<SearchRow | null>(null);
@@ -91,12 +94,33 @@ export function SearchScreen() {
       {activeTab ? (
         <ResultsList rows={visibleRows} onRowTap={setSheetRow} />
       ) : (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 py-20 text-center">
-          <span className="material-symbols-outlined text-5xl text-outline">travel_explore</span>
-          <p className="font-headline text-xl text-on-surface">Search the network</p>
-          <p className="font-body text-sm text-on-surface-variant">
-            Enter a query above to search Soulseek. Each search opens in its own tab.
-          </p>
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4 py-8">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <span className="material-symbols-outlined text-5xl text-outline">travel_explore</span>
+            <p className="font-headline text-xl text-on-surface">Search the network</p>
+            <p className="font-body text-sm text-on-surface-variant">
+              Enter a query above to search Soulseek. Each search opens in its own tab.
+            </p>
+            {settings.searches.enable_history && settings.searches.history.length > 0 ? (
+              <div className="mt-2 flex flex-wrap justify-center gap-2">
+                {settings.searches.history.slice(-8).map((h) => (
+                  <button
+                    key={h}
+                    onClick={() => startSearch(h)}
+                    className="rounded-full bg-surface-container-high px-3 py-1 text-xs text-on-surface-variant hover:text-primary"
+                  >
+                    {h}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <div className="w-full max-w-md">
+            <WishlistManager />
+          </div>
+          <div className="text-[11px] text-on-surface-variant">
+            Grouping: {settings.searches.group_searches} · Expand: {settings.searches.expand_results} · Filters {settings.searches.enablefilters ? "on" : "off"}
+          </div>
         </div>
       )}
 

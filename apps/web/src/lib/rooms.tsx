@@ -2,7 +2,31 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "@/lib/session";
+import { useConfig } from "@/lib/config/provider";
 import type { ChatEvent, RoomEvent } from "@/lib/protocol";
+
+function applyWords(text: string, cfg: { censorwords: boolean; censored: string[]; replacewords: boolean; autoreplaced: Record<string, string> }): string {
+  let out = text;
+  if (cfg.replacewords && cfg.autoreplaced) {
+    for (const [from, to] of Object.entries(cfg.autoreplaced)) {
+      if (!from) continue;
+      // Simple replace (nicotine does whole-word aware but we do simple)
+      out = out.split(from).join(to);
+    }
+  }
+  if (cfg.censorwords && cfg.censored.length) {
+    for (const pat of cfg.censored) {
+      if (!pat) continue;
+      try {
+        const re = new RegExp(pat, "gi");
+        out = out.replace(re, "*".repeat(pat.length));
+      } catch {
+        out = out.split(pat).join("*".repeat(pat.length));
+      }
+    }
+  }
+  return out;
+}
 
 export interface RoomMessage {
   id: string;
@@ -20,6 +44,7 @@ export interface JoinedRoom {
 
 export function useRooms() {
   const { send, subscribe, state } = useSession();
+  const { settings } = useConfig();
   const [roomList, setRoomList] = useState<{ name: string; users: number }[]>([]);
   const [joinedRooms, setJoinedRooms] = useState<Map<string, JoinedRoom>>(() => new Map());
   const [messages, setMessages] = useState<Map<string, RoomMessage[]>>(() => new Map());
@@ -115,11 +140,14 @@ export function useRooms() {
       } else if (msg.type === "chat:event") {
         const ev = (msg as unknown as { event: ChatEvent }).event;
         if (ev.type === "say-chatroom" && ev.room && ev.username && ev.message) {
+          // Apply censor filter on display if enabled (mirrors nicotine chatrooms censor)
+          const filtered = applyWords(ev.message, { censorwords: settings.words.censorwords, censored: settings.words.censored, replacewords: false, autoreplaced: {} });
+          const displayMsg = settings.words.censorwords ? filtered : ev.message;
           const rm: RoomMessage = {
             id: `msg-${Date.now()}-${Math.random()}`,
             room: ev.room,
             username: ev.username,
-            message: ev.message,
+            message: displayMsg,
             timestamp: Date.now(),
           };
           setMessages((prev) => {
@@ -146,7 +174,7 @@ export function useRooms() {
       }
     });
     return unsub;
-  }, [state.status, subscribe, activeRoom]);
+  }, [state.status, subscribe, activeRoom, settings.words.censorwords, settings.words.censored]);
 
   const joinRoom = useCallback(
     (room: string) => {
@@ -184,10 +212,13 @@ export function useRooms() {
   const say = useCallback(
     (room: string, message: string) => {
       if (!message.trim()) return;
-      send({ type: "chat:room", action: "say", room, message: message.trim() });
-      // optimistic local echo will come back via server as say-chatroom
+      let out = message.trim();
+      // /me action handling
+      if (out.startsWith("/me ")) out = `* ${out.slice(4)}`;
+      out = applyWords(out, { censorwords: settings.words.censorwords, censored: settings.words.censored, replacewords: settings.words.replacewords, autoreplaced: settings.words.autoreplaced });
+      send({ type: "chat:room", action: "say", room, message: out });
     },
-    [send],
+    [send, settings.words],
   );
 
   const closeAll = useCallback(() => {
