@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useTransfers } from "@/lib/transfers";
+import { useConfig } from "@/lib/config/provider";
 
 type NavItem = { icon: string; label: string; href: string };
 
@@ -41,11 +42,14 @@ export function BottomNav() {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
   const { downloads, uploads } = useTransfers();
+  const { settings } = useConfig();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const transferCount = mounted ? downloads.length + uploads.length : 0;
-
-  const moreActive = mounted && MORE.some((i) => isActive(pathname, i.href));
+  const visibleMap = settings.ui.modes_visible || {};
+  const hrefToKey: Record<string, string> = { "/search": "search", "/downloads": "downloads", "/private-chat": "privateChat", "/browse": "browse", "/buddies": "buddies", "/uploads": "uploads", "/chat": "chat", "/profile": "profile", "/interests": "interests" };
+  const moreFiltered = mounted ? MORE.filter((i) => visibleMap[hrefToKey[i.href]] !== false) : MORE;
+  const moreActive = mounted && moreFiltered.some((i) => isActive(pathname, i.href));
 
   return (
     <>
@@ -64,7 +68,7 @@ export function BottomNav() {
         <div className="p-2">
           <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-outline-variant/40" />
           <div className="grid grid-cols-3 gap-2 p-2">
-            {MORE.map((item) => {
+            {moreFiltered.map((item) => {
               const active = mounted ? isActive(pathname, item.href) : false;
               return (
                 <Link

@@ -231,6 +231,12 @@ export class TransferManager {
     };
   }
 
+  resetStats() {
+    this.statsManager.reset();
+    this.emitStats();
+    this.persist();
+  }
+
   clearFinished(type: "downloads" | "uploads" | "all" = "all") {
     const toDelete: string[] = [];
     for (const [id, t] of this.transfers) {
@@ -579,42 +585,35 @@ export class TransferManager {
   // ---- Phase 4: upload serving (FIFO/Round Robin with buddy/privileged) ----
 
   /** Handle incoming QueueUpload from peer (they want to download from us). */
-  handleQueueUpload(username: string, virtualPath: string) {
+  handleQueueUpload(username: string, virtualPath: string, peerIp?: string) {
     const id = `${username}::${virtualPath}`;
     // 0. Ban/Geoblock check before queuing (nicotine networkfilter.py)
-    // Use cached peer address country if available via pending; fallback to global filter check
-    const peerIp = ""; // ip unknown at this stage — check after GetPeerAddress if needed
-    const country = getCountryCode(peerIp);
+    const ip = peerIp || "";
+    const country = ip ? getCountryCode(ip) : "";
     const block = shouldBlockUser({
       username,
-      ip: peerIp,
+      ip,
       countryCode: country,
       banlist: this.config.banlist,
       ipblocklist: this.config.ipblocklist,
       geoblock: this.config.geoblock,
       geoblockcc: this.config.geoblockcc,
     });
-    // Note: ip empty → ipblock not triggered; we will re-check with real IP in session hook
-    // Simple username ban check here
-    if (this.config.banlist.includes(username)) {
-      const banMsg = this.config.usecustomban ? this.config.customban : "Banned, don't bother retrying";
-      const t: BridgeTransfer = {
-        id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Banned", queuePosition: null, isUpload: true,
-      };
-      this.transfers.set(id, t);
-      this.emit(t);
-      logger.info("transfer", "upload denied banned", { username, banMsg });
-      return t;
-    }
-    if (block.blocked && block.reason === "Geoblocked") {
-      const msg = this.config.usecustomgeoblock ? this.config.customgeoblock : "Sorry, your country is blocked";
-      const t: BridgeTransfer = {
-        id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Banned", queuePosition: null, isUpload: true,
-      };
-      this.transfers.set(id, t);
-      this.emit(t);
-      logger.info("transfer", "upload denied geoblocked", { username, country });
-      return t;
+    if (this.config.banlist.includes(username) || block.blocked) {
+      const isGeo = block.reason === "Geoblocked";
+      const banMsg = isGeo ? (this.config.usecustomgeoblock ? this.config.customgeoblock : "Sorry, your country is blocked") : (this.config.usecustomban ? this.config.customban : "Banned, don't bother retrying");
+      // If geoblock with empty IP, defer — allow queue and re-check later via handlePeerAddressResolved
+      if (isGeo && !ip && this.config.geoblock) {
+        // defer, fall through to queue but mark for later check
+      } else {
+        const t: BridgeTransfer = {
+          id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Banned", queuePosition: null, isUpload: true,
+        };
+        this.transfers.set(id, t);
+        this.emit(t);
+        logger.info("transfer", isGeo ? "upload denied geoblocked" : "upload denied banned", { username, banMsg, ip, country });
+        return t;
+      }
     }
 
     // 1. already queued?
@@ -675,7 +674,28 @@ export class TransferManager {
     this.persist();
     // schedule upload queue check (FIFO) after 100ms
     setTimeout(() => this.checkUploadQueue(), 100);
+    // if geoblock deferred (ip empty), try to resolve address shortly
+    if (!ip && this.config.geoblock) {
+      setTimeout(() => this.handlePeerAddressResolved(username, ""), 2000);
+    }
     return t;
+  }
+
+  /** Called from session when peer address resolves to re-check geoblock */
+  handlePeerAddressResolved(username: string, ip: string) {
+    if (!this.config.geoblock) return;
+    const cc = ip ? getCountryCode(ip) : "";
+    for (const t of this.transfers.values()) {
+      if (t.username !== username || !t.isUpload || t.status !== "Queued") continue;
+      const block = shouldBlockUser({ username, ip: ip || "", countryCode: cc, banlist: this.config.banlist, ipblocklist: this.config.ipblocklist, geoblock: true, geoblockcc: this.config.geoblockcc });
+      if (block.blocked) {
+        t.status = "Banned";
+        t.queuePosition = null;
+        this.emit(t);
+        this.emitStats();
+        this.persist();
+      }
+    }
   }
 
   private checkUploadQueue() {

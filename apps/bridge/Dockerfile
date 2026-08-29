@@ -31,7 +31,11 @@ ENV NODE_ENV=production
 ENV DATA_DIR=/data
 WORKDIR /app
 COPY --from=builder /app/apps/bridge/dist ./dist
-COPY apps/bridge/src/data/ip_country_data.csv ./dist/data/ip_country_data.csv
+# GeoIP: fetch at build time (not committed — see .gitignore). Fallback to empty if offline.
+RUN mkdir -p ./dist/data && \
+    (curl -fsSL https://raw.githubusercontent.com/nicotine-plus/nicotine-plus/master/pynicotine/external/data/ip_country_data.csv -o ./dist/data/ip_country_data.csv || \
+     wget -qO ./dist/data/ip_country_data.csv https://raw.githubusercontent.com/nicotine-plus/nicotine-plus/master/pynicotine/external/data/ip_country_data.csv || \
+     echo "GeoIP fetch failed — geoblock will be no-op" && rm -f ./dist/data/ip_country_data.csv)
 COPY COPYING ./COPYING
 COPY LICENSES ./LICENSES
 COPY ATTRIBUTION.md ./ATTRIBUTION.md

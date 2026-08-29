@@ -48,6 +48,11 @@ import {
   buildSayChatroom,
   buildSendUploadSpeed,
   buildSetRoomTicker,
+  buildEnableRoomInvitations,
+  buildCancelRoomMembership,
+  buildCancelRoomOwnership,
+  buildAddRoomOperator,
+  buildRemoveRoomOperator,
   buildSetStatus,
   buildSetWaitPort,
   buildSharedFileListRequest,
@@ -93,6 +98,7 @@ import {
   parseRoomList,
   parseRoomMember,
   parseRoomMembers,
+  parseRoomOperators,
   parseRoomTickers,
   parseRoomTickerEvent,
   parseSayChatroom,
@@ -145,6 +151,7 @@ export interface SessionOptions {
   onChatEvent?: (event: ChatEvent) => void; onRoomEvent?: (event: RoomEvent) => void;
   onTransferEvent?: (event: TransferEvent) => void; onBrowseEvent?: (event: BrowseEvent) => void;
   onServerEvent?: (event: ServerEvent) => void; signal?: AbortSignal;
+  onWishlistEvent?: (event: { type: "result" | "end"; searchId: string; token: number; rows?: SearchRow[]; reason?: string }) => void;
   // F-stream wiring to TransferManager (Phase 4)
   onFileConnection?: (token: number, socket: Socket) => void;
   onFileChunk?: (token: number, chunk: Buffer) => void;
@@ -169,6 +176,9 @@ export interface ChatEvent {
 export interface RoomEvent {
   type: "join-room" | "leave-room" | "user-joined-room" | "user-left-room"
     | "room-list" | "room-members" | "room-tickers" | "ticker-added" | "ticker-removed"
+    | "room-member-added" | "room-member-removed" | "cancel-membership" | "cancel-ownership"
+    | "membership-granted" | "membership-revoked" | "operator-added" | "operator-removed"
+    | "operatorship-granted" | "operatorship-revoked" | "room-operators" | "enable-room-invitations"
     | "privileged-users" | "cant-create-room";
   room?: string; username?: string; data?: unknown;
 }
@@ -369,9 +379,22 @@ export class SoulseekSession {
         const token = this.tokenCounter++;
         if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
         this.allowedSearchTokens.add(token);
-        // Use internal search plumbing but emit via existing event
+        const searchId = `wishlist:${term}:${Date.now()}`;
+        const handlers: SearchHandlers = {
+          onResult: (p) => this.opts.onWishlistEvent?.({ type: "result", searchId: p.searchId, token: p.token, rows: p.rows }),
+          onEnd: (p) => this.opts.onWishlistEvent?.({ type: "end", searchId: p.searchId, token, reason: p.reason }),
+        };
+        const active: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
+        active.timer = setTimeout(() => {
+          this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token);
+          handlers.onEnd({ searchId, reason: "timeout" });
+        }, DEFAULT_SEARCH_TIMEOUT_MS);
+        this.searches.set(token, active);
+        this.searchIds.set(searchId, token);
         this.serverSocket.write(buildWishlistSearch(token, term));
-        logger.info("search", "wishlist auto-search", { term, token });
+        logger.info("search", "wishlist auto-search", { term, token, searchId });
+        // notify server of start via wishlist event
+        this.opts.onWishlistEvent?.({ type: "result", searchId, token, rows: [] });
       } catch {}
     }, intervalMs);
   }
@@ -988,8 +1011,48 @@ export class SoulseekSession {
       try { const rm = parseRoomMembers(payload); this.emitRoom({ type: "room-members", room: rm.room, data: rm.members }); } catch {}
       return;
     }
-    if (code === SERVER_MESSAGE_CODES.addRoomMember || code === SERVER_MESSAGE_CODES.removeRoomMember) {
-      try { const m = parseRoomMember(payload); this.emitRoom({ type: code === SERVER_MESSAGE_CODES.addRoomMember ? "room-members" : "room-members", room: m.room, username: m.username, data: m }); } catch {}
+    if (code === SERVER_MESSAGE_CODES.addRoomMember) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "room-member-added", room: m.room, username: m.username, data: m }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.removeRoomMember) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "room-member-removed", room: m.room, username: m.username }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.cancelRoomMembership) {
+      try { const room = new SlskReader(payload).string(); this.emitRoom({ type: "cancel-membership", room }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.cancelRoomOwnership) {
+      try { const room = new SlskReader(payload).string(); this.emitRoom({ type: "cancel-ownership", room }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.roomMembershipGranted) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "membership-granted", room: m.room, username: m.username }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.roomMembershipRevoked) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "membership-revoked", room: m.room, username: m.username }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.addRoomOperator) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "operator-added", room: m.room, username: m.username }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.removeRoomOperator) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "operator-removed", room: m.room, username: m.username }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.roomOperatorshipGranted) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "operatorship-granted", room: m.room, username: m.username }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.roomOperatorshipRevoked) {
+      try { const m = parseRoomMember(payload); this.emitRoom({ type: "operatorship-revoked", room: m.room, username: m.username }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.roomOperators) {
+      try { const ro = parseRoomOperators(payload); this.emitRoom({ type: "room-operators", room: ro.room, data: ro.operators }); } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.roomTickerRemoved) {
@@ -1001,8 +1064,7 @@ export class SoulseekSession {
       return;
     }
     if (code === SERVER_MESSAGE_CODES.joinGlobalRoom || code === SERVER_MESSAGE_CODES.leaveGlobalRoom) {
-      // server ack for global room join/leave
-      try { this.emitRoom({ type: code === SERVER_MESSAGE_CODES.joinGlobalRoom ? "join-room" : "leave-room", room: "global", data: payload.length }); } catch {}
+      try { this.emitRoom({ type: code === SERVER_MESSAGE_CODES.joinGlobalRoom ? "join-room" : "leave-room", room: "global", data: { pending: payload.length } }); } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.cantCreateRoom) {
@@ -1041,12 +1103,12 @@ export class SoulseekSession {
       try { const accept = payload[0] !== 0; void accept; } catch {}
       return;
     }
-    if (code === SERVER_MESSAGE_CODES.enableRoomInvitations || code === SERVER_MESSAGE_CODES.addToPrivileged) {
-      // no-op ack
+    if (code === SERVER_MESSAGE_CODES.enableRoomInvitations) {
+      try { const enabled = payload.length ? payload[0] !== 0 : true; this.emitRoom({ type: "enable-room-invitations", data: enabled }); } catch {}
       return;
     }
-    // Generic fallback for remaining 76 codes: emit raw for debugging but don't close
-    this.emit({ type: "privilege-time" } as unknown as UserInfoEvent);
+    if (code === SERVER_MESSAGE_CODES.addToPrivileged) return;
+    // Generic fallback for remaining codes: ignore, debug log
     // Unknown codes: ignore (don't close) — nicotine logs debug
   }
 
@@ -1305,12 +1367,13 @@ export class SoulseekSession {
         reject(new Error("GetPeerAddress timeout"));
       }, PEER_ADDRESS_TIMEOUT_MS);
       this.peerAddressRequests.set(username, {
-        cb: (addr) => {
+        cbs: [(addr: PeerAddress) => {
           clearTimeout(timer);
           this.userAddresses.set(username, { addr, updated: Date.now() });
           resolve(addr);
-        },
+        }],
         timer,
+        createdAt: Date.now(),
       });
       this.serverSocket?.write(buildGetPeerAddress(username));
     });
@@ -1331,10 +1394,8 @@ export class SoulseekSession {
           hostname: addr.ip, port: addr.port,
           socket: {
             open: (sock) => {
-              this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, lastActive: Date.now() });
+              this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, lastActive: Date.now(), createdAt: Date.now() });
               (sock as Socket).write(buildPeerInit(this.username, connType));
-              // Wait for remote PeerInit/Pierce to complete — consider connected after open + init
-              // For P, we consider success after we send PeerInit and get data
               setTimeout(() => resolve(sock as Socket), 200);
             },
             data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
@@ -1710,7 +1771,16 @@ export class SoulseekSession {
     if (!search) return;
     if (search.users.has(resp.username)) return;
     search.users.add(resp.username);
-    const rows = resp.results.map((file) => toRow(resp.username, resp.freeUploadSlots, resp.inQueue, resp.uploadSpeed, file));
+    const cc = this.userAddresses.get(resp.username)?.addr ? getCountryCode(this.userAddresses.get(resp.username)!.addr.ip) : "";
+    // lazy request address if missing for future
+    if (!this.userAddresses.has(resp.username)) {
+      try { this.serverSocket?.write(buildGetPeerAddress(resp.username)); } catch {}
+    }
+    const rows = resp.results.map((file) => {
+      const r = toRow(resp.username, resp.freeUploadSlots, resp.inQueue, resp.uploadSpeed, file);
+      (r as unknown as { country?: string }).country = cc;
+      return r;
+    });
     const remaining = search.maxResults - search.count;
     if (remaining <= 0) return;
     const batch = rows.slice(0, remaining);
@@ -1802,6 +1872,11 @@ export class SoulseekSession {
   joinGlobalRoom() { this.serverSocket?.write(buildJoinGlobalRoom()); }
   leaveGlobalRoom() { this.serverSocket?.write(buildLeaveGlobalRoom()); }
   setRoomTicker(room: string, msg: string) { this.serverSocket?.write(buildSetRoomTicker(room, msg)); }
+  setEnableRoomInvitations(enabled: boolean) { this.serverSocket?.write(buildEnableRoomInvitations(enabled)); }
+  cancelRoomMembership(room: string) { this.serverSocket?.write(buildCancelRoomMembership(room)); }
+  cancelRoomOwnership(room: string) { this.serverSocket?.write(buildCancelRoomOwnership(room)); }
+  addRoomOperator(room: string, username: string) { this.serverSocket?.write(buildAddRoomOperator(room, username)); }
+  removeRoomOperator(room: string, username: string) { this.serverSocket?.write(buildRemoveRoomOperator(room, username)); }
 
   // File ops via peer
   requestSharedFileList(username: string) {

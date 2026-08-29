@@ -17,7 +17,7 @@ function fmtSince(ts: number): string {
 }
 
 export function StatisticsPanel() {
-  const { total, session, refresh, loading } = useStatistics();
+  const { total, session, refresh, reset, loading } = useStatistics() as unknown as { total: ReturnType<typeof useStatistics>["total"]; session: ReturnType<typeof useStatistics>["session"]; refresh: () => void; reset: () => void; loading: boolean };
   if (!total && !session) {
     return (
       <div className="glass-panel rounded-2xl p-4">
@@ -35,7 +35,10 @@ export function StatisticsPanel() {
     <div className="glass-panel rounded-2xl p-4">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="font-label text-sm font-semibold">Statistics</h3>
-        <button onClick={refresh} disabled={loading} className="rounded-lg bg-surface-container-high px-3 py-1 text-xs">{loading ? "…" : "Refresh"}</button>
+        <div className="flex gap-2">
+          <button onClick={refresh} disabled={loading} className="rounded-lg bg-surface-container-high px-3 py-1 text-xs">{loading ? "…" : "Refresh"}</button>
+          <button onClick={() => { if (confirm("Reset all statistics? This mirrors pynicotine/transfers.py:Statistics reset.")) reset(); }} className="rounded-lg bg-error-container px-3 py-1 text-xs text-on-error-container">Reset</button>
+        </div>
       </div>
       <p className="mb-3 text-xs text-on-surface-variant">Since {fmtSince(t.since_timestamp)} — mirrors <code>pynicotine/transfers.py:Statistics</code></p>
       <div className="overflow-x-auto">

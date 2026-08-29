@@ -90,8 +90,33 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
     return () => io.disconnect();
   }, [visibleFileCount, visibleFiles.length]);
 
+  const [sortKey, setSortKey] = useState<"name" | "size" | "bitrate" | "length">(() => {
+    try { const s = JSON.parse(localStorage.getItem("nicotine.browse.sort") || "null"); return s?.key || "name"; } catch { return "name"; }
+  });
+  const [sortDir, setSortDir] = useState<"asc" | "desc">(() => {
+    try { const s = JSON.parse(localStorage.getItem("nicotine.browse.sort") || "null"); return s?.dir || "asc"; } catch { return "asc"; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("nicotine.browse.sort", JSON.stringify({ key: sortKey, dir: sortDir })); } catch {}
+  }, [sortKey, sortDir]);
+
+  const sortedFiles = useMemo(() => {
+    const arr = [...visibleFiles];
+    arr.sort((a, b) => {
+      let va: number | string = 0, vb: number | string = 0;
+      if (sortKey === "name") { va = a.name.toLowerCase(); vb = b.name.toLowerCase(); }
+      else if (sortKey === "size") { va = a.size; vb = b.size; }
+      else if (sortKey === "bitrate") { va = new Map(a.attrs).get(0) || 0; vb = new Map(b.attrs).get(0) || 0; }
+      else if (sortKey === "length") { va = new Map(a.attrs).get(1) || 0; vb = new Map(b.attrs).get(1) || 0; }
+      if (va < vb) return sortDir === "asc" ? -1 : 1;
+      if (va > vb) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return arr;
+  }, [visibleFiles, sortKey, sortDir]);
+
   const pagedFolders = useMemo(() => filteredFolders.slice(0, visibleFolderCount), [filteredFolders, visibleFolderCount]);
-  const pagedFiles = useMemo(() => visibleFiles.slice(0, visibleFileCount), [visibleFiles, visibleFileCount]);
+  const pagedFiles = useMemo(() => sortedFiles.slice(0, visibleFileCount), [sortedFiles, visibleFileCount]);
 
   const totalSize = folders.reduce((acc, f) => acc + f.files.reduce((a, file) => a + (file.size || 0), 0), 0);
   const totalFiles = folders.reduce((acc, f) => acc + f.files.length, 0);
@@ -237,9 +262,32 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
             <div className="flex flex-1 items-center justify-center p-10 font-body text-sm text-outline">Select a folder to view files.</div>
           ) : (
             <div className="flex flex-1 flex-col overflow-hidden">
-              <div className="flex items-center justify-between border-b border-surface-container-highest/20 bg-surface-container-low px-4 py-3">
+              <div className="flex items-center justify-between border-b border-surface-container-highest/20 bg-surface-container-low px-4 py-3 gap-2">
                 <h2 className="truncate font-label text-xs uppercase tracking-widest text-on-surface font-bold">{activeFolder.name}</h2>
-                <span className="font-label text-xs text-on-surface-variant">{visibleFiles.length} files</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="font-label text-xs text-on-surface-variant hidden sm:inline">{visibleFiles.length} files</span>
+                  <button
+                    disabled={isDemo}
+                    title={isDemo ? "Disabled in demo" : `Download all ${visibleFiles.length} files`}
+                    onClick={() => {
+                      if (isDemo) return;
+                      // batch with small delay to avoid MAX_SOCKETS burst
+                      visibleFiles.forEach((file, idx) => {
+                        const shortName = file.name.split(/[\\\/]/).pop() || file.name;
+                        const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : `${activeFolder.name}\\${shortName}`;
+                        setTimeout(() => requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName }), idx * 150);
+                      });
+                    }}
+                    className={`rounded-full px-3 py-1.5 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline cursor-not-allowed" : "bg-primary text-on-primary hover:bg-primary-container"}`}
+                  >
+                    Download Folder
+                  </button>
+                  <div className="hidden md:flex items-center gap-1 text-[11px]">
+                    {(["name", "size", "bitrate", "length"] as const).map((k) => (
+                      <button key={k} onClick={() => { if (sortKey === k) setSortDir(sortDir === "asc" ? "desc" : "asc"); else { setSortKey(k); setSortDir("asc"); } }} className={`rounded-full px-2 py-1 font-label ${sortKey === k ? "bg-primary-fixed/20 text-primary font-bold" : "bg-surface-container-high text-on-surface-variant"}`}>{k}{sortKey === k ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</button>
+                    ))}
+                  </div>
+                </div>
               </div>
               <div className="flex-1 overflow-y-auto">
                 {visibleFiles.length === 0 ? (
