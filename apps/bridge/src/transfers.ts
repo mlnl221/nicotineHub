@@ -682,7 +682,8 @@ export class TransferManager {
       t._fileHandle = fd;
       const stat = statSync(incompletePath);
       let offset = stat.size;
-      // size_changed → truncate
+      // size_changed → truncate to 0 (nicotine truncates to 0 and restarts; we truncate to 0)
+      // Alternative would be ftruncate to t.size, but 0 is safer for mismatch
       if (offset > t.size) {
         try { const { ftruncateSync } = require("node:fs"); ftruncateSync(fd, 0); offset = 0; } catch {}
       }

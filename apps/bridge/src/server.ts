@@ -335,6 +335,12 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         ws.data.session?.close();
         const session = new SoulseekSession({
           username, password, host, port, listenPort: LISTEN_PORT, profile: defaultProfile(username), dataDir: DATA_DIR,
+          onFileConnection: (token, socket) => {
+            try { (ws.data.transfers as unknown as { handleFileConnection: (t:number,s:unknown)=>void })?.handleFileConnection(token, socket as unknown as never); } catch {}
+          },
+          onFileChunk: (token, chunk) => {
+            try { (ws.data.transfers as unknown as { handleFileChunk: (t:number,c:Buffer)=>void })?.handleFileChunk(token, chunk); } catch {}
+          },
           onUserEvent: (event) => {
             logger.debug("server", "user event", { type: event.type, username: event.username });
             try { ws.send(JSON.stringify({ type: "userinfo:event", event })); } catch {}

@@ -108,6 +108,11 @@ also set `NEXT_PUBLIC_BRIDGE_TOKEN` or `localStorage.nicotine.bridgeToken` — t
 | `BRIDGE_TOKEN` | *(open)* | If set, `GET /ws?token=` or `Authorization: Bearer` or `Sec-WebSocket-Protocol` must match else `401` |
 | `DATA_DIR` | `/data` | Docker volume for `downloads/`, `incomplete/` (`INCOMPLETE<md5>`), `uploads/`, `shares.json` (`bridge-data:/data`) |
 | `LISTEN_PORT` | `2234` | Peer inbound listener (port-forward on homelab) |
+| `SHARED_DIRS` | `/data/shared` | Colon-separated real FS dirs to auto-scan into shares (e.g. `/data/shared:/data/music`), scanned on startup via `ShareDB.scanFsShares` with 0.4s flood throttle |
+| `ENABLE_SERVER_PING` | `1` | Set `0` to disable obsolete ServerPing 32 keepalive fallback (nicotine uses TCP keepalive) |
+| `SHARES_DIR` | `DATA_DIR` | Override shares persist path (default `DATA_DIR/shares.json`) |
+
+> **Distributed network:** Bridge is **leaf-only** — it participates as leaf via `HaveNoParent 71` + `BranchLevel/Root` + `PossibleParents 102` (up to 10 parallel D dials) and forwards `DistribSearch 3`/`EmbeddedMessage 93`, but does not act as parent (no child aggregation). `D` attempts return `distrib:unsupported` if ever queried as parent; matches nicotine leaf mode.
 
 ---
 

@@ -4,8 +4,8 @@
  * Handles SharedFileList 4/5 and FolderContents 36/37, respects ExcludedSearchPhrases.
  * Also handles inbound FileSearch (server 26) filtering.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { join, basename, relative, extname } from "node:path";
 import { deflateSync } from "node:zlib";
 import { frameMessage, packString, packUint32, packUint64, PEER_MESSAGE_CODES } from "./soulseek.ts";
 
@@ -35,10 +35,20 @@ export class ShareDB {
   private excludedPhrases = new Set<string>();
   private allowedTokens = new Set<number>(); // gated responses — not used for shares but for search
   private dataDir: string;
+  private lastShareRequests = new Map<string, number>(); // flood protection 0.4s per nicotine shares.py:1342
+  private static readonly SHARE_THROTTLE_MS = 400;
 
   constructor(opts?: { dataDir?: string }) {
     this.dataDir = opts?.dataDir || defaultDataDir();
     this.load();
+    // Auto-scan if folders empty and shared dirs exist on FS
+    if (this.folders.length === 0) {
+      const auto = this.scanFsShares();
+      if (auto.length > 0) {
+        this.folders = auto;
+        this.persist();
+      }
+    }
   }
 
   private load() {
@@ -79,6 +89,83 @@ export class ShareDB {
   }
 
   getFolders(): ShareFolder[] { return this.folders; }
+
+  getSharedCounts(): { dirs: number; files: number } {
+    let files = 0;
+    for (const f of this.folders) files += f.files.length;
+    return { dirs: this.folders.length, files };
+  }
+
+  /** Flood protection: 0.4s per user — mirrors nicotine shares.py:_requested_share_times */
+  shouldThrottle(username: string): boolean {
+    const now = Date.now();
+    const last = this.lastShareRequests.get(username) || 0;
+    if (now - last < ShareDB.SHARE_THROTTLE_MS) return true;
+    this.lastShareRequests.set(username, now);
+    return false;
+  }
+
+  /** FS scanner — walks real dirs under SHARED_DIRS or DATA_DIR/shared */
+  scanFsShares(sharedDirs?: string[]): ShareFolder[] {
+    const dirs = sharedDirs || this.resolveSharedDirs();
+    const folders: ShareFolder[] = [];
+    for (const realDir of dirs) {
+      if (!existsSync(realDir)) continue;
+      try {
+        const virtualBase = basename(realDir);
+        this.walkDir(realDir, virtualBase, folders);
+      } catch {}
+    }
+    return folders;
+  }
+
+  private resolveSharedDirs(): string[] {
+    // Env SHARED_DIRS=" /data/shared:/data/music" or SHARES_DIR
+    const env = process.env.SHARED_DIRS || process.env.SHARES_DIR || "";
+    if (env) return env.split(":").map(s => s.trim()).filter(Boolean);
+    const candidates = [join(this.dataDir, "shared"), join(this.dataDir, "shares"), "/data/shared"];
+    return candidates.filter(p => existsSync(p));
+  }
+
+  private walkDir(realPath: string, virtualPath: string, out: ShareFolder[]) {
+    let entries: string[];
+    try { entries = readdirSync(realPath); } catch { return; }
+    const files: ShareFile[] = [];
+    for (const ent of entries) {
+      const full = join(realPath, ent);
+      let st;
+      try { st = statSync(full); } catch { continue; }
+      if (st.isDirectory()) {
+        this.walkDir(full, `${virtualPath}\\${ent}`, out);
+      } else if (st.isFile()) {
+        const ext = extname(ent).slice(1).toLowerCase();
+        const attrs = this.buildAttrs(full, ext, st.size);
+        files.push({ name: `${virtualPath}\\${ent}`, size: st.size, ext, attrs });
+      }
+    }
+    if (files.length) out.push({ name: virtualPath, files: files.sort((a,b)=> a.name.localeCompare(b.name)) });
+  }
+
+  private buildAttrs(_full: string, ext: string, _size: number): Array<[number, number]> {
+    // Minimal attrs: nicotine uses TinyTag for bitrate/length/sampleRate/bitDepth
+    // Bridge approximates: empty unless audio extension, then stub length 0
+    // Keep extensible for future tinytag-js
+    if (["mp3","flac","ogg","m4a","wav","wma","aac"].includes(ext)) {
+      // Return no attrs for now — client will show unknown quality but file still searchable
+      return [];
+    }
+    return [];
+  }
+
+  /** Rescan and persist — called on startup or via WS rescan request */
+  rescan(): ShareFolder[] {
+    const scanned = this.scanFsShares();
+    if (scanned.length > 0) {
+      this.folders = scanned;
+      this.persist();
+    }
+    return this.folders;
+  }
 
   setExcludedPhrases(phrases: string[]) {
     for (const ph of phrases) this.excludedPhrases.add(ph.toLowerCase());

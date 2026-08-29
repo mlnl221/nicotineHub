@@ -2,7 +2,7 @@
  * Full Soulseek (SLSK) protocol implementation for the WebSocket bridge.
  *
  * Mirrors nicotine-plus pynicotine/slskmessages.py + slskproto.py:
- *  - All 76 server codes, 18 peer codes, 6 distrib codes, init + file codes
+ *  - All 102 server codes, 18 peer codes, 6 distrib codes, init + file codes
  *  - Framing [uint32 len][uint32 code][payload] (server/peer), [len][uint8 code][payload] (init/distrib)
  *  - Packing primitives little-endian, zlib caps, >2GiB quirk, obfuscation tail
  *  - Token gating for search/browse, size guards
