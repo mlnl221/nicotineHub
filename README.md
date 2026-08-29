@@ -1,8 +1,12 @@
 # Nicotine Hub
 
+[![AI-DECLARATION: pair](https://img.shields.io/badge/䷼%20AI--DECLARATION-pair-ffedd5?labelColor=ffedd5)](AI-DECLARATION.md)
+
 > **Demo → https://nicotine-hub-web-phi.vercel.app/** — Try it in your browser, no bridge required. Enter any username/password to explore search, chat, profiles & browse with mocked data. *Downloads/uploads are disabled in the demo.*
 
 A **mobile-first** web client for the [Soulseek](https://www.slsknet.org/) network.
+
+> This port is built predominantly with AI assistance under human review — see [AI-DECLARATION.md](AI-DECLARATION.md).
 
 Beyond MVP — login, multi-mode search, real file transfers with resume, browsing, chat, buddies, interests & profiles. Built on the protocol from [Nicotine+](https://github.com/nicotine-plus/nicotine-plus) (`doc/SLSKPROTOCOL.md`).
 
