@@ -177,7 +177,7 @@ export default function DiagnosticsPage() {
             ts: data.ts || new Date().toISOString(),
             uptime: data.uptime || prev?.uptime || 0,
             port: data.port || 8787,
-            listenPort: data.listenPort || 2234,
+            listenPort: data.listenPort || 62904,
             dataDir: data.dataDir || "/data",
             tokenAuth: !!data.tokenAuth,
           }));
@@ -288,7 +288,7 @@ export default function DiagnosticsPage() {
                 {healthLatency !== null && <span className="text-on-surface-variant">· {healthLatency} ms</span>}
               </div>
               <div className="break-all text-[11px] text-on-surface-variant">{bridgeUrlDisplay}</div>
-              <div>Port {health?.port ?? 8787} · Listen {health?.listenPort ?? 2234} {health?.tokenAuth ? "· token auth" : "· open"}</div>
+              <div>Port {health?.port ?? 8787} · Listen {health?.listenPort ?? 62904} {health?.tokenAuth ? "· token auth" : "· open"}</div>
               <div className="text-[11px]">Uptime {health ? `${Math.floor(health.uptime)}s` : "—"} · {health ? new Date(health.ts).toLocaleString() : "—"}</div>
             </HealthCard>
             <HealthCard title="Soulseek" icon="cloud">

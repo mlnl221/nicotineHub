@@ -14,7 +14,7 @@
  *   client -> server: { type:"chat:private", action:"send", username, message }
  */
 
-import { mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { SoulseekSession } from "./session.ts";
@@ -182,10 +182,23 @@ function defaultProfile(username: string) {
   return { username, descr: "", pic: null, totalupl: 0, queuesize: 0, slotsavail: true, uploadallowed: 1 };
 }
 
-const LISTEN_PORT = Number(process.env.LISTEN_PORT || 62904);
+let LISTEN_PORT = Number(process.env.LISTEN_PORT || 62904);
 const PORT = Number(process.env.PORT || 8787);
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || "";
 const DATA_DIR = process.env.DATA_DIR || "/data";
+
+// Persisted listen port override (homelab: survives restart without compose change)
+// File DATA_DIR/listen_port overrides env default but env wins if explicitly set.
+try {
+  if (!process.env.LISTEN_PORT) {
+    const _persistedPath = join(DATA_DIR, "listen_port");
+    if (existsSync(_persistedPath)) {
+      const _raw = readFileSync(_persistedPath, "utf8").trim();
+      const _n = Number(_raw);
+      if (Number.isInteger(_n) && _n >= 1024 && _n <= 65535) LISTEN_PORT = _n;
+    }
+  }
+} catch {}
 
 // Global plugin manager (shared across WS, but per-WS session getter is swapped)
 const pluginManager = new PluginManager({ dataDir: DATA_DIR });
@@ -996,6 +1009,43 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             if (key === "private_chatrooms") (session as unknown as { setEnableRoomInvitations?: (b: boolean) => void })?.setEnableRoomInvitations?.(!!value);
             (session as unknown as { setNetworkFilters?: (o: unknown) => void })?.setNetworkFilters?.({ [key]: value });
             if (key === "banlist" || key === "ipblocklist") tm?.setConfig?.({ [key]: value });
+          } else if (section === "server" && (key === "portrange" || key === "listen_port" || key === "listenPort")) {
+            // Mirrors nicotine-plus preferences.py portrange -> core.reconnect parity
+            let newPort: number | null = null;
+            if (Array.isArray(value) && value.length >= 1) newPort = Number((value as unknown[])[0]);
+            else if (typeof value === "number") newPort = value;
+            else if (typeof value === "string") newPort = Number(value);
+            if (newPort !== null && Number.isInteger(newPort) && newPort >= 1024 && newPort <= 65535) {
+              const oldPort = LISTEN_PORT;
+              if (newPort !== oldPort) {
+                const prevPort = LISTEN_PORT;
+                LISTEN_PORT = newPort;
+                try { writeFileSync(join(DATA_DIR, "listen_port"), String(newPort)); } catch {}
+                const sess = session as unknown as { setListenPort?: (p: number) => Promise<void>; reconnect?: (r: string) => void } | undefined;
+                if (sess?.setListenPort) {
+                  // Fire-and-forget, report via WS
+                  (sess.setListenPort(newPort) as Promise<void>).then(() => {
+                    logger.info("server", "listen port updated via config", { oldPort: prevPort, newPort });
+                    try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: newPort })); } catch {}
+                    // Notify web of new health
+                    try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: newPort, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN } })); } catch {}
+                  }).catch((e: Error) => {
+                    // Revert global on bind failure
+                    LISTEN_PORT = prevPort;
+                    try { writeFileSync(join(DATA_DIR, "listen_port"), String(prevPort)); } catch {}
+                    logger.warn("server", "listen port change failed, reverted", { newPort, error: e.message });
+                    ws.send(JSON.stringify({ type: "error", error: `Cannot listen on port ${newPort}: ${e.message}` }));
+                  });
+                  return; // avoid double config:updated below
+                } else {
+                  // No active session yet — next login will use new port
+                  logger.info("server", "listen port updated (no active session)", { oldPort: prevPort, newPort });
+                }
+              }
+            } else {
+              ws.send(JSON.stringify({ type: "error", error: `Invalid listen port ${JSON.stringify(value)} (must be 1024-65535)` }));
+              return;
+            }
           } else if (section === "logging" && ["readroomlines", "readprivatelines", "rooms_timestamp", "private_timestamp"].includes(key)) {
             // logging caps are web-only, but acknowledge
             void value;

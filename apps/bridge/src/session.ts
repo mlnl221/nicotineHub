@@ -563,11 +563,77 @@ export class SoulseekSession {
 
   setProfile(profile: UserInfoResponseMessage) { this.profile = { ...this.profile, ...profile }; }
   private profile: UserInfoResponseMessage;
+  private _listenPort: number;
+
+  /** Current listen port (mirrors nicotine-plus portrange[0]). Updated via setListenPort. */
+  get listenPort(): number { return this._listenPort; }
 
   constructor(private readonly opts: SessionOptions) {
     this.username = opts.username;
     this.profile = opts.profile;
+    this._listenPort = opts.listenPort;
     this.shareDB = new ShareDB({ dataDir: opts.dataDir || process.env.DATA_DIR || "/data" });
+  }
+
+  /**
+   * Update listen port at runtime — mirrors nicotine-plus preferences portrange change.
+   * Validates 1024-65535, restarts peer listener, and triggers server reconnect
+   * (SetWaitPort is sent after next login, like pynicotine core.reconnect()).
+   */
+  async setListenPort(newPort: number): Promise<void> {
+    const port = Number(newPort);
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+      throw new Error(`Invalid listen port ${newPort}: must be 1024-65535`);
+    }
+    if (port === this._listenPort) return;
+    const oldPort = this._listenPort;
+    this._listenPort = port;
+    logger.info("server", "listen port change", { oldPort, newPort: port, username: this.username, loggedIn: this.loggedIn });
+    if (!this.loggedIn) {
+      // Listener only exists when logged in; next login will bind new port
+      try { this.listener?.stop(); } catch {}
+      this.listener = undefined;
+      return;
+    }
+    // Restart peer listener on new port
+    try { this.listener?.stop(); } catch {}
+    this.listener = undefined;
+    try {
+      this.startListener();
+    } catch (e) {
+      // Revert on bind failure (e.g. port in use)
+      this._listenPort = oldPort;
+      try { this.startListener(); } catch {}
+      throw new Error(`Cannot listen on port ${port}: ${(e as Error).message}`);
+    }
+    // Trigger server reconnect so new SetWaitPort is advertised (nicotine-plus core.reconnect parity)
+    this.reconnect("listen port change");
+  }
+
+  /** Manual reconnect — mirrors pynicotine ServerReconnect / core.reconnect() */
+  reconnect(reason = "manual reconnect"): void {
+    logger.info("server", "manual reconnect", { reason, listenPort: this._listenPort, username: this.username });
+    this.shouldReconnect = true;
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
+    // Distributed teardown mirrors _server_disconnect
+    this.parent = null;
+    this.potentialParents.clear();
+    this.childPeers.clear();
+    this.branchLevel = 0;
+    this.branchRoot = this.username;
+    this.isServerParent = false;
+    this.maxDistribChildren = 0;
+    this.distribParentMinSpeed = PARENT_MIN_SPEED_DEFAULT;
+    this.distribParentSpeedRatio = PARENT_SPEED_RATIO_DEFAULT;
+    this.uploadSpeed = 0;
+    const sock = this.serverSocket;
+    this.serverSocket = undefined;
+    this.loggedIn = false;
+    this.cleanupServerTimers();
+    if (sock) { try { (sock as unknown as { end: () => void }).end(); } catch {} }
+    this.emitServer({ type: "reconnect", attempt: 1, delay: 0 });
+    setTimeout(() => { if (this.shouldReconnect) this.connectServer(); }, 200);
   }
 
   login(): Promise<LoginResponse & { success: true }> {
@@ -688,7 +754,7 @@ export class SoulseekSession {
         this.reconnectAttempts = 0;
         if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
         // Now advertise listen port (after success)
-        this.serverSocket?.write(buildSetWaitPort(this.opts.listenPort));
+        this.serverSocket?.write(buildSetWaitPort(this._listenPort));
         // Report real share counts (nicotine shares.py sendNumSharedFoldersFiles)
         try {
           const { dirs, files } = this.shareDB.getSharedCounts();
@@ -1194,7 +1260,7 @@ export class SoulseekSession {
 
   private startListener() {
     this.listener = Bun.listen({
-      port: this.opts.listenPort, hostname: "0.0.0.0",
+      port: this._listenPort, hostname: "0.0.0.0",
       socket: {
         open: () => {},
         data: (peer, chunk) => {
