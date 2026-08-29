@@ -1,5 +1,5 @@
 # ---- Bridge: Bun WebSocket + Soulseek login server ----
-FROM oven/bun:1.2 AS base
+FROM oven/bun:1.4 AS base
 WORKDIR /app
 
 # ---- deps: workspace-aware install ----
