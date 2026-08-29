@@ -15,6 +15,8 @@ import type {
   BridgeOutboundMessage,
   LoginRequest,
 } from "@/lib/protocol";
+import { isDemo } from "@/lib/demo";
+import { emitRoomList, handleDemoSend } from "@/lib/demo/mock";
 
 export type SessionStatus = "idle" | "connecting" | "connected" | "failed";
 
@@ -80,7 +82,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<SessionState>(() => {
     if (typeof window !== "undefined") {
       try {
-        if (sessionStorage.getItem("__mockLoggedIn") === "1") return { status: "connected", user: "tester" };
+        if (isDemo) {
+          const saved = sessionStorage.getItem("__mockLoggedIn");
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved) as { user?: string };
+              if (parsed?.user) return { status: "connected", user: parsed.user };
+            } catch {
+              if (saved === "1") return { status: "connected", user: "demo" };
+            }
+          }
+        } else if (sessionStorage.getItem("__mockLoggedIn") === "1") return { status: "connected", user: "tester" };
       } catch {}
     }
     return { status: "idle" };
@@ -105,6 +117,34 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     (req: Omit<LoginRequest, "type">) => {
+      // Demo: accept any username/password, no bridge
+      if (isDemo) {
+        const user = req.username.trim() || "demo";
+        if (!req.username.trim() || !req.password) {
+          // For demo we still allow empty? Require at least username; password is ignored
+          if (!req.username.trim()) {
+            setState({ status: "failed", error: "Enter any username to try the demo." });
+            return;
+          }
+        }
+        setState({ status: "connecting" });
+        setTimeout(() => {
+          try {
+            sessionStorage.setItem("__mockLoggedIn", JSON.stringify({ user }));
+          } catch {}
+          setState({ status: "connected", user, error: undefined });
+          const result: BridgeOutboundMessage = {
+            type: "login:result",
+            ok: true,
+            data: { success: true, banner: "Welcome to Nicotine Hub (Demo)", ipAddress: "203.0.113.1", checksum: "demo", isSupporter: true },
+          };
+          listeners.current.forEach((cb) => cb(result));
+          // Pre-seed room list for chat page
+          emitRoomList(listeners.current);
+        }, 420);
+        return;
+      }
+
       const gen = ++generation.current;
       socketRef.current?.close();
       setState({ status: "connecting" });
@@ -170,6 +210,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   );
 
   const send = useCallback((msg: BridgeInboundMessage) => {
+    if (isDemo) {
+      const handled = handleDemoSend(msg, listeners.current, stateRef.current.user);
+      if (handled) return;
+      // fallthrough for unknown demo messages -> ignore
+      return;
+    }
     const ws = socketRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify(msg));

@@ -34,10 +34,10 @@ export default function Home() {
             <span className="font-headline text-3xl font-black text-on-primary">N</span>
           </div>
           <h1 className="mb-2 font-headline text-3xl md:text-4xl font-bold tracking-tight text-on-surface dark:text-inverse-on-surface">
-            Nicotine Mobile
+            Nicotine Hub
           </h1>
           <p className="font-body text-sm text-on-surface-variant dark:text-outline-variant">
-            Enter your credentials to access the hub.
+            Enter any username and password to try the demo.
           </p>
         </div>
 

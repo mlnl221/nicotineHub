@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useSession } from "@/lib/session";
 import type { Transfer, TransferStatsMessage } from "@/lib/protocol";
+import { isDemo } from "@/lib/demo";
 
 interface TransfersApi {
   transfers: Transfer[];
@@ -92,6 +93,7 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
 
   const requestDownload = useCallback(
     (opts: { username: string; virtualPath: string; size: number; fileName?: string }) => {
+      if (isDemo) return;
       // Optimistic local add for immediate feedback when bridge is mocked
       const id = `${opts.username}::${opts.virtualPath}`;
       const fileName = opts.fileName ?? opts.virtualPath.split("\\").pop() ?? opts.virtualPath;
