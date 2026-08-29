@@ -278,13 +278,13 @@ export function interestsRecMenu(thing: string, isLiked: boolean, isDisliked: bo
   ];
 }
 
-export function buddyMenu(buddy: string): MenuItem[] {
+export function buddyMenu(buddy: string, opts?: { onNote?: () => void; onRemove?: () => void }): MenuItem[] {
   return [
     ...userMenu(buddy, "userlist"),
     { id: "sep-note", label: "---", icon: "" },
-    { id: "note", label: "Add User Note…", icon: "edit_note", action: () => toast(`Note for ${buddy}`) },
+    { id: "note", label: "Add User Note…", icon: "edit_note", action: () => (opts?.onNote ? opts.onNote() : toast(`Note for ${buddy}`)) },
     { id: "sep2", label: "---", icon: "" },
-    { id: "remove", label: "Remove", icon: "person_remove", danger: true, action: () => toast(`Remove ${buddy}`) },
+    { id: "remove", label: "Remove", icon: "person_remove", danger: true, action: () => (opts?.onRemove ? opts.onRemove() : toast(`Remove ${buddy}`)) },
   ];
 }
 

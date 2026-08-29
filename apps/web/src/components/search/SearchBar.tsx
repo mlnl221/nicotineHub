@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { SearchMode } from "@/lib/search";
+import { useConfig } from "@/lib/config/provider";
 
 interface SearchBarProps {
   onSearch: (query: string, opts?: { mode: SearchMode; target?: string }) => void;
@@ -20,13 +21,15 @@ const MODES: Array<{ id: SearchMode; label: string; icon: string; desc: string }
 ];
 
 export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, searching, onStop }: SearchBarProps) {
+  const { settings } = useConfig();
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<SearchMode>("global");
   const [target, setTarget] = useState("");
 
   const submit = () => {
     const q = query.trim();
-    if (q.length < 3) return;
+    const min = settings.searches.min_search_chars ?? 3;
+    if (q.length < min) return;
     if (mode === "user" && !target.trim()) return;
     if (mode === "room" && !target.trim()) return;
     onSearch(q, { mode, target: target.trim() || undefined });
@@ -43,6 +46,7 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
           <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-surface-container-low px-3 sm:px-4 py-2.5 ghost-border transition-all focus-within:border-primary">
             <span className="material-symbols-outlined text-outline shrink-0">search</span>
             <input
+              list="search-history"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
@@ -59,6 +63,11 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
               spellCheck={false}
               className="flex-1 w-full min-w-0 bg-transparent font-body text-sm text-on-surface placeholder:text-outline focus:outline-none"
             />
+            <datalist id="search-history">
+              {settings.searches.history.slice(0, 200).map((h) => (
+                <option key={h} value={h} />
+              ))}
+            </datalist>
           </div>
 
           <button

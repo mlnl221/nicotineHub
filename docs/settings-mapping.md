@@ -315,6 +315,8 @@ retention/storage toggle rather than a filesystem path.
 - File manager command (`ui.filemanager`), URL protocol handlers (`urls.protocols`).
 - OS-level Now Playing backends (MPRIS, speech) — replaced by `mediaSession` later.
 - Desktop plugins (`plugins.*`), post-transfer shell commands (`afterfinish`, `afterfolder`).
+- **Colors/fonts/tab positions** (`chatme/.../tab_changed`, `globalfont/...`, `tabmain/...`) — intentional omit per `docs/DESIGN.md` Omitted Controls (2026-08-30 Phase A/B) to keep Alexandria editorial palette/typography.
+- **Diagnostics docked pane** — stays routed `/diagnostics` vs MainWindow bottom pane; mobile uses separate route with scope/level filters, not docked log view.
 
 ## Legend of future-proofing notes
 

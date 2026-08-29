@@ -24,9 +24,11 @@ function fileTypeIcon(ext: string): string {
 interface ResultsListProps {
   rows: SearchRow[];
   onRowTap: (row: SearchRow) => void;
+  grouping?: string;
+  expand?: string;
 }
 
-export function ResultsList({ rows, onRowTap }: ResultsListProps) {
+export function ResultsList({ rows, onRowTap, grouping = "folder_grouping", expand = "all" }: ResultsListProps) {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -55,17 +57,35 @@ export function ResultsList({ rows, onRowTap }: ResultsListProps) {
   const sliced = useMemo(() => rows.slice(0, visibleCount), [rows, visibleCount]);
 
   const groups = useMemo(() => {
+    if (grouping === "ungrouped") {
+      return [["ungrouped", sliced] as [string, SearchRow[]]];
+    }
     const map = new Map<string, SearchRow[]>();
     for (const row of sliced) {
-      const key = row.folder || "(root)";
+      const key = grouping === "user_grouping" ? row.user : row.folder || "(root)";
       const list = map.get(key);
       if (list) list.push(row);
       else map.set(key, [row]);
     }
     return [...map.entries()];
-  }, [sliced]);
+  }, [sliced, grouping]);
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // sync collapsed to expand setting
+  useEffect(() => {
+    if (grouping === "ungrouped") {
+      setCollapsed(new Set());
+      return;
+    }
+    const keys = groups.map(([k]) => k);
+    if (expand === "all") setCollapsed(new Set());
+    else if (expand === "none") setCollapsed(new Set(keys));
+    else if (expand === "partial") {
+      // partial: expand first half, collapse rest (mimics folder_grouping expand_root)
+      const half = Math.floor(keys.length / 2);
+      setCollapsed(new Set(keys.slice(half)));
+    }
+  }, [grouping, expand, groups.map(g=>g[0]).join("|")]);
   const hasMore = visibleCount < rows.length;
 
   if (rows.length === 0) {
@@ -77,10 +97,48 @@ export function ResultsList({ rows, onRowTap }: ResultsListProps) {
     );
   }
 
+  const isUngrouped = grouping === "ungrouped";
+
   return (
     <div className="flex-1 px-3 py-2 max-w-full overflow-hidden">
       {groups.map(([folder, items]) => {
-        const isCollapsed = collapsed.has(folder);
+        const isCollapsed = isUngrouped ? false : collapsed.has(folder);
+        if (isUngrouped) {
+          // flat rendering without header
+          return (
+            <div key={folder} className="mb-2 overflow-hidden rounded-2xl bg-surface-container-lowest max-w-full">
+              <ul>
+                {items.map((row, i) => (
+                  <li key={`${row.user}:${row.path}:${i}`}>
+                    <button
+                      type="button"
+                      data-row-user={row.user}
+                      data-row-path={row.path}
+                      data-row-filename={row.filename}
+                      data-row-folder={row.folder}
+                      data-row-size={String(row.size)}
+                      onClick={() => onRowTap(row)}
+                      className="flex w-full items-center gap-3 border-t border-outline-variant/15 px-4 py-2.5 text-left transition-colors active:bg-surface-container max-w-full overflow-hidden first:border-t-0"
+                    >
+                      <span className="material-symbols-outlined text-[22px] text-primary-container shrink-0">{fileTypeIcon(row.fileType)}</span>
+                      <div className="min-w-0 flex-1 overflow-hidden">
+                        <div className="truncate font-body text-sm font-medium text-on-surface max-w-full">{row.filename}</div>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-label text-[11px] text-on-surface-variant max-w-full overflow-hidden">
+                          <span className="inline-flex items-center gap-1 min-w-0 max-w-[35vw] truncate"><span className="material-symbols-outlined text-[13px] shrink-0">person</span><span className="truncate">{row.user}</span></span>
+                          <span>{humanSize(row.size)}</span>
+                          {humanQuality(row.attributes) ? <span>{humanQuality(row.attributes)}</span> : null}
+                          {humanLength(row.length) ? <span>{humanLength(row.length)}</span> : null}
+                          {row.slotFree ? <span className="rounded-full bg-tertiary-container px-1.5 py-0.5 font-semibold text-on-tertiary-container">free</span> : <span className="text-outline">q:{row.inQueue}</span>}
+                          {row.private ? <span className="rounded-full bg-surface-container-highest px-1.5 py-0.5 text-on-surface-variant">private</span> : null}
+                        </div>
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        }
         return (
           <div key={folder} className="mb-2 overflow-hidden rounded-2xl bg-surface-container-lowest max-w-full">
             <button

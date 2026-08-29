@@ -9,6 +9,7 @@ import { BottomNav } from "@/components/mobile/BottomNav";
 import { usePrivateChat } from "@/lib/privateChat";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { privateChatMenu, userMenu } from "@/lib/context-menu/menus";
+import { useConfig } from "@/lib/config/provider";
 
 function PrivateChatInner() {
   const { state } = useSession();
@@ -17,6 +18,7 @@ function PrivateChatInner() {
   const initialUser = params.get("user") || "";
   const { conversations, users, activeUser, setActiveUser, sendMessage, closeAll, closeConversation } = usePrivateChat();
   const [input, setInput] = useState("");
+  const { settings } = useConfig();
   const [newChatUser, setNewChatUser] = useState(initialUser);
   const [filter, setFilter] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
@@ -244,21 +246,24 @@ function PrivateChatInner() {
                       </span>
                     </div>
                   ) : (
-                    activeMessages.map((m) => (
-                      <div key={m.id} className={`flex gap-3 max-w-[78%] min-w-0 ${m.isSelf ? "self-end flex-row-reverse" : ""}`}>
+                    activeMessages.map((m) => {
+                      const isIgnored = !m.isSelf && (settings.server.ignorelist.includes(m.username) || !!settings.server.ipignorelist[m.username]);
+                      return (
+                      <div key={m.id} className={`flex gap-3 max-w-[78%] min-w-0 ${m.isSelf ? "self-end flex-row-reverse" : ""} ${isIgnored ? "opacity-40" : ""}`}>
                         <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-surface-container-high text-xs font-bold">
                           {m.isSelf ? "You" : m.username.slice(0, 2).toUpperCase()}
                         </div>
                         <div
                           className={`rounded-2xl px-4 py-3 shadow-sm max-w-full overflow-hidden min-w-0 ${m.isSelf ? "rounded-br-sm bg-primary-container/20 border border-primary/20" : "rounded-bl-sm bg-surface-container-low border border-outline-variant/20"}`}
                         >
-                          <p className="font-body text-sm leading-relaxed break-words [overflow-wrap:anywhere] whitespace-pre-wrap">{m.message}</p>
+                          <p className="font-body text-sm leading-relaxed break-words [overflow-wrap:anywhere] whitespace-pre-wrap">{isIgnored ? "[ignored]" : m.message}</p>
                           <p className="mt-1 font-label text-[10px] text-outline">
                             {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </p>
                         </div>
                       </div>
-                    ))
+                      );
+                    })
                   )}
                   <div ref={endRef} />
                 </div>

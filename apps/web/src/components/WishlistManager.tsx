@@ -5,11 +5,10 @@ import { useSession } from "@/lib/session";
 import { useConfig } from "@/lib/config/provider";
 
 export function WishlistManager() {
-  const { terms, addTerm, removeTerm, interval } = useWishlist();
+  const { terms, entries, addTerm, removeTerm, interval, toggleAuto, resetSeen } = useWishlist();
   const { send, state } = useSession();
   const { settings } = useConfig();
   const [input, setInput] = useState("");
-  const [autoSearch, setAutoSearch] = useState(true);
 
   const handleAdd = () => {
     if (!input.trim()) return;
@@ -42,27 +41,35 @@ export function WishlistManager() {
         <button onClick={handleAdd} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary">Add</button>
       </div>
 
-      <label className="mb-3 flex items-center gap-2 text-xs text-on-surface-variant">
-        <input type="checkbox" checked={autoSearch} onChange={(e) => setAutoSearch(e.target.checked)} />
-        Automatic search (bridge cycles one term per interval)
-      </label>
-
       {terms.length === 0 ? (
         <p className="text-xs text-on-surface-variant">No wishes yet. Add a term to auto-search periodically.</p>
       ) : (
         <ul className="space-y-2">
-          {terms.map((t) => (
-            <li key={t} className="flex items-center justify-between rounded-xl bg-surface-container-low px-3 py-2 dark:bg-surface-container-high">
-              <span className="text-sm text-on-surface truncate pr-2">{t}</span>
-              <div className="flex gap-1">
+          {entries.map((e) => (
+            <li key={e.term} className="flex items-center justify-between rounded-xl bg-surface-container-low px-3 py-2 dark:bg-surface-container-high">
+              <div className="min-w-0 flex-1">
+                <span className="text-sm text-on-surface truncate pr-2 block">{e.term}</span>
+                <span className="text-[10px] text-on-surface-variant">{e.ignoredUsers.length} seen • {e.auto ? "auto" : "manual"} • {new Date(e.timeAdded).toLocaleDateString()}</span>
+              </div>
+              <div className="flex gap-1 shrink-0">
                 <button
-                  onClick={() => triggerManualSearch(t)}
+                  onClick={() => toggleAuto(e.term)}
+                  title={e.auto ? "Auto-search on" : "Auto-search off"}
+                  className={`rounded-lg px-2 py-1 text-xs ${e.auto ? "bg-primary-container text-on-primary-container" : "bg-surface-container-high text-on-surface-variant"}`}
+                >
+                  {e.auto ? "Auto" : "Manual"}
+                </button>
+                <button
+                  onClick={() => triggerManualSearch(e.term)}
                   disabled={state.status !== "connected"}
                   className="rounded-lg bg-surface-container-high px-2 py-1 text-xs text-on-surface-variant hover:text-primary disabled:opacity-50"
                 >
                   Search
                 </button>
-                <button onClick={() => removeTerm(t)} className="rounded-lg px-2 py-1 text-xs text-error hover:bg-error-container">
+                <button onClick={() => resetSeen(e.term)} className="rounded-lg px-2 py-1 text-xs text-on-surface-variant hover:text-primary" title="Reset seen users">
+                  Reset
+                </button>
+                <button onClick={() => removeTerm(e.term)} className="rounded-lg px-2 py-1 text-xs text-error hover:bg-error-container">
                   Remove
                 </button>
               </div>

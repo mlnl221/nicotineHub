@@ -16,11 +16,13 @@ import { ResultsList } from "./ResultsList";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { searchResultMenu, searchTabMenu } from "@/lib/context-menu/menus";
 import { useContextMenu } from "@/lib/context-menu/useContextMenu";
+import { useWishlist } from "@/lib/wishlist";
 
 export function SearchScreen() {
   const { activeTab, activeId, tabs, setActive, closeTab, startSearch, stopSearch, setFilters, clearFilters } = useSearches();
   const { requestDownload } = useTransfers();
-  const { settings } = useConfig();
+  const { settings, setOption } = useConfig();
+  const { getIgnored, markSeen } = useWishlist();
   const router = useRouter();
   const [showFilters, setShowFilters] = useState(false);
   const [sheetRow, setSheetRow] = useState<SearchRow | null>(null);
@@ -64,12 +66,31 @@ export function SearchScreen() {
 
   const visibleRows = useMemo(
     () => {
-      if (workerRows !== null && deferredRows.length > 500) return workerRows;
-      return activeTab && deferredFilters ? applyFilters(deferredRows, deferredFilters) : activeTab ? applyFilters(activeTab.rows, activeTab.filters) : [];
+      let rows: typeof deferredRows;
+      if (workerRows !== null && deferredRows.length > 500) rows = workerRows;
+      else if (activeTab && deferredFilters) rows = applyFilters(deferredRows, deferredFilters);
+      else if (activeTab) rows = applyFilters(activeTab.rows, activeTab.filters);
+      else rows = [];
+      // wishlist seen filtering: hide previously seen users
+      if (activeTab?.mode === "wishlist") {
+        const ignored = getIgnored(activeTab.query);
+        if (ignored.size) rows = rows.filter((r) => !ignored.has(r.user));
+      }
+      return rows;
     },
-    [activeTab, deferredRows, deferredFilters, workerRows],
+    [activeTab, deferredRows, deferredFilters, workerRows, getIgnored],
   );
   const isStale = activeTab ? deferredRows !== activeTab.rows || deferredFilters !== activeTab.filters : false;
+
+  // wishlist: mark visible users as seen when tab becomes active/read
+  useEffect(() => {
+    if (!activeTab || activeTab.mode !== "wishlist") return;
+    if (visibleRows.length === 0) return;
+    const users = [...new Set(visibleRows.map((r) => r.user))];
+    // debounce seen marking 1s after visible
+    const id = setTimeout(() => markSeen(activeTab.query, users), 1000);
+    return () => clearTimeout(id);
+  }, [activeTab?.id, visibleRows, markSeen]);
 
   const activeFilterCount = useMemo(() => {
     if (!activeTab) return 0;
@@ -165,7 +186,30 @@ export function SearchScreen() {
             {activeTab.reason === "max_results" ? " · limit reached" : ""}
             {activeTab.mode !== "global" ? ` · ${activeTab.mode}${activeTab.target ? `:${activeTab.target}` : ""}` : ""}
             {isStale ? " · filtering…" : ""}
+            {visibleRows.length !== activeTab.total ? ` • showing ${visibleRows.length}` : ""}
           </span>
+          <div className="flex items-center gap-1 shrink-0">
+            <select
+              value={settings.searches.group_searches}
+              onChange={(e) => setOption("searches", "group_searches", e.target.value)}
+              className="rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-semibold text-on-surface-variant outline-none"
+              title="Grouping"
+            >
+              <option value="folder_grouping">By Folder</option>
+              <option value="user_grouping">By User</option>
+              <option value="ungrouped">Ungrouped</option>
+            </select>
+            <select
+              value={settings.searches.expand_results}
+              onChange={(e) => setOption("searches", "expand_results", e.target.value)}
+              className="rounded-full bg-surface-container-low px-2 py-1 text-[10px] font-semibold text-on-surface-variant outline-none"
+              title="Expand"
+            >
+              <option value="all">Expand All</option>
+              <option value="partial">Partial</option>
+              <option value="none">Collapse</option>
+            </select>
+          </div>
         </div>
       ) : null}
 
@@ -185,7 +229,7 @@ export function SearchScreen() {
             }
           }}
         >
-          <ResultsList rows={visibleRows} onRowTap={setSheetRow} />
+          <ResultsList rows={visibleRows} onRowTap={setSheetRow} grouping={settings.searches.group_searches} expand={settings.searches.expand_results} />
         </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4 py-8">
@@ -197,7 +241,7 @@ export function SearchScreen() {
             </p>
             {settings.searches.enable_history && settings.searches.history.length > 0 ? (
               <div className="mt-2 flex flex-wrap justify-center gap-2">
-                {settings.searches.history.slice(-8).map((h) => (
+                {settings.searches.history.slice(0, 8).map((h) => (
                   <button
                     key={h}
                     onClick={() => startSearch(h)}

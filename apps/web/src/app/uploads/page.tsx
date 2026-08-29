@@ -13,6 +13,8 @@ import { UploadStats } from "@/components/transfers/StatsCards";
 import { PageHeader } from "@/components/PageHeader";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { transferMenu } from "@/lib/context-menu/menus";
+import { useConfig } from "@/lib/config/provider";
+import { useSearches } from "@/lib/search";
 import { isDemo } from "@/lib/demo";
 
 function humanSpeed(bps: number): string {
@@ -23,12 +25,46 @@ function humanSpeed(bps: number): string {
   return `${kb.toFixed(0)} KB/s`;
 }
 
+function getFolder(vp: string): string { const idx = vp.lastIndexOf("\\"); return idx >= 0 ? (vp.slice(0, idx) || "(root)") : "(root)"; }
 function UploadsInner() {
   const { uploads, downloads, stats, clearTransfer } = useTransfers();
+  const { settings, setOption } = useConfig();
+  const { startSearch } = useSearches();
+  const router = useRouter();
   const totalDown = stats?.downloadSpeed ?? downloads.filter(d => d.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const totalUp = stats?.uploadSpeed ?? uploads.filter(u=>u.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const activeCount = downloads.length + uploads.length;
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; transfer: import("@/lib/protocol").Transfer } | null>(null);
+  const groupMode = settings.transfers.groupuploads ?? "folder_grouping";
+  const expandMode = settings.transfers.expand_uploads ?? "all";
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (groupMode === "ungrouped") { setCollapsed(new Set()); return; }
+    const keys = (() => { const m = new Map<string, unknown>(); uploads.forEach((t) => { const k = groupMode === "user_grouping" ? t.username : getFolder(t.virtualPath); m.set(k, true); }); return [...m.keys()]; })();
+    if (expandMode === "all") setCollapsed(new Set());
+    else if (expandMode === "none") setCollapsed(new Set(keys));
+    else if (expandMode === "partial") setCollapsed(new Set(keys.slice(Math.floor(keys.length/2))));
+  }, [groupMode, expandMode, uploads.map(u=>u.id).join("|")]);
+  const uploadGroups = (() => {
+    if (groupMode === "ungrouped") return [["ungrouped", uploads] as [string, typeof uploads]];
+    const map = new Map<string, typeof uploads>();
+    uploads.forEach((t) => { const k = groupMode === "user_grouping" ? t.username : getFolder(t.virtualPath); const arr = map.get(k); if (arr) arr.push(t); else map.set(k, [t]); });
+    return [...map.entries()];
+  })();
+  const handleDoubleClick = (t: import("@/lib/protocol").Transfer) => {
+    const action = settings.transfers.upload_doubleclick;
+    switch (action) {
+      case 0: break;
+      case 1: window.dispatchEvent(new CustomEvent("nicotine:toast", { detail: { title: "Open", body: "No file to open" } })); break;
+      case 2: window.dispatchEvent(new CustomEvent("nicotine:toast", { detail: { title: "Open", body: "Browser cannot open file manager" } })); break;
+      case 3: startSearch(t.fileName); break;
+      case 4: clearTransfer(t.id, true); break;
+      case 5: clearTransfer(t.id, true); break;
+      case 6: clearTransfer(t.id, true); break;
+      case 7: router.push(`/browse/${encodeURIComponent(t.username)}`); break;
+      default: break;
+    }
+  };
 
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
@@ -56,10 +92,24 @@ function UploadsInner() {
           <ThroughputChart />
           <UploadStats />
           <section data-testid="uploads-section" className="bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border flex flex-col gap-4 max-w-full overflow-hidden">
-            <h3 className="font-headline text-xl font-semibold flex items-center gap-2">
-              <span className="material-symbols-outlined text-tertiary">upload</span>
-              Uploading ({uploads.length})
-            </h3>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h3 className="font-headline text-xl font-semibold flex items-center gap-2">
+                <span className="material-symbols-outlined text-tertiary">upload</span>
+                Uploading ({uploads.length})
+              </h3>
+              <div className="flex items-center gap-1">
+                <select value={groupMode} onChange={(e) => setOption("transfers", "groupuploads", e.target.value)} className="rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-semibold outline-none">
+                  <option value="folder_grouping">By Folder</option>
+                  <option value="user_grouping">By User</option>
+                  <option value="ungrouped">Ungrouped</option>
+                </select>
+                <select value={expandMode} onChange={(e) => setOption("transfers", "expand_uploads", e.target.value)} className="rounded-full bg-surface-container-low px-2 py-1 text-[10px] font-semibold outline-none">
+                  <option value="all">Expand All</option>
+                  <option value="partial">Partial</option>
+                  <option value="none">Collapse</option>
+                </select>
+              </div>
+            </div>
             {uploads.length === 0 ? (
               <div data-testid="empty-uploads" className="py-16 text-center">
                 <p className="font-body text-on-surface-variant">No active uploads</p>
@@ -74,11 +124,29 @@ function UploadsInner() {
               </div>
             ) : (
               <div className="space-y-4">
-                {uploads.map((t) => (
-                  <div key={t.id} onContextMenu={(e) => { e.preventDefault(); setMenuAnchor({ x: e.clientX, y: e.clientY, transfer: t }); }}>
-                    <TransferCard transfer={t} onCancel={() => clearTransfer(t.id, true)} onClear={() => clearTransfer(t.id, true)} />
-                  </div>
-                ))}
+                {uploadGroups.map(([groupKey, items]) => {
+                  const isCollapsed = groupMode !== "ungrouped" && collapsed.has(groupKey);
+                  return (
+                    <div key={groupKey}>
+                      {groupMode !== "ungrouped" ? (
+                        <button onClick={() => setCollapsed((prev) => { const n = new Set(prev); if (n.has(groupKey)) n.delete(groupKey); else n.add(groupKey); return n; })} className="flex w-full items-center gap-2 py-2 text-left">
+                          <span className="material-symbols-outlined text-[16px]">{isCollapsed ? "chevron_right" : "expand_more"}</span>
+                          <span className="font-label text-xs font-semibold truncate">{groupKey}</span>
+                          <span className="font-label text-[10px] text-outline">{items.length}</span>
+                        </button>
+                      ) : null}
+                      {!isCollapsed ? (
+                        <div className="space-y-3">
+                          {items.map((t) => (
+                            <div key={t.id} onDoubleClick={() => handleDoubleClick(t)} onContextMenu={(e) => { e.preventDefault(); setMenuAnchor({ x: e.clientX, y: e.clientY, transfer: t }); }}>
+                              <TransferCard transfer={t} onCancel={() => clearTransfer(t.id, true)} onClear={() => clearTransfer(t.id, true)} />
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </section>

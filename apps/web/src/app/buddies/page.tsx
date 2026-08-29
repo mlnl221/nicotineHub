@@ -13,7 +13,7 @@ import { buddyMenu } from "@/lib/context-menu/menus";
 export default function BuddiesPage() {
   const { state } = useSession();
   const router = useRouter();
-  const { buddies, filter, setFilter, addBuddy, removeBuddy, setTrusted, setNotify } = useBuddies();
+  const { buddies, filter, setFilter, addBuddy, removeBuddy, setTrusted, setNotify, setNote } = useBuddies();
   const [addInput, setAddInput] = useState("");
   const [noteEdit, setNoteEdit] = useState<string | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; username: string } | null>(null);
@@ -112,6 +112,10 @@ export default function BuddiesPage() {
                 return (
                   <div
                     key={b.username}
+                    onDoubleClick={() => {
+                      const note = prompt(`Note for ${b.username}`, b.note ?? "");
+                      if (note !== null) setNote(b.username, note);
+                    }}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       setMenuAnchor({ x: e.clientX, y: e.clientY, username: b.username });
@@ -211,7 +215,19 @@ export default function BuddiesPage() {
       </main>
       <BottomNav />
       {menuAnchor ? (
-        <ContextMenu x={menuAnchor.x} y={menuAnchor.y} items={buddyMenu(menuAnchor.username)} onClose={() => setMenuAnchor(null)} />
+        <ContextMenu
+          x={menuAnchor.x}
+          y={menuAnchor.y}
+          items={buddyMenu(menuAnchor.username, {
+            onNote: () => {
+              const cur = buddies.find((x) => x.username === menuAnchor.username);
+              const note = prompt(`Note for ${menuAnchor.username}`, cur?.note ?? "");
+              if (note !== null) setNote(menuAnchor.username, note);
+            },
+            onRemove: () => removeBuddy(menuAnchor.username),
+          })}
+          onClose={() => setMenuAnchor(null)}
+        />
       ) : null}
     </div>
   );
