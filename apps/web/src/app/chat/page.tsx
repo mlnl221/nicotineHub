@@ -1,14 +1,18 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
-import { StubNotice } from "@/components/StubNotice";
+import { useRooms } from "@/lib/rooms";
 
 export default function ChatRoomsPage() {
   const { state } = useSession();
   const router = useRouter();
+  const { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say } = useRooms();
+  const [joinInput, setJoinInput] = useState("");
+  const [sayInput, setSayInput] = useState("");
+  const [filter, setFilter] = useState("");
 
   useEffect(() => {
     if (state.status !== "connected") router.replace("/");
@@ -16,11 +20,281 @@ export default function ChatRoomsPage() {
 
   if (state.status !== "connected") return null;
 
+  const activeMessages = activeRoom ? messages.get(activeRoom) || [] : [];
+  const joinedArray = Array.from(joinedRooms.values());
+  const filteredRooms = filter
+    ? roomList.filter((r) => r.name.toLowerCase().includes(filter.toLowerCase()))
+    : roomList;
+  const activeUsers = activeRoom ? joinedRooms.get(activeRoom)?.users || [] : [];
+
+  const handleJoin = () => {
+    const r = joinInput.trim();
+    if (!r) return;
+    // sanitize like nicotine: ascii, single spaces, max 24
+    const sanitized = r.replace(/[^ -~]/g, "").replace(/\s+/g, " ").trim().slice(0, 24);
+    if (!sanitized) return;
+    joinRoom(sanitized);
+    setJoinInput("");
+  };
+
+  const handleSay = () => {
+    if (!activeRoom || !sayInput.trim()) return;
+    say(activeRoom, sayInput);
+    setSayInput("");
+  };
+
   return (
-    <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
+    <div className="flex h-screen overflow-hidden bg-surface-container-lowest font-body text-on-surface">
       <Sidebar />
-      <main className="relative ml-72 flex min-h-screen flex-1 flex-col overflow-hidden">
-        <StubNotice title="Chat Rooms" icon="groups" description="Join and participate in Soulseek chat rooms." />
+      <main className="ml-72 flex flex-1 flex-col overflow-hidden">
+        <header className="flex items-center justify-between border-b border-outline-variant/15 bg-surface-container-lowest/80 px-6 py-4 backdrop-blur-xl">
+          <div className="flex items-center gap-4">
+            <h2 className="font-headline text-xl font-bold tracking-tight text-primary">Chat Rooms</h2>
+            {activeRoom ? (
+              <span className="inline-flex items-center gap-2 rounded-full bg-primary-fixed/20 px-3 py-1 font-label text-xs font-semibold text-primary">
+                <span className="material-symbols-outlined text-[16px]">tag</span> {activeRoom}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            {activeRoom ? (
+              <button
+                onClick={() => leaveRoom(activeRoom)}
+                className="rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container"
+              >
+                Leave
+              </button>
+            ) : null}
+          </div>
+        </header>
+
+        <div className="flex flex-1 overflow-hidden">
+          {/* Left: Rooms */}
+          <aside className="hidden w-80 flex-col border-r border-outline-variant/15 bg-surface md:flex">
+            <div className="border-b border-outline-variant/15 p-3 space-y-3">
+              <div className="flex gap-2">
+                <input
+                  value={joinInput}
+                  onChange={(e) => setJoinInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleJoin()}
+                  placeholder="Join or create room..."
+                  maxLength={24}
+                  className="flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm placeholder:text-outline-variant focus:border-primary outline-none"
+                />
+                <button
+                  onClick={handleJoin}
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary"
+                >
+                  Join
+                </button>
+              </div>
+              <div className="relative">
+                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-outline">search</span>
+                <input
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="Filter rooms..."
+                  className="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest py-2 pl-8 pr-3 text-sm focus:border-primary outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2 space-y-4">
+              {/* Joined */}
+              {joinedArray.length > 0 ? (
+                <div>
+                  <h4 className="px-3 py-1 font-label text-[10px] uppercase tracking-widest text-on-surface-variant">
+                    Joined Rooms
+                  </h4>
+                  <ul className="space-y-1">
+                    {joinedArray.map((r) => (
+                      <li key={r.name}>
+                        <button
+                          onClick={() => setActiveRoom(r.name)}
+                          className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm ${activeRoom === r.name ? "bg-primary-fixed/20 text-primary font-semibold" : "hover:bg-surface-container-low text-on-surface-variant"}`}
+                        >
+                          <span className="flex items-center gap-2 truncate">
+                            <span className="material-symbols-outlined text-[16px]">tag</span> {r.name}
+                          </span>
+                          <span className="rounded bg-surface-container-high px-1.5 py-0.5 font-label text-[10px]">{r.users.length}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {/* Public */}
+              <div>
+                <h4 className="px-3 py-1 font-label text-[10px] uppercase tracking-widest text-on-surface-variant">
+                  Public Rooms {roomList.length ? `• ${roomList.length}` : ""}
+                </h4>
+                {filteredRooms.length === 0 ? (
+                  <p className="px-3 py-2 font-body text-xs text-outline">No rooms yet. Join one above.</p>
+                ) : (
+                  <ul className="space-y-1 max-h-[40vh] overflow-y-auto">
+                    {filteredRooms.slice(0, 50).map((r) => (
+                      <li key={r.name}>
+                        <button
+                          onClick={() => joinRoom(r.name)}
+                          className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm hover:bg-surface-container-low"
+                        >
+                          <span className="flex items-center gap-2 truncate">
+                            <span className="material-symbols-outlined text-[16px] text-outline">tag</span> {r.name}
+                          </span>
+                          <span className="font-label text-xs text-outline">{r.users}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </aside>
+
+          {/* Center: Messages */}
+          <section className="flex flex-1 flex-col overflow-hidden bg-surface-container-lowest/30">
+            {/* Mobile room picker */}
+            <div className="border-b border-outline-variant/15 bg-surface p-3 md:hidden">
+              <select
+                value={activeRoom || ""}
+                onChange={(e) => setActiveRoom(e.target.value || null)}
+                className="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm"
+              >
+                <option value="">Select a room</option>
+                {joinedArray.map((r) => (
+                  <option key={r.name} value={r.name}>
+                    {r.name} ({r.users.length})
+                  </option>
+                ))}
+              </select>
+              <div className="mt-2 flex gap-2">
+                <input
+                  value={joinInput}
+                  onChange={(e) => setJoinInput(e.target.value)}
+                  placeholder="Room name"
+                  className="flex-1 rounded-lg border border-outline-variant/30 px-3 py-2 text-sm"
+                />
+                <button onClick={handleJoin} className="rounded-lg bg-primary px-4 py-2 text-sm text-on-primary">
+                  Join
+                </button>
+              </div>
+            </div>
+
+            {!activeRoom ? (
+              <div className="flex flex-1 items-center justify-center p-8 text-center">
+                <div>
+                  <span className="material-symbols-outlined text-5xl text-outline-variant">groups</span>
+                  <p className="mt-2 font-headline text-lg font-semibold">No room selected</p>
+                  <p className="mt-1 font-body text-sm text-on-surface-variant">Join or create a room from the sidebar.</p>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Room header */}
+                <div className="flex items-center justify-between border-b border-outline-variant/15 bg-surface-container-lowest/60 px-6 py-3 backdrop-blur-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-primary">tag</span>
+                    <h3 className="font-headline font-bold">{activeRoom}</h3>
+                    <span className="rounded-full bg-surface-container-high px-2 py-0.5 font-label text-xs">
+                      {activeUsers.length} users
+                    </span>
+                  </div>
+                  <span className="hidden md:inline font-label text-xs text-on-surface-variant">Room history may be truncated</span>
+                </div>
+
+                <div className="flex flex-1 overflow-hidden">
+                  <div className="flex flex-1 flex-col overflow-hidden">
+                    <div className="flex-1 overflow-y-auto p-6 space-y-2">
+                      {activeMessages.length === 0 ? (
+                        <div className="py-10 text-center">
+                          <p className="font-body text-sm text-outline">No messages yet. Start the conversation.</p>
+                        </div>
+                      ) : (
+                        activeMessages.map((m) => (
+                          <div key={m.id} className="group flex gap-3 hover:bg-surface-container-low/40 -mx-6 px-6 py-1.5">
+                            <span
+                              className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-xs font-bold ${m.username === "system" ? "bg-surface-container-high text-outline" : "bg-primary-container text-on-primary-container"}`}
+                            >
+                              {m.username === "system" ? "·" : m.username.slice(0, 2).toUpperCase()}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-body text-sm leading-relaxed">
+                                <span className={`font-semibold ${m.username === "system" ? "text-outline italic" : "text-on-surface"}`}>
+                                  {m.username}
+                                </span>
+                                <span className="ml-2 font-mono text-xs text-outline">
+                                  {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                              </p>
+                              <p
+                                className={`mt-0.5 font-body text-sm leading-relaxed ${m.username === "system" ? "text-on-surface-variant italic" : "text-on-surface"}`}
+                              >
+                                {m.message}
+                              </p>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="border-t border-outline-variant/15 bg-surface p-3">
+                      <div className="flex items-end gap-2 rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-2 focus-within:border-primary">
+                        <textarea
+                          value={sayInput}
+                          onChange={(e) => setSayInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              handleSay();
+                            }
+                          }}
+                          placeholder={`Message #${activeRoom}...`}
+                          rows={1}
+                          className="max-h-28 min-h-[40px] flex-1 resize-none bg-transparent px-2 py-2 text-sm placeholder:text-outline focus:outline-none"
+                        />
+                        <button
+                          onClick={handleSay}
+                          className="rounded-lg bg-primary p-2.5 text-on-primary hover:bg-primary-container"
+                        >
+                          <span className="material-symbols-outlined text-[20px]">send</span>
+                        </button>
+                      </div>
+                      <p className="mt-2 px-2 font-mono text-[10px] text-outline">Enter to send • Shift+Enter for new line • /me for action</p>
+                    </div>
+                  </div>
+
+                  {/* Right: user list desktop */}
+                  <aside className="hidden w-56 flex-col border-l border-outline-variant/15 bg-surface-container-lowest md:flex">
+                    <div className="border-b border-outline-variant/15 px-4 py-3">
+                      <h4 className="font-label text-xs uppercase tracking-widest text-on-surface-variant">
+                        Users • {activeUsers.length}
+                      </h4>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                      {activeUsers.length === 0 ? (
+                        <p className="px-3 py-2 font-body text-xs text-outline">No users (room list may be stale).</p>
+                      ) : (
+                        activeUsers.map((u) => (
+                          <button
+                            key={u}
+                            onClick={() => (window.location.href = `/profile/${encodeURIComponent(u)}`)}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-surface-container-low"
+                          >
+                            <span className="flex h-6 w-6 items-center justify-center rounded bg-surface-container-high text-[10px] font-bold">
+                              {u.slice(0, 2).toUpperCase()}
+                            </span>
+                            <span className="truncate font-body text-xs font-medium">{u}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </aside>
+                </div>
+              </>
+            )}
+          </section>
+        </div>
       </main>
     </div>
   );

@@ -811,6 +811,56 @@ export function parseRoomTickerEvent(payload: Buffer): RoomTickerEvent {
   return { room: r.string(), username: r.string(), msg: r.string() };
 }
 
+/* Browse shares — SharedFileListResponse 5 + FolderContentsResponse 37 */
+
+export interface BrowseFileEntry { name: string; size: number; ext: string; attrs: Array<[number, number]>; }
+export interface BrowseFolderEntry { name: string; files: BrowseFileEntry[]; }
+
+function parseBrowseFile(r: SlskReader): BrowseFileEntry {
+  const code = r.uint8(); // 1
+  void code;
+  const name = r.string();
+  // size is uint64
+  const raw = r.uint64();
+  const size = raw <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(raw) : Number(raw & BigInt(0x1fffffffffffff));
+  const ext = r.string();
+  const nAttrs = r.uint32();
+  const attrs: Array<[number, number]> = [];
+  for (let i = 0; i < nAttrs; i++) {
+    const type = r.uint32();
+    const value = r.uint32();
+    attrs.push([type, value]);
+  }
+  return { name, size, ext, attrs };
+}
+
+export function parseSharedFileListResponse(payload: Buffer): { folders: BrowseFolderEntry[] } {
+  const buf = inflateSync(payload) as Buffer;
+  const r = new SlskReader(Buffer.from(buf));
+  const ndirs = r.uint32();
+  const folders: BrowseFolderEntry[] = [];
+  for (let i = 0; i < ndirs; i++) {
+    const dirName = r.string();
+    const nfiles = r.uint32();
+    const files: BrowseFileEntry[] = [];
+    for (let j = 0; j < nfiles; j++) files.push(parseBrowseFile(r));
+    folders.push({ name: dirName, files });
+  }
+  // optional unknown int and private block — ignore remaining
+  return { folders };
+}
+
+export function parseFolderContentsResponse(payload: Buffer): { token: number; dir: string; files: BrowseFileEntry[] } {
+  const buf = inflateSync(payload) as Buffer;
+  const r = new SlskReader(Buffer.from(buf));
+  const token = r.uint32();
+  const dir = r.string();
+  const nfiles = r.uint32();
+  const files: BrowseFileEntry[] = [];
+  for (let i = 0; i < nfiles; i++) files.push(parseBrowseFile(r));
+  return { token, dir, files };
+}
+
 /* Distrib */
 
 export function parseDistribSearch(payload: Buffer): { username: string; token: number; query: string } {

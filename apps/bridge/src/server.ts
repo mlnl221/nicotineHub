@@ -347,6 +347,14 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             logger.debug("chat", "room event", { type: event.type, room: event.room });
             try { ws.send(JSON.stringify({ type: "room:event", event })); } catch {}
           },
+          onBrowseEvent: (event) => {
+            logger.debug("browse", "browse event", { type: event.type, username: event.username, folder: (event as { folder?: string }).folder });
+            try {
+              if (event.type === "browse-shares") ws.send(JSON.stringify({ type: "browse:shares", username: event.username, folders: event.folders }));
+              else if (event.type === "browse-folder") ws.send(JSON.stringify({ type: "browse:folder", username: event.username, folder: event.folder, token: event.token, files: event.files }));
+              else if (event.type === "browse-error") ws.send(JSON.stringify({ type: event.type === "browse-error" && (event as { token?: number }).token !== undefined ? "browse:folder" : "browse:shares", username: event.username, error: event.error, ...(event as { folder?: string; token?: number }) }));
+            } catch {}
+          },
           onTransferEvent: (event) => {
             logger.debug("transfer", "transfer event", { type: event.type, username: event.username, file: event.file?.slice(0,80), token: event.token });
             try { ws.send(JSON.stringify({ type: "peer:transfer", event })); } catch {}
