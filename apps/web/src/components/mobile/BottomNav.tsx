@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTransfers } from "@/lib/transfers";
 
 type NavItem = { icon: string; label: string; href: string };
@@ -40,10 +40,12 @@ function isActive(pathname: string, href: string) {
 export function BottomNav() {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
   let transferCount = 0;
   try {
     const t = useTransfers();
-    transferCount = t.downloads.length + t.uploads.length;
+    if (mounted) transferCount = t.downloads.length + t.uploads.length;
   } catch {}
 
   const moreActive = MORE.some((i) => isActive(pathname, i.href));

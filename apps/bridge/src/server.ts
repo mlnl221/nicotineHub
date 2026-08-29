@@ -172,7 +172,7 @@ function defaultProfile(username: string) {
   return { username, descr: "", pic: null, totalupl: 0, queuesize: 0, slotsavail: true, uploadallowed: 1 };
 }
 
-const LISTEN_PORT = Number(process.env.LISTEN_PORT || 2234);
+const LISTEN_PORT = Number(process.env.LISTEN_PORT || 62904);
 const PORT = Number(process.env.PORT || 8787);
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || "";
 const DATA_DIR = process.env.DATA_DIR || "/data";

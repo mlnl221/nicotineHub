@@ -232,6 +232,7 @@ export class SoulseekSession {
   // pending browse tracking
   private pendingBrowseShares = new Map<string, { timer: ReturnType<typeof setTimeout> }>();
   private pendingBrowseFolder = new Map<number, { username: string; folder: string; timer: ReturnType<typeof setTimeout> }>();
+  private pendingPeerMessages = new Map<string, Array<{ connType: string; msg: Buffer }>>();
 
   get isLoggedIn(): boolean { return this.loggedIn; }
 
@@ -271,6 +272,37 @@ export class SoulseekSession {
     this.wishlistTerms = terms.slice();
     this.wishlistIndex = 0;
     this.restartWishlistTimer();
+  }
+
+  private queuePendingPeerMessage(username: string, connType: string, msg: Buffer) {
+    const key = username.toLowerCase();
+    if (!this.pendingPeerMessages.has(key)) this.pendingPeerMessages.set(key, []);
+    this.pendingPeerMessages.get(key)!.push({ connType, msg });
+    this.flushPendingPeerMessages(username, connType);
+  }
+
+  private flushPendingPeerMessages(username: string, connType: string) {
+    const key = username.toLowerCase();
+    const list = this.pendingPeerMessages.get(key);
+    if (!list || list.length === 0) return;
+    const sock = this.getPeerSocket(username, connType);
+    if (!sock) return;
+    const remaining: Array<{ connType: string; msg: Buffer }> = [];
+    for (const item of list) {
+      if (item.connType !== connType) { remaining.push(item); continue; }
+      try { (sock as unknown as { write: (b: Buffer) => void }).write(item.msg); } catch { remaining.push(item); }
+    }
+    if (remaining.length) this.pendingPeerMessages.set(key, remaining);
+    else this.pendingPeerMessages.delete(key);
+  }
+
+  private sendConnectToPeerFallback(username: string, connType: string) {
+    if (!this.loggedIn || !this.serverSocket) return;
+    const token = this.tokenCounter++ >>> 0;
+    if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
+    try { this.serverSocket.write(buildConnectToPeer(token, username, connType)); } catch {}
+    const timer = setTimeout(() => { this.pendingConnects.delete(token); }, CONNECT_PEER_TIMEOUT_MS);
+    this.pendingConnects.set(token, { resolve: () => {}, reject: () => {}, timer, username, connType });
   }
 
   private restartWishlistTimer() {
@@ -1053,15 +1085,30 @@ export class SoulseekSession {
             if (pi.connType === "F") state.isFileConn = true;
           } catch {}
         } else if (code === 0) {
-          try { parsePierceFireWall(initPayload); } catch {}
+          try {
+            const pf = parsePierceFireWall(initPayload);
+            const pending = this.pendingConnects.get(pf.token);
+            if (pending) {
+              clearTimeout(pending.timer);
+              this.pendingConnects.delete(pf.token);
+              state.username = pending.username;
+              state.connType = pending.connType;
+              setTimeout(() => this.flushPendingPeerMessages(pending.username, pending.connType), 10);
+            }
+          } catch {}
         }
         state.initDone = true;
+        if (state.username && state.connType) {
+          setTimeout(() => this.flushPendingPeerMessages(state.username!, state.connType!), 10);
+        }
         // Phase 1: send any pendingMsg queued by ensurePeerAndSend
         const pendingMsg = (state as unknown as { pendingMsg?: Buffer }).pendingMsg as Buffer | undefined;
         if (pendingMsg) {
           try { (peer as Socket).write(pendingMsg); } catch {}
           delete (state as unknown as { pendingMsg?: Buffer }).pendingMsg;
-        } else if (state.outbound) { try { (peer as Socket).write(buildUserInfoRequest()); } catch {} }
+        } else if (state.outbound && state.connType === "P" && !state.username) {
+          try { (peer as Socket).write(buildUserInfoRequest()); } catch {}
+        }
         state.buf = state.buf.subarray(total);
         continue;
       }
@@ -1169,8 +1216,8 @@ export class SoulseekSession {
         try {
           const username = state.username ?? "unknown";
           const parsed = parseSharedFileListResponse(msg.payload);
-          const pending = this.pendingBrowseShares.get(username);
-          if (pending) { clearTimeout(pending.timer); this.pendingBrowseShares.delete(username); }
+          const pending = this.pendingBrowseShares.get(username.toLowerCase());
+          if (pending) { clearTimeout(pending.timer); this.pendingBrowseShares.delete(username.toLowerCase()); }
           this.emitBrowse({ type: "browse-shares", username, folders: parsed.folders });
           try { (peer as Socket).end(); } catch {}
         } catch {}
@@ -1332,12 +1379,13 @@ export class SoulseekSession {
 
   // File ops via peer
   requestSharedFileList(username: string) {
-    // timeout 30s
+    // timeout 30s — key lowercased for case-insensitive matching
+    const key = username.toLowerCase();
     const timer = setTimeout(() => {
-      this.pendingBrowseShares.delete(username);
+      this.pendingBrowseShares.delete(key);
       this.emitBrowse({ type: "browse-error", username, error: "Timed out fetching shares" });
     }, 30000);
-    this.pendingBrowseShares.set(username, { timer });
+    this.pendingBrowseShares.set(key, { timer });
     this.ensurePeerAndSend(username, "P", buildSharedFileListRequest());
   }
   requestFolderContents(username: string, dir: string, token: number) {
@@ -1356,18 +1404,26 @@ export class SoulseekSession {
 
   private ensurePeerAndSend(username: string, connType: string, msg: Buffer) {
     if (!this.loggedIn) return;
+    // Queue for indirect fallback (peer connects to us via PierceFirewall)
+    this.queuePendingPeerMessage(username, connType, msg);
     const cached = this.userAddresses.get(username);
     if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) {
       this.connectToPeerViaAddress(username, cached.addr, connType, msg);
+      if (cached.port === 0 || cached.ip === "0.0.0.0") this.sendConnectToPeerFallback(username, connType);
+      else setTimeout(() => { if (!this.getPeerSocket(username, connType)) this.sendConnectToPeerFallback(username, connType); }, 800);
       return;
     }
     const existing = this.peerAddressRequests.get(username);
     if (existing) {
-      existing.cbs.push((addr) => this.connectToPeerViaAddress(username, addr, connType, msg));
+      existing.cbs.push((addr) => {
+        this.connectToPeerViaAddress(username, addr, connType, msg);
+        if (addr.port === 0 || addr.ip === "0.0.0.0") this.sendConnectToPeerFallback(username, connType);
+        else setTimeout(() => { if (!this.getPeerSocket(username, connType)) this.sendConnectToPeerFallback(username, connType); }, 800);
+      });
       return;
     }
-    const timer = setTimeout(() => { this.peerAddressRequests.delete(username); }, PEER_ADDRESS_TIMEOUT_MS);
-    const entry = { cbs: [(addr: PeerAddress) => { clearTimeout(timer); this.connectToPeerViaAddress(username, addr, connType, msg); }], timer, createdAt: Date.now() };
+    const timer = setTimeout(() => { this.peerAddressRequests.delete(username); this.sendConnectToPeerFallback(username, connType); }, PEER_ADDRESS_TIMEOUT_MS);
+    const entry = { cbs: [(addr: PeerAddress) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); this.connectToPeerViaAddress(username, addr, connType, msg); if (addr.port === 0 || addr.ip === "0.0.0.0") this.sendConnectToPeerFallback(username, connType); else setTimeout(() => { if (!this.getPeerSocket(username, connType)) this.sendConnectToPeerFallback(username, connType); }, 800); }], timer, createdAt: Date.now() };
     this.peerAddressRequests.set(username, entry);
     this.serverSocket?.write(buildGetPeerAddress(username));
   }
@@ -1450,6 +1506,7 @@ export class SoulseekSession {
     for (const { timer } of this.pendingBrowseFolder.values()) clearTimeout(timer);
     this.pendingBrowseShares.clear(); this.pendingBrowseFolder.clear();
     this.pendingConnects.clear(); this.pendingFileTokens.clear();
+    this.pendingPeerMessages.clear();
     this.userInfoRequests.clear(); this.peerAddressRequests.clear(); this.failedUserInfo.clear();
     this.excludedPhrases.clear();
     if (this.idleTimer) clearInterval(this.idleTimer);
