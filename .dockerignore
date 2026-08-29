@@ -17,6 +17,7 @@ node_modules/
 docs/
 compose.yaml
 *.md
+!ATTRIBUTION.md
 
 # vcs / os
 .git/
