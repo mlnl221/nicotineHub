@@ -63,10 +63,10 @@ function PrivateChatInner() {
   const topBarSubtitle = activeUser ? "Private message" : `${users.length} conversations`;
 
   return (
-    <div className="flex min-h-[100dvh] h-screen max-w-[100vw] overflow-x-hidden bg-surface-container-lowest font-body text-on-surface">
+    <div className="flex min-h-[100dvh] h-screen max-w-full overflow-hidden bg-surface-container-lowest font-body text-on-surface">
       <Sidebar />
       <TopBar title={topBarTitle} subtitle={topBarSubtitle} />
-      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
+      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
         <header className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
           <div>
             <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Private Chat</h2>
@@ -95,7 +95,7 @@ function PrivateChatInner() {
           </div>
         </header>
 
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden min-h-0">
           {/* Left: Active Conversations */}
           <aside className="hidden w-80 flex-col border-r border-outline-variant/15 bg-surface md:flex">
             <div className="border-b border-outline-variant/15 p-3 space-y-3">
@@ -137,7 +137,7 @@ function PrivateChatInner() {
                 </button>
               </div>
             ) : null}
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-2 space-y-1">
               {filteredUsers.length === 0 ? (
                 <p className="p-4 text-center font-body text-sm text-outline">
                   No conversations yet.<br />Start a new chat above.
@@ -185,7 +185,7 @@ function PrivateChatInner() {
           </aside>
 
           {/* Center: Messages + Mobile picker */}
-          <section className="flex flex-1 flex-col overflow-hidden" onContextMenu={(e) => {
+          <section className="flex flex-1 flex-col overflow-hidden min-h-0" onContextMenu={(e) => {
             const target = e.target as HTMLElement;
             if (target.closest("button, input, textarea, select")) return;
             e.preventDefault();
@@ -239,7 +239,7 @@ function PrivateChatInner() {
               </div>
             ) : (
               <>
-                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-6 space-y-4">
                   {activeMessages.length === 0 ? (
                     <div className="flex justify-center">
                       <span className="rounded-full bg-surface-container-high px-4 py-2 font-label text-xs text-on-surface-variant">

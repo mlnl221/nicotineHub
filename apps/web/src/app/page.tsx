@@ -16,7 +16,7 @@ export default function Home() {
   if (state.status === "connected") return null;
 
   return (
-    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-surface font-body text-on-surface dark:bg-inverse-surface dark:text-inverse-on-surface px-6 py-12">
+    <div className="relative flex min-h-dvh items-center justify-center overflow-x-hidden bg-surface font-body text-on-surface dark:bg-inverse-surface dark:text-inverse-on-surface px-6 py-12">
       {/* Ambient background */}
       <div
         className="pointer-events-none absolute inset-0 opacity-40 dark:opacity-20"

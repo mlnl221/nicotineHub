@@ -58,10 +58,10 @@ function TabbedProfileInner() {
   if (state.status !== "connected") return null;
 
   return (
-    <div className="flex min-h-screen max-w-[100vw] overflow-x-hidden bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
+    <div className="flex min-h-screen max-w-full overflow-x-clip bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Profiles" subtitle={`${tabs.length}/10 tabs • User profiles`} />
-      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <header className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
           <div>
             <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">User Profiles</h2>
@@ -97,7 +97,7 @@ function TabbedProfileInner() {
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="flex flex-1 flex-col overflow-x-hidden max-w-full min-w-0 min-h-0">
           {activeTab ? (
             <ProfileView key={activeTab.id} tab={activeTab} />
           ) : (

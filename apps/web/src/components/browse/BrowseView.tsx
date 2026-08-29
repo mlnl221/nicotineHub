@@ -127,7 +127,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
 
   const expandFolders = (settings as unknown as { userbrowse?: { expand_folders?: string } }).userbrowse?.expand_folders ?? "all";
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex flex-1 flex-col overflow-hidden min-h-0">
       {!loading && folders.length === 0 ? (
         <div className="bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800 px-6 py-3 font-body text-sm text-amber-900 dark:text-amber-200">
           No shares available — this user shares no files or no shares are configured on the bridge. Check Settings → Shares and run a rescan (check_shares_available parity).
@@ -175,9 +175,9 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden min-h-0">
         {/* Folder list */}
-        <aside className="hidden w-80 flex-shrink-0 flex-col border-r border-surface-container-highest/30 bg-surface-container-lowest md:flex">
+        <aside className="hidden w-80 flex-shrink-0 flex-col border-r border-surface-container-highest/30 bg-surface-container-lowest md:flex min-h-0">
           <div className="border-b border-surface-container-highest/20 p-3">
             <div className="relative">
               <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-outline">search</span>
@@ -189,7 +189,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
               />
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-2 space-y-1" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
             {loading && folders.length === 0 ? (
               <div className="space-y-2 p-2">
                 <div className="h-10 animate-pulse rounded-lg bg-surface-container-high" />
@@ -235,7 +235,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
         </aside>
 
         {/* File list */}
-        <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="flex flex-1 flex-col overflow-hidden min-h-0">
           <div className="border-b border-surface-container-highest/20 bg-surface-container-lowest p-3 md:hidden">
             <select
               value={selectedFolder || ""}
@@ -271,7 +271,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
           ) : !activeFolder ? (
             <div className="flex flex-1 items-center justify-center p-10 font-body text-sm text-outline">Select a folder to view files.</div>
           ) : (
-            <div className="flex flex-1 flex-col overflow-hidden">
+            <div className="flex flex-1 flex-col overflow-hidden min-h-0">
               <div className="flex items-center justify-between border-b border-surface-container-highest/20 bg-surface-container-low px-4 py-3 gap-2">
                 <h2 className="truncate font-label text-xs uppercase tracking-widest text-on-surface font-bold">{activeFolder.name}</h2>
                 <div className="flex items-center gap-2 shrink-0">
@@ -299,7 +299,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                   </div>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto">
+              <div className="flex-1 overflow-y-auto overscroll-contain min-h-0" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
                 {visibleFiles.length === 0 ? (
                   <p className="p-6 font-body text-sm text-outline">No files match &quot;{fileQuery}&quot; in this folder.</p>
                 ) : (
