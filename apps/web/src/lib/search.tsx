@@ -17,6 +17,8 @@ import {
   type FilterState,
   type SearchRow,
 } from "@/lib/protocol";
+import { isDemo } from "@/lib/demo";
+import { DEMO_SEARCH_QUERIES, mockSearchRows } from "@/lib/demo/fixtures";
 
 export type SearchMode = "global" | "user" | "room" | "wishlist" | "buddies";
 
@@ -47,7 +49,7 @@ interface SearchApi {
 const SearchContext = createContext<SearchApi | null>(null);
 
 export function SearchProvider({ children }: { children: ReactNode }) {
-  const { send, subscribe } = useSession();
+  const { send, subscribe, state } = useSession();
   const { settings, setSection } = useConfig();
   const [tabs, setTabs] = useState<SearchTab[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -55,6 +57,40 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   const tabsRef = useRef<SearchTab[]>([]);
   tabsRef.current = tabs;
   const lastQuery = useRef<Map<string, number>>(new Map());
+
+  // Demo: default to 2 fake searches with results "linux iso" + "tails 5.2 iso" (ended)
+  // SearchProvider is per-page (not global) so we seed on every mount when empty+connected,
+  // not via sessionStorage flag (which would block re-seed after navigating away).
+  useEffect(() => {
+    if (!isDemo) return;
+    if (state.status !== "connected") return;
+    if (tabs.length !== 0) return;
+    const newTabs: SearchTab[] = [...DEMO_SEARCH_QUERIES].map((q) => {
+      const id = `s${++counter.current}`;
+      const rows = mockSearchRows(q);
+      return {
+        id,
+        query: q,
+        mode: "global" as SearchMode,
+        status: "ended" as const,
+        reason: "max_results",
+        rows,
+        total: rows.length,
+        filters: emptyFilters(),
+      };
+    });
+    setTabs(newTabs);
+    setActiveId(newTabs[0]?.id ?? null);
+  }, [state.status, tabs.length]);
+
+  // Demo: clear on logout so next login re-seeds fresh (provider is per-page, but clear anyway)
+  useEffect(() => {
+    if (!isDemo) return;
+    if (state.status !== "idle") return;
+    setTabs([]);
+    setActiveId(null);
+    counter.current = 0;
+  }, [state.status]);
 
   useEffect(() => {
     const unsub = subscribe((msg) => {

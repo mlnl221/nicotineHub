@@ -51,7 +51,7 @@ function UploadsInner() {
           {isDemo ? (
             <div className="rounded-xl bg-tertiary-fixed/20 dark:bg-tertiary-container/20 px-4 py-3 flex items-center gap-3 ghost-border">
               <span className="material-symbols-outlined text-tertiary">info</span>
-              <p className="font-label text-xs font-semibold text-on-tertiary-container dark:text-tertiary-fixed">Demo — downloads &amp; uploads are disabled on Vercel.</p>
+              <p className="font-label text-xs font-semibold text-on-tertiary-container dark:text-tertiary-fixed">Demo preview — 1 upload simulated below (see Downloads for both). New transfers are disabled on Vercel.</p>
             </div>
           ) : null}
           <section data-testid="uploads-section" className="bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border flex flex-col gap-4 max-w-full overflow-hidden">

@@ -13,6 +13,7 @@ import {
 import { useSession } from "@/lib/session";
 import type { Transfer, TransferStatsMessage } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
+import { mockDemoTransfers } from "@/lib/demo/fixtures";
 
 interface TransfersApi {
   transfers: Transfer[];
@@ -46,27 +47,103 @@ function loadInitial(): Transfer[] {
 }
 
 export function TransfersProvider({ children }: { children: ReactNode }) {
-  const { send, subscribe } = useSession();
+  const { send, subscribe, state } = useSession();
   // Hydration-safe: start with defaults ([]) on both server & first client render,
   // then hydrate from localStorage after mount. See config/provider.tsx pattern.
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [stats, setStats] = useState<TransferStatsMessage | null>(null);
   const hydrated = useRef(false);
+  const demoAnimRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    setTransfers(loadInitial());
+    const loaded = loadInitial();
+    setTransfers(loaded);
     hydrated.current = true;
   }, []);
 
   // Persist mock transfers for demo refresh (skip initial write)
+  // In demo we throttle writes to avoid churn from animation (updates every ~900ms)
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!hydrated.current) return;
+    // Demo animation throttles persist to once per 3s via timeout
+    if (isDemo) {
+      if (persistTimer.current) clearTimeout(persistTimer.current);
+      persistTimer.current = setTimeout(() => {
+        try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(transfers)); } catch {}
+      }, 1200);
+      return () => { if (persistTimer.current) clearTimeout(persistTimer.current); };
+    }
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(transfers));
     } catch {
       // ignore
     }
   }, [transfers]);
+
+  // Demo: inject two fake transfers (download + upload) if empty after hydrate
+  useEffect(() => {
+    if (!isDemo) return;
+    if (!hydrated.current) return;
+    if (transfers.length !== 0) return;
+    if (state.status !== "connected") return;
+    try {
+      if (sessionStorage.getItem("__demoTransfersSeeded")) return;
+      sessionStorage.setItem("__demoTransfersSeeded", "1");
+    } catch {}
+    const seeded = mockDemoTransfers();
+    setTransfers(seeded);
+  }, [state.status, transfers.length]);
+
+  // Demo: animate Transferring progress so downloads/uploads look live
+  useEffect(() => {
+    if (!isDemo) return;
+    if (transfers.length === 0) return;
+    const hasTransferring = transfers.some((t) => t.status === "Transferring");
+    if (!hasTransferring) {
+      if (demoAnimRef.current) { clearInterval(demoAnimRef.current); demoAnimRef.current = null; }
+      return;
+    }
+    if (demoAnimRef.current) return; // already running
+    demoAnimRef.current = setInterval(() => {
+      setTransfers((prev) =>
+        prev.map((t) => {
+          if (t.status !== "Transferring") return t;
+          // increment by ~0.8s worth of speed, with jitter
+          const jitter = 0.85 + Math.random() * 0.3;
+          const inc = Math.floor(t.speed * 0.9 * jitter);
+          const nextCurrent = Math.min(t.size, t.current + inc);
+          const nextSpeed = Math.floor(t.speed * (0.88 + Math.random() * 0.24));
+          const remaining = t.size - nextCurrent;
+          const timeLeft = nextSpeed ? Math.ceil(remaining / nextSpeed) : null;
+          if (nextCurrent >= t.size) {
+            return { ...t, current: t.size, speed: 0, timeLeft: null, status: "Finished" as const };
+          }
+          return {
+            ...t,
+            current: nextCurrent,
+            speed: nextSpeed,
+            avgSpeed: Math.floor((t.avgSpeed + nextSpeed) / 2),
+            timeLeft,
+          };
+        }),
+      );
+    }, 900);
+    return () => {
+      if (demoAnimRef.current) { clearInterval(demoAnimRef.current); demoAnimRef.current = null; }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDemo, transfers.length]);
+
+  // Demo: clear on logout
+  useEffect(() => {
+    if (!isDemo) return;
+    if (state.status !== "idle") return;
+    if (demoAnimRef.current) { clearInterval(demoAnimRef.current); demoAnimRef.current = null; }
+    setTransfers([]);
+    try { sessionStorage.removeItem("__demoTransfersSeeded"); } catch {}
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+  }, [state.status]);
 
   useEffect(() => {
     const unsub = subscribe((msg) => {

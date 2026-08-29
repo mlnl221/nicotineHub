@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "@/lib/session";
 import type { UserInfoEvent, UserInfoStats, UserInfoStatus } from "@/lib/protocol";
+import { isDemo } from "@/lib/demo";
+import { mockBuddies } from "@/lib/demo/fixtures";
 
 export interface Buddy {
   username: string;
@@ -48,6 +50,25 @@ export function useBuddies() {
   useEffect(() => {
     saveBuddies(buddies);
   }, [buddies]);
+
+  // Demo: seed 2 buddies on first connect
+  useEffect(() => {
+    if (!isDemo) return;
+    if (state.status !== "connected") return;
+    if (buddies.length !== 0) return;
+    try { if (sessionStorage.getItem("__demoBuddiesSeeded")) return; } catch {}
+    try { sessionStorage.setItem("__demoBuddiesSeeded", "1"); } catch {}
+    const seeded = mockBuddies();
+    setBuddies(seeded);
+  }, [state.status, buddies.length]);
+
+  // Demo: clear on logout
+  useEffect(() => {
+    if (!isDemo) return;
+    if (state.status !== "idle") return;
+    setBuddies([]);
+    try { sessionStorage.removeItem("__demoBuddiesSeeded"); } catch {}
+  }, [state.status]);
 
   // Subscribe to user-status/stats/watch-user updates
   useEffect(() => {

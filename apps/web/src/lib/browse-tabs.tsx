@@ -3,6 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSession } from "@/lib/session";
 import type { BrowseFolder, BrowseFile } from "@/lib/protocol";
+import { isDemo } from "@/lib/demo";
+import { DEMO_BROWSE_USERS, mockBrowseFolders } from "@/lib/demo/fixtures";
 
 export interface BrowseTab {
   id: string;
@@ -93,6 +95,32 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
 
   // persist on change (debounced via effect)
   useEffect(() => { persist(tabs, activeId); }, [tabs, activeId]);
+
+  // Demo: seed 2 browse shares (jazzcat + vinyl_hunter) with mocked folders
+  useEffect(() => {
+    if (!isDemo) return;
+    if (state.status !== "connected") return;
+    if (tabs.length !== 0) return;
+    try { if (sessionStorage.getItem("__demoBrowseSeeded")) return; } catch {}
+    try { sessionStorage.setItem("__demoBrowseSeeded", "1"); } catch {}
+    const newTabs: BrowseTab[] = [...DEMO_BROWSE_USERS].map((username) => {
+      const id = `b${++counter.current}`;
+      const folders = mockBrowseFolders(username);
+      return { id, username, loading: false, error: null, folders, currentFolder: null, currentFiles: null, query: "" };
+    });
+    setTabs(newTabs);
+    setActiveId(newTabs[0]?.id ?? null);
+  }, [state.status, tabs.length]);
+
+  // Demo: clear on logout
+  useEffect(() => {
+    if (!isDemo) return;
+    if (state.status !== "idle") return;
+    setTabs([]);
+    setActiveId(null);
+    counter.current = 0;
+    try { sessionStorage.removeItem("__demoBrowseSeeded"); } catch {}
+  }, [state.status]);
 
   // Subscribe to browse messages — multiplex by username
   useEffect(() => {
