@@ -40,6 +40,9 @@ export interface JoinedRoom {
   name: string;
   users: string[];
   tickers: { username: string; msg: string }[];
+  owner?: string;
+  isPrivate?: boolean;
+  operators?: string[];
 }
 
 export function useRooms() {
@@ -128,10 +131,44 @@ export function useRooms() {
             });
             break;
           }
-          case "room-tickers":
-          case "ticker-added":
+          case "room-tickers": {
+            const data = ev.data as Array<{ username: string; msg: string }> | undefined;
+            const room = ev.room;
+            if (!room || !Array.isArray(data)) break;
+            setJoinedRooms((prev) => {
+              const next = new Map(prev);
+              const cur = next.get(room) || { name: room, users: [], tickers: [] };
+              next.set(room, { ...cur, tickers: data });
+              return next;
+            });
+            break;
+          }
+          case "ticker-added": {
+            const room = ev.room;
+            const username = ev.username;
+            const msg = ev.data as string | undefined;
+            if (!room || !username || typeof msg !== "string") break;
+            setJoinedRooms((prev) => {
+              const next = new Map(prev);
+              const cur = next.get(room);
+              if (!cur) return prev;
+              const filtered = cur.tickers.filter((t) => t.username !== username);
+              next.set(room, { ...cur, tickers: [...filtered, { username, msg }] });
+              return next;
+            });
+            break;
+          }
           case "ticker-removed": {
-            // store tickers if needed
+            const room = ev.room;
+            const username = ev.username;
+            if (!room || !username) break;
+            setJoinedRooms((prev) => {
+              const next = new Map(prev);
+              const cur = next.get(room);
+              if (!cur) return prev;
+              next.set(room, { ...cur, tickers: cur.tickers.filter((t) => t.username !== username) });
+              return next;
+            });
             break;
           }
           default:
@@ -213,13 +250,16 @@ export function useRooms() {
     (room: string, message: string) => {
       if (!message.trim()) return;
       let out = message.trim();
-      // /me action handling
       if (out.startsWith("/me ")) out = `* ${out.slice(4)}`;
       out = applyWords(out, { censorwords: settings.words.censorwords, censored: settings.words.censored, replacewords: settings.words.replacewords, autoreplaced: settings.words.autoreplaced });
       send({ type: "chat:room", action: "say", room, message: out });
     },
     [send, settings.words],
   );
+
+  const setTicker = useCallback((room: string, msg: string) => {
+    send({ type: "chat:room", action: "setTicker", room, message: msg } as unknown as never);
+  }, [send]);
 
   const closeAll = useCallback(() => {
     joinedRooms.forEach((_, room) => {
@@ -230,5 +270,5 @@ export function useRooms() {
     setActiveRoom(null);
   }, [joinedRooms, send]);
 
-  return { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, closeAll };
+  return { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, closeAll };
 }

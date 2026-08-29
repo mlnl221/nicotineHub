@@ -7,14 +7,22 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { useRooms } from "@/lib/rooms";
+import { ContextMenu } from "@/components/ui/ContextMenu";
+import { chatRoomMenu, userMenu } from "@/lib/context-menu/menus";
+import { useConfig } from "@/lib/config/provider";
 
 export default function ChatRoomsPage() {
   const { state } = useSession();
+  const { settings } = useConfig();
   const router = useRouter();
-  const { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, closeAll } = useRooms();
+  const { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, closeAll } = useRooms();
   const [joinInput, setJoinInput] = useState("");
   const [sayInput, setSayInput] = useState("");
   const [filter, setFilter] = useState("");
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [tickerInput, setTickerInput] = useState("");
+  const [showWall, setShowWall] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
 
   useEffect(() => {
     if (state.status !== "connected") router.replace("/");
@@ -28,15 +36,17 @@ export default function ChatRoomsPage() {
     ? roomList.filter((r) => r.name.toLowerCase().includes(filter.toLowerCase()))
     : roomList;
   const activeUsers = activeRoom ? joinedRooms.get(activeRoom)?.users || [] : [];
+  const activeTickers = activeRoom ? joinedRooms.get(activeRoom)?.tickers || [] : [];
 
   const handleJoin = () => {
     const r = joinInput.trim();
     if (!r) return;
-    // sanitize like nicotine: ascii, single spaces, max 24
     const sanitized = r.replace(/[^ -~]/g, "").replace(/\s+/g, " ").trim().slice(0, 24);
     if (!sanitized) return;
+    // private flag: nicotine shows private rooms with lock; we pass via suffix hint and setTicker path — UI only for now
     joinRoom(sanitized);
     setJoinInput("");
+    setIsPrivate(false);
   };
 
   const handleSay = () => {
@@ -50,34 +60,19 @@ export default function ChatRoomsPage() {
       <Sidebar />
       <TopBar title={activeRoom || "Chat Rooms"} subtitle={activeRoom ? `${activeUsers.length} users • ${roomList.length} public rooms` : `${joinedArray.length} joined • ${roomList.length} public`} />
       <main className="md:ml-72 flex flex-1 flex-col overflow-hidden pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
-        <header className="hidden md:flex items-center justify-between border-b border-outline-variant/15 bg-surface-container-lowest/80 px-6 py-4 backdrop-blur-xl">
-          <div className="flex items-center gap-4">
-            <h2 className="font-headline text-xl font-bold tracking-tight text-primary">Chat Rooms</h2>
-            {activeRoom ? (
-              <span className="inline-flex items-center gap-2 rounded-full bg-primary-fixed/20 px-3 py-1 font-label text-xs font-semibold text-primary">
-                <span className="material-symbols-outlined text-[16px]">tag</span> {activeRoom}
-              </span>
-            ) : null}
+        <header className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
+          <div>
+            <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Chat Rooms</h2>
+            <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">
+              {activeRoom ? `${activeUsers.length} users • ${activeRoom}` : `${joinedArray.length} joined • ${roomList.length} public`}
+              <span className="hidden md:inline"> • Monitoring rooms</span>
+            </p>
           </div>
-          <div className="flex items-center gap-2">
-            {joinedRooms.size > 0 ? (
-              <button
-                onClick={() => {
-                  if (confirm("Close all rooms? Leave all joined rooms.")) closeAll();
-                }}
-                className="rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container"
-              >
-                Close All
-              </button>
-            ) : null}
-            {activeRoom ? (
-              <button
-                onClick={() => leaveRoom(activeRoom)}
-                className="rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container"
-              >
-                Leave
-              </button>
-            ) : null}
+          <div className="flex items-center gap-2 md:gap-4">
+            {activeRoom ? <span className="hidden md:inline-flex items-center gap-2 rounded-full bg-primary-fixed/20 px-3 py-1 font-label text-xs font-semibold text-primary"><span className="material-symbols-outlined text-[16px]">tag</span> {activeRoom}</span> : null}
+            {joinedRooms.size > 0 ? <button onClick={() => { if (confirm("Close all rooms? Leave all joined rooms.")) closeAll(); }} className="hidden md:inline-flex rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container">Close All</button> : null}
+            {activeRoom ? <button onClick={() => leaveRoom(activeRoom)} className="hidden md:inline-flex rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container">Leave</button> : null}
+            <a href="/settings?tab=chats#chats" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Chat settings"><span className="material-symbols-outlined">settings</span></a>
           </div>
         </header>
 
@@ -101,6 +96,10 @@ export default function ChatRoomsPage() {
                   Join
                 </button>
               </div>
+              <label className="flex items-center gap-2 text-xs text-on-surface-variant">
+                <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} className="rounded" />
+                Private room
+              </label>
               <div className="relative">
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-outline">search</span>
                 <input
@@ -134,6 +133,15 @@ export default function ChatRoomsPage() {
                       <li key={r.name}>
                         <button
                           onClick={() => setActiveRoom(r.name)}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setMenuAnchor({
+                              x: e.clientX,
+                              y: e.clientY,
+                              items: [{ id: "leave", label: "Leave Room", icon: "logout", danger: true, action: () => leaveRoom(r.name) }],
+                            });
+                          }}
                           className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm ${activeRoom === r.name ? "bg-primary-fixed/20 text-primary font-semibold" : "hover:bg-surface-container-low text-on-surface-variant"}`}
                         >
                           <span className="flex items-center gap-2 truncate">
@@ -176,7 +184,21 @@ export default function ChatRoomsPage() {
           </aside>
 
           {/* Center: Messages */}
-          <section className="flex flex-1 flex-col overflow-hidden bg-surface-container-lowest/30">
+          <section className="flex flex-1 flex-col overflow-hidden bg-surface-container-lowest/30" onContextMenu={(e) => {
+            const t = e.target as HTMLElement;
+            if (t.closest("button, input, textarea, select")) return;
+            e.preventDefault();
+            setMenuAnchor({
+              x: e.clientX,
+              y: e.clientY,
+              items: chatRoomMenu(activeRoom, activeRoom ? "chat" : "activity", {
+                onFind: () => {},
+                onCopyAll: () => navigator.clipboard.writeText(activeMessages.map((m) => `${m.username}: ${m.message}`).join("\n")),
+                onClear: () => {},
+                onLeave: () => activeRoom && leaveRoom(activeRoom),
+              }),
+            });
+          }}>
             {/* Mobile room picker */}
             <div className="border-b border-outline-variant/15 bg-surface p-3 md:hidden">
               <select
@@ -202,6 +224,9 @@ export default function ChatRoomsPage() {
                   Join
                 </button>
               </div>
+              <label className="mt-2 flex items-center gap-2 text-xs text-on-surface-variant">
+                <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} /> Private
+              </label>
             </div>
 
             {!activeRoom ? (
@@ -222,9 +247,43 @@ export default function ChatRoomsPage() {
                     <span className="rounded-full bg-surface-container-high px-2 py-0.5 font-label text-xs">
                       {activeUsers.length} users
                     </span>
+                    <button onClick={() => setShowWall((v) => !v)} className="hidden md:inline-flex items-center gap-1 rounded-full bg-tertiary-container px-2 py-0.5 font-label text-xs text-on-tertiary-container">
+                      <span className="material-symbols-outlined text-[14px]">wallpaper</span> Room Wall {activeTickers.length ? `• ${activeTickers.length}` : ""}
+                    </button>
                   </div>
                   <span className="hidden md:inline font-label text-xs text-on-surface-variant">Room history may be truncated</span>
                 </div>
+                {/* Ticker strip */}
+                {activeTickers.length ? (
+                  <div className="flex gap-2 overflow-x-auto bg-tertiary-fixed/10 px-4 py-2 border-b border-outline-variant/10 hide-scrollbar">
+                    {activeTickers.map((t) => (
+                      <span key={t.username} className="shrink-0 rounded-full bg-surface-container-high px-3 py-1 font-label text-xs">
+                        <span className="font-semibold">{t.username}:</span> {t.msg}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {showWall ? (
+                  <div className="border-b border-outline-variant/15 bg-surface p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-label text-xs uppercase tracking-widest">Room Wall • {activeTickers.length} tickers</h4>
+                      <button onClick={() => setShowWall(false)} className="rounded-full p-1 hover:bg-surface-container-high"><span className="material-symbols-outlined text-[18px]">close</span></button>
+                    </div>
+                    <div className="flex gap-2">
+                      <input value={tickerInput} onChange={(e) => setTickerInput(e.target.value)} placeholder="Set your ticker…" className="flex-1 rounded-lg bg-surface-container-low px-3 py-2 text-sm" />
+                      <button onClick={() => { if (activeRoom && tickerInput.trim()) { setTicker(activeRoom, tickerInput.trim()); setTickerInput(""); } }} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary">Set Ticker</button>
+                      <button onClick={() => { if (activeRoom) { setTicker(activeRoom, ""); } }} className="rounded-lg bg-surface-container-high px-3 py-2 text-xs">Clear</button>
+                    </div>
+                    <ul className="max-h-40 overflow-y-auto space-y-1">
+                      {activeTickers.map((t) => (
+                        <li key={t.username} className="flex justify-between rounded-lg bg-surface-container-lowest px-3 py-2 text-sm">
+                          <span><span className="font-semibold">{t.username}</span> — {t.msg}</span>
+                        </li>
+                      ))}
+                      {activeTickers.length === 0 ? <li className="text-xs text-outline">No tickers yet.</li> : null}
+                    </ul>
+                  </div>
+                ) : null}
 
                 <div className="flex flex-1 overflow-hidden">
                   <div className="flex flex-1 flex-col overflow-hidden">
@@ -234,8 +293,10 @@ export default function ChatRoomsPage() {
                           <p className="font-body text-sm text-outline">No messages yet. Start the conversation.</p>
                         </div>
                       ) : (
-                        activeMessages.map((m) => (
-                          <div key={m.id} className="group flex gap-3 hover:bg-surface-container-low/40 -mx-4 md:-mx-6 px-4 md:px-6 py-1.5 max-w-full overflow-hidden">
+                        activeMessages.map((m) => {
+                          const isIgnored = m.username !== "system" && (settings.server.ignorelist.includes(m.username) || !!settings.server.ipignorelist[m.username]);
+                          return (
+                          <div key={m.id} className={`group flex gap-3 hover:bg-surface-container-low/40 -mx-4 md:-mx-6 px-4 md:px-6 py-1.5 max-w-full overflow-hidden ${isIgnored ? "opacity-40" : ""}`}>
                             <span
                               className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-xs font-bold ${m.username === "system" ? "bg-surface-container-high text-outline" : "bg-primary-container text-on-primary-container"}`}
                             >
@@ -253,11 +314,12 @@ export default function ChatRoomsPage() {
                               <p
                                 className={`mt-0.5 font-body text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${m.username === "system" ? "text-on-surface-variant italic" : "text-on-surface"}`}
                               >
-                                {m.message}
+                                {isIgnored ? "[ignored]" : m.message}
                               </p>
                             </div>
                           </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
 
@@ -298,18 +360,27 @@ export default function ChatRoomsPage() {
                       {activeUsers.length === 0 ? (
                         <p className="px-3 py-2 font-body text-xs text-outline">No users (room list may be stale).</p>
                       ) : (
-                        activeUsers.map((u) => (
+                        activeUsers.map((u) => {
+                          const isIgnored = settings.server.ignorelist.includes(u) || !!settings.server.ipignorelist[u];
+                          const isOperator = (joinedRooms.get(activeRoom!)?.operators || []).includes(u);
+                          const isOwner = joinedRooms.get(activeRoom!)?.owner === u;
+                          return (
                           <button
                             key={u}
                             onClick={() => (window.location.href = `/profile/${encodeURIComponent(u)}`)}
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-surface-container-low"
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setMenuAnchor({ x: e.clientX, y: e.clientY, items: userMenu(u, "chatrooms") });
+                            }}
+                            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-surface-container-low ${isIgnored ? "opacity-40" : ""} ${isOwner ? "font-bold underline decoration-primary" : isOperator ? "font-semibold" : ""}`}
                           >
-                            <span className="flex h-6 w-6 items-center justify-center rounded bg-surface-container-high text-[10px] font-bold">
+                            <span className={`flex h-6 w-6 items-center justify-center rounded text-[10px] font-bold ${isOwner ? "bg-primary text-on-primary" : "bg-surface-container-high"}`}>
                               {u.slice(0, 2).toUpperCase()}
                             </span>
-                            <span className="truncate font-body text-xs font-medium">{u}</span>
+                            <span className="truncate font-body text-xs font-medium">{u}{isOwner ? " ★" : isOperator ? " ◆" : ""}</span>
                           </button>
-                        ))
+                        );})
                       )}
                     </div>
                   </aside>
@@ -320,6 +391,7 @@ export default function ChatRoomsPage() {
         </div>
       </main>
       <BottomNav />
+      {menuAnchor ? <ContextMenu x={menuAnchor.x} y={menuAnchor.y} items={menuAnchor.items} onClose={() => setMenuAnchor(null)} /> : null}
     </div>
   );
 }
