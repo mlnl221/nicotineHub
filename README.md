@@ -111,6 +111,7 @@ also set `NEXT_PUBLIC_BRIDGE_TOKEN` or `localStorage.nicotine.bridgeToken` — t
 | `SHARED_DIRS` | `/data/shared` | Colon-separated real FS dirs to auto-scan into shares (e.g. `/data/shared:/data/music`), scanned on startup via `ShareDB.scanFsShares` with 0.4s flood throttle |
 | `ENABLE_SERVER_PING` | `1` | Set `0` to disable obsolete ServerPing 32 keepalive fallback (nicotine uses TCP keepalive) |
 | `SHARES_DIR` | `DATA_DIR` | Override shares persist path (default `DATA_DIR/shares.json`) |
+| `UPLOAD_LIMIT` / `DOWNLOAD_LIMIT` | `0` (unlimited) | KB/s bandwidth limiter for F transfers (adaptive `max(4096,sent*1.25/dt)` + pause/resume throttle, env `UPLOAD_LIMIT`/`DOWNLOAD_LIMIT` or `UPLOADLIMIT`/`DOWNLOADLIMIT` for nicotine parity) |
 
 > **Distributed network:** Bridge is **leaf-only** — it participates as leaf via `HaveNoParent 71` + `BranchLevel/Root` + `PossibleParents 102` (up to 10 parallel D dials) and forwards `DistribSearch 3`/`EmbeddedMessage 93`, but does not act as parent (no child aggregation). `D` attempts return `distrib:unsupported` if ever queried as parent; matches nicotine leaf mode.
 

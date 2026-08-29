@@ -218,6 +218,17 @@ export class SoulseekSession {
 
   get isLoggedIn(): boolean { return this.loggedIn; }
 
+  // Expose ShareDB for rescan via server.ts WS
+  get shareDBInstance(): ShareDB { return this.shareDB; }
+  async rescanShares(): Promise<import("./shares.ts").ShareFolder[]> {
+    const res = await this.shareDB.rescanAsync();
+    try {
+      const { dirs, files } = this.shareDB.getSharedCounts();
+      this.reportShares(dirs, files);
+    } catch {}
+    return res;
+  }
+
   private emit(event: UserInfoEvent) { this.opts.onUserEvent?.(event); }
   private emitChat(event: ChatEvent) { this.opts.onChatEvent?.(event); }
   private emitRoom(event: RoomEvent) { this.opts.onRoomEvent?.(event); }

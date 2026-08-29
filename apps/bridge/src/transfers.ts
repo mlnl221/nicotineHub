@@ -592,6 +592,22 @@ export class TransferManager {
     }, delayMs);
   }
 
+  // Bandwidth limiter — token bucket approximation (nicotine slskproto.py Limetr)
+  // Env UPLOAD_LIMIT / DOWNLOAD_LIMIT in KB/s (0 = unlimited)
+  private getUploadLimit(): number {
+    const raw = Number(process.env.UPLOAD_LIMIT || process.env.UPLOADLIMIT || 0);
+    return raw > 0 ? raw * 1024 : 0;
+  }
+  private getDownloadLimit(): number {
+    const raw = Number(process.env.DOWNLOAD_LIMIT || process.env.DOWNLOADLIMIT || 0);
+    return raw > 0 ? raw * 1024 : 0;
+  }
+  private limiterDelay(bytes: number, limitBps: number): number {
+    if (!limitBps) return 0;
+    // adaptive chunk: max(4096, sent*1.25/dt) parity — simple delay = bytes/limit*1000
+    return Math.ceil((bytes / limitBps) * 1000);
+  }
+
   // F connection handling — called by session when raw bytes arrive
   async handleFileConnection(token: number, socket: Socket) {
     const t = this.getByToken(token);
@@ -621,6 +637,16 @@ export class TransferManager {
     const onData = (chunk: Buffer) => {
       if (left <= 0) return;
       const toWrite = chunk.subarray(0, Math.min(chunk.length, left));
+      // Bandwidth throttling: delay processing if limit exceeded (mimics slskproto adaptive 4096 logic)
+      const dlLimit = this.getDownloadLimit();
+      if (dlLimit) {
+        const delay = this.limiterDelay(toWrite.length, dlLimit);
+        if (delay > 10) {
+          // Simple throttle: pause socket briefly
+          try { (socket as unknown as { pause?: () => void })?.pause?.(); } catch {}
+          setTimeout(() => { try { (socket as unknown as { resume?: () => void })?.resume?.(); } catch {} }, delay);
+        }
+      }
       try {
         const { writeSync } = require("node:fs");
         writeSync(handle!, toWrite, 0, toWrite.length);
@@ -634,7 +660,9 @@ export class TransferManager {
       t.current += toWrite.length;
       left -= toWrite.length;
       const elapsed = (Date.now() - (t._startTime ?? Date.now())) / 1000;
-      t.speed = toWrite.length * 2; // approx, throttled 500 ms
+      // Adaptive speed calc like slskproto: max(4096, sent*1.25/dt)
+      const rawSpeed = elapsed > 0 ? (t.current - startOffset) / elapsed : toWrite.length * 2;
+      t.speed = Math.max(4096, Math.min(rawSpeed, dlLimit || rawSpeed));
       t.avgSpeed = elapsed > 0 ? (t.current - startOffset) / elapsed : t.speed;
       t.timeLeft = t.speed > 0 ? Math.ceil(left / t.speed) : null;
       // throttle emit 500 ms

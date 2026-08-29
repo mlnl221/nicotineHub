@@ -553,6 +553,15 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         return;
       }
 
+      if (data.type === "shares:rescan") {
+        const session = requireLogin(); if (!session) return;
+        (session as unknown as { rescanShares: () => Promise<unknown> }).rescanShares().then((folders: unknown) => {
+          const counts = (session as unknown as { shareDBInstance: { getSharedCounts: () => { dirs:number; files:number } } }).shareDBInstance.getSharedCounts();
+          ws.send(JSON.stringify({ type: "shares:rescanned", folders, counts }));
+        }).catch((e: Error) => ws.send(errorMessage(e.message)));
+        return;
+      }
+
       if (data.type === "diagnostics:clear") {
         logger.info("system", "diagnostics clear requested");
         diagClear();
