@@ -176,6 +176,7 @@ export interface Settings {
   };
   plugins: {
     enable: boolean;
+    enabled: string[];
   };
   ctcp: {
     enable: boolean;
@@ -362,6 +363,7 @@ export const defaults: Settings = {
   },
   plugins: {
     enable: true,
+    enabled: [],
   },
   ctcp: {
     enable: true,

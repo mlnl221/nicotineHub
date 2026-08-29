@@ -549,6 +549,83 @@ export interface DiagnosticsBrowserLogRequest {
   meta?: Record<string, unknown>;
 }
 
+/* ------------------------------------------------------------------ *
+ * Plugins
+ * ------------------------------------------------------------------ */
+
+export interface PluginInfo {
+  name: string;
+  humanName: string;
+  enabled: boolean;
+  isInternal: boolean;
+  info: Record<string, unknown>;
+  settings?: Record<string, unknown> | null;
+  metasettings?: Record<string, unknown> | null;
+}
+
+export interface PluginListRequest {
+  type: "plugin:list";
+}
+export interface PluginToggleRequest {
+  type: "plugin:toggle";
+  name: string;
+}
+export interface PluginReloadRequest {
+  type: "plugin:reload";
+  name: string;
+}
+export interface PluginUninstallRequest {
+  type: "plugin:uninstall";
+  name: string;
+}
+export interface PluginSettingsRequest {
+  type: "plugin:settings";
+  name: string;
+  settings: Record<string, unknown>;
+}
+export interface PluginResetSettingsRequest {
+  type: "plugin:resetSettings";
+  name: string;
+}
+export interface PluginInstallRequest {
+  type: "plugin:install";
+  fileName?: string;
+  data: string; // base64 zip
+}
+export interface PluginInstallUrlRequest {
+  type: "plugin:installUrl";
+  url: string;
+}
+
+export interface PluginListMessage {
+  type: "plugin:list";
+  plugins: PluginInfo[];
+}
+export interface PluginInstalledMessage {
+  type: "plugin:installed";
+  name: string;
+  ok: boolean;
+}
+export interface PluginToggledMessage {
+  type: "plugin:toggled";
+  name: string;
+  enabled: boolean;
+}
+export interface PluginReloadedMessage {
+  type: "plugin:reloaded";
+  name: string;
+}
+export interface PluginUninstalledMessage {
+  type: "plugin:uninstalled";
+  name: string;
+  ok: boolean;
+}
+export interface PluginOutputMessage {
+  type: "plugin:output";
+  plugin: string;
+  text: string;
+}
+
 export type BridgeOutboundMessage =
   | LoginStartMessage
   | LoginResultSuccess
@@ -574,7 +651,13 @@ export type BridgeOutboundMessage =
   | DiagnosticsInitMessage
   | DiagnosticsLogMessage
   | DiagnosticsHealthMessage
-  | DiagnosticsClearedMessage;
+  | DiagnosticsClearedMessage
+  | PluginListMessage
+  | PluginInstalledMessage
+  | PluginToggledMessage
+  | PluginReloadedMessage
+  | PluginUninstalledMessage
+  | PluginOutputMessage;
 
 export type BridgeInboundMessage =
   | LoginRequest
@@ -594,4 +677,12 @@ export type BridgeInboundMessage =
   | UserinfoRequestMessage
   | DiagnosticsClearRequest
   | DiagnosticsSubscribeRequest
-  | DiagnosticsBrowserLogRequest;
+  | DiagnosticsBrowserLogRequest
+  | PluginListRequest
+  | PluginToggleRequest
+  | PluginReloadRequest
+  | PluginUninstallRequest
+  | PluginSettingsRequest
+  | PluginResetSettingsRequest
+  | PluginInstallRequest
+  | PluginInstallUrlRequest;

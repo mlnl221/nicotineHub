@@ -8,11 +8,15 @@
  *   client -> server: { type:"chat:private", action:"send", username, message }
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { z } from "zod";
 import { SoulseekSession } from "./session.ts";
 import { TransferManager } from "./transfers.ts";
 import { diagClear, diagLog, diagTail, diagSubscribe, logger, type LogLevel } from "./logger.ts";
+import { PluginManager } from "./plugins/manager.ts";
+import { Plugin as CoreCommandsPlugin, manifest as coreCommandsManifest } from "./plugins/builtin/core_commands.ts";
+import { Plugin as SpamfilterPlugin, manifest as spamManifest } from "./plugins/builtin/spamfilter.ts";
 
 /* Schemas */
 
@@ -123,6 +127,15 @@ const BrowseSchema = z.object({
   token: z.number().int().optional(),
 });
 
+const PluginListRequestSchema = z.object({ type: z.literal("plugin:list") });
+const PluginToggleSchema = z.object({ type: z.literal("plugin:toggle"), name: z.string().min(1).max(64) });
+const PluginReloadSchema = z.object({ type: z.literal("plugin:reload"), name: z.string().min(1).max(64) });
+const PluginUninstallSchema = z.object({ type: z.literal("plugin:uninstall"), name: z.string().min(1).max(64) });
+const PluginSettingsSchema = z.object({ type: z.literal("plugin:settings"), name: z.string().min(1).max(64), settings: z.record(z.unknown()) });
+const PluginResetSettingsSchema = z.object({ type: z.literal("plugin:resetSettings"), name: z.string().min(1).max(64) });
+const PluginInstallSchema = z.object({ type: z.literal("plugin:install"), fileName: z.string().max(255).optional(), data: z.string().min(1) }); // base64 zip
+const PluginInstallUrlSchema = z.object({ type: z.literal("plugin:installUrl"), url: z.string().url().max(2048) });
+
 function defaultProfile(username: string) {
   return { username, descr: "", pic: null, totalupl: 0, queuesize: 0, slotsavail: true, uploadallowed: 1 };
 }
@@ -131,6 +144,15 @@ const LISTEN_PORT = Number(process.env.LISTEN_PORT || 2234);
 const PORT = Number(process.env.PORT || 8787);
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || "";
 const DATA_DIR = process.env.DATA_DIR || "/data";
+
+// Global plugin manager (shared across WS, but per-WS session getter is swapped)
+const pluginManager = new PluginManager({ dataDir: DATA_DIR });
+pluginManager.registerBuiltin("core_commands", coreCommandsManifest as unknown as Record<string, unknown>, () => new CoreCommandsPlugin());
+pluginManager.registerBuiltin("spamfilter", spamManifest as unknown as Record<string, unknown>, () => new SpamfilterPlugin());
+// start async (don't block serve)
+pluginManager.start().catch((e) => logger.warn("bridge", "plugin manager start failed", { error: (e as Error).message }));
+// expose for http handlers
+(globalThis as unknown as Record<string, unknown>).__pluginManager = pluginManager;
 
 // Ensure data volume exists (dev fallback to /tmp if /data not writable)
 try {
@@ -162,9 +184,9 @@ const CORS_HEADERS = {
   "access-control-allow-headers": "content-type, authorization",
 };
 
-export const server = Bun.serve<{ session?: SoulseekSession; transfers?: TransferManager; logUnsub?: () => void }>({
+export const server = Bun.serve<{ session?: SoulseekSession; transfers?: TransferManager; logUnsub?: () => void; pluginManager?: PluginManager }>({
   port: PORT,
-  fetch(req, server) {
+  async fetch(req, server) {
     const url = new URL(req.url);
     if (req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -216,6 +238,60 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         health: { ok: true, ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN },
         logs: entries,
       }), { status: 200, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+    }
+
+    if (url.pathname === "/plugins" && req.method === "GET") {
+      if (BRIDGE_TOKEN) {
+        const tok = extractToken(req);
+        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401 });
+      }
+      const list = pluginManager.getInstalledPluginListWithStatus();
+      // include meta for each + loaded settings/metasettings
+      const enriched = list.map((p) => ({
+        ...p,
+        settings: pluginManager.getPluginSettings(p.name),
+        metasettings: pluginManager.getPluginMetaSettings(p.name),
+      }));
+      return new Response(JSON.stringify({ plugins: enriched, globalEnable: true }), { status: 200, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+    }
+    if (url.pathname === "/plugins/install" && req.method === "POST") {
+      if (BRIDGE_TOKEN) {
+        const tok = extractToken(req);
+        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401 });
+      }
+      // expect multipart or raw zip; handle raw body as zip bytes (content-type octet-stream) or JSON {url}
+      const ct = req.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        try {
+          const body = (await req.json()) as { url?: string; data?: string; fileName?: string };
+          if (body.url) {
+            const name = await pluginManager.installFromUrl(body.url);
+            if (!name) return new Response(JSON.stringify({ error: "install failed" }), { status: 400, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+            return new Response(JSON.stringify({ ok: true, name }), { status: 200, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+          }
+          if (body.data) {
+            const buf = Buffer.from(body.data, "base64");
+            const tmp = join(DATA_DIR, `.upload_${Date.now()}.zip`);
+            try { mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+            writeFileSync(tmp, buf);
+            const name = await (pluginManager as unknown as { installPluginFromZip: (p: string) => Promise<string | null> }).installPluginFromZip(tmp);
+            try { rmSync(tmp, { force: true }); } catch {}
+            if (!name) return new Response(JSON.stringify({ error: "install failed" }), { status: 400, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+            return new Response(JSON.stringify({ ok: true, name }), { status: 200, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+          }
+        } catch (e) { return new Response(JSON.stringify({ error: (e as Error).message }), { status: 400, headers: { "content-type": "application/json", ...CORS_HEADERS } }); }
+      }
+      // raw zip bytes
+      try {
+        const buf = Buffer.from(await req.arrayBuffer());
+        if (buf.length === 0) return new Response("Missing zip body", { status: 400 });
+        const tmp = join(DATA_DIR, `.upload_${Date.now()}.zip`);
+        writeFileSync(tmp, buf);
+        const name = await (pluginManager as unknown as { installPluginFromZip: (p: string) => Promise<string | null> }).installPluginFromZip(tmp);
+        try { rmSync(tmp, { force: true }); } catch {}
+        if (!name) return new Response(JSON.stringify({ error: "install failed" }), { status: 400, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+        return new Response(JSON.stringify({ ok: true, name }), { status: 200, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+      } catch (e) { return new Response(JSON.stringify({ error: (e as Error).message }), { status: 500, headers: { "content-type": "application/json", ...CORS_HEADERS } }); }
     }
 
     if (url.pathname === "/ws") {
@@ -291,6 +367,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
   websocket: {
     open(ws) {
       ws.data = {};
+      (ws.data as unknown as Record<string, unknown>).pluginManager = pluginManager;
+      // allow plugins to send to this ws's session; pluginManager is global, swap getter per ws on login
       logger.info("bridge", "ws open", { ip: (ws as unknown as { remoteAddress?: string }).remoteAddress });
       const tm = new TransferManager({
         dataDir: DATA_DIR,
@@ -322,7 +400,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN } }));
       } catch {}
     },
-    message(ws, raw) {
+    async message(ws, raw) {
       let parsed: unknown;
       try { parsed = JSON.parse(String(raw)); } catch { ws.send(errorMessage("Invalid JSON payload.")); return; }
       const data = parsed as { type?: string };
@@ -346,14 +424,43 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             try { return (ws.data.transfers as unknown as { getQueuePlace: (f:string)=>number })?.getQueuePlace(file) ?? 1; } catch { return 1; }
           },
           onUserEvent: (event) => {
+            // plugin hooks for user status/stats
+            if (event.type === "user-status" && event.status) {
+              pluginManager.userStatusNotification(event.status.username, event.status.status, event.status.privileged);
+            } else if (event.type === "user-stats" && event.stats) {
+              pluginManager.userStatsNotification(event.stats.username, event.stats);
+            } else if (event.type === "peer-address" && event.peerAddress) {
+              pluginManager.userResolveNotification(event.username ?? "", event.peerAddress.ip ?? "", event.peerAddress.port ?? 0);
+            }
             logger.debug("server", "user event", { type: event.type, username: event.username });
             try { ws.send(JSON.stringify({ type: "userinfo:event", event })); } catch {}
           },
           onChatEvent: (event) => {
+            // plugin zap handling for incoming chat
+            if (event.type === "private-message" && event.username && event.message) {
+              const out = pluginManager.incomingPrivateChatEvent(event.username, event.message);
+              if (out === null) return;
+              const finalMsg = out?.[1] as string | undefined;
+              if (finalMsg !== undefined) event.message = finalMsg;
+              pluginManager.incomingPrivateChatNotification(event.username, event.message);
+            } else if (event.type === "say-chatroom" && event.room && event.username && event.message) {
+              const out = pluginManager.incomingPublicChatEvent(event.room, event.username, event.message);
+              if (out === null) return;
+              const finalMsg = out?.[2] as string | undefined;
+              if (finalMsg !== undefined) event.message = finalMsg;
+              pluginManager.incomingPublicChatNotification(event.room, event.username, event.message);
+            }
             logger.debug("chat", "chat event", { type: event.type, room: event.room, username: event.username });
             try { ws.send(JSON.stringify({ type: "chat:event", event })); } catch {}
           },
           onRoomEvent: (event) => {
+            if (event.type === "join-room" && event.room) pluginManager.joinChatroomNotification(event.room);
+            else if (event.type === "leave-room" && event.room) pluginManager.leaveChatroomNotification(event.room);
+            else if (event.type === "user-joined-room" && event.room && event.username) pluginManager.userJoinChatroomNotification(event.room, event.username);
+            else if (event.type === "user-left-room" && event.room && event.username) pluginManager.userLeaveChatroomNotification(event.room, event.username);
+            else if (event.type === "room-list" && event.data) {
+              // ignore
+            }
             logger.debug("chat", "room event", { type: event.type, room: event.room });
             try { ws.send(JSON.stringify({ type: "room:event", event })); } catch {}
           },
@@ -366,6 +473,12 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             } catch {}
           },
           onTransferEvent: (event) => {
+            // plugin transfer hooks
+            if (event.type === "queue-upload" && event.username && event.file) pluginManager.uploadQueuedNotification(event.username, event.file);
+            else if (event.type === "transfer-response" && event.username && event.file) {
+              // treat as started? use upload_started
+              pluginManager.uploadStartedNotification(event.username, event.file);
+            }
             logger.debug("transfer", "transfer event", { type: event.type, username: event.username, file: event.file?.slice(0,80), token: event.token });
             try { ws.send(JSON.stringify({ type: "peer:transfer", event })); } catch {}
             // Delegate to TransferManager for queue / transfer-request handling
@@ -391,6 +504,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             } catch {}
           },
           onServerEvent: (event) => {
+            if (event.type === "reconnect") pluginManager.serverConnectNotification();
+            else if (event.type === "reconnect-failed") pluginManager.serverDisconnectNotification(false);
             logger.info("server", "server reconnect", event as unknown as Record<string, unknown>);
             try { ws.send(JSON.stringify({ type: "server:reconnect", ...event })); } catch {}
           },
@@ -398,6 +513,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         ws.data.session = session;
         // Ensure TransferManager can call back into session
         try { ws.data.transfers?.setSessionGetter(() => session as unknown as never); } catch {}
+        try { pluginManager.setSessionGetter(() => session as unknown as ReturnType<PluginManager["setSessionGetter"]> extends never ? never : unknown as never); } catch {}
         ws.send(JSON.stringify({ type: "login:start" }));
         session.login()
           .then((outcome) => {
@@ -423,8 +539,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid search message.")); return; }
         const session = requireLogin(); if (!session) return;
         const { searchId, query } = result.data;
-        logger.info("search", "search request", { searchId, query: query.slice(0,80) });
-        const token = session.search(query, searchId, {
+        const out = pluginManager.outgoingGlobalSearchEvent(query);
+        if (out === null) return;
+        const finalQuery = (out?.[0] as string) ?? query;
+        logger.info("search", "search request", { searchId, query: finalQuery.slice(0,80) });
+        const token = session.search(finalQuery, searchId, {
           onResult: (p) => {
             logger.debug("search", "search result", { searchId, rows: p.rows?.length });
             ws.send(JSON.stringify({ type: "search:result", ...p }));
@@ -443,7 +562,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid search:user message.")); return; }
         const session = requireLogin(); if (!session) return;
         const { searchId, username, query } = result.data;
-        const token = session.searchUser(username, query, searchId, {
+        const out = pluginManager.outgoingUserSearchEvent([username], query);
+        if (out === null) return;
+        const finalQuery = (out?.[1] as string) ?? query;
+        const token = session.searchUser(username, finalQuery, searchId, {
           onResult: (p) => ws.send(JSON.stringify({ type: "search:result", ...p })),
           onEnd: (p) => ws.send(JSON.stringify({ type: "search:end", ...p })),
         });
@@ -455,7 +577,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid search:room message.")); return; }
         const session = requireLogin(); if (!session) return;
         const { searchId, room, query } = result.data;
-        const token = session.searchRoom(room, query, searchId, {
+        const out = pluginManager.outgoingRoomSearchEvent([room], query);
+        if (out === null) return;
+        const finalQuery = (out?.[1] as string) ?? query;
+        const token = session.searchRoom(room, finalQuery, searchId, {
           onResult: (p) => ws.send(JSON.stringify({ type: "search:result", ...p })),
           onEnd: (p) => ws.send(JSON.stringify({ type: "search:end", ...p })),
         });
@@ -467,7 +592,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid search:wishlist message.")); return; }
         const session = requireLogin(); if (!session) return;
         const { searchId, query } = result.data;
-        const token = session.wishlistSearch(query, searchId, {
+        const out = pluginManager.outgoingWishlistSearchEvent(query);
+        if (out === null) return;
+        const finalQuery = (out?.[0] as string) ?? query;
+        const token = session.wishlistSearch(finalQuery, searchId, {
           onResult: (p) => ws.send(JSON.stringify({ type: "search:result", ...p })),
           onEnd: (p) => ws.send(JSON.stringify({ type: "search:end", ...p })),
         });
@@ -510,10 +638,41 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid chat:room message.")); return; }
         const session = requireLogin(); if (!session) return;
         const { action, room, message } = result.data;
-        if (action === "join") session.joinRoom(room);
-        else if (action === "leave") session.leaveRoom(room);
-        else if (action === "say" && message) session.sayChatroom(room, message);
-        else if (action === "setTicker" && message) session.setRoomTicker(room, message);
+        if (action === "join") {
+          pluginManager.joinChatroomNotification(room);
+          session.joinRoom(room);
+        } else if (action === "leave") {
+          pluginManager.leaveChatroomNotification(room);
+          session.leaveRoom(room);
+        } else if (action === "say" && message) {
+          // slash command intercept
+          if (message.startsWith("/")) {
+            const firstSpace = message.indexOf(" ");
+            const cmd = firstSpace >= 0 ? message.slice(1, firstSpace).toLowerCase() : message.slice(1).toLowerCase();
+            const args = firstSpace >= 0 ? message.slice(firstSpace + 1) : "";
+            const outputs: string[] = [];
+            pluginManager.setOutputHandler((_, text) => outputs.push(text));
+            const handled = await pluginManager.triggerChatroomCommand(room, cmd, args);
+            pluginManager.setOutputHandler(null);
+            if (handled || outputs.length > 0) {
+              // send plugin output as local echo so user sees command result
+              for (const t of outputs) {
+                try { ws.send(JSON.stringify({ type: "chat:event", event: { type: "say-chatroom", room, username: "[plugin]", message: t, timestamp: Date.now() } })); } catch {}
+                try { ws.send(JSON.stringify({ type: "plugin:output", plugin: "core_commands", text: t })); } catch {}
+              }
+              if (handled) return;
+            }
+            // fallback: if command not handled, still allow plugin to maybe handle via outgoing event? Then drop if zap
+          }
+          const out = pluginManager.outgoingPublicChatEvent(room, message);
+          if (out === null) {
+            ws.send(JSON.stringify({ type: "chat:event", event: { type: "say-chatroom", room, username: session.username, message, timestamp: Date.now() } } as unknown as Record<string, unknown>));
+            return;
+          }
+          const finalMsg = (out?.[1] as string) ?? message;
+          session.sayChatroom(room, finalMsg);
+          pluginManager.outgoingPublicChatNotification(room, finalMsg);
+        } else if (action === "setTicker" && message) session.setRoomTicker(room, message);
         else if (action === "ticker") { /* server pushes tickers, no client send needed */ }
         return;
       }
@@ -521,7 +680,30 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const result = ChatPrivateSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid chat:private message.")); return; }
         const session = requireLogin(); if (!session) return;
-        if (result.data.action === "send" && result.data.message) session.sendPrivateMessage(result.data.username, result.data.message);
+        if (result.data.action === "send" && result.data.message) {
+          const msg = result.data.message;
+          if (msg.startsWith("/")) {
+            const firstSpace = msg.indexOf(" ");
+            const cmd = firstSpace >= 0 ? msg.slice(1, firstSpace).toLowerCase() : msg.slice(1).toLowerCase();
+            const args = firstSpace >= 0 ? msg.slice(firstSpace + 1) : "";
+            const outputs: string[] = [];
+            pluginManager.setOutputHandler((_, text) => outputs.push(text));
+            const handled = await pluginManager.triggerPrivateChatCommand(result.data.username, cmd, args);
+            pluginManager.setOutputHandler(null);
+            if (handled || outputs.length > 0) {
+              for (const t of outputs) {
+                try { ws.send(JSON.stringify({ type: "chat:event", event: { type: "private-message", username: result.data.username, message: t, timestamp: Date.now() } })); } catch {}
+                try { ws.send(JSON.stringify({ type: "plugin:output", plugin: "core_commands", text: t })); } catch {}
+              }
+              if (handled) return;
+            }
+          }
+          const out = pluginManager.outgoingPrivateChatEvent(result.data.username, msg);
+          if (out === null) return;
+          const finalMsg = (out?.[1] as string) ?? msg;
+          session.sendPrivateMessage(result.data.username, finalMsg);
+          pluginManager.outgoingPrivateChatNotification(result.data.username, finalMsg);
+        }
         return;
       }
       if (data.type === "chat:global") {
@@ -625,6 +807,84 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             session.setProfile({ username: session.username, descr: msg.profile.descr, pic: msg.profile.pic ? Buffer.from(msg.profile.pic, "base64") : null, totalupl: msg.profile.totalupl, queuesize: msg.profile.queuesize, slotsavail: msg.profile.slotsavail, uploadallowed: msg.profile.uploadallowed });
             break;
         }
+        return;
+      }
+
+      // ---- plugin WS API ----
+      if (data.type === "plugin:list") {
+        const list = pluginManager.getInstalledPluginListWithStatus();
+        const enriched = list.map((p) => ({
+          ...p,
+          settings: pluginManager.getPluginSettings(p.name),
+          metasettings: pluginManager.getPluginMetaSettings(p.name),
+        }));
+        ws.send(JSON.stringify({ type: "plugin:list", plugins: enriched }));
+        return;
+      }
+      if (data.type === "plugin:toggle") {
+        const res = PluginToggleSchema.safeParse(parsed);
+        if (!res.success) { ws.send(errorMessage(res.error.issues[0].message)); return; }
+        await pluginManager.togglePlugin(res.data.name);
+        const list = pluginManager.getInstalledPluginListWithStatus().map((p) => ({ ...p, settings: pluginManager.getPluginSettings(p.name), metasettings: pluginManager.getPluginMetaSettings(p.name) }));
+        ws.send(JSON.stringify({ type: "plugin:list", plugins: list }));
+        ws.send(JSON.stringify({ type: "plugin:toggled", name: res.data.name, enabled: pluginManager.isPluginLoaded(res.data.name) }));
+        return;
+      }
+      if (data.type === "plugin:reload") {
+        const res = PluginReloadSchema.safeParse(parsed);
+        if (!res.success) { ws.send(errorMessage(res.error.issues[0].message)); return; }
+        await pluginManager.reloadPlugin(res.data.name);
+        ws.send(JSON.stringify({ type: "plugin:reloaded", name: res.data.name }));
+        return;
+      }
+      if (data.type === "plugin:uninstall") {
+        const res = PluginUninstallSchema.safeParse(parsed);
+        if (!res.success) { ws.send(errorMessage(res.error.issues[0].message)); return; }
+        const ok = pluginManager.uninstallPlugin(res.data.name);
+        ws.send(JSON.stringify({ type: "plugin:uninstalled", name: res.data.name, ok }));
+        const list = pluginManager.getInstalledPluginListWithStatus().map((p) => ({ ...p, settings: pluginManager.getPluginSettings(p.name), metasettings: pluginManager.getPluginMetaSettings(p.name) }));
+        ws.send(JSON.stringify({ type: "plugin:list", plugins: list }));
+        return;
+      }
+      if (data.type === "plugin:settings") {
+        const res = PluginSettingsSchema.safeParse(parsed);
+        if (!res.success) { ws.send(errorMessage(res.error.issues[0].message)); return; }
+        pluginManager.setPluginSettings(res.data.name, res.data.settings as Record<string, unknown>);
+        ws.send(JSON.stringify({ type: "plugin:settings", name: res.data.name, ok: true }));
+        return;
+      }
+      if (data.type === "plugin:resetSettings") {
+        const res = PluginResetSettingsSchema.safeParse(parsed);
+        if (!res.success) { ws.send(errorMessage(res.error.issues[0].message)); return; }
+        pluginManager.resetPluginSettings(res.data.name);
+        ws.send(JSON.stringify({ type: "plugin:resetSettings", name: res.data.name, ok: true }));
+        return;
+      }
+      if (data.type === "plugin:install") {
+        const res = PluginInstallSchema.safeParse(parsed);
+        if (!res.success) { ws.send(errorMessage(res.error.issues[0].message)); return; }
+        try {
+          const buf = Buffer.from(res.data.data, "base64");
+          const tmp = join(DATA_DIR, `.ws_upload_${Date.now()}_${res.data.fileName ?? "plugin.zip"}`);
+          try { mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+          writeFileSync(tmp, buf);
+          const name = await (pluginManager as unknown as { installPluginFromZip: (p: string) => Promise<string | null> }).installPluginFromZip(tmp);
+          try { rmSync(tmp, { force: true }); } catch {}
+          if (!name) { ws.send(errorMessage("Install failed")); return; }
+          ws.send(JSON.stringify({ type: "plugin:installed", name, ok: true }));
+          const list = pluginManager.getInstalledPluginListWithStatus().map((p) => ({ ...p, settings: pluginManager.getPluginSettings(p.name), metasettings: pluginManager.getPluginMetaSettings(p.name) }));
+          ws.send(JSON.stringify({ type: "plugin:list", plugins: list }));
+        } catch (e) { ws.send(errorMessage((e as Error).message)); }
+        return;
+      }
+      if (data.type === "plugin:installUrl") {
+        const res = PluginInstallUrlSchema.safeParse(parsed);
+        if (!res.success) { ws.send(errorMessage(res.error.issues[0].message)); return; }
+        const name = await pluginManager.installFromUrl(res.data.url);
+        if (!name) { ws.send(errorMessage("Install from URL failed")); return; }
+        ws.send(JSON.stringify({ type: "plugin:installed", name, ok: true }));
+        const list = pluginManager.getInstalledPluginListWithStatus().map((p) => ({ ...p, settings: pluginManager.getPluginSettings(p.name), metasettings: pluginManager.getPluginMetaSettings(p.name) }));
+        ws.send(JSON.stringify({ type: "plugin:list", plugins: list }));
         return;
       }
 
