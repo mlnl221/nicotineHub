@@ -336,6 +336,12 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         ws.data.session?.close();
         const session = new SoulseekSession({
           username, password, host, port, listenPort: LISTEN_PORT, profile: defaultProfile(username), dataDir: DATA_DIR,
+          onFileConnection: (token, socket) => {
+            try { (ws.data.transfers as unknown as { handleFileConnection: (t:number,s:unknown)=>void })?.handleFileConnection(token, socket as unknown as never); } catch {}
+          },
+          onFileChunk: (token, chunk) => {
+            try { (ws.data.transfers as unknown as { handleFileChunk: (t:number,c:Buffer)=>void })?.handleFileChunk(token, chunk); } catch {}
+          },
           onUserEvent: (event) => {
             logger.debug("server", "user event", { type: event.type, username: event.username });
             try { ws.send(JSON.stringify({ type: "userinfo:event", event })); } catch {}
@@ -545,6 +551,15 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             logger.warn("peer", "peer connect failed", { username, connType, error: e.message });
             ws.send(JSON.stringify({ type: "peer:connect", ok: false, username, error: e.message }));
           });
+        return;
+      }
+
+      if (data.type === "shares:rescan") {
+        const session = requireLogin(); if (!session) return;
+        (session as unknown as { rescanShares: () => Promise<unknown> }).rescanShares().then((folders: unknown) => {
+          const counts = (session as unknown as { shareDBInstance: { getSharedCounts: () => { dirs:number; files:number } } }).shareDBInstance.getSharedCounts();
+          ws.send(JSON.stringify({ type: "shares:rescanned", folders, counts }));
+        }).catch((e: Error) => ws.send(errorMessage(e.message)));
         return;
       }
 

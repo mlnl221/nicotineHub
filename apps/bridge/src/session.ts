@@ -137,6 +137,9 @@ export interface SessionOptions {
   onChatEvent?: (event: ChatEvent) => void; onRoomEvent?: (event: RoomEvent) => void;
   onTransferEvent?: (event: TransferEvent) => void; onBrowseEvent?: (event: BrowseEvent) => void;
   onServerEvent?: (event: ServerEvent) => void; signal?: AbortSignal;
+  // F-stream wiring to TransferManager (Phase 4)
+  onFileConnection?: (token: number, socket: Socket) => void;
+  onFileChunk?: (token: number, chunk: Buffer) => void;
 }
 export interface UserInfoEvent {
   type: "user-status" | "user-stats" | "user-interests" | "recommendations" | "global-recommendations"
@@ -215,6 +218,17 @@ export class SoulseekSession {
 
   get isLoggedIn(): boolean { return this.loggedIn; }
 
+  // Expose ShareDB for rescan via server.ts WS
+  get shareDBInstance(): ShareDB { return this.shareDB; }
+  async rescanShares(): Promise<import("./shares.ts").ShareFolder[]> {
+    const res = await this.shareDB.rescanAsync();
+    try {
+      const { dirs, files } = this.shareDB.getSharedCounts();
+      this.reportShares(dirs, files);
+    } catch {}
+    return res;
+  }
+
   private emit(event: UserInfoEvent) { this.opts.onUserEvent?.(event); }
   private emitChat(event: ChatEvent) { this.opts.onChatEvent?.(event); }
   private emitRoom(event: RoomEvent) { this.opts.onRoomEvent?.(event); }
@@ -252,7 +266,10 @@ export class SoulseekSession {
       socket: {
         open: (sock) => {
           logger.info("server", "tcp open, sending login", { username: this.username });
+          // Bun TCP keepalive: pynicotine sets SO_KEEPALIVE idle 10s interval 2s count 10
+          // Bun only exposes setKeepAlive(bool); tuning not available — fallback ServerPing 32 60s
           try { (sock as unknown as { setKeepAlive?: (b: boolean) => void }).setKeepAlive?.(true); } catch {}
+          try { (sock as unknown as { setNoDelay?: (b: boolean) => void }).setNoDelay?.(true); } catch {}
           this.serverSocket = sock as Socket;
           // Send Login only; SetWaitPort after success (nicotine parity)
           sock.write(buildLogin(this.opts.username, this.opts.password));
@@ -347,6 +364,11 @@ export class SoulseekSession {
         if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
         // Now advertise listen port (after success)
         this.serverSocket?.write(buildSetWaitPort(this.opts.listenPort));
+        // Report real share counts (nicotine shares.py sendNumSharedFoldersFiles)
+        try {
+          const { dirs, files } = this.shareDB.getSharedCounts();
+          this.serverSocket?.write(buildSharedFoldersFiles(dirs, files));
+        } catch {}
         this.startListener();
         this.startIdleSweep();
         this.startServerPing();
@@ -758,7 +780,9 @@ export class SoulseekSession {
     }, 5000);
   }
   private startServerPing() {
-    // nicotine uses TCP keepalive; we send ServerPing 32 every 60s as fallback (TODO spec 60s)
+    // nicotine (slskproto.py) marks ServerPing 32 obsolete and uses TCP keepalive instead.
+    // Bridge sends it as fallback every 60s; disable via ENABLE_SERVER_PING=0
+    if (process.env.ENABLE_SERVER_PING === "0") return;
     this.serverPingTimer = setInterval(() => {
       try { this.serverSocket?.write(Buffer.concat([Buffer.from([4, 0, 0, 0]), Buffer.from([32, 0, 0, 0])])); } catch {}
     }, 60000);
@@ -955,19 +979,20 @@ export class SoulseekSession {
         state.buf = state.buf.subarray(total);
         continue;
       }
-      // File connection: raw [uint32 token] + [uint64 offset] + bytes
+      // File connection: raw [uint32 token] + [uint64 offset] + bytes (nicotine downloads.py FileTransferInit+FileOffset)
       if (state.isFileConn) {
         if (state.fileToken === undefined) {
           if (state.buf.length < 4) break;
           state.fileToken = state.buf.readUInt32LE(0);
           state.buf = state.buf.subarray(4);
-          // next expected is offset
+          // Wire to TransferManager if handler registered (Phase 4)
+          try { this.opts.onFileConnection?.(state.fileToken, peer); } catch {}
           continue;
         }
-        // For now, ignore file bytes (bridge delegates to TransferManager via events)
-        // Consume all as file data
-        const n = state.buf.length;
-        if (n > 0) {
+        // Forward raw bytes to TransferManager via callback; also emit diagnostic
+        if (state.buf.length > 0) {
+          const chunk = Buffer.from(state.buf);
+          try { this.opts.onFileChunk?.(state.fileToken, chunk); } catch {}
           this.emitTransfer({ type: "transfer-request", username: state.username, token: state.fileToken, file: `F:${state.fileToken}` });
           state.buf = Buffer.alloc(0);
         }
@@ -1075,8 +1100,12 @@ export class SoulseekSession {
       } else if (msg.code === PEER_MESSAGE_CODES.userInfoRequest) {
         if (!state.outbound) { try { (peer as Socket).write(buildUserInfoResponse(this.profile)); } catch {} }
       } else if (msg.code === PEER_MESSAGE_CODES.sharedFileListRequest) {
+        const peerName = state.username || "unknown";
+        if (this.shareDB.shouldThrottle(peerName)) break;
         try { (peer as Socket).write(this.shareDB.buildSharedFileListResponse()); } catch { try { (peer as Socket).write(emptySharesResponse()); } catch {} }
       } else if (msg.code === PEER_MESSAGE_CODES.folderContentsRequest) {
+        const peerName2 = state.username || "unknown";
+        if (this.shareDB.shouldThrottle(peerName2)) break;
         try { const tok = msg.payload.readUInt32LE(0); const r = new SlskReader(msg.payload); r.uint32(); const dir = r.string(); const resp = this.shareDB.buildFolderContentsResponse(tok, dir); (peer as Socket).write(resp); } catch { try { const tok = msg.payload.readUInt32LE(0); (peer as Socket).write(emptyFolderResponse(tok)); } catch {} }
       } else if (msg.code === PEER_MESSAGE_CODES.fileSearchRequest) {
         try {
@@ -1100,6 +1129,8 @@ export class SoulseekSession {
         try { const p = parsePlaceInQueueResponse(msg.payload); this.emitTransfer({ type: "place-in-queue", username: state.username, file: p.file, place: p.place }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.uploadFailed || msg.code === PEER_MESSAGE_CODES.uploadDenied) {
         try { this.emitTransfer({ type: msg.code === PEER_MESSAGE_CODES.uploadFailed ? "upload-failed" : "upload-denied", username: state.username, file: msg.payload.toString("utf8").slice(0, 256) }); } catch {}
+      } else if (msg.code === PEER_MESSAGE_CODES.placeholdUpload || msg.code === PEER_MESSAGE_CODES.uploadQueueNotification) {
+        // Obsolete/deprecated 42/52 — no-op to silence unknown-peer warnings (nicotine keeps but never handles)
       }
     }
     if (state.buf.length === 0) this.peerStates.delete(peer);

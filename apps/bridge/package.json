@@ -12,6 +12,7 @@
     "typecheck": "bunx tsc --noEmit"
   },
   "dependencies": {
+    "music-metadata": "^11.15.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

@@ -2,7 +2,7 @@
  * Full Soulseek (SLSK) protocol implementation for the WebSocket bridge.
  *
  * Mirrors nicotine-plus pynicotine/slskmessages.py + slskproto.py:
- *  - All 76 server codes, 18 peer codes, 6 distrib codes, init + file codes
+ *  - All 102 server codes, 18 peer codes, 6 distrib codes, init + file codes
  *  - Framing [uint32 len][uint32 code][payload] (server/peer), [len][uint8 code][payload] (init/distrib)
  *  - Packing primitives little-endian, zlib caps, >2GiB quirk, obfuscation tail
  *  - Token gating for search/browse, size guards
@@ -521,15 +521,29 @@ const MAX_SEARCH_COMPRESSED = 16 * 1024 * 1024;
 
 function inflateWithCap(payload: Buffer, max = MAX_SEARCH_DECOMPRESSED): Buffer {
   if (payload.length > MAX_SEARCH_COMPRESSED) throw new Error("Search response too large");
-  // Guard against zlib bomb: try inflate with cap
   let buf: Buffer;
   try {
-    buf = inflateSync(payload, { chunkSize: 64 * 1024 } as unknown as Record<string, unknown>) as Buffer;
-  } catch (e) {
-    // second stage attempt — some peers double-compress (nicotine two-stage)
-    throw e;
+    buf = inflateSync(payload) as Buffer;
+  } catch {
+    // second stage attempt — some peers double-compress (nicotine two-stage, slskmessages.py:466)
+    try {
+      const first = inflateSync(payload) as Buffer;
+      buf = inflateSync(first) as Buffer;
+    } catch (e) {
+      throw e;
+    }
   }
   if (buf.length > max) throw new Error("Decompressed search response exceeds limit");
+  // nicotine two-stage: if decompressed still looks like zlib (starts with 0x78), try second inflate
+  if (buf.length >= 2 && buf[0] === 0x78 && (buf[1] === 0x01 || buf[1] === 0x9c || buf[1] === 0xda)) {
+    try {
+      const second = inflateSync(buf) as Buffer;
+      if (second.length > max) throw new Error("Decompressed search response exceeds limit");
+      return Buffer.from(second);
+    } catch {
+      // not double-compressed, return first stage
+    }
+  }
   return Buffer.from(buf);
 }
 
