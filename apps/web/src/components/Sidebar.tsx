@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { useSession } from "@/lib/session";
 import { useTransfers } from "@/lib/transfers";
 
@@ -20,12 +21,16 @@ const NAV = [
 export function Sidebar() {
   const { logout, state } = useSession();
   const pathname = usePathname();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
   let downloadsCount = 0;
   let uploadsCount = 0;
   try {
     const t = useTransfers();
-    downloadsCount = t.downloads.length;
-    uploadsCount = t.uploads.length;
+    if (mounted) {
+      downloadsCount = t.downloads.length;
+      uploadsCount = t.uploads.length;
+    }
   } catch {
     // TransfersProvider not mounted on login page
   }

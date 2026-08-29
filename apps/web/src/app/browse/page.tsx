@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
-import Link from "next/link";
+import { BrowseProvider, useBrowseTabs } from "@/lib/browse-tabs";
+import { BrowseTabs } from "@/components/browse/BrowseTabs";
+import { BrowseView } from "@/components/browse/BrowseView";
 
 const RECENT_BROWSE_KEY = "nicotine.recentBrowse";
 
@@ -17,9 +19,7 @@ function loadRecent(): string[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 function saveRecent(username: string) {
   try {
@@ -29,28 +29,46 @@ function saveRecent(username: string) {
   } catch {}
 }
 
-export default function BrowseSharesPage() {
+function BrowseInner() {
   const { state } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const { tabs, activeTab, openBrowse } = useBrowseTabs();
   const [username, setUsername] = useState("");
   const [recent, setRecent] = useState<string[]>([]);
 
-  useEffect(() => {
-    if (state.status !== "connected") router.replace("/");
-  }, [state.status, router]);
+  useEffect(() => { setRecent(loadRecent()); }, [tabs.length]);
 
+  // Handle ?user= deep link (from profile Browse Files or direct link)
   useEffect(() => {
-    setRecent(loadRecent());
-  }, []);
-
-  if (state.status !== "connected") return null;
+    const q = searchParams.get("user") || searchParams.get("username");
+    if (q) {
+      const u = decodeURIComponent(q);
+      if (u) {
+        saveRecent(u);
+        openBrowse(u);
+        // clean URL without reload
+        const url = new URL(window.location.href);
+        url.searchParams.delete("user");
+        url.searchParams.delete("username");
+        window.history.replaceState(null, "", url.toString());
+      }
+    }
+  }, [searchParams, openBrowse]);
 
   const go = () => {
     const u = username.trim();
     if (!u) return;
+    if (tabs.length >= 10) return;
     saveRecent(u);
-    router.push(`/browse/${encodeURIComponent(u)}`);
+    openBrowse(u);
+    setUsername("");
+    setRecent(loadRecent());
   };
+
+  if (state.status !== "connected") return null;
+
+  const hasTabs = tabs.length > 0;
 
   return (
     <div className="flex min-h-screen max-w-[100vw] overflow-x-hidden bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
@@ -58,70 +76,88 @@ export default function BrowseSharesPage() {
       <TopBar title="Browse" subtitle="Browse shared files" />
       <main className="md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden bg-background pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <header className="hidden md:flex sticky top-0 z-10 bg-surface-container-lowest/80 backdrop-blur-xl px-10 py-6">
-          <div className="mx-auto flex max-w-screen-2xl items-end justify-between">
+          <div className="mx-auto flex w-full max-w-screen-2xl items-end justify-between">
             <div>
               <h2 className="font-headline text-3xl font-bold tracking-tight text-on-surface">Browse Shares</h2>
-              <p className="mt-1 font-body text-sm text-on-surface-variant">Browse another user&apos;s shared files</p>
+              <p className="mt-1 font-body text-sm text-on-surface-variant">Browse another user&apos;s shared files — {tabs.length}/10 tabs</p>
             </div>
           </div>
         </header>
-        <div className="mx-auto w-full max-w-xl flex-1 p-4 sm:p-6 md:p-10">
-          <div className="rounded-xl bg-surface-container-lowest p-8 shadow-sm ring-1 ring-outline-variant/15">
-            <label className="font-label text-xs uppercase tracking-widest text-on-surface-variant">Username</label>
-            <div className="mt-3 flex gap-2">
-              <input
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && go()}
-                placeholder="Enter username to browse"
-                className="flex-1 min-w-0 w-full rounded-xl bg-surface-container-low px-4 py-3 font-body text-sm outline-none ghost-border focus:border-primary"
-              />
+
+        {/* Input + tabs bar */}
+        <div className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-lowest/80 backdrop-blur-xl border-b border-surface-container-highest/20">
+          <div className="mx-auto w-full max-w-screen-2xl px-4 sm:px-6 md:px-10 py-3 flex flex-col gap-3">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-outline">search</span>
+                <input
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && go()}
+                  placeholder={tabs.length >= 10 ? "Max 10 tabs reached — close one first" : "Enter username to browse"}
+                  disabled={tabs.length >= 10}
+                  className="w-full rounded-xl bg-surface-container-low pl-9 pr-4 py-3 min-h-11 font-body text-sm outline-none ghost-border focus:border-primary disabled:opacity-50"
+                />
+              </div>
               <button
                 onClick={go}
-                disabled={!username.trim()}
+                disabled={!username.trim() || tabs.length >= 10}
                 className="shrink-0 rounded-xl bg-primary px-6 py-3 min-h-11 font-label text-xs font-bold uppercase tracking-widest text-on-primary disabled:opacity-50 hover:bg-primary-container"
               >
                 Browse
               </button>
             </div>
-            <p className="mt-3 font-body text-xs text-outline">
-              Tip: use &quot;Browse&quot; from a search result or profile to jump directly.
-            </p>
+            <BrowseTabs />
           </div>
+        </div>
 
-          {recent.length ? (
-            <div className="mt-8 rounded-xl bg-surface-container-lowest p-6 ghost-border">
-              <div className="flex items-center justify-between">
-                <h3 className="font-label text-xs uppercase tracking-widest text-on-surface-variant">Recent browses</h3>
-                <button
-                  onClick={() => {
-                    localStorage.removeItem(RECENT_BROWSE_KEY);
-                    setRecent([]);
-                  }}
-                  className="font-label text-xs text-outline hover:text-error"
-                >
-                  Clear
-                </button>
+        <div className="flex flex-1 flex-col overflow-hidden">
+          {activeTab ? (
+            <BrowseView key={activeTab.id} tab={activeTab} />
+          ) : (
+            <div className="mx-auto w-full max-w-xl flex-1 p-4 sm:p-6 md:p-10">
+              <div className="rounded-xl bg-surface-container-lowest p-8 shadow-sm ring-1 ring-outline-variant/15">
+                <p className="font-body text-sm text-on-surface-variant">No browse open. Enter a username above or pick from recent.</p>
+                <p className="mt-2 font-label text-xs text-outline">Tip: use &quot;Browse&quot; from a search result or profile to jump directly. Tabs load in background and persist.</p>
               </div>
-              <ul className="mt-4 space-y-2">
-                {recent.map((u) => (
-                  <li key={u}>
-                    <Link
-                      href={`/browse/${encodeURIComponent(u)}`}
-                      onClick={() => saveRecent(u)}
-                      className="flex items-center justify-between rounded-lg bg-surface-container-low px-4 py-3 hover:bg-surface-container-high"
-                    >
-                      <span className="font-body text-sm font-medium">{u}</span>
-                      <span className="material-symbols-outlined text-[18px] text-outline">chevron_right</span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+              {recent.length ? (
+                <div className="mt-8 rounded-xl bg-surface-container-lowest p-6 ghost-border">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-label text-xs uppercase tracking-widest text-on-surface-variant">Recent browses</h3>
+                    <button onClick={() => { localStorage.removeItem(RECENT_BROWSE_KEY); setRecent([]); }} className="font-label text-xs text-outline hover:text-error">Clear</button>
+                  </div>
+                  <ul className="mt-4 space-y-2">
+                    {recent.map((u) => (
+                      <li key={u}>
+                        <button
+                          onClick={() => { saveRecent(u); openBrowse(u); }}
+                          className="flex w-full items-center justify-between rounded-lg bg-surface-container-low px-4 py-3 hover:bg-surface-container-high text-left"
+                        >
+                          <span className="font-body text-sm font-medium">{u}</span>
+                          <span className="material-symbols-outlined text-[18px] text-outline">chevron_right</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
-          ) : null}
+          )}
         </div>
       </main>
       <BottomNav />
     </div>
+  );
+}
+
+export default function BrowseSharesPage() {
+  const { state } = useSession();
+  const router = useRouter();
+  useEffect(() => { if (state.status !== "connected") router.replace("/"); }, [state.status, router]);
+  if (state.status !== "connected") return null;
+  return (
+    <BrowseProvider>
+      <BrowseInner />
+    </BrowseProvider>
   );
 }

@@ -6,13 +6,13 @@ services:
     restart: unless-stopped
     environment:
       PORT: "8787"
-      LISTEN_PORT: "2234"
+      LISTEN_PORT: "62904"
       DATA_DIR: "/data"
       BRIDGE_TOKEN: "${BRIDGE_TOKEN:-}"
     ports:
       - "8787:8787"
-      - "2234:2234"
-      - "2234:2234/udp"
+      - "62904:62904"
+      - "62904:62904/udp"
     volumes:
       - bridge-data:/data
     healthcheck:
