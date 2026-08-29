@@ -1,6 +1,6 @@
-# Bridge 1:1 Parity — Todo Plan
+# Bridge 1:1 Parity — Todo Plan (DONE — archived)
 
-> Goal: make `apps/bridge` a complete WebSocket bridge that mirrors the entire nicotine-plus wire protocol (server + peer + distributed + file) — no reverse proxy, browser can't do raw TCP so bridge is the only SLSK speaker. UI deferred; bridge must be WS-complete.
+> Goal: make `apps/bridge` a complete WebSocket bridge that mirrors the entire nicotine-plus wire protocol (server + peer + distributed + file) — **ACHIEVED** via PR #19 (76/18/6/2, leaf `D`) + PR #21 (`F` streaming + search modes). UI deferred at the time; now `apps/web` is also beyond MVP.
 
 Reference: `pynicotine/slskmessages.py:4302` (76 server, 18 peer, 6 distrib codes), `pynicotine/slskproto.py`, `doc/SLSKPROTOCOL.md`, `apps/bridge/src/soulseek.ts:1`.
 
@@ -76,22 +76,22 @@ WS mapping: `type: "chat:*" | "room:*" | "privileges:*" | "search:*"` validated 
 - [x] `Dockerfile` ensures `mkdir -p $DATA_DIR` + `chown`.
 - [x] Update `apps/web/src/lib/session.tsx` + `protocol.ts` to send token on WS connect; update `README.md` env notes.
 
-## Deferred (out-of-scope this branch, tracked in NEXT_PHASES)
+## Deferred (now mostly done, see README Roadmap)
 
-- Web UI for chat/rooms/browse/transfers/distrib visualizations.
-- Search filters/tabs beyond bridge parity.
-- OS keychain for credentials.
+- ~~Web UI for chat/rooms/browse/transfers/distrib visualizations~~ → done (`/chat` `/browse` `/downloads` + leaf `D`).
+- ~~Search filters/tabs beyond bridge parity~~ → done (multi-mode + nicotine-parity `FilterBar`).
+- OS keychain for credentials (still deferred — no persistence).
 
 ---
 
-## Verification Gates (each phase)
+## Verification Gates (each phase) — all green at merge
 
-- `bun test` — packing/parsing vs `doc/SLSKPROTOCOL.md` hex, incl. new 54/56/110 empty, 1001, 121, zlib caps.
+- `bun test` — packing/parsing vs `doc/SLSKPROTOCOL.md` hex, incl. new 54/56/110 empty, 1001, 121, zlib caps, `PlaceInQueue` 44/51, `UserSearch`/`RoomSearch`/`WishlistSearch` framing, streaming (download resume + upload).
 - `bun run build` — typecheck + prod builds (bridge + web).
 - Manual smoke: `PORT=8788 LISTEN_PORT=2235 DATA_DIR=/tmp/bridge-data BRIDGE_TOKEN=secret bun run --cwd apps/bridge dev` → `ws://localhost:8788/ws?token=secret` login/search/userinfo/transfer flow.
 - Compose smoke: `docker compose up --build` → `/health` + `ws?token` auth 401/101.
 
-## Worktree / PR
+## Worktree / PR — archived
 
-- Worktree: `feat/bridge-1-1-parity` at `/home/magnus/projects/nicotine_mobile-bridge-1-1` — ports `3001/8788/2235` (main uses `3000/8787/2234`, see `AGENTS.md` per-worktree ports).
-- Branch: `feat/bridge-1-1-parity` → PR against `main`.
+- Worktree: `feat/bridge-1-1-parity` at `/home/magnus/projects/nicotine_mobile-bridge-1-1` — ports `3001/8788/2235` (main uses `3000/8787/2234`). Later: `feat/transfer-search-modes` at `...-transfer-search` (3002/8789/2236) → PR #21 merged as `c1946a0`.
+- Branch: `feat/bridge-1-1-parity` → PR #19, `feat/transfer-search-modes` → PR #21 against `main`.
