@@ -75,6 +75,8 @@ const VALID_TABS = new Set<string>(TABS.map((t) => t.id));
 export default function SettingsPage() {
   const { resetAll } = useConfig();
   const [tab, setTab] = useState<TabId>("network");
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Deep-link via ?tab= / #tab — sync to URL and survive reload (settings-plan.md Phase B)
   useEffect(() => {
@@ -86,11 +88,12 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
+    if (!mounted) return;
     const url = new URL(window.location.href);
     url.searchParams.set("tab", tab);
     url.hash = tab;
     window.history.replaceState(null, "", url.toString());
-  }, [tab]);
+  }, [tab, mounted]);
 
   const activeTab = TAB_MAP.get(tab);
 

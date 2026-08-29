@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -46,11 +47,20 @@ function loadInitial(): Transfer[] {
 
 export function TransfersProvider({ children }: { children: ReactNode }) {
   const { send, subscribe } = useSession();
-  const [transfers, setTransfers] = useState<Transfer[]>(() => loadInitial());
+  // Hydration-safe: start with defaults ([]) on both server & first client render,
+  // then hydrate from localStorage after mount. See config/provider.tsx pattern.
+  const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [stats, setStats] = useState<TransferStatsMessage | null>(null);
+  const hydrated = useRef(false);
 
-  // Persist mock transfers for demo refresh
   useEffect(() => {
+    setTransfers(loadInitial());
+    hydrated.current = true;
+  }, []);
+
+  // Persist mock transfers for demo refresh (skip initial write)
+  useEffect(() => {
+    if (!hydrated.current) return;
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(transfers));
     } catch {

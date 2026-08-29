@@ -21,19 +21,14 @@ const NAV = [
 export function Sidebar() {
   const { logout, state } = useSession();
   const pathname = usePathname();
+  // Hydration-safe: TransfersProvider now starts [] then hydrates after mount; gate counts + isActive until mounted
+  // to avoid Sidebar.tsx:79 badge " (2)" mismatch (server 0 vs client localStorage 2). Also fixes conditional hook try/catch.
+  const { downloads, uploads } = useTransfers();
   const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
-  let downloadsCount = 0;
-  let uploadsCount = 0;
-  try {
-    const t = useTransfers();
-    if (mounted) {
-      downloadsCount = t.downloads.length;
-      uploadsCount = t.uploads.length;
-    }
-  } catch {
-    // TransfersProvider not mounted on login page
-  }
+  useEffect(() => setMounted(true), []);
+  const downloadsCount = mounted ? downloads.length : 0;
+  const uploadsCount = mounted ? uploads.length : 0;
+  const displayUser = mounted ? (state.user ?? "System Administrator") : "System Administrator";
 
   return (
     <nav className="fixed left-0 top-0 z-50 hidden h-full w-72 flex-col space-y-8 bg-surface-container-low/90 p-6 backdrop-blur-md dark:bg-surface-container-low/90 md:flex">
@@ -50,8 +45,8 @@ export function Sidebar() {
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-container">
           <span className="font-headline text-sm font-bold text-on-primary">N</span>
         </div>
-        <div className="font-label text-sm font-semibold text-primary dark:text-inverse-primary">
-          {state.user ?? "System Administrator"}
+        <div className="font-label text-sm font-semibold text-primary dark:text-inverse-primary" suppressHydrationWarning>
+          {displayUser}
         </div>
       </div>
 
@@ -62,7 +57,7 @@ export function Sidebar() {
 
       <ul className="mt-8 flex-1 space-y-2">
         {NAV.map((item) => {
-          const isActive = pathname === item.href || (item.href !== "#" && pathname.startsWith(item.href));
+          const isActive = mounted ? (pathname === item.href || (item.href !== "#" && pathname.startsWith(item.href))) : false;
           const badge =
             item.label === "Downloads" && downloadsCount > 0 ? ` (${downloadsCount})`
             : item.label === "Uploads" && uploadsCount > 0 ? ` (${uploadsCount})`
@@ -81,7 +76,7 @@ export function Sidebar() {
                 <span className="material-symbols-outlined" style={isActive ? { fontVariationSettings: "'FILL' 1" } : undefined}>
                   {item.icon}
                 </span>
-                <span className="font-label text-xs uppercase tracking-widest">
+                <span className="font-label text-xs uppercase tracking-widest" suppressHydrationWarning>
                   {item.label}
                   {badge}
                 </span>
