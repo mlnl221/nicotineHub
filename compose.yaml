@@ -1,5 +1,6 @@
 services:
   bridge:
+    image: ghcr.io/mlnl221/nicotinehub-bridge:${TAG:-latest}
     build:
       context: .
       dockerfile: apps/bridge/Dockerfile
@@ -21,6 +22,7 @@ services:
       timeout: 5s
       retries: 5
   web:
+    image: ghcr.io/mlnl221/nicotinehub-web:${TAG:-latest}
     build:
       context: .
       dockerfile: apps/web/Dockerfile

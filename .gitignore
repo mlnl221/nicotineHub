@@ -15,7 +15,6 @@ compose.override.yaml
 
 # bun / npm
 bun.lockb
-bun.lock
 
 # logs
 *.log

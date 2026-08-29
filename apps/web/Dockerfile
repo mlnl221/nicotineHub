@@ -1,5 +1,5 @@
 # ---- Builder (Bun): Next.js standalone build ----
-FROM oven/bun:1.2 AS builder
+FROM oven/bun:1.4 AS builder
 WORKDIR /app
 COPY package.json bun.lock ./
 COPY apps/bridge/package.json apps/bridge/package.json
