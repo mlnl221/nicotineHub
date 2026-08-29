@@ -13,6 +13,7 @@ import { PortChecker } from "@/components/PortChecker";
 import { StatisticsPanel } from "@/components/StatisticsPanel";
 import { useConfig } from "@/lib/config/provider";
 import { formatStrftime } from "@/lib/chatFormat";
+import { isDemo } from "@/lib/demo";
 
 const LEVELS: DiagLevel[] = ["debug", "info", "warn", "error"];
 const LEVEL_COLOR: Record<DiagLevel, string> = {
@@ -46,8 +47,7 @@ export default function DiagnosticsPage() {
   const { state, send, subscribe } = useSession();
   const { settings } = useConfig();
   const router = useRouter();
-  let transfersApi: ReturnType<typeof useTransfers> | null = null;
-  try { transfersApi = useTransfers(); } catch { transfersApi = null; }
+  const transfersApi = useTransfers();
 
   const [health, setHealth] = useState<DiagnosticsHealth | null>(null);
   const [healthLatency, setHealthLatency] = useState<number | null>(null);
@@ -59,8 +59,10 @@ export default function DiagnosticsPage() {
   const [autoScroll, setAutoScroll] = useState(true);
   const logRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const [bridgeUrlDisplay, setBridgeUrlDisplay] = useState("ws://localhost:8787/ws");
 
   useEffect(() => {
+    if (state.status === "idle" || state.status === "connecting") return;
     if (state.status !== "connected") router.replace("/");
   }, [state.status, router]);
 
@@ -89,7 +91,9 @@ export default function DiagnosticsPage() {
   }, [state.status, subscribe, send, levelFilter, paused]);
 
   // HTTP fallback: fetch logs directly from bridge (covers mock mode and early ws miss)
+  // Demo has no bridge — skip HTTP poll entirely, mock supplies via WS.
   useEffect(() => {
+    if (isDemo) return;
     if (state.status !== "connected") return;
     let cancelled = false;
     const fetchLogs = async () => {
@@ -140,6 +144,7 @@ export default function DiagnosticsPage() {
 
   // poll health via HTTP if WS doesn't supply
   useEffect(() => {
+    if (isDemo) return;
     if (state.status !== "connected") return;
     let timer: ReturnType<typeof setInterval>;
     const fetchHealth = async () => {
@@ -259,17 +264,31 @@ export default function DiagnosticsPage() {
     };
   }, [state.status, state.user, handleBrowserLog]);
 
-  if (state.status !== "connected") return null;
-
-  const bridgeUrlDisplay = (() => {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     try {
-      const v = localStorage.getItem("nicotine.bridgeUrl");
-      if (v) return v.replace(/token=[^&]+/, "token=***");
+      const v = window.localStorage.getItem("nicotine.bridgeUrl");
+      if (v) { setBridgeUrlDisplay(v.replace(/token=[^&]+/, "token=***")); return; }
     } catch {}
-    return `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:8787/ws`;
-  })();
+    if (isDemo) { setBridgeUrlDisplay("demo (offline — no bridge)"); return; }
+    try {
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      setBridgeUrlDisplay(`${proto}//${window.location.hostname}:8787/ws`);
+    } catch {}
+  }, []);
 
-  const stats = transfersApi?.stats;
+  if (state.status !== "connected") {
+    if (state.status === "idle" || state.status === "connecting") {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-surface-dim dark:bg-inverse-surface">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      );
+    }
+    return null;
+  }
+
+  const stats = transfersApi.stats;
 
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
@@ -314,9 +333,9 @@ export default function DiagnosticsPage() {
                 <>
                   <div>↓ {((stats.downloadSpeed||0)/1024).toFixed(1)} KB/s · ↑ {((stats.uploadSpeed||0)/1024).toFixed(1)} KB/s</div>
                   <div>Active ↓ {stats.activeDownloads} ↑ {stats.activeUploads} · Queued ↓ {stats.queuedDownloads} ↑ {stats.queuedUploads}</div>
-                  <div className="text-[11px] text-on-surface-variant">Total {transfersApi?.transfers.length ?? 0} tracked</div>
+                  <div className="text-[11px] text-on-surface-variant">Total {transfersApi.transfers.length} tracked</div>
                 </>
-              ) : <span className="text-on-surface-variant">No stats yet</span>}
+              ) : <span className="text-on-surface-variant">No stats yet {isDemo ? "· demo offline" : ""}</span>}
             </HealthCard>
           </div>
 

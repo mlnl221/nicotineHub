@@ -1,7 +1,7 @@
 "use client";
 
 import type { BridgeInboundMessage, BridgeOutboundMessage } from "@/lib/protocol";
-import { DEMO_ROOMS, mockBrowseFolders, mockProfile, mockRecommendations, mockSearchRows, mockSimilarUsers } from "./fixtures";
+import { DEMO_ROOMS, mockBrowseFolders, mockDiagnosticsEntries, mockDiagnosticsHealth, mockProfile, mockRecommendations, mockSearchRows, mockSessionStats, mockSimilarUsers, mockStats } from "./fixtures";
 
 export type DemoListener = (msg: BridgeOutboundMessage) => void;
 
@@ -221,7 +221,44 @@ export function handleDemoSend(
     return true;
   }
 
-  if (msg.type === "diagnostics:clear" || msg.type === "diagnostics:subscribe" || msg.type === "diagnostics:browser-log") {
+  if ((anyMsg.type as string) === "statistics:request") {
+    setTimeout(() => {
+      emit(listeners, { type: "statistics:response", total: mockStats(), session: mockSessionStats() } as unknown as BridgeOutboundMessage);
+    }, 180);
+    return true;
+  }
+  if ((anyMsg.type as string) === "statistics:reset") {
+    setTimeout(() => {
+      emit(listeners, { type: "statistics:reset:ok" } as unknown as BridgeOutboundMessage);
+      // follow reset:ok, the provider will request again — emit fresh stats
+      setTimeout(() => {
+        emit(listeners, { type: "statistics:response", total: { ...mockStats(), started_downloads: 0, completed_downloads: 0, downloaded_size: 0, started_uploads: 0, completed_uploads: 0, uploaded_size: 0, since_timestamp: Math.floor(Date.now() / 1000) }, session: { ...mockSessionStats(), started_downloads: 0, completed_downloads: 0, downloaded_size: 0, started_uploads: 0, completed_uploads: 0, uploaded_size: 0, since_timestamp: Math.floor(Date.now() / 1000) } } as unknown as BridgeOutboundMessage);
+      }, 120);
+    }, 150);
+    return true;
+  }
+
+  if (msg.type === "diagnostics:subscribe") {
+    setTimeout(() => {
+      emit(listeners, { type: "diagnostics:init", entries: mockDiagnosticsEntries() } as unknown as BridgeOutboundMessage);
+      emit(listeners, { type: "diagnostics:health", health: mockDiagnosticsHealth() } as unknown as BridgeOutboundMessage);
+    }, 150);
+    return true;
+  }
+  if (msg.type === "diagnostics:clear") {
+    setTimeout(() => emit(listeners, { type: "diagnostics:cleared" } as unknown as BridgeOutboundMessage), 80);
+    return true;
+  }
+  if (msg.type === "diagnostics:browser-log") {
+    // echo demo browser logs back as diagnostics:log so the tail looks live (offline)
+    const entry = {
+      ts: new Date().toISOString(),
+      level: ((anyMsg.level as string) || "info") as import("@/lib/protocol").DiagLevel,
+      scope: ((anyMsg.scope as string) || "system") as import("@/lib/protocol").DiagScope,
+      msg: String(anyMsg.msg || "browser log"),
+      meta: (anyMsg.meta as Record<string, unknown>) || undefined,
+    };
+    setTimeout(() => emit(listeners, { type: "diagnostics:log", entry } as unknown as BridgeOutboundMessage), 60);
     return true;
   }
 

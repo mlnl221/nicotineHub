@@ -50,15 +50,19 @@ export function StatisticsProvider({ children }: { children: React.ReactNode }) 
         setLoading(false);
       }
       if ((m as unknown as { type: string }).type === "statistics:reset:ok") {
-        refresh();
+        // avoid calling refresh() which would capture stale closure — re-request directly
+        send({ type: "statistics:request" } as unknown as never);
+        setLoading(true);
+        setTimeout(() => setLoading(false), 1200);
       }
     });
     return unsub;
-  }, [subscribe, refresh]);
+  }, [subscribe, send]);
 
   useEffect(() => {
     if (state.status === "connected") refresh();
-  }, [state.status, refresh]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.status]);
 
   return <StatsContext.Provider value={{ total, session: sessionStat, refresh, reset, loading } as StatsApi & { reset: () => void }}>{children}</StatsContext.Provider>;
 }

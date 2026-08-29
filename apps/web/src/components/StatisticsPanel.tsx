@@ -31,7 +31,7 @@ function fmtSince(ts: number): string {
 
 export function StatisticsPanel() {
   const { total, session, refresh, reset, loading } = useStatistics() as unknown as { total: ReturnType<typeof useStatistics>["total"]; session: ReturnType<typeof useStatistics>["session"]; refresh: () => void; reset: () => void; loading: boolean };
-  if (!total && !session) {
+  if (!total || !session) {
     return (
       <div className="glass-panel rounded-2xl p-4">
         <div className="mb-2 flex items-center justify-between">
@@ -39,11 +39,12 @@ export function StatisticsPanel() {
           <button onClick={refresh} disabled={loading} className="rounded-lg bg-surface-container-high px-3 py-1 text-xs">{loading ? "…" : "Refresh"}</button>
         </div>
         <p className="text-xs text-on-surface-variant">No statistics yet — connect to the bridge to load.</p>
+        {loading && <p className="mt-2 text-[11px] text-on-surface-variant">Loading…</p>}
       </div>
     );
   }
-  const t = total!;
-  const s = session!;
+  const t = total;
+  const s = session;
   return (
     <div className="glass-panel rounded-2xl p-4">
       <div className="mb-3 flex items-center justify-between">
