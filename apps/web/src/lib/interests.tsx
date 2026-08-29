@@ -69,8 +69,18 @@ export function useInterests() {
       send({ type: "userinfo", action: "recommendations" });
       send({ type: "userinfo", action: "similarUsers" });
     }
+    // Expiry 12m like nicotine: auto-refresh recommendations after 12 minutes
+    const EXPIRY_MS = 12 * 60 * 1000;
+    const expiryTimer = setInterval(() => {
+      if (likes.length === 0) send({ type: "userinfo", action: "globalRecommendations" });
+      else {
+        send({ type: "userinfo", action: "recommendations" });
+        send({ type: "userinfo", action: "similarUsers" });
+      }
+    }, EXPIRY_MS);
     return () => {
       unsub();
+      clearInterval(expiryTimer);
     };
   }, [state.status, subscribe, send, likes.length, itemName]);
 

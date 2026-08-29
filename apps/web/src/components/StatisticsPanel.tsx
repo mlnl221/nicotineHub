@@ -13,7 +13,20 @@ function humanSize(n: number): string {
 function fmtSince(ts: number): string {
   if (!ts) return "—";
   const d = new Date(ts * 1000);
-  return d.toLocaleDateString();
+  const now = Date.now();
+  const diff = now - d.getTime();
+  const days = Math.floor(diff / (24 * 60 * 60 * 1000));
+  const hours = Math.floor(diff / (60 * 60 * 1000));
+  const date = d.toLocaleDateString();
+  if (days === 0) {
+    if (hours === 0) return `${date} — less than an hour ago`;
+    return `${date} — ${hours} hour${hours === 1 ? "" : "s"} ago`;
+  }
+  if (days === 1) return `${date} — 1 day ago`;
+  if (days < 30) return `${date} — ${days} days ago`;
+  const months = Math.floor(days / 30);
+  if (months === 1) return `${date} — 1 month ago`;
+  return `${date} — ${months} months ago`;
 }
 
 export function StatisticsPanel() {

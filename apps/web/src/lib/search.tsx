@@ -95,17 +95,40 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsub = subscribe((msg) => {
       if (msg.type === "search:result") {
-        setTabs((prev) =>
-          prev.map((t) =>
-            t.id === msg.searchId ? { ...t, rows: [...t.rows, ...msg.rows], total: t.total + msg.rows.length } : t,
-          ),
-        );
+        const searchId = (msg as { searchId: string }).searchId;
+        const isWishlist = typeof searchId === "string" && searchId.startsWith("wishlist:");
+        setTabs((prev) => {
+          const exists = prev.some((t) => t.id === searchId);
+          if (isWishlist && !exists) {
+            // Auto-create wishlist tab on interval hit (needs UI tab for wishlist:*)
+            const term = searchId.split(":")[1] || searchId;
+            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [...msg.rows], total: msg.rows.length, filters: emptyFilters() };
+            setActiveId(searchId);
+            return [...prev, wlTab];
+          }
+          return prev.map((t) =>
+            t.id === searchId ? { ...t, rows: [...t.rows, ...msg.rows], total: t.total + msg.rows.length } : t,
+          );
+        });
       } else if (msg.type === "search:end") {
+        const searchId = (msg as { searchId: string }).searchId;
         setTabs((prev) =>
           prev.map((t) =>
-            t.id === msg.searchId ? { ...t, status: "ended", reason: msg.reason } : t,
+            t.id === searchId ? { ...t, status: "ended", reason: (msg as { reason: string }).reason } : t,
           ),
         );
+      } else if (msg.type === "search:start") {
+        const searchId = (msg as { searchId: string }).searchId;
+        const isWishlist = typeof searchId === "string" && searchId.startsWith("wishlist:");
+        if (isWishlist) {
+          setTabs((prev) => {
+            if (prev.some((t) => t.id === searchId)) return prev;
+            const term = searchId.split(":")[1] || searchId;
+            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [], total: 0, filters: emptyFilters() };
+            setActiveId(searchId);
+            return [...prev, wlTab];
+          });
+        }
       }
     });
     return unsub;

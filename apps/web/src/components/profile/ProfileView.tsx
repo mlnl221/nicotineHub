@@ -242,7 +242,7 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
     <div className="flex flex-1 flex-col overflow-hidden">
       <header className="sticky top-0 z-10 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-8 py-4 md:py-6 flex flex-col gap-3 md:gap-4 border-b border-outline-variant/10">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4 min-w-0 flex-1">
+          <div className={`flex items-center gap-4 min-w-0 flex-1 ${profile.info && !profile.info.slotsavail ? "opacity-60" : ""}`} title={profile.info && !profile.info.slotsavail ? "Slots full" : undefined}>
             {profile.info?.pic && showPic ? (
               <Image
                 src={picObjectUrl ?? profilePicSrc(profile.info.pic)}
@@ -375,7 +375,9 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
             <StatCard label="Files Shared" value={profile.stats.files.toLocaleString()} />
             <StatCard label="Shared Folders" value={profile.stats.dirs.toLocaleString()} />
             <StatCard label="Avg Speed" value={profile.stats.avgspeed ? humanSpeed(profile.stats.avgspeed) : "—"} />
-            <StatCard label="Upload Slots" value={profile.info ? `${profile.info.totalupl} total / ${profile.info.slotsavail ? "Open" : "Full"}` : "—"} />
+            <div className={profile.info && !profile.info.slotsavail ? "opacity-60" : undefined} title={profile.info && !profile.info.slotsavail ? "Slots full — may not accept uploads" : undefined}>
+              <StatCard label="Upload Slots" value={profile.info ? `${profile.info.totalupl} total / ${profile.info.slotsavail ? "Open" : "Full"}` : "—"} />
+            </div>
             {profile.info && profile.info.queuesize > 0 ? <StatCard label="Queued Uploads" value={profile.info.queuesize.toString()} /> : null}
             {profile.info && profile.info.uploadallowed !== undefined ? <StatCard label="Queue Slots" value={profile.info.uploadallowed.toString()} /> : null}
           </section>
@@ -438,6 +440,7 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
               <button onClick={() => router.push("/settings?tab=user-profile")} className="rounded-xl bg-surface-container-low px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest hover:bg-surface-container-high">Edit Profile</button>
             )}
             <button onClick={() => refresh(tab.id)} className="rounded-xl bg-surface-container-low px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest hover:bg-surface-container-high">Refresh</button>
+            <button onClick={() => router.push(`/interests`)} className="rounded-xl bg-tertiary-container px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest text-on-tertiary-container hover:bg-tertiary">Similar Users</button>
           </div>
           {giftOpen ? (
             <div className="mt-6 rounded-xl bg-surface-container-high p-4">

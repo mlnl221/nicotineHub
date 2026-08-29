@@ -11,7 +11,7 @@
 
 import type { Socket, TCPSocketListener } from "bun";
 import { deflateSync, inflateSync } from "node:zlib";
-import { ShareDB } from "./shares.ts";
+import { ShareDB, PermissionLevel } from "./shares.ts";
 import { logger } from "./logger.ts";
 import { shouldBlockUser, shouldIgnoreUser, getCountryCode, setCountryForIp } from "./networkfilter.ts";
 import { PortMapper } from "./portmapper.ts";
@@ -378,6 +378,22 @@ export class SoulseekSession {
     } catch {}
     return res;
   }
+  private getSharePermissionLevel(username: string): PermissionLevel {
+    if (!username || username === "unknown") return PermissionLevel.PUBLIC;
+    // Banned check via shouldBlockUser helper (banlist/ipblocklist)
+    try {
+      const peerIp = this.userAddresses.get(username)?.addr?.ip || "";
+      const blocked = shouldBlockUser({ username, peerIp, banlist: this.banlist, ipblocklist: this.ipblocklist, geoblock: this.geoblock, geoblockcc: this.geoblockcc, customBan: this.customban, customGeoblock: this.customgeoblock, trustedUsers: [], privilegedUsers: [], buddyUsers: [] } as never);
+      if (blocked.blocked) return PermissionLevel.BANNED;
+    } catch {}
+    // Buddy/trusted — bridge stores watched buddies in buddyUsers set if available via plugin or config
+    // For now, check if user is in userlist or watched; treat as BUDDY if watched
+    const lower = username.toLowerCase();
+    // Heuristic: if user is in _userlist or has been watched, consider buddy
+    if (this._userlist.some(u => u.toLowerCase() === lower)) return PermissionLevel.BUDDY;
+    // Also check privileged users from transfers? fallback to PUBLIC
+    return PermissionLevel.PUBLIC;
+  }
 
   setNetworkFilters(opts: Partial<{
     banlist: string[]; ignorelist: string[]; ipblocklist: Record<string, string>; ipignorelist: Record<string, string>;
@@ -405,6 +421,64 @@ export class SoulseekSession {
     this.wishlistIndex = 0;
     this.restartWishlistTimer();
   }
+
+  // Phase H — Network extras (server.interface/autoreply/autosearch/autojoin/userlist/autoaway)
+  private _interface = "";
+  private _autoreply = "";
+  private _autosearch: string[] = [];
+  private _autojoin: string[] = [];
+  private _userlist: string[] = [];
+  private _autoreplyThrottle = new Map<string, number>(); // user -> ts for auto-reply dedup
+  private _autoawayTimer?: ReturnType<typeof setInterval>;
+  private _lastActivity = Date.now();
+  setNetworkInterface(iface: string) { this._interface = String(iface || ""); }
+  setAutoreply(msg: string) { this._autoreply = String(msg || ""); }
+  setAutosearch(terms: string[]) { this._autosearch = (terms || []).slice().filter(Boolean); }
+  setAutojoin(rooms: string[]) { this._autojoin = (rooms || []).slice().filter(Boolean); }
+  setUserlist(users: string[]) { this._userlist = (users || []).slice().filter(Boolean); }
+  setAutoaway(minutes: number) {
+    const m = Math.max(1, Math.min(10000, Number(minutes) || 15));
+    this.autoawayMinutes = m;
+    this.restartAutoawayTimer();
+  }
+  private autoawayMinutes = 15;
+  private restartAutoawayTimer() {
+    if (this._autoawayTimer) { clearInterval(this._autoawayTimer); this._autoawayTimer = undefined; }
+    if (!this.loggedIn || this.autoawayMinutes <= 0) return;
+    this._lastActivity = Date.now();
+    this._autoawayTimer = setInterval(() => {
+      if (!this.loggedIn || this.away) return;
+      if (Date.now() - this._lastActivity > this.autoawayMinutes * 60_000) {
+        this.setStatus(1); // away
+      }
+    }, 60_000);
+  }
+  private handleAutoJoinAndWatch() {
+    // nicotine-plus autojoin / userlist / autosearch on login
+    for (const room of this._autojoin.slice(0, 50)) {
+      const sanitized = room.replace(/[^ -~]/g, "").replace(/\s+/g, " ").trim().slice(0, 24);
+      if (sanitized) try { this.joinRoom(sanitized); } catch {}
+    }
+    for (const user of this._userlist.slice(0, 100)) {
+      if (user) try { this.watchUser(user); } catch {}
+    }
+    for (const term of this._autosearch.slice(0, 20)) {
+      if (term) try { this.search(term, `autosearch:${term.slice(0,20)}`, { onResult: () => {}, onEnd: () => {} }); } catch {}
+    }
+  }
+  private maybeAutoreply(username: string, message: string) {
+    if (!this.away || !this._autoreply) return;
+    if (message.includes("\x01")) return; // ignore CTCP
+    const now = Date.now();
+    const last = this._autoreplyThrottle.get(username.toLowerCase()) || 0;
+    if (now - last < 60_000) return; // 1/min per user, avoid spam
+    this._autoreplyThrottle.set(username.toLowerCase(), now);
+    try { this.sendPrivateMessage(username, this._autoreply); } catch {}
+  }
+  private away = false;
+  // expose for server.ts config:update chatrooms/userbrowse (web-only but acknowledge)
+  setChatroomsConfig(_opts: Record<string, unknown>) { /* web-only, noop in bridge */ }
+  setUserbrowseConfig(_opts: Record<string, unknown>) { /* web-only, noop */ }
 
   private queuePendingPeerMessage(username: string, connType: string, msg: Buffer) {
     const key = username.toLowerCase();
@@ -818,6 +892,8 @@ export class SoulseekSession {
 
   private cleanupServerTimers() {
     if (this.serverPingTimer) { clearInterval(this.serverPingTimer); this.serverPingTimer = undefined; }
+    if (this.wishlistTimer) { clearInterval(this.wishlistTimer); this.wishlistTimer = undefined; }
+    if (this._autoawayTimer) { clearInterval(this._autoawayTimer); this._autoawayTimer = undefined; }
   }
 
   private handleServerData(chunk: ArrayBuffer | Uint8Array) {
@@ -872,6 +948,8 @@ export class SoulseekSession {
         // Distrib bootstrap: HaveNoParent true + BranchRoot(login) + BranchLevel 0 + AcceptChildren false — mirrors _sendHaveNoParent
         this._sendHaveNoParent();
         this.restartWishlistTimer();
+        this.restartAutoawayTimer();
+        this.handleAutoJoinAndWatch();
         this.loginResolve?.(resp);
         this.loginResolve = undefined;
         this.loginReject = undefined;
@@ -1023,6 +1101,8 @@ export class SoulseekSession {
         // Also respect geo/ban filtering for PM? Not needed but keep
         this.emitChat({ type: "private-message", username: m.username, message: m.message, msgId: m.id, timestamp: m.timestamp });
         this.serverSocket?.write(buildMessageAcked(m.id));
+        // Auto-reply when away
+        this.maybeAutoreply(m.username, m.message);
       } catch {}
       return;
     }
@@ -1891,18 +1971,20 @@ export class SoulseekSession {
       } else if (msg.code === PEER_MESSAGE_CODES.sharedFileListRequest) {
         const peerName = state.username || "unknown";
         if (this.shareDB.shouldThrottle(peerName)) break;
-        try { (peer as Socket).write(this.shareDB.buildSharedFileListResponse()); } catch { try { (peer as Socket).write(emptySharesResponse()); } catch {} }
+        try { const perm = this.getSharePermissionLevel(peerName); (peer as Socket).write(this.shareDB.buildSharedFileListResponse(perm)); } catch { try { (peer as Socket).write(emptySharesResponse()); } catch {} }
       } else if (msg.code === PEER_MESSAGE_CODES.folderContentsRequest) {
         const peerName2 = state.username || "unknown";
         if (this.shareDB.shouldThrottle(peerName2)) break;
-        try { const tok = msg.payload.readUInt32LE(0); const r = new SlskReader(msg.payload); r.uint32(); const dir = r.string(); const resp = this.shareDB.buildFolderContentsResponse(tok, dir); (peer as Socket).write(resp); } catch { try { const tok = msg.payload.readUInt32LE(0); (peer as Socket).write(emptyFolderResponse(tok)); } catch {} }
+        try { const tok = msg.payload.readUInt32LE(0); const r = new SlskReader(msg.payload); r.uint32(); const dir = r.string(); const perm = this.getSharePermissionLevel(peerName2); const resp = this.shareDB.buildFolderContentsResponse(tok, dir, perm); (peer as Socket).write(resp); } catch { try { const tok = msg.payload.readUInt32LE(0); (peer as Socket).write(emptyFolderResponse(tok)); } catch {} }
       } else if (msg.code === PEER_MESSAGE_CODES.fileSearchRequest) {
         try {
-          // peer FileSearchRequest 8: [token][query] — respond with FileSearchResponse 9 via same peer
+          // peer FileSearchRequest 8: [token][query] — respond with FileSearchResponse 9 via same peer, respecting permission
           const r = new SlskReader(msg.payload);
           const token = r.uint32(); const query = r.string();
           if (!this.shareDB.isExcluded(query)) {
-            const resp = this.shareDB.buildFileSearchResponse(token, this.username, query);
+            const peerName = state.username || "unknown";
+            const perm = this.getSharePermissionLevel(peerName);
+            const resp = this.shareDB.buildFileSearchResponse(token, this.username, query, true, 0, 0, perm);
             if (resp) (peer as Socket).write(resp);
           }
         } catch {}
@@ -2027,7 +2109,11 @@ export class SoulseekSession {
   requestSimilarUsers() { this.serverSocket?.write(frameMessage(SERVER_MESSAGE_CODES.similarUsers, Buffer.alloc(0))); }
   requestItemRecommendations(item: string) { this.serverSocket?.write(buildItemRec(item)); }
   requestItemSimilarUsers(item: string) { this.serverSocket?.write(buildItemSim(item)); }
-  setStatus(status: number) { this.serverSocket?.write(buildSetStatus(status)); }
+  setStatus(status: number) {
+    this.away = status === 1;
+    if (!this.away) this._lastActivity = Date.now();
+    this.serverSocket?.write(buildSetStatus(status));
+  }
   reportShares(folders: number, files: number) { this.serverSocket?.write(buildSharedFoldersFiles(folders, files)); }
   addThingILike(thing: string) { this.serverSocket?.write(buildAddThingILike(thing)); }
   removeThingILike(thing: string) { this.serverSocket?.write(buildRemoveThingILike(thing)); }

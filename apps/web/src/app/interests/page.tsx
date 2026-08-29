@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { useInterests } from "@/lib/interests";
+import { useWishlist } from "@/lib/wishlist";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { interestsMenu, interestsRecMenu, userMenu } from "@/lib/context-menu/menus";
 
@@ -31,6 +32,7 @@ export default function InterestsPage() {
     fetchItemDetails,
     clearItem,
   } = useInterests();
+  const { addTerm } = useWishlist();
   const [likeInput, setLikeInput] = useState("");
   const [hateInput, setHateInput] = useState("");
   const [showItemModal, setShowItemModal] = useState(false);
@@ -380,12 +382,14 @@ export default function InterestsPage() {
                   onRecommend: () => fetchItemDetails(menuAnchor.thing),
                   onSearch: () => router.push(`/search?q=${encodeURIComponent(menuAnchor.thing)}`),
                   onRemove: () => removeLike(menuAnchor.thing),
+                  onWishlist: () => addTerm(menuAnchor.thing),
                 })
               : menuAnchor.type === "hate"
                 ? interestsMenu(menuAnchor.thing, {
                     onRecommend: () => fetchItemDetails(menuAnchor.thing),
                     onSearch: () => router.push(`/search?q=${encodeURIComponent(menuAnchor.thing)}`),
                     onRemove: () => removeHate(menuAnchor.thing),
+                    onWishlist: () => addTerm(menuAnchor.thing),
                   })
                 : menuAnchor.type === "rec"
                   ? interestsRecMenu(
@@ -397,6 +401,7 @@ export default function InterestsPage() {
                         onDislike: () => addHate(menuAnchor.thing),
                         onRecommend: () => fetchItemDetails(menuAnchor.thing),
                         onSearch: () => router.push(`/search?q=${encodeURIComponent(menuAnchor.thing)}`),
+                        onWishlist: () => addTerm(menuAnchor.thing),
                       }
                     )
                   : userMenu(menuAnchor.thing, "interests")

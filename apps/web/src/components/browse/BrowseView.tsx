@@ -8,6 +8,7 @@ import { useTransfers } from "@/lib/transfers";
 import { isDemo } from "@/lib/demo";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { browseFolderMenu, browseFileMenu } from "@/lib/context-menu/menus";
+import { useConfig } from "@/lib/config/provider";
 
 const PAGE_SIZE = 50;
 
@@ -22,6 +23,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const router = useRouter();
   const { setQuery, openFolder, retry } = useBrowseTabs();
   const { requestDownload } = useTransfers();
+  const { settings } = useConfig();
   const { username, loading, error, folders, currentFolder, currentFiles, query } = tab;
 
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
@@ -29,10 +31,12 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const [propsFile, setPropsFile] = useState<null | { name: string; size: number; ext: string; attrs: Array<[number, number]>; folder: string }>(null);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
 
-  // auto-select first folder when folders load
+  // auto-select first folder when folders load — respects userbrowse.expand_folders (nicotine parity)
   useEffect(() => {
+    const expand = (settings as unknown as { userbrowse?: { expand_folders?: string } }).userbrowse?.expand_folders ?? "all";
+    if (expand === "none") return; // stay collapsed until user picks
     if (folders.length && !selectedFolder) setSelectedFolder(folders[0].name);
-  }, [folders, selectedFolder]);
+  }, [folders, selectedFolder, settings]);
 
   // reset selection when username changes (tab switch handled via new tab prop, but folders may change)
   useEffect(() => {
@@ -121,8 +125,14 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const totalSize = folders.reduce((acc, f) => acc + f.files.reduce((a, file) => a + (file.size || 0), 0), 0);
   const totalFiles = folders.reduce((acc, f) => acc + f.files.length, 0);
 
+  const expandFolders = (settings as unknown as { userbrowse?: { expand_folders?: string } }).userbrowse?.expand_folders ?? "all";
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
+      {!loading && folders.length === 0 ? (
+        <div className="bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800 px-6 py-3 font-body text-sm text-amber-900 dark:text-amber-200">
+          No shares available — this user shares no files or no shares are configured on the bridge. Check Settings → Shares and run a rescan (check_shares_available parity).
+        </div>
+      ) : null}
       {/* Header */}
       <header className="sticky top-0 z-10 border-b border-surface-container-highest/20 bg-surface-container-lowest/80 backdrop-blur-xl px-6 py-4 md:px-8">
         <nav className="flex items-center gap-1 font-body text-xs overflow-x-auto hide-scrollbar whitespace-nowrap max-w-full">
