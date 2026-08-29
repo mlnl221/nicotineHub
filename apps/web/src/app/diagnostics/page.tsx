@@ -8,6 +8,8 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import type { DiagEntry, DiagLevel, DiagnosticsHealth } from "@/lib/protocol";
+import { PortChecker } from "@/components/PortChecker";
+import { StatisticsPanel } from "@/components/StatisticsPanel";
 
 const LEVELS: DiagLevel[] = ["debug", "info", "warn", "error"];
 const LEVEL_COLOR: Record<DiagLevel, string> = {
@@ -252,7 +254,11 @@ export default function DiagnosticsPage() {
         </header>
 
         <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 md:gap-6 px-4 pb-6 md:px-10 md:pb-8">
-          {/* Health cards */}
+          {/* Health cards + new panels */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2">
+            <PortChecker />
+            <StatisticsPanel />
+          </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <HealthCard title="Bridge" icon="dns">
               <div className="flex items-center gap-2">

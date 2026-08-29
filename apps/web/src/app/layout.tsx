@@ -5,6 +5,11 @@ import { SessionProvider } from "@/lib/session";
 import { ConfigProvider } from "@/lib/config/provider";
 import { TransfersProvider } from "@/lib/transfers";
 import { DemoBanner } from "@/components/DemoBanner";
+import { ConfigBridgeSync } from "@/lib/config/sync";
+import { WishlistProvider } from "@/lib/wishlist";
+import { StatisticsProvider } from "@/lib/statistics";
+import { ToastHost } from "@/components/ToastHost";
+import { NowPlayingSync } from "@/components/NowPlayingSync";
 
 export const metadata: Metadata = {
   title: "Nicotine Hub",
@@ -62,7 +67,16 @@ export default function RootLayout({
         <ThemeProvider>
           <ConfigProvider>
             <SessionProvider>
-              <TransfersProvider>{children}</TransfersProvider>
+              <WishlistProvider>
+                <StatisticsProvider>
+                  <TransfersProvider>
+                    <ConfigBridgeSync />
+                    <NowPlayingSync />
+                    {children}
+                    <ToastHost />
+                  </TransfersProvider>
+                </StatisticsProvider>
+              </WishlistProvider>
             </SessionProvider>
           </ConfigProvider>
         </ThemeProvider>

@@ -136,6 +136,22 @@ const PluginResetSettingsSchema = z.object({ type: z.literal("plugin:resetSettin
 const PluginInstallSchema = z.object({ type: z.literal("plugin:install"), fileName: z.string().max(255).optional(), data: z.string().min(1) }); // base64 zip
 const PluginInstallUrlSchema = z.object({ type: z.literal("plugin:installUrl"), url: z.string().url().max(2048) });
 
+const ConfigUpdateSchema = z.object({
+  type: z.literal("config:update"),
+  section: z.string().min(1).max(64),
+  key: z.string().min(1).max(64),
+  value: z.unknown(),
+});
+
+const WishlistUpdateSchema = z.object({
+  type: z.literal("wishlist:update"),
+  terms: z.array(z.string().min(1).max(255)).max(100),
+});
+
+const StatsRequestSchema = z.object({
+  type: z.literal("statistics:request"),
+});
+
 function defaultProfile(username: string) {
   return { username, descr: "", pic: null, totalupl: 0, queuesize: 0, slotsavail: true, uploadallowed: 1 };
 }
@@ -745,6 +761,59 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           const counts = (session as unknown as { shareDBInstance: { getSharedCounts: () => { dirs:number; files:number } } }).shareDBInstance.getSharedCounts();
           ws.send(JSON.stringify({ type: "shares:rescanned", folders, counts }));
         }).catch((e: Error) => ws.send(errorMessage(e.message)));
+        return;
+      }
+
+      if (data.type === "config:update") {
+        const result = ConfigUpdateSchema.safeParse(parsed);
+        if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid config:update")); return; }
+        const { section, key, value } = result.data;
+        const session = ws.data.session;
+        const tm = ws.data.transfers as unknown as { setConfig?: (c: Record<string, unknown>) => void } | undefined;
+        // Bridge-relevant mappings
+        try {
+          if (section === "transfers") {
+            const cfg: Record<string, unknown> = { [key]: value };
+            tm?.setConfig?.(cfg);
+            // Also update session network filters if relevant
+            if (["banlist", "ipblocklist", "geoblock", "geoblockcc", "usecustomban", "customban", "usecustomgeoblock", "customgeoblock"].includes(key)) {
+              (session as unknown as { setNetworkFilters?: (o: unknown) => void })?.setNetworkFilters?.({ [key]: value });
+            }
+            if (key === "share_filters" && Array.isArray(value)) {
+              (session as unknown as { setShareFilters?: (f: string[]) => void })?.setShareFilters?.(value as string[]);
+            }
+            if (key === "downloadfilters" || key === "enablefilters") {
+              tm?.setConfig?.({ [key]: value });
+            }
+            if (["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "groupdownloads", "groupuploads"].includes(key)) {
+              tm?.setConfig?.({ [key]: value });
+            }
+          } else if (section === "server" && ["banlist", "ignorelist", "ipblocklist", "ipignorelist"].includes(key)) {
+            (session as unknown as { setNetworkFilters?: (o: unknown) => void })?.setNetworkFilters?.({ [key]: value });
+            if (key === "banlist" || key === "ipblocklist") tm?.setConfig?.({ [key]: value });
+          }
+          logger.debug("bridge", "config update", { section, key });
+          ws.send(JSON.stringify({ type: "config:updated", section, key }));
+        } catch (e) {
+          ws.send(errorMessage((e as Error).message));
+        }
+        return;
+      }
+
+      if (data.type === "wishlist:update") {
+        const result = WishlistUpdateSchema.safeParse(parsed);
+        if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid wishlist:update")); return; }
+        const session = requireLogin(); if (!session) return;
+        (session as unknown as { setWishlistTerms?: (t: string[]) => void }).setWishlistTerms?.(result.data.terms);
+        logger.info("search", "wishlist terms updated", { count: result.data.terms.length });
+        ws.send(JSON.stringify({ type: "wishlist:updated", count: result.data.terms.length }));
+        return;
+      }
+
+      if (data.type === "statistics:request") {
+        const tm = ws.data.transfers as unknown as { getStatsSummary?: () => unknown } | undefined;
+        const summary = tm?.getStatsSummary?.() ?? { total: null, session: null };
+        ws.send(JSON.stringify({ type: "statistics:response", ...summary as Record<string, unknown> }));
         return;
       }
 

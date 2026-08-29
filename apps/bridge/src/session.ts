@@ -8,6 +8,7 @@ import type { Socket, TCPSocketListener } from "bun";
 import { deflateSync, inflateSync } from "node:zlib";
 import { ShareDB } from "./shares.ts";
 import { logger } from "./logger.ts";
+import { shouldBlockUser, shouldIgnoreUser, getCountryCode, setCountryForIp } from "./networkfilter.ts";
 import {
   buildAddThingIHate,
   buildAddThingILike,
@@ -213,6 +214,20 @@ export class SoulseekSession {
   private parentCandidate: string | undefined;
   private maxChildren = 0;
   private shareDB: ShareDB;
+  private wishlistInterval = 12 * 60; // seconds, server 12 min default (2 min privileged)
+  private wishlistTerms: string[] = [];
+  private wishlistIndex = 0;
+  // ban/ignore/geo config — updated via server WS
+  private banlist: string[] = [];
+  private ignorelist: string[] = [];
+  private ipblocklist: Record<string, string> = {};
+  private ipignorelist: Record<string, string> = {};
+  private geoblock = false;
+  private geoblockcc: string[] = [];
+  private usecustomban = false;
+  private customban = "Banned, don't bother retrying";
+  private usecustomgeoblock = false;
+  private customgeoblock = "Sorry, your country is blocked";
 
   // pending browse tracking
   private pendingBrowseShares = new Map<string, { timer: ReturnType<typeof setTimeout> }>();
@@ -229,6 +244,57 @@ export class SoulseekSession {
       this.reportShares(dirs, files);
     } catch {}
     return res;
+  }
+
+  setNetworkFilters(opts: Partial<{
+    banlist: string[]; ignorelist: string[]; ipblocklist: Record<string, string>; ipignorelist: Record<string, string>;
+    geoblock: boolean; geoblockcc: string[]; usecustomban: boolean; customban: string;
+    usecustomgeoblock: boolean; customgeoblock: string;
+  }>) {
+    if (opts.banlist !== undefined) this.banlist = opts.banlist;
+    if (opts.ignorelist !== undefined) this.ignorelist = opts.ignorelist;
+    if (opts.ipblocklist !== undefined) this.ipblocklist = opts.ipblocklist;
+    if (opts.ipignorelist !== undefined) this.ipignorelist = opts.ipignorelist;
+    if (opts.geoblock !== undefined) this.geoblock = opts.geoblock;
+    if (opts.geoblockcc !== undefined) this.geoblockcc = opts.geoblockcc;
+    if (opts.usecustomban !== undefined) this.usecustomban = opts.usecustomban;
+    if (opts.customban !== undefined) this.customban = opts.customban;
+    if (opts.usecustomgeoblock !== undefined) this.usecustomgeoblock = opts.usecustomgeoblock;
+    if (opts.customgeoblock !== undefined) this.customgeoblock = opts.customgeoblock;
+  }
+
+  setShareFilters(filters: string[]) {
+    this.shareDB.setShareFilters(filters);
+  }
+
+  setWishlistTerms(terms: string[]) {
+    this.wishlistTerms = terms.slice();
+    this.wishlistIndex = 0;
+    this.restartWishlistTimer();
+  }
+
+  private restartWishlistTimer() {
+    if (this.wishlistTimer) { clearInterval(this.wishlistTimer); this.wishlistTimer = undefined; }
+    if (!this.wishlistTerms.length || !this.loggedIn) return;
+    const intervalMs = Math.max(30_000, this.wishlistInterval * 1000);
+    this.wishlistTimer = setInterval(() => {
+      if (!this.loggedIn || !this.serverSocket || !this.wishlistTerms.length) return;
+      const term = this.wishlistTerms[this.wishlistIndex % this.wishlistTerms.length];
+      this.wishlistIndex++;
+      try {
+        const token = this.tokenCounter++;
+        if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
+        this.allowedSearchTokens.add(token);
+        const searchId = `wishlist:${term}:${Date.now()}`;
+        const handlers: SearchHandlers = {
+          onResult: (p) => this.emit({ type: "privilege-time" } as unknown as UserInfoEvent), // placeholder; real routing handled via routeResult
+          onEnd: () => {},
+        };
+        // Use internal search plumbing but emit via existing event
+        this.serverSocket.write(buildWishlistSearch(token, term));
+        logger.info("search", "wishlist auto-search", { term, token });
+      } catch {}
+    }, intervalMs);
   }
 
   private emit(event: UserInfoEvent) { this.opts.onUserEvent?.(event); }
@@ -378,6 +444,7 @@ export class SoulseekSession {
         this.serverSocket?.write(buildHaveNoParent());
         try { this.serverSocket?.write(buildBranchLevel(this.branchLevel)); } catch {}
         if (this.branchRoot) try { this.serverSocket?.write(buildBranchRoot(this.branchRoot)); } catch {}
+        this.restartWishlistTimer();
         this.loginResolve?.(resp);
         this.loginResolve = undefined;
         this.loginReject = undefined;
@@ -454,8 +521,10 @@ export class SoulseekSession {
     if (code === SERVER_MESSAGE_CODES.getPeerAddress) {
       try {
         const addr = parsePeerAddress(payload);
-        // cache 30m TTL
+        // cache 30m TTL and populate geo cache if we have country mapping externally
         this.userAddresses.set(addr.username, { addr, updated: Date.now() });
+        // If bridge has geoblock enabled, try to lookup country via simple /24 heuristic placeholder
+        // Real geo uses ip_country_data.csv; we keep cache externally populated via setCountryForIp
         const pending = this.peerAddressRequests.get(addr.username);
         if (pending) {
           clearTimeout(pending.timer);
@@ -473,14 +542,29 @@ export class SoulseekSession {
       return;
     }
     if (code === SERVER_MESSAGE_CODES.sayChatroom) {
-      try { const m = parseSayChatroom(payload); this.emitChat({ type: "say-chatroom", room: m.room, username: m.username, message: m.message }); } catch {}
+      try {
+        const m = parseSayChatroom(payload);
+        const peerAddr = this.userAddresses.get(m.username)?.addr;
+        const ip = peerAddr?.ip || "";
+        if (shouldIgnoreUser({ username: m.username, ip, ignorelist: this.ignorelist, ipignorelist: this.ipignorelist })) return;
+        this.emitChat({ type: "say-chatroom", room: m.room, username: m.username, message: m.message });
+      } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.messageUser) {
       try {
         const m = parseMessageUser(payload);
+        // Ignore filter — drop messages from ignored users/IPs
+        const peerAddr = this.userAddresses.get(m.username)?.addr;
+        const ip = peerAddr?.ip || "";
+        const country = ip ? getCountryCode(ip) : "";
+        if (shouldIgnoreUser({ username: m.username, ip, ignorelist: this.ignorelist, ipignorelist: this.ipignorelist })) {
+          this.serverSocket?.write(buildMessageAcked(m.id));
+          logger.debug("chat", "ignored private message", { username: m.username });
+          return;
+        }
+        // Also respect geo/ban filtering for PM? Not needed but keep
         this.emitChat({ type: "private-message", username: m.username, message: m.message, msgId: m.id, timestamp: m.timestamp });
-        // Must ack or server re-delivers
         this.serverSocket?.write(buildMessageAcked(m.id));
       } catch {}
       return;
@@ -519,7 +603,7 @@ export class SoulseekSession {
       return;
     }
     if (code === SERVER_MESSAGE_CODES.wishlistInterval) {
-      try { const secs = payload.readUInt32LE(0); this.emit({ type: "wishlist-interval", wishlistInterval: secs }); } catch {}
+      try { const secs = payload.readUInt32LE(0); this.wishlistInterval = secs; this.restartWishlistTimer(); this.emit({ type: "wishlist-interval", wishlistInterval: secs }); } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.roomTickers) {

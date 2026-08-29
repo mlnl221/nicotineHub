@@ -101,6 +101,13 @@ export function Sidebar() {
           <span className="material-symbols-outlined">monitoring</span>
           <span className="font-label text-xs uppercase tracking-widest">Diagnostics</span>
         </a>
+        <a
+          href="/statistics"
+          className="flex items-center space-x-3 rounded-xl px-4 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant"
+        >
+          <span className="material-symbols-outlined">bar_chart</span>
+          <span className="font-label text-xs uppercase tracking-widest">Statistics</span>
+        </a>
         <button
           onClick={() => logout()}
           className="flex w-full items-center space-x-3 rounded-xl px-4 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant"

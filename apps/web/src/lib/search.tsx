@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { useSession } from "@/lib/session";
+import { useConfig } from "@/lib/config/provider";
 import {
   emptyFilters,
   type FilterState,
@@ -47,6 +48,7 @@ const SearchContext = createContext<SearchApi | null>(null);
 
 export function SearchProvider({ children }: { children: ReactNode }) {
   const { send, subscribe } = useSession();
+  const { settings, setSection } = useConfig();
   const [tabs, setTabs] = useState<SearchTab[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const counter = useRef(0);
@@ -74,12 +76,24 @@ export function SearchProvider({ children }: { children: ReactNode }) {
 
   const startSearch = useCallback(
     (query: string, opts?: { mode?: SearchMode; target?: string }) => {
+      const trimmed = query.trim();
+      if (trimmed.length < (settings.searches.min_search_chars ?? 3)) return;
+      // History handling (nicotine searches.history 200)
+      if (settings.searches.enable_history && trimmed) {
+        const hist = settings.searches.history ?? [];
+        const nextHist = [trimmed, ...hist.filter((h) => h !== trimmed)].slice(0, 200);
+        setSection("searches", { history: nextHist });
+      }
       const mode = opts?.mode ?? "global";
       const target = opts?.target?.trim();
       const id = `s${++counter.current}`;
+      const defilter = settings.searches.defilter;
+      const initialFilters: FilterState = settings.searches.enablefilters
+        ? { include: defilter.include, exclude: defilter.exclude, size: defilter.fileSize, bitrate: defilter.bitrate, freeSlot: defilter.freeSlots, country: defilter.country, fileType: defilter.fileType, length: defilter.length, publicOnly: defilter.publicFiles }
+        : emptyFilters();
       setTabs((prev) => [
         ...prev,
-        { id, query, mode, target, status: "searching", rows: [], total: 0, filters: emptyFilters() },
+        { id, query: trimmed, mode, target, status: "searching", rows: [], total: 0, filters: initialFilters },
       ]);
       setActiveId(id);
       if (mode === "user" && target) {
@@ -111,10 +125,10 @@ export function SearchProvider({ children }: { children: ReactNode }) {
           send({ type: "search", searchId: id, query });
         }
       } else {
-        send({ type: "search", searchId: id, query });
+        send({ type: "search", searchId: id, query: trimmed });
       }
     },
-    [send],
+    [send, settings, setSection],
   );
 
   const stopSearch = useCallback(
