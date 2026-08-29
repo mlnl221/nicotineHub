@@ -14,15 +14,27 @@ function copy(text: string, ok = "Copied") {
   } else toast(text);
 }
 
+function navigate(path: string) {
+  if (typeof window === "undefined") return;
+  try {
+    // Use history.pushState + popstate to avoid full reload which loses in-memory WebSocket session.
+    // Next.js App Router handles popstate; fallback to href if that fails.
+    window.history.pushState(null, "", path);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  } catch {
+    window.location.href = path;
+  }
+}
+
 // Standard UserPopupMenu per nicotine-plus pynicotine/gtkgui/widgets/popupmenu.py
 export function userMenu(username: string, tabName: string, opts?: { onBrowse?: () => void; onProfile?: () => void; onMessage?: () => void }): MenuItem[] {
   const items: MenuItem[] = [
     { id: "user-label", label: username, icon: "person", disabled: true },
     { id: "sep1", label: "---", icon: "" },
   ];
-  if (tabName !== "userinfo") items.push({ id: "view-profile", label: "View User Profile", icon: "account_circle", action: () => (opts?.onProfile ? opts.onProfile() : (window.location.href = `/profile/${encodeURIComponent(username)}`)) });
-  if (tabName !== "privatechat") items.push({ id: "send-message", label: "Send Message", icon: "chat_bubble", action: () => (opts?.onMessage ? opts.onMessage() : (window.location.href = `/private-chat?user=${encodeURIComponent(username)}`)) });
-  if (tabName !== "userbrowse") items.push({ id: "browse-files", label: "Browse Files", icon: "folder_managed", action: () => (opts?.onBrowse ? opts.onBrowse() : (window.location.href = `/browse/${encodeURIComponent(username)}`)) });
+  if (tabName !== "userinfo") items.push({ id: "view-profile", label: "View User Profile", icon: "account_circle", action: () => (opts?.onProfile ? opts.onProfile() : navigate(`/profile/${encodeURIComponent(username)}`)) });
+  if (tabName !== "privatechat") items.push({ id: "send-message", label: "Send Message", icon: "chat_bubble", action: () => (opts?.onMessage ? opts.onMessage() : navigate(`/private-chat?user=${encodeURIComponent(username)}`)) });
+  if (tabName !== "userbrowse") items.push({ id: "browse-files", label: "Browse Files", icon: "folder_managed", action: () => (opts?.onBrowse ? opts.onBrowse() : navigate(`/browse/${encodeURIComponent(username)}`)) });
   if (tabName !== "userlist") items.push({ id: "add-buddy", label: "Add Buddy", icon: "person_add", action: () => toast("Add buddy: use Buddies page") });
   items.push({ id: "sep2", label: "---", icon: "" });
   // Ban/Ignore are exact labels — toast as unavailable until bridge implements
@@ -57,8 +69,8 @@ export function searchResultMenu(row: { user: string; path: string; filename: st
     { id: "sep2", label: "---", icon: "" },
     { id: "props", label: "File Properties", icon: "info", action: () => toast(`${row.filename} • ${row.path}`) },
     { id: "sep3", label: "---", icon: "" },
-    { id: "view-profile", label: "View User Profile", icon: "account_circle", action: () => (window.location.href = `/profile/${encodeURIComponent(row.user)}`) },
-    { id: "browse-folder", label: "Browse Folder", icon: "folder_managed", action: () => (window.location.href = `/browse/${encodeURIComponent(row.user)}`) },
+    { id: "view-profile", label: "View User Profile", icon: "account_circle", action: () => navigate(`/profile/${encodeURIComponent(row.user)}`) },
+    { id: "browse-folder", label: "Browse Folder", icon: "folder_managed", action: () => navigate(`/browse/${encodeURIComponent(row.user)}`) },
     { id: "sep4", label: "---", icon: "" },
     {
       id: "copy", label: "Copy", icon: "content_copy", submenu: [
@@ -102,8 +114,8 @@ export function transferMenu(t: { user: string; fileName: string; path?: string;
     { id: "pause", label: isUpload ? "Abort" : "Pause", icon: "pause", action: acts.onPause ?? acts.onRemove },
     { id: "remove", label: "Remove", icon: "delete", danger: true, action: acts.onRemove },
     { id: "sep3", label: "---", icon: "" },
-    { id: "view-profile", label: "View User Profile", icon: "account_circle", action: () => (window.location.href = `/profile/${encodeURIComponent(t.user)}`) },
-    { id: "browse-folder", label: "Browse Folder", icon: "folder_managed", action: () => (window.location.href = `/browse/${encodeURIComponent(t.user)}`) },
+    { id: "view-profile", label: "View User Profile", icon: "account_circle", action: () => navigate(`/profile/${encodeURIComponent(t.user)}`) },
+    { id: "browse-folder", label: "Browse Folder", icon: "folder_managed", action: () => navigate(`/browse/${encodeURIComponent(t.user)}`) },
     { id: "sep4", label: "---", icon: "" },
     {
       id: "copy-search", label: "Copy & Search", icon: "search", submenu: [

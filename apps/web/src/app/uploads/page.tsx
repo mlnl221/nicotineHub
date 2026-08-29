@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
@@ -14,7 +15,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { transferMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
-import { useSearches } from "@/lib/search";
+import { useSearchesOptional } from "@/lib/search";
 import { isDemo } from "@/lib/demo";
 
 function humanSpeed(bps: number): string {
@@ -29,7 +30,7 @@ function getFolder(vp: string): string { const idx = vp.lastIndexOf("\\"); retur
 function UploadsInner() {
   const { uploads, downloads, stats, clearTransfer } = useTransfers();
   const { settings, setOption } = useConfig();
-  const { startSearch } = useSearches();
+  const searches = useSearchesOptional();
   const router = useRouter();
   const totalDown = stats?.downloadSpeed ?? downloads.filter(d => d.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const totalUp = stats?.uploadSpeed ?? uploads.filter(u=>u.status==="Transferring").reduce((s,t)=>s+t.speed,0);
@@ -57,7 +58,7 @@ function UploadsInner() {
       case 0: break;
       case 1: window.dispatchEvent(new CustomEvent("nicotine:toast", { detail: { title: "Open", body: "No file to open" } })); break;
       case 2: window.dispatchEvent(new CustomEvent("nicotine:toast", { detail: { title: "Open", body: "Browser cannot open file manager" } })); break;
-      case 3: startSearch(t.fileName); break;
+      case 3: searches ? searches.startSearch(t.fileName) : router.push(`/search?query=${encodeURIComponent(t.fileName)}`); break;
       case 4: clearTransfer(t.id, true); break;
       case 5: clearTransfer(t.id, true); break;
       case 6: clearTransfer(t.id, true); break;
@@ -120,7 +121,7 @@ function UploadsInner() {
                     <p className="font-label text-xs text-on-surface-variant mt-1">Uploads are queued but cannot start until you configure Shares (Settings → Shares). Queue remains inspectable — matching nicotine+.</p>
                   </div>
                 </div>
-                <a href="/downloads" className="mt-6 inline-flex font-label text-sm font-semibold text-primary hover:underline">View Downloads</a>
+                <Link href="/downloads" className="mt-6 inline-flex font-label text-sm font-semibold text-primary hover:underline">View Downloads</Link>
               </div>
             ) : (
               <div className="space-y-4">

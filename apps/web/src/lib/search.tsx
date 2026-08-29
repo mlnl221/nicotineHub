@@ -226,3 +226,7 @@ export function useSearches(): SearchApi {
   if (!ctx) throw new Error("useSearches must be used within SearchProvider");
   return ctx;
 }
+
+export function useSearchesOptional(): SearchApi | null {
+  return useContext(SearchContext);
+}

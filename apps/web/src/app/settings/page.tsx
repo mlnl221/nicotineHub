@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useConfig } from "@/lib/config/provider";
@@ -112,13 +113,13 @@ export default function SettingsPage() {
         />
 
         <header className="relative z-10 hidden md:flex w-full items-center justify-between px-4 py-3 md:px-8 md:py-6">
-          <a
+          <Link
             href="/search"
             className="flex items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant transition-colors hover:text-primary dark:text-outline dark:hover:text-primary-fixed"
           >
             <span className="material-symbols-outlined text-[16px]">arrow_back</span>
             Back to search
-          </a>
+          </Link>
           <button
             onClick={() => {
               if (confirm("Reset all settings to their defaults?")) resetAll();

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
@@ -15,7 +16,7 @@ import { useStatistics } from "@/lib/statistics";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { transferMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
-import { useSearches } from "@/lib/search";
+import { useSearchesOptional } from "@/lib/search";
 import { isDemo } from "@/lib/demo";
 
 function humanSpeed(bps: number): string {
@@ -43,7 +44,7 @@ function DownloadsInner() {
   const { downloads, uploads, stats, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer } = useTransfers();
   const { total } = useStatistics();
   const { settings, setOption } = useConfig();
-  const { startSearch } = useSearches();
+  const searches = useSearchesOptional();
   const router = useRouter();
   const totalDown = stats?.downloadSpeed ?? downloads.filter(d => d.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const totalUp = stats?.uploadSpeed ?? uploads.filter(u=>u.status==="Transferring").reduce((s,t)=>s+t.speed,0);
@@ -98,7 +99,7 @@ function DownloadsInner() {
         break;
       }
       case 2: window.dispatchEvent(new CustomEvent("nicotine:toast", { detail: { title: "Open", body: "Browser cannot open file manager" } })); break;
-      case 3: startSearch(t.fileName); break;
+      case 3: searches ? searches.startSearch(t.fileName) : router.push(`/search?query=${encodeURIComponent(t.fileName)}`); break;
       case 4: isUpload ? clearTransfer(t.id, true) : pauseDownload(t.id); break;
       case 5: isUpload ? clearTransfer(t.id, true) : cancelDownload(t.id); break;
       case 6: isUpload ? clearTransfer(t.id, true) : resumeDownload(t.id); break;
@@ -175,7 +176,7 @@ function DownloadsInner() {
               {downloads.length === 0 ? (
                 <div data-testid="empty-downloads" className="py-12 text-center">
                   <p className="font-body text-on-surface-variant">No active downloads</p>
-                  <a href="/search" className="mt-3 inline-flex font-label text-sm font-semibold text-primary hover:underline">Search Files</a>
+                  <Link href="/search" className="mt-3 inline-flex font-label text-sm font-semibold text-primary hover:underline">Search Files</Link>
                 </div>
               ) : (
                 <div className="space-y-4">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSearches } from "@/lib/search";
 import { applyFilters } from "@/lib/filter";
@@ -143,9 +144,9 @@ export function SearchScreen() {
           </p>
         </div>
         <div className="flex items-center gap-2 md:gap-4 shrink-0">
-          <a href="/settings?tab=searches#searches" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Search settings">
+          <Link href="/settings?tab=searches#searches" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Search settings">
             <span className="material-symbols-outlined">settings</span>
-          </a>
+          </Link>
         </div>
       </header>
       <div className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-low/95 backdrop-blur dark:bg-inverse-surface/95 border-b border-outline-variant/10">
