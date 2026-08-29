@@ -24,23 +24,23 @@ export function SearchTabs() {
   if (tabs.length === 0) return null;
 
   return (
-    <div className="flex gap-2 overflow-x-auto px-3 pb-2">
+    <div className="flex gap-2 overflow-x-auto overflow-y-hidden hide-scrollbar px-3 pb-2 scroll-px-3 snap-x max-w-full">
       {tabs.map((tab) => {
         const active = tab.id === activeId;
         const badge = modeBadge(tab.mode, tab.target);
         return (
           <div
             key={tab.id}
-            className={`group flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 font-label text-xs transition-colors ${
+            className={`group flex shrink-0 snap-start items-center gap-1.5 rounded-full px-3 py-1.5 font-label text-xs transition-colors min-h-9 ${
               active
                 ? "bg-primary-container text-on-primary-container"
                 : "bg-surface-container-lowest text-on-surface-variant ghost-border"
             }`}
           >
-            <span className="material-symbols-outlined text-[12px] opacity-70">{modeIcon(tab.mode)}</span>
-            <button type="button" onClick={() => setActive(tab.id)} className="max-w-[40vw] truncate">
-              {badge ? <span className="mr-1 opacity-60">[{badge}]</span> : null}
-              {tab.query}
+            <span className="material-symbols-outlined text-[12px] opacity-70 shrink-0">{modeIcon(tab.mode)}</span>
+            <button type="button" onClick={() => setActive(tab.id)} className="max-w-[40vw] truncate whitespace-nowrap min-h-[28px] flex items-center">
+              {badge ? <span className="mr-1 shrink-0 opacity-60">[{badge}]</span> : null}
+              <span className="truncate">{tab.query}</span>
               {tab.status === "searching" ? <span className="ml-1 animate-pulse">•</span> : null}
             </button>
             <button
@@ -51,7 +51,7 @@ export function SearchTabs() {
                 if (tab.status === "searching") stopSearch(tab.id);
                 closeTab(tab.id);
               }}
-              className="flex h-4 w-4 items-center justify-center rounded-full text-on-surface-variant/70 hover:text-error"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-on-surface-variant/70 hover:text-error hover:bg-surface-container-high -mr-1"
             >
               <span className="material-symbols-outlined text-[14px]">close</span>
             </button>

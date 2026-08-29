@@ -57,10 +57,10 @@ function PrivateChatInner() {
   const topBarSubtitle = activeUser ? "Private message" : `${users.length} conversations`;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-surface-container-lowest font-body text-on-surface">
+    <div className="flex min-h-[100dvh] h-screen max-w-[100vw] overflow-x-hidden bg-surface-container-lowest font-body text-on-surface">
       <Sidebar />
       <TopBar title={topBarTitle} subtitle={topBarSubtitle} />
-      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
         {/* Desktop header — hidden on mobile (TopBar covers it) */}
         <header className="hidden md:flex items-center justify-between border-b border-outline-variant/15 bg-surface-container-lowest/80 px-6 py-4 backdrop-blur-xl">
           <div className="flex items-center gap-4">
@@ -192,7 +192,7 @@ function PrivateChatInner() {
               <select
                 value={activeUser || ""}
                 onChange={(e) => setActiveUser(e.target.value || null)}
-                className="w-full rounded-lg border border-outline-variant/30 bg-surface px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-outline-variant/30 bg-surface px-3 py-2.5 min-h-11 text-sm"
               >
                 <option value="">Select a conversation</option>
                 {users.map((u) => (
@@ -206,9 +206,9 @@ function PrivateChatInner() {
                   value={newChatUser}
                   onChange={(e) => setNewChatUser(e.target.value)}
                   placeholder="New chat username"
-                  className="flex-1 rounded-lg border border-outline-variant/30 px-3 py-2 text-sm"
+                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 text-sm"
                 />
-                <button onClick={startNewChat} className="rounded-lg bg-primary px-4 py-2 text-sm text-on-primary">
+                <button onClick={startNewChat} className="shrink-0 rounded-lg bg-primary px-4 py-2.5 min-h-11 text-sm text-on-primary">
                   Start
                 </button>
               </div>
@@ -233,14 +233,14 @@ function PrivateChatInner() {
                     </div>
                   ) : (
                     activeMessages.map((m) => (
-                      <div key={m.id} className={`flex gap-3 max-w-[80%] ${m.isSelf ? "self-end flex-row-reverse" : ""}`}>
+                      <div key={m.id} className={`flex gap-3 max-w-[78%] min-w-0 ${m.isSelf ? "self-end flex-row-reverse" : ""}`}>
                         <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-surface-container-high text-xs font-bold">
                           {m.isSelf ? "You" : m.username.slice(0, 2).toUpperCase()}
                         </div>
                         <div
-                          className={`rounded-2xl px-4 py-3 shadow-sm ${m.isSelf ? "rounded-br-sm bg-primary-container/20 border border-primary/20" : "rounded-bl-sm bg-surface-container-low border border-outline-variant/20"}`}
+                          className={`rounded-2xl px-4 py-3 shadow-sm max-w-full overflow-hidden min-w-0 ${m.isSelf ? "rounded-br-sm bg-primary-container/20 border border-primary/20" : "rounded-bl-sm bg-surface-container-low border border-outline-variant/20"}`}
                         >
-                          <p className="font-body text-sm leading-relaxed">{m.message}</p>
+                          <p className="font-body text-sm leading-relaxed break-words [overflow-wrap:anywhere] whitespace-pre-wrap">{m.message}</p>
                           <p className="mt-1 font-label text-[10px] text-outline">
                             {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </p>
@@ -264,11 +264,11 @@ function PrivateChatInner() {
                       }}
                       placeholder={`Message ${activeUser}...`}
                       rows={1}
-                      className="max-h-32 min-h-[40px] flex-1 resize-none bg-transparent px-2 py-2 font-body text-sm placeholder:text-outline focus:outline-none"
+                      className="max-h-32 min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 font-body text-sm placeholder:text-outline focus:outline-none"
                     />
                     <button
                       onClick={handleSend}
-                      className="rounded-lg bg-primary p-2.5 text-on-primary hover:bg-primary-container"
+                      className="rounded-lg bg-primary p-3 min-h-11 min-w-11 flex items-center justify-center text-on-primary hover:bg-primary-container shrink-0"
                     >
                       <span className="material-symbols-outlined text-[20px]">send</span>
                     </button>

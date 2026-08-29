@@ -58,8 +58,8 @@ export function SearchScreen() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-surface-container-low dark:bg-inverse-surface">
-      <header className="sticky top-0 z-20 bg-surface-container-low/95 backdrop-blur dark:bg-inverse-surface/95">
+    <div className="flex min-h-screen max-w-full overflow-x-hidden flex-col bg-surface-container-low dark:bg-inverse-surface">
+      <header className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-low/95 backdrop-blur dark:bg-inverse-surface/95">
         <SearchBar
           onSearch={startSearch}
           onToggleFilters={() => setShowFilters((v) => !v)}
@@ -78,8 +78,8 @@ export function SearchScreen() {
       </header>
 
       {activeTab ? (
-        <div className="flex items-center justify-between px-4 py-2 font-label text-xs text-on-surface-variant">
-          <span>
+        <div className="flex items-center justify-between gap-2 px-4 py-2 font-label text-xs text-on-surface-variant max-w-full overflow-hidden">
+          <span className="min-w-0 flex-1 truncate">
             {visibleRows.length} of {activeTab.total} results
             {activeTab.status === "searching" ? " · searching…" : ""}
             {activeTab.reason === "max_results" ? " · limit reached" : ""}
@@ -107,7 +107,7 @@ export function SearchScreen() {
           onClick={() => setSheetRow(null)}
         >
           <div
-            className="w-full rounded-t-2xl bg-surface-container p-3 pb-6"
+            className="w-full max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-surface-container p-3 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-outline-variant" />
@@ -172,9 +172,9 @@ export function SearchScreen() {
         </div>
       ) : null}
 
-      {/* Toast */}
+      {/* Toast — above BottomNav on mobile */}
       {toast ? (
-        <div className="fixed bottom-6 left-1/2 z-40 -translate-x-1/2 rounded-full bg-inverse-surface px-4 py-2 font-label text-xs text-inverse-on-surface shadow-lg">
+        <div className="fixed bottom-[calc(76px+env(safe-area-inset-bottom,0px))] md:bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-full bg-inverse-surface px-4 py-2 text-center font-label text-xs text-inverse-on-surface shadow-lg">
           {toast}
         </div>
       ) : null}
@@ -197,7 +197,7 @@ function SheetAction({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left font-body text-sm transition-colors active:bg-surface-container-high"
+      className="flex w-full min-h-11 items-center gap-3 rounded-xl px-3 py-3.5 text-left font-body text-sm transition-colors active:bg-surface-container-high"
     >
       <span className={`material-symbols-outlined ${muted ? "text-outline" : "text-primary"}`}>
         {icon}

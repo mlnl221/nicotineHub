@@ -48,11 +48,11 @@ export function ResultsList({ rows, onRowTap }: ResultsListProps) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-3 py-2">
+    <div className="flex-1 px-3 py-2 max-w-full overflow-hidden">
       {groups.map(([folder, items]) => {
         const isCollapsed = collapsed.has(folder);
         return (
-          <div key={folder} className="mb-2 overflow-hidden rounded-2xl bg-surface-container-lowest">
+          <div key={folder} className="mb-2 overflow-hidden rounded-2xl bg-surface-container-lowest max-w-full">
             <button
               type="button"
               onClick={() =>
@@ -63,15 +63,15 @@ export function ResultsList({ rows, onRowTap }: ResultsListProps) {
                   return next;
                 })
               }
-              className="flex w-full items-center gap-2 px-4 py-2.5 text-left"
+              className="flex w-full min-h-11 items-center gap-2 px-4 py-3 text-left"
             >
-              <span className="material-symbols-outlined text-[18px] text-on-surface-variant">
+              <span className="material-symbols-outlined text-[18px] text-on-surface-variant shrink-0">
                 {isCollapsed ? "chevron_right" : "expand_more"}
               </span>
-              <span className="flex-1 truncate font-label text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
+              <span className="flex-1 min-w-0 truncate font-label text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
                 {folder}
               </span>
-              <span className="font-label text-xs text-outline">{items.length}</span>
+              <span className="font-label text-xs text-outline shrink-0">{items.length}</span>
             </button>
 
             {!isCollapsed ? (
@@ -81,19 +81,19 @@ export function ResultsList({ rows, onRowTap }: ResultsListProps) {
                     <button
                       type="button"
                       onClick={() => onRowTap(row)}
-                      className="flex w-full items-center gap-3 border-t border-outline-variant/15 px-4 py-2.5 text-left transition-colors active:bg-surface-container"
+                      className="flex w-full items-center gap-3 border-t border-outline-variant/15 px-4 py-2.5 text-left transition-colors active:bg-surface-container max-w-full overflow-hidden"
                     >
-                      <span className="material-symbols-outlined text-[22px] text-primary-container">
+                      <span className="material-symbols-outlined text-[22px] text-primary-container shrink-0">
                         {fileTypeIcon(row.fileType)}
                       </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-body text-sm font-medium text-on-surface">
+                      <div className="min-w-0 flex-1 overflow-hidden">
+                        <div className="truncate font-body text-sm font-medium text-on-surface max-w-full">
                           {row.filename}
                         </div>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-label text-[11px] text-on-surface-variant">
-                          <span className="inline-flex items-center gap-1">
-                            <span className="material-symbols-outlined text-[13px]">person</span>
-                            {row.user}
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-label text-[11px] text-on-surface-variant max-w-full overflow-hidden">
+                          <span className="inline-flex items-center gap-1 min-w-0 max-w-[35vw] truncate">
+                            <span className="material-symbols-outlined text-[13px] shrink-0">person</span>
+                            <span className="truncate">{row.user}</span>
                           </span>
                           <span>{humanSize(row.size)}</span>
                           {humanQuality(row.attributes) ? <span>{humanQuality(row.attributes)}</span> : null}

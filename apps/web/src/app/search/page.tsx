@@ -20,10 +20,10 @@ export default function SearchPage() {
   if (state.status !== "connected") return null;
 
   return (
-    <div className="flex min-h-screen bg-surface-container-low dark:bg-inverse-surface">
+    <div className="flex min-h-screen max-w-[100vw] overflow-x-hidden bg-surface-container-low dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Search" subtitle="Find files across the network" />
-      <main className="md:ml-72 flex min-h-screen flex-1 flex-col bg-surface-container-low dark:bg-inverse-surface pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="md:ml-72 flex min-h-screen flex-1 flex-col bg-surface-container-low dark:bg-inverse-surface pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
         <SearchProvider>
           <SearchScreen />
         </SearchProvider>

@@ -46,10 +46,10 @@ export default function ChatRoomsPage() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-surface-container-lowest font-body text-on-surface">
+    <div className="flex min-h-[100dvh] h-screen max-w-[100vw] overflow-x-hidden bg-surface-container-lowest font-body text-on-surface">
       <Sidebar />
       <TopBar title={activeRoom || "Chat Rooms"} subtitle={activeRoom ? `${activeUsers.length} users • ${roomList.length} public rooms` : `${joinedArray.length} joined • ${roomList.length} public`} />
-      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
         <header className="hidden md:flex items-center justify-between border-b border-outline-variant/15 bg-surface-container-lowest/80 px-6 py-4 backdrop-blur-xl">
           <div className="flex items-center gap-4">
             <h2 className="font-headline text-xl font-bold tracking-tight text-primary">Chat Rooms</h2>
@@ -182,7 +182,7 @@ export default function ChatRoomsPage() {
               <select
                 value={activeRoom || ""}
                 onChange={(e) => setActiveRoom(e.target.value || null)}
-                className="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2.5 min-h-11 text-sm"
               >
                 <option value="">Select a room</option>
                 {joinedArray.map((r) => (
@@ -196,9 +196,9 @@ export default function ChatRoomsPage() {
                   value={joinInput}
                   onChange={(e) => setJoinInput(e.target.value)}
                   placeholder="Room name"
-                  className="flex-1 rounded-lg border border-outline-variant/30 px-3 py-2 text-sm"
+                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 text-sm"
                 />
-                <button onClick={handleJoin} className="rounded-lg bg-primary px-4 py-2 text-sm text-on-primary">
+                <button onClick={handleJoin} className="shrink-0 rounded-lg bg-primary px-4 py-2.5 min-h-11 text-sm text-on-primary">
                   Join
                 </button>
               </div>
@@ -215,10 +215,10 @@ export default function ChatRoomsPage() {
             ) : (
               <>
                 {/* Room header */}
-                <div className="flex items-center justify-between border-b border-outline-variant/15 bg-surface-container-lowest/60 px-6 py-3 backdrop-blur-sm">
-                  <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between border-b border-outline-variant/15 bg-surface-container-lowest/60 px-4 md:px-6 py-3 backdrop-blur-sm max-w-full overflow-hidden gap-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
                     <span className="material-symbols-outlined text-primary">tag</span>
-                    <h3 className="font-headline font-bold">{activeRoom}</h3>
+                    <h3 className="font-headline font-bold truncate min-w-0 max-w-[40vw]">{activeRoom}</h3>
                     <span className="rounded-full bg-surface-container-high px-2 py-0.5 font-label text-xs">
                       {activeUsers.length} users
                     </span>
@@ -228,14 +228,14 @@ export default function ChatRoomsPage() {
 
                 <div className="flex flex-1 overflow-hidden">
                   <div className="flex flex-1 flex-col overflow-hidden">
-                    <div className="flex-1 overflow-y-auto p-6 space-y-2">
+                    <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 max-w-full overflow-x-hidden">
                       {activeMessages.length === 0 ? (
                         <div className="py-10 text-center">
                           <p className="font-body text-sm text-outline">No messages yet. Start the conversation.</p>
                         </div>
                       ) : (
                         activeMessages.map((m) => (
-                          <div key={m.id} className="group flex gap-3 hover:bg-surface-container-low/40 -mx-6 px-6 py-1.5">
+                          <div key={m.id} className="group flex gap-3 hover:bg-surface-container-low/40 -mx-4 md:-mx-6 px-4 md:px-6 py-1.5 max-w-full overflow-hidden">
                             <span
                               className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-xs font-bold ${m.username === "system" ? "bg-surface-container-high text-outline" : "bg-primary-container text-on-primary-container"}`}
                             >
@@ -251,7 +251,7 @@ export default function ChatRoomsPage() {
                                 </span>
                               </p>
                               <p
-                                className={`mt-0.5 font-body text-sm leading-relaxed ${m.username === "system" ? "text-on-surface-variant italic" : "text-on-surface"}`}
+                                className={`mt-0.5 font-body text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${m.username === "system" ? "text-on-surface-variant italic" : "text-on-surface"}`}
                               >
                                 {m.message}
                               </p>
@@ -274,11 +274,11 @@ export default function ChatRoomsPage() {
                           }}
                           placeholder={`Message #${activeRoom}...`}
                           rows={1}
-                          className="max-h-28 min-h-[40px] flex-1 resize-none bg-transparent px-2 py-2 text-sm placeholder:text-outline focus:outline-none"
+                          className="max-h-28 min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 text-sm placeholder:text-outline focus:outline-none"
                         />
                         <button
                           onClick={handleSay}
-                          className="rounded-lg bg-primary p-2.5 text-on-primary hover:bg-primary-container"
+                          className="rounded-lg bg-primary p-3 min-h-11 min-w-11 flex items-center justify-center text-on-primary hover:bg-primary-container shrink-0"
                         >
                           <span className="material-symbols-outlined text-[20px]">send</span>
                         </button>

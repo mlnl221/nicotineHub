@@ -53,7 +53,7 @@ export default function BrowseSharesPage() {
   };
 
   return (
-    <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
+    <div className="flex min-h-screen max-w-[100vw] overflow-x-hidden bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Browse" subtitle="Browse shared files" />
       <main className="md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden bg-background pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
@@ -65,7 +65,7 @@ export default function BrowseSharesPage() {
             </div>
           </div>
         </header>
-        <div className="mx-auto w-full max-w-xl flex-1 p-6 md:p-10">
+        <div className="mx-auto w-full max-w-xl flex-1 p-4 sm:p-6 md:p-10">
           <div className="rounded-xl bg-surface-container-lowest p-8 shadow-sm ring-1 ring-outline-variant/15">
             <label className="font-label text-xs uppercase tracking-widest text-on-surface-variant">Username</label>
             <div className="mt-3 flex gap-2">
@@ -74,12 +74,12 @@ export default function BrowseSharesPage() {
                 onChange={(e) => setUsername(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && go()}
                 placeholder="Enter username to browse"
-                className="flex-1 rounded-xl bg-surface-container-low px-4 py-3 font-body text-sm outline-none ghost-border focus:border-primary"
+                className="flex-1 min-w-0 w-full rounded-xl bg-surface-container-low px-4 py-3 font-body text-sm outline-none ghost-border focus:border-primary"
               />
               <button
                 onClick={go}
                 disabled={!username.trim()}
-                className="rounded-xl bg-primary px-6 py-3 font-label text-xs font-bold uppercase tracking-widest text-on-primary disabled:opacity-50 hover:bg-primary-container"
+                className="shrink-0 rounded-xl bg-primary px-6 py-3 min-h-11 font-label text-xs font-bold uppercase tracking-widest text-on-primary disabled:opacity-50 hover:bg-primary-container"
               >
                 Browse
               </button>

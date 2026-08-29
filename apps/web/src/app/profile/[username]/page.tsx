@@ -231,13 +231,13 @@ function ProfileInner({ username }: { username: string }) {
   };
 
   return (
-    <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
+    <div className="flex min-h-screen max-w-[100vw] overflow-x-hidden bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Profile" />
       <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
-        <header className="sticky top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex flex-col gap-3 md:gap-4 border-b border-outline-variant/10">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-4 min-w-0">
+        <header className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex flex-col gap-3 md:gap-4 border-b border-outline-variant/10">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-4 min-w-0 flex-1">
               {profile.info?.pic && showPic ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -305,16 +305,16 @@ function ProfileInner({ username }: { username: string }) {
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 shrink-0 w-full sm:w-auto">
               <button
                 onClick={() => router.push(`/browse/${encodeURIComponent(username)}`)}
-                className="rounded-xl bg-primary-container px-4 py-2.5 font-label text-xs font-semibold uppercase tracking-widest text-on-primary-container transition-colors hover:bg-primary hover:text-on-primary"
+                className="flex-1 sm:flex-none rounded-xl bg-primary-container px-4 py-2.5 min-h-11 font-label text-xs font-semibold uppercase tracking-widest text-on-primary-container transition-colors hover:bg-primary hover:text-on-primary"
               >
                 Browse Files
               </button>
               <button
                 onClick={() => router.push(`/private-chat?user=${encodeURIComponent(username)}`)}
-                className="rounded-xl bg-surface-container-low px-4 py-2.5 font-label text-xs font-semibold uppercase tracking-widest text-on-surface transition-colors hover:bg-surface-container-high dark:bg-surface-container-high dark:text-on-surface"
+                className="flex-1 sm:flex-none rounded-xl bg-surface-container-low px-4 py-2.5 min-h-11 font-label text-xs font-semibold uppercase tracking-widest text-on-surface transition-colors hover:bg-surface-container-high dark:bg-surface-container-high dark:text-on-surface"
               >
                 Send Message
               </button>
@@ -324,26 +324,26 @@ function ProfileInner({ username }: { username: string }) {
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => setShowPic((v) => !v)}
-                className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-1.5 font-label text-xs hover:bg-surface-container-high"
+                className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-2.5 min-h-9 font-label text-xs hover:bg-surface-container-high"
               >
                 <span className="material-symbols-outlined text-[16px]">{showPic ? "visibility_off" : "visibility"}</span>
                 {showPic ? "Hide" : "Show"} picture
               </button>
               <button
                 onClick={handleCopyPic}
-                className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-1.5 font-label text-xs hover:bg-surface-container-high"
+                className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-2.5 min-h-9 font-label text-xs hover:bg-surface-container-high"
               >
                 <span className="material-symbols-outlined text-[16px]">content_copy</span> Copy
               </button>
               <button
                 onClick={handleSavePic}
-                className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-1.5 font-label text-xs hover:bg-surface-container-high"
+                className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-2.5 min-h-9 font-label text-xs hover:bg-surface-container-high"
               >
                 <span className="material-symbols-outlined text-[16px]">download</span> Save
               </button>
               <button
                 onClick={handleSharePic}
-                className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-1.5 font-label text-xs hover:bg-surface-container-high"
+                className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-2.5 min-h-9 font-label text-xs hover:bg-surface-container-high"
               >
                 <span className="material-symbols-outlined text-[16px]">share</span> Share
               </button>
@@ -523,7 +523,7 @@ function ProfileInner({ username }: { username: string }) {
                       flash(`Gifting ${d} days to ${username}`);
                       setGiftOpen(false);
                     }}
-                    className="rounded-lg bg-primary px-4 py-2 font-label text-xs text-on-primary"
+                    className="rounded-lg bg-primary px-4 py-2.5 min-h-9 font-label text-xs text-on-primary"
                   >
                     Give
                   </button>
