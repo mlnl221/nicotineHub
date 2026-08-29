@@ -396,6 +396,8 @@ export interface UserInfoEvent {
     | "item-recommendations"
     | "item-similar-users"
     | "peer-address"
+    | "watch-user"
+    | "privileged-users"
     | "user-info-response"
     | "user-info-failed";
   username?: string;
@@ -405,6 +407,16 @@ export interface UserInfoEvent {
   recommendations?: Recommendation[];
   similarUsers?: SimilarUser[];
   info?: UserInfoProfile;
+  watchUser?: {
+    exists: boolean;
+    status?: number;
+    avgspeed?: number;
+    files?: number;
+    dirs?: number;
+    country?: string;
+  };
+  privilegedUsers?: string[];
+  peerAddress?: { ip?: string; port?: number };
 }
 
 export interface UserInfoEventMessage {

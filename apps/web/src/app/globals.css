@@ -64,6 +64,34 @@
   --radius-full: 0.75rem;
 }
 
+/* Dark theme — invert surface tiers per docs/DESIGN.md tonal layering.
+   Light: lowest (#fff) → dim (#dbdadb) darkest light.
+   Dark: dim/lowest near-black, containers step up toward inverse-surface.
+   This makes dark:bg-surface-* utilities resolve to actual dark greys
+   instead of re-using light hex values. Keeps inverse-surface (#303031)
+   as page background (used by many pages via dark:bg-inverse-surface) for
+   backward compat. */
+.dark {
+  --color-background: #111314;
+  --color-surface: #1a1c1e;
+  --color-surface-dim: #111314;
+  --color-surface-bright: #2a2c30;
+  --color-surface-container-lowest: #0f0f10;
+  --color-surface-container-low: #1e2022;
+  --color-surface-container: #232529;
+  --color-surface-container-high: #2a2c2f;
+  --color-surface-container-highest: #303235;
+  --color-surface-variant: #2e3033;
+  --color-inverse-surface: #303031;
+  --color-inverse-on-surface: #f2f0f1;
+  --color-on-surface: #f2f0f1;
+  --color-on-background: #f2f0f1;
+  --color-on-surface-variant: #c3c6d6;
+  --color-outline: #8e919f;
+  --color-outline-variant: #434653;
+  --color-surface-tint: #b1c5ff;
+}
+
 .glass-panel {
   background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(20px);
@@ -84,6 +112,14 @@
 
 .ghost-border {
   border: 1px solid rgba(195, 198, 213, 0.15); /* outline-variant at 15% */
+}
+
+.dark .ghost-border {
+  border: 1px solid rgba(67, 70, 83, 0.3);
+}
+
+.dark .glass-panel {
+  background: rgba(30, 32, 34, 0.8);
 }
 
 .progress-glow {
