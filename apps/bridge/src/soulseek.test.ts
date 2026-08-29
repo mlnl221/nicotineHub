@@ -52,6 +52,9 @@ import {
   buildConnectToPeer,
   buildCantConnectToPeer,
   buildSendUploadSpeed,
+  buildUserSearch,
+  buildRoomSearch,
+  buildWishlistSearch,
   packUint64LE,
   unpackUint64LE,
   parseTransferRequest,
@@ -64,6 +67,7 @@ import {
   parseFileTransferInit,
   parseFileOffset,
   PEER_MESSAGE_CODES,
+  SlskReader,
 } from "./soulseek.ts";
 
 describe("packing primitives", () => {
@@ -610,5 +614,45 @@ describe("transfers — protocol shims (Phase 0)", () => {
     init.writeUInt32LE(42, 0);
     expect(parseFileTransferInit(init).token).toBe(42);
     expect(parseFileOffset(packUint64LE(8192))).toBe(8192);
+  });
+
+  test("buildUserSearch frames code 42 with username/token/query", () => {
+    const raw = buildUserSearch("bob", 99, "hello");
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(SERVER_MESSAGE_CODES.userSearch);
+    const r = new SlskReader(p.payload);
+    expect(r.string()).toBe("bob");
+    expect(r.uint32()).toBe(99);
+    expect(r.string()).toBe("hello");
+  });
+
+  test("buildRoomSearch frames code 120 with room/token/query", () => {
+    const raw = buildRoomSearch("myroom", 77, "query term");
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(SERVER_MESSAGE_CODES.roomSearch);
+    const r = new SlskReader(p.payload);
+    expect(r.string()).toBe("myroom");
+    expect(r.uint32()).toBe(77);
+    expect(r.string()).toBe("query term");
+  });
+
+  test("buildWishlistSearch frames code 103 with token/query", () => {
+    const raw = buildWishlistSearch(55, "wishlist query");
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(SERVER_MESSAGE_CODES.wishlistSearch);
+    const r = new SlskReader(p.payload);
+    expect(r.uint32()).toBe(55);
+    expect(r.string()).toBe("wishlist query");
+  });
+
+  test("PlaceInQueueRequest uses code 51, Response uses 44 (not confused)", () => {
+    const req = tryParseMessage(buildPlaceInQueueRequest("file.mp3"))!;
+    const resp = tryParseMessage(buildPlaceInQueueResponse("file.mp3", 3))!;
+    expect(req.code).toBe(PEER_MESSAGE_CODES.placeInQueueRequest);
+    expect(req.code).toBe(51);
+    expect(resp.code).toBe(PEER_MESSAGE_CODES.placeInQueueResponse);
+    expect(resp.code).toBe(44);
+    expect(parsePlaceInQueueRequest(req.payload).file).toBe("file.mp3");
+    expect(parsePlaceInQueueResponse(resp.payload).place).toBe(3);
   });
 });

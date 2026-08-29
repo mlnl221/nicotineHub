@@ -2,6 +2,22 @@
 
 import { useSearches } from "@/lib/search";
 
+function modeBadge(mode: string, target?: string) {
+  if (mode === "global") return null;
+  if (mode === "wishlist") return "★";
+  if (mode === "buddies") return target ? `@${target}` : "buddies";
+  if (target) return `${mode}:${target}`;
+  return mode;
+}
+
+function modeIcon(mode: string): string {
+  if (mode === "user") return "person";
+  if (mode === "room") return "tag";
+  if (mode === "wishlist") return "favorite";
+  if (mode === "buddies") return "group";
+  return "public";
+}
+
 export function SearchTabs() {
   const { tabs, activeId, setActive, closeTab, stopSearch } = useSearches();
 
@@ -11,6 +27,7 @@ export function SearchTabs() {
     <div className="flex gap-2 overflow-x-auto px-3 pb-2">
       {tabs.map((tab) => {
         const active = tab.id === activeId;
+        const badge = modeBadge(tab.mode, tab.target);
         return (
           <div
             key={tab.id}
@@ -20,7 +37,9 @@ export function SearchTabs() {
                 : "bg-surface-container-lowest text-on-surface-variant ghost-border"
             }`}
           >
+            <span className="material-symbols-outlined text-[12px] opacity-70">{modeIcon(tab.mode)}</span>
             <button type="button" onClick={() => setActive(tab.id)} className="max-w-[40vw] truncate">
+              {badge ? <span className="mr-1 opacity-60">[{badge}]</span> : null}
               {tab.query}
               {tab.status === "searching" ? <span className="ml-1 animate-pulse">•</span> : null}
             </button>

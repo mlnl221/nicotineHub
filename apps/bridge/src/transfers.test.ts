@@ -187,3 +187,153 @@ describe("transfers — upload serving (Phase 4)", () => {
     mgr2.close();
   });
 });
+
+describe("transfers — file streaming (Phase 4 - download & upload)", () => {
+  let tmp: string;
+  beforeEach(() => { tmp = makeTmpDir(); });
+  afterEach(() => { try { rmSync(tmp, { recursive: true, force: true }); } catch {} });
+
+  test("download streaming writes chunks and finishes (F demux wiring)", async () => {
+    let registered: number | undefined;
+    let unregistered: number | undefined;
+    const mockSession: any = {
+      registerFileToken: (tok: number) => { registered = tok; },
+      unregisterFileToken: (tok: number) => { unregistered = tok; },
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+    };
+    const { mgr, finished } = makeManager(tmp, mockSession);
+    // clear demo uploads
+    (mgr as any).transfers.clear();
+    const t = mgr.requestDownload("alice", "Music\\stream.mp3", 4096, "stream.mp3");
+    const token = t.token!;
+    expect(t.status).toBe("Queued");
+    mgr.handleTransferRequest(1, token, "Music\\stream.mp3");
+    expect(mgr.get(t.id)?.status).toBe("Getting status");
+    expect(registered).toBe(token);
+
+    const writes: Buffer[] = [];
+    const mockSocket: any = {
+      write: (buf: Buffer) => writes.push(Buffer.from(buf)),
+      end: () => {},
+    };
+    await (mgr as any).handleFileConnection(token, mockSocket);
+    expect(mgr.get(t.id)?.status).toBe("Transferring");
+    // should have sent 8-byte offset (0)
+    expect(writes.length).toBe(1);
+    expect(writes[0].length).toBe(8);
+    expect(Number(writes[0].readBigUInt64LE(0))).toBe(0);
+    expect(unregistered).toBe(token);
+
+    // send 4 x 1KiB chunks = 4096
+    for (let i = 0; i < 4; i++) {
+      const chunk = Buffer.alloc(1024, 0x41 + i);
+      (mgr as any).handleFileChunk(token, chunk);
+    }
+    const final = mgr.get(t.id);
+    expect(final?.status).toBe("Finished");
+    expect(final?.current).toBe(4096);
+    expect(finished.length).toBe(1);
+    expect(finished[0].id).toBe(t.id);
+    // file on disk
+    const dlPath = join(tmp, "downloads", "stream.mp3");
+    expect(existsSync(dlPath)).toBe(true);
+    const content = readFileSync(dlPath);
+    expect(content.length).toBe(4096);
+    mgr.close();
+  });
+
+  test("download resume uses existing incomplete offset", async () => {
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    (mgr as any).transfers.clear();
+    // pre-create incomplete file with 2048 bytes
+    const virtual = "Music\\resume.mp3";
+    const user = "alice";
+    const incompleteDir = join(tmp, "incomplete");
+    const hash = createHash("md5").update(virtual + user).digest("hex");
+    const incompletePath = join(incompleteDir, `INCOMPLETE${hash}resume.mp3`);
+    // ensure dir exists via first request
+    const t1 = mgr.requestDownload(user, virtual, 4096, "resume.mp3");
+    mgr.close();
+    // write partial file manually to simulate interrupted download
+    const { writeFileSync: wfs, mkdirSync: mks } = await import("node:fs");
+    mks(incompleteDir, { recursive: true });
+    wfs(incompletePath, Buffer.alloc(2048, 0x42));
+    // new manager reloads (but we reuse same tmp dir)
+    const { mgr: mgr2 } = makeManager(tmp, mockSession);
+    (mgr2 as any).transfers.clear();
+    const t2 = mgr2.requestDownload(user, virtual, 4096, "resume.mp3");
+    const token = t2.token!;
+    mgr2.handleTransferRequest(1, token, virtual);
+    const writes: Buffer[] = [];
+    const mockSocket: any = { write: (b: Buffer) => writes.push(b), end: () => {} };
+    await (mgr2 as any).handleFileConnection(token, mockSocket);
+    // offset should be 2048
+    expect(Number(writes[0].readBigUInt64LE(0))).toBe(2048);
+    // send remaining 2048
+    (mgr2 as any).handleFileChunk(token, Buffer.alloc(2048, 0x43));
+    expect(mgr2.get(t2.id)?.status).toBe("Finished");
+    expect(readFileSync(join(tmp, "downloads", "resume.mp3")).length).toBe(4096);
+    mgr2.close();
+  });
+
+  test("getQueuePlace returns correct position for queued uploads", () => {
+    const { mgr } = makeManager(tmp);
+    (mgr as any).transfers.clear();
+    mgr.handleQueueUpload("u1", "a.mp3");
+    mgr.handleQueueUpload("u2", "b.mp3");
+    mgr.handleQueueUpload("u3", "c.mp3");
+    expect((mgr as any).getQueuePlace("b.mp3")).toBe(2);
+    expect((mgr as any).getQueuePlace("c.mp3")).toBe(3);
+    expect((mgr as any).getQueuePlace("missing.mp3")).toBe(1);
+    mgr.close();
+  });
+
+  test("upload serving streams file after offset (shared file)", async () => {
+    const sharedDir = join(tmp, "shared");
+    const { mkdirSync: mks, writeFileSync: wfs } = await import("node:fs");
+    mks(sharedDir, { recursive: true });
+    const realFile = join(sharedDir, "share.mp3");
+    wfs(realFile, Buffer.alloc(3000, 0x44));
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+      transferRequest: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    (mgr as any).transfers.clear();
+    const q = mgr.handleQueueUpload("peerA", "share.mp3");
+    // wait for checkUploadQueue tick
+    await new Promise((r) => setTimeout(r, 200));
+    const up = mgr.get(q.id);
+    const token = up?.token;
+    expect(token).toBeDefined();
+    expect(up?.status).toBe("Transferring");
+    const writes: Buffer[] = [];
+    const mockSocket: any = {
+      write: (b: Buffer) => writes.push(Buffer.from(b)),
+      end: () => {},
+    };
+    await (mgr as any).handleFileConnection(token!, mockSocket);
+    // then peer sends offset 0
+    const off = Buffer.alloc(8);
+    off.writeBigUInt64LE(BigInt(0), 0);
+    (mgr as any).handleFileChunk(token!, off);
+    await new Promise((r) => setTimeout(r, 500));
+    const totalSent = writes.reduce((s, b) => s + b.length, 0);
+    expect(totalSent).toBe(3000);
+    expect(mgr.get(q.id)?.status).toBe("Finished");
+    mgr.close();
+  });
+});

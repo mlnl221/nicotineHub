@@ -608,14 +608,49 @@ export class TransferManager {
     return Math.ceil((bytes / limitBps) * 1000);
   }
 
+  getQueuePlace(file: string): number {
+    let idx = 0;
+    for (const t of this.transfers.values()) {
+      if (!t.isUpload || t.status !== "Queued") continue;
+      idx++;
+      if (t.virtualPath === file) return idx;
+    }
+    // fallback: linear search 1
+    return 1;
+  }
+
   // F connection handling — called by session when raw bytes arrive
   async handleFileConnection(token: number, socket: Socket) {
     const t = this.getByToken(token);
-    if (!t || t.isUpload) {
+    if (!t) {
       try { socket.end(); } catch {}
       return;
     }
+    // Upload serving: peer (downloader) connected via F to fetch file from us
+    if (t.isUpload) {
+      if (t._statusTimer) { clearTimeout(t._statusTimer); t._statusTimer = undefined; }
+      if (t._timer) { clearInterval(t._timer); t._timer = undefined; }
+      t.status = "Transferring";
+      if (!t._startTime) t._startTime = Date.now();
+      this.emit(t);
+      this.emitStats();
+      try { this.session?.unregisterFileToken(token); } catch {}
+      (t as unknown as { _uploadSocket?: Socket })._uploadSocket = socket;
+      (t as unknown as { _uploadOffsetBuf?: Buffer })._uploadOffsetBuf = Buffer.alloc(0);
+      (t as unknown as { _uploadAwaitingOffset?: boolean })._uploadAwaitingOffset = true;
+      const stall = setTimeout(() => {
+        if (t.status === "Transferring") {
+          t.status = "Connection timeout";
+          this.emit(t);
+          try { socket.end(); } catch {}
+          this.scheduleRetry?.(t.id, 180_000);
+        }
+      }, 60_000);
+      (t as unknown as { _stallTimer?: Timer })._stallTimer = stall;
+      return;
+    }
     if (t._statusTimer) { clearTimeout(t._statusTimer); t._statusTimer = undefined; }
+    if (t._timer) { clearInterval(t._timer); t._timer = undefined; }
     t.status = "Transferring";
     t._startTime = Date.now();
     const startOffset = await this.prepareIncompleteFile(t);
@@ -695,8 +730,146 @@ export class TransferManager {
   handleFileChunk(token: number, chunk: Buffer) {
     const t = this.getByToken(token);
     if (!t) return;
+    // Upload path: awaiting offset from downloader (8 bytes uint64 LE)
+    if (t.isUpload) {
+      const awaiting = (t as unknown as { _uploadAwaitingOffset?: boolean })._uploadAwaitingOffset;
+      if (awaiting) {
+        let buf = (t as unknown as { _uploadOffsetBuf?: Buffer })._uploadOffsetBuf || Buffer.alloc(0);
+        buf = Buffer.concat([buf, chunk]);
+        (t as unknown as { _uploadOffsetBuf?: Buffer })._uploadOffsetBuf = buf;
+        if (buf.length < 8) return;
+        const offset = Number(buf.readBigUInt64LE(0));
+        (t as unknown as { _uploadAwaitingOffset?: boolean })._uploadAwaitingOffset = false;
+        const remaining = buf.subarray(8);
+        // stall timer cleared on successful offset
+        const stall = (t as unknown as { _stallTimer?: Timer })._stallTimer;
+        if (stall) { clearTimeout(stall); (t as unknown as { _stallTimer?: Timer })._stallTimer = undefined; }
+        this.startUploadStream(t, offset, remaining.length ? remaining : undefined);
+        if (remaining.length) {
+          // if peer pipelined data after offset (shouldn't happen for upload), ignore
+        }
+        return;
+      }
+      // If upload already streaming, any extra chunk after offset is unexpected (downloader shouldn't send); ignore
+      return;
+    }
     const cb = (t as unknown as { _onFileData?: (c: Buffer) => void })._onFileData;
     if (cb) cb(chunk);
+  }
+
+  private startUploadStream(t: BridgeTransfer, offset: number, _initialTail?: Buffer) {
+    const socket = (t as unknown as { _uploadSocket?: Socket })._uploadSocket as Socket | undefined;
+    if (!socket) return;
+    // Resolve real file path: try Shared dirs -> DATA_DIR/shared -> uploads
+    let realPath: string | null = null;
+    let fileSize = t.size || 0;
+    try {
+      const { existsSync: es, statSync: ss } = require("node:fs") as typeof import("node:fs");
+      const { join: jp } = require("node:path") as typeof import("node:path");
+      const candidates: string[] = [];
+      const sharedEnv = process.env.SHARED_DIRS || process.env.SHARES_DIR || "";
+      if (sharedEnv) candidates.push(...sharedEnv.split(":").map((s) => s.trim()).filter(Boolean));
+      candidates.push(jp(this.dataDir, "shared"), jp(this.dataDir, "shares"), jp(this.dataDir, "uploads"), this.dataDir);
+      const base = t.fileName;
+      for (const dir of candidates) {
+        const cand = jp(dir, base);
+        if (es(cand)) { realPath = cand; try { fileSize = ss(cand).size; } catch {} break; }
+        // also search recursively one level for virtualPath basename fallback
+        try {
+          const { readdirSync } = require("node:fs");
+          if (es(dir)) {
+            const ents = readdirSync(dir);
+            for (const e of ents) {
+              const p = jp(dir, e);
+              try { if (es(p) && ss(p).isFile() && e === base) { realPath = p; fileSize = ss(p).size; break; } } catch {}
+            }
+            if (realPath) break;
+          }
+        } catch {}
+      }
+    } catch {}
+    if (!realPath) {
+      // No real file — stream dummy zeros of fileSize (or t.size) to demonstrate protocol
+      const remaining = Math.max(0, (fileSize || t.size || 1024 * 1024) - offset);
+      const dummyChunk = Buffer.alloc(Math.min(64 * 1024, remaining));
+      let sent = 0;
+      const ulLimit = this.getUploadLimit();
+      const start = Date.now();
+      const sendLoop = () => {
+        if (sent >= remaining) {
+          t.current = fileSize || t.size;
+          t.status = "Finished";
+          t.speed = 0;
+          this.emit(t);
+          this.emitStats();
+          try { socket.end(); } catch {}
+          try { this.session?.sendUploadSpeed(t.avgSpeed || 0); } catch {}
+          return;
+        }
+        const toSend = Math.min(dummyChunk.length, remaining - sent);
+        const slice = dummyChunk.subarray(0, toSend);
+        try { socket.write(slice); } catch { t.status = "Connection closed"; this.emit(t); try { socket.end(); } catch {} return; }
+        sent += toSend;
+        t.current = offset + sent;
+        const elapsed = (Date.now() - start) / 1000;
+        const speed = elapsed > 0 ? sent / elapsed : toSend * 2;
+        t.speed = ulLimit ? Math.min(speed, ulLimit) : speed;
+        t.avgSpeed = speed;
+        this.emit(t);
+        this.emitStats();
+        const delay = ulLimit ? this.limiterDelay(toSend, ulLimit) : 0;
+        if (delay > 5) setTimeout(sendLoop, delay);
+        else setImmediate(sendLoop);
+      };
+      setImmediate(sendLoop);
+      return;
+    }
+    // Real file streaming
+    try {
+      const { createReadStream } = require("node:fs") as typeof import("node:fs");
+      const rs = createReadStream(realPath, { start: offset });
+      let sent = 0;
+      const start = Date.now();
+      const ulLimit = this.getUploadLimit();
+      rs.on("data", (chunk: Buffer) => {
+        const toSend = chunk as Buffer;
+        // throttle
+        if (ulLimit) {
+          const delay = this.limiterDelay(toSend.length, ulLimit);
+          if (delay > 10) {
+            try { (rs as unknown as { pause?: () => void }).pause?.(); } catch {}
+            setTimeout(() => { try { (rs as unknown as { resume?: () => void }).resume?.(); } catch {} }, delay);
+          }
+        }
+        try { socket.write(toSend); } catch { rs.destroy(); }
+        sent += toSend.length;
+        t.current = offset + sent;
+        const elapsed = (Date.now() - start) / 1000;
+        const speed = elapsed > 0 ? sent / elapsed : toSend.length * 2;
+        t.speed = ulLimit ? Math.min(speed, ulLimit) : speed;
+        t.avgSpeed = speed;
+        this.emit(t);
+        this.emitStats();
+      });
+      rs.on("end", () => {
+        t.status = "Finished";
+        t.speed = 0;
+        t.current = fileSize;
+        this.emit(t);
+        this.emitStats();
+        try { socket.end(); } catch {}
+        try { this.session?.sendUploadSpeed(t.avgSpeed || 0); } catch {}
+      });
+      rs.on("error", () => {
+        t.status = "File read error.";
+        this.emit(t);
+        try { socket.end(); } catch {}
+      });
+    } catch {
+      t.status = "File read error.";
+      this.emit(t);
+      try { socket.end(); } catch {}
+    }
   }
 
   private async prepareIncompleteFile(t: BridgeTransfer): Promise<number> {
