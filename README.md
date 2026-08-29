@@ -166,12 +166,13 @@ Soulseek is unencrypted; see Security above.
 
 ## Porting status
 
-Stage `d395cc6` — almost 1:1, mobile-friendly. See **[docs/porting-status.md](docs/porting-status.md)** for the full domain-by-domain matrix and intentionally omitted features.
+Stage `d395cc6` — almost 1:1, mobile-friendly. See **[docs/porting-status.md](docs/porting-status.md)** for the full domain-by-domain matrix, **[docs/settings-mapping.md](docs/settings-mapping.md)** for the authoritative settings map, and **`docs/settings-plan.md`** for done vs next (Phases A–G done, H: Network extras).
 
 ## Docs
 
-- `docs/architecture.md` — bridge, search & protocol details
+- `docs/architecture.md` — bridge, search & protocol, WS JSON (`/ws` `plugin:*` `config:update` etc.) + `LISTEN_PORT`/`PortMapper`
+- `docs/porting-status.md` — domain-by-domain matrix vs nicotine-plus 3.3.x
 - `docs/DESIGN.md` — UI tokens
 - `docs/settings-mapping.md` — Nicotine+ settings reference (authoritative)
-- `docs/settings-plan.md` — remaining settings phases
+- `docs/settings-plan.md` — **status (done A–G) vs next (H: Network extras)**
 - `AGENTS.md` — agent conventions
