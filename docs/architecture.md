@@ -54,9 +54,10 @@ Bridge is **leaf-only**: sends `HaveNoParent 71` + `BranchLevel/Root` on login, 
 ## Bridge files
 
 - `soulseek.ts` — framing/packing, builders/parsers for all codes
-- `session.ts` — server socket + `Bun.listen` (`P` vs `F` demux via `pendingFileTokens` + heuristic), peer states (`buf/initDone/isFileConn/fileToken`), idle sweep (2s init, 10s ghost, 60s max), `GetPeerAddress` cache, search/browses
+- `session.ts` — server socket + `Bun.listen` (`P` vs `F` demux via `pendingFileTokens` + heuristic), peer states (`buf/initDone/isFileConn/fileToken`), idle sweep (2s init, 10s ghost, 60s max), `GetPeerAddress` cache, search/browses, `PortMapper` (`portmapper.ts` NAT-PMP → UPnP) on login/disconnect/port change
 - `shares.ts` — `ShareDB` (`DATA_DIR/shares.json`, in-memory folders, search, `build*Response`)
 - `transfers.ts` — `TransferManager` (Map `id→Transfer`, queued/active, 2s `transfer:stats`, 300s `PlaceInQueue` poll, `INCOMPLETE<md5>` + `downloads.json`)
+- `portmapper.ts` — `NATPMP` (RFC6886 UDP 5351 → gateway from `/proc/net/route` → 1 GiB? no, port mapping lease 43200, renewal 7200) + `UPnP` (SSDP multicast 239.255.255.250:1900, device desc fetch, SOAP AddPortMapping/Delete) + `PortMapper` orchestrator (NAT-PMP fallback UPnP, `setPort`/`add`/`remove` like `pynicotine/portmapper.py`)
 - `server.ts` — `Bun.serve` (`/ws` zod, `/health`, `/logs`, `/diagnostics`, `/files/:token`) + token via `?token`/`Authorization`/`Sec-WebSocket-Protocol`
 
 ## Env (full)

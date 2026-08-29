@@ -52,6 +52,7 @@ export function ConfigBridgeSync() {
         ipblocklist: settings.server.ipblocklist,
         ipignorelist: settings.server.ipignorelist,
         portrange: settings.server.portrange,
+        upnp: settings.server.upnp,
       },
     };
     const key = JSON.stringify(relevant);

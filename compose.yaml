@@ -14,9 +14,12 @@ services:
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
     # Homelab: bridge stays host-exposed so browser can ws://nas:8787/ws directly.
     # LISTEN_PORT is also the host port — changing it in Settings → Network (portrange)
-    # writes DATA_DIR/listen_port and reconnects the bridge, but Docker needs a
-    # recreate to update the host binding: set LISTEN_PORT env and `docker compose up -d`
-    # (or use `LISTEN_PORT=12345 docker compose up -d`). For reverse-proxy only (internal):
+    # writes DATA_DIR/listen_port and reconnects the bridge; UPnP/NAT-PMP auto-maps
+    # the new port if `server.upnp` is enabled (default true, toggle in Network). For
+    # full Docker host binding, also set LISTEN_PORT env and `docker compose up -d`
+    # (or `LISTEN_PORT=12345 docker compose up -d`). UPnP inside Docker bridge network
+    # may fail (container IP 172.x != host LAN IP) — use `network_mode: host` for
+    # auto-mapping or forward manually. For reverse-proxy only (internal):
     #   services: { bridge: { ports: !["127.0.0.1:8787:8787"] } } and set NEXT_PUBLIC_BRIDGE_URL via web env.
     ports:
       - "8787:8787"

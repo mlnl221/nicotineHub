@@ -14,6 +14,7 @@ import { deflateSync, inflateSync } from "node:zlib";
 import { ShareDB } from "./shares.ts";
 import { logger } from "./logger.ts";
 import { shouldBlockUser, shouldIgnoreUser, getCountryCode, setCountryForIp } from "./networkfilter.ts";
+import { PortMapper } from "./portmapper.ts";
 import {
   buildAcceptChildren,
   buildAddThingIHate,
@@ -294,6 +295,75 @@ export class SoulseekSession {
       const item = this.pendingPeerQueue.shift()!;
       try { item.fn(); } catch {}
     }
+  }
+
+  // Portmapper — NAT-PMP → UPnP fallback, mirrors pynicotine/portmapper.py
+  private portMapper = new PortMapper();
+  private _upnpEnabled = true;
+  private _localIpAddress = "";
+
+  private findLocalIpAddress(): string {
+    try {
+      const { createSocket } = require("node:dgram") as typeof import("node:dgram");
+      const sock = createSocket("udp4");
+      // connect to dummy address to get local interface
+      // Use sync approach: create socket, connect, then get address
+      // Fallback to 127.0.0.1
+      try {
+        // Bun doesn't support connect for dgram easily; try UDP connect hack
+        // Use same logic as pynicotine: connect to 10.255.255.255:1
+        const dummy = require("node:dgram").createSocket("udp4") as unknown as { connect: (port:number, host:string, cb?:()=>void)=>void; address:()=>{address:string} };
+        // Instead use node:net trick: create UDP socket and bind
+        // Simpler: try to get local IP via os.networkInterfaces
+        const { networkInterfaces } = require("node:os") as typeof import("node:os");
+        const nets = networkInterfaces();
+        for (const addrs of Object.values(nets)) {
+          if (!addrs) continue;
+          for (const addr of addrs) {
+            if (addr.family === "IPv4" && !addr.internal) return addr.address;
+          }
+        }
+      } catch {}
+      return "0.0.0.0";
+    } catch { return "0.0.0.0"; }
+  }
+
+  private updatePortMapper(): void {
+    const ip = this._localIpAddress || this.findLocalIpAddress();
+    this._localIpAddress = ip;
+    if (this._listenPort && ip) {
+      this.portMapper.setPort(this._listenPort, ip);
+      if (this._upnpEnabled) {
+        // fire-and-forget, renew handled inside
+        this.portMapper.addPortMapping(false).catch(() => {});
+      }
+    }
+  }
+
+  private removePortMappingSync(): void {
+    // best-effort removal on disconnect
+    this.portMapper.removePortMapping(false).catch(() => {});
+  }
+
+  setUpnpEnabled(enabled: boolean): void {
+    const was = this._upnpEnabled;
+    this._upnpEnabled = enabled;
+    logger.info("server", `UPnP ${enabled ? "enabled" : "disabled"}`, { listenPort: this._listenPort, username: this.username });
+    if (enabled && !was) {
+      this.updatePortMapper();
+    } else if (!enabled && was) {
+      this.removePortMappingSync();
+    }
+  }
+
+  // Called after successful login + listener bind (nicotine-portmapper parity)
+  private handlePortMapperOnConnect(): void {
+    if (!this._upnpEnabled) return;
+    this.updatePortMapper();
+  }
+
+  private handlePortMapperOnDisconnect(): void {
+    this.removePortMappingSync();
   }
 
   get isLoggedIn(): boolean { return this.loggedIn; }
@@ -589,11 +659,26 @@ export class SoulseekSession {
     const oldPort = this._listenPort;
     this._listenPort = port;
     logger.info("server", "listen port change", { oldPort, newPort: port, username: this.username, loggedIn: this.loggedIn });
+    // Update portmapper mapping target (like nicotine PortMapper.set_port)
+    const oldIp = this._localIpAddress;
+    const newIp = this.findLocalIpAddress();
+    this._localIpAddress = newIp;
+    this.portMapper.setPort(port, newIp);
     if (!this.loggedIn) {
       // Listener only exists when logged in; next login will bind new port
       try { this.listener?.stop(); } catch {}
       this.listener = undefined;
+      // Remove old mapping if UPnP was active
+      if (this._upnpEnabled) {
+        try { await this.portMapper.removePortMapping(true); } catch {}
+        // Re-add with new port if we had an old mapping? But not logged in, will add on login
+      }
       return;
+    }
+    // If UPnP enabled, remove old mapping before rebinding
+    if (this._upnpEnabled) {
+      try { await this.portMapper.removePortMapping(true); } catch {}
+      // setPort already updated to new port above
     }
     // Restart peer listener on new port
     try { this.listener?.stop(); } catch {}
@@ -603,10 +688,18 @@ export class SoulseekSession {
     } catch (e) {
       // Revert on bind failure (e.g. port in use)
       this._listenPort = oldPort;
+      this.portMapper.setPort(oldPort, oldIp);
       try { this.startListener(); } catch {}
+      if (this._upnpEnabled) {
+        try { await this.portMapper.addPortMapping(false); } catch {}
+      }
       throw new Error(`Cannot listen on port ${port}: ${(e as Error).message}`);
     }
     // Trigger server reconnect so new SetWaitPort is advertised (nicotine-plus core.reconnect parity)
+    // Also (re)add UPnP mapping with new port (done on next login success via updatePortMapper, but do now for immediate)
+    if (this._upnpEnabled) {
+      this.portMapper.addPortMapping(false).catch(() => {});
+    }
     this.reconnect("listen port change");
   }
 
@@ -616,6 +709,8 @@ export class SoulseekSession {
     this.shouldReconnect = true;
     this.reconnectAttempts = 0;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
+    // Portmapper: remove before reconnect (nicotine _server_disconnect)
+    try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}
     // Distributed teardown mirrors _server_disconnect
     this.parent = null;
     this.potentialParents.clear();
@@ -627,6 +722,9 @@ export class SoulseekSession {
     this.distribParentMinSpeed = PARENT_MIN_SPEED_DEFAULT;
     this.distribParentSpeedRatio = PARENT_SPEED_RATIO_DEFAULT;
     this.uploadSpeed = 0;
+    // Peer listener will be rebound on next login success; stop old now to free port for immediate retry
+    try { this.listener?.stop(); } catch {}
+    this.listener = undefined;
     const sock = this.serverSocket;
     this.serverSocket = undefined;
     this.loggedIn = false;
@@ -673,13 +771,17 @@ export class SoulseekSession {
         },
         close: () => {
           logger.warn("server", "tcp close", { loggedIn: this.loggedIn, username: this.username });
+          const wasLoggedIn = this.loggedIn;
+          if (wasLoggedIn) {
+            // Portmapper cleanup mirrors pynicotine _server_disconnect remove_port_mapping
+            try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}
+          }
           if (!this.loggedIn && this.loginReject) {
             const err = new Error("Connection closed before login completed.");
             this.loginReject(err);
             this.loginReject = undefined;
             this.loginResolve = undefined;
           }
-          const wasLoggedIn = this.loggedIn;
           // keep loggedIn false; schedule reconnect if we were logged in or still trying
           if (wasLoggedIn) this.loggedIn = false;
           this.cleanupServerTimers();
@@ -763,6 +865,10 @@ export class SoulseekSession {
         this.startListener();
         this.startIdleSweep();
         this.startServerPing();
+        // Portmapper: NAT-PMP → UPnP fallback (like nicotine PortMapper LEASE_DURATION 12h, RENEWAL 2h)
+        this._localIpAddress = this.findLocalIpAddress();
+        this.portMapper.setPort(this._listenPort, this._localIpAddress);
+        if (this._upnpEnabled) this.portMapper.addPortMapping(false).catch(() => {});
         // Distrib bootstrap: HaveNoParent true + BranchRoot(login) + BranchLevel 0 + AcceptChildren false — mirrors _sendHaveNoParent
         this._sendHaveNoParent();
         this.restartWishlistTimer();
@@ -2082,6 +2188,8 @@ export class SoulseekSession {
   close() {
     this.shouldReconnect = false;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
+    // Portmapper: remove mapping on quit (like nicotine _server_disconnect portmapper.remove)
+    try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}
     for (const token of [...this.searches.keys()]) { const s = this.searches.get(token); if (s?.timer) clearTimeout(s.timer); if (s) s.onEnd({ searchId: s.searchId, reason: "stopped" }); this.searches.delete(token); }
     this.searchIds.clear(); this.allowedSearchTokens.clear();
     for (const { timer } of this.peerAddressRequests.values()) clearTimeout(timer);

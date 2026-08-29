@@ -1046,6 +1046,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
               ws.send(JSON.stringify({ type: "error", error: `Invalid listen port ${JSON.stringify(value)} (must be 1024-65535)` }));
               return;
             }
+          } else if (section === "server" && key === "upnp") {
+            const enabled = Boolean(value);
+            (session as unknown as { setUpnpEnabled?: (b: boolean) => void })?.setUpnpEnabled?.(enabled);
+            logger.info("server", `UPnP ${enabled ? "enabled" : "disabled"} via config`, { upnp: enabled });
           } else if (section === "logging" && ["readroomlines", "readprivatelines", "rooms_timestamp", "private_timestamp"].includes(key)) {
             // logging caps are web-only, but acknowledge
             void value;

@@ -36,6 +36,7 @@ export interface Settings {
     ipblocklist: Record<string, string>;
     ipignorelist: Record<string, string>;
     portrange: [number, number];
+    upnp: boolean;
   };
   ui: {
     dark_mode: boolean;
@@ -204,6 +205,7 @@ export const defaults: Settings = {
     ipblocklist: {},
     ipignorelist: {},
     portrange: [DEFAULT_LISTEN_PORT, DEFAULT_LISTEN_PORT],
+    upnp: true,
   },
   ui: {
     dark_mode: false,

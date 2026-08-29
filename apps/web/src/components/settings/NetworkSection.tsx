@@ -102,6 +102,12 @@ export function NetworkSection() {
           {!isConnected ? <span className="block pt-1 text-amber-700 dark:text-amber-300">Not connected — change will apply on next login.</span> : null}
         </div>
       ) : null}
+      <ToggleControl
+        label="UPnP port mapping"
+        description="Automatically forward the listening port via UPnP/NAT-PMP (like nicotine-plus). Falls back from NAT-PMP to UPnP; renews every 2 h. Disable if your router doesn't support it or you forward manually."
+        checked={server.upnp ?? true}
+        onChange={(v) => setOption("server", "upnp", v)}
+      />
       <NumberControl
         label="Idle minutes before away"
         description={`Automatically mark you away after ${defaults.server.autoaway} minutes of inactivity.`}
