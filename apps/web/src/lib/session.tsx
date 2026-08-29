@@ -17,6 +17,7 @@ import type {
 } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
 import { emitRoomList, handleDemoSend } from "@/lib/demo/mock";
+import { clearDemoStorage, seedDemoStorage } from "@/lib/demo/seed";
 
 export type SessionStatus = "idle" | "connecting" | "connected" | "failed";
 
@@ -136,7 +137,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [clearHeartbeat, clearReconnect]);
 
   const logout = useCallback(() => {
-    try { sessionStorage.removeItem("__mockLoggedIn"); sessionStorage.removeItem("__mockTransfers"); } catch {}
+    try {
+      sessionStorage.removeItem("__mockLoggedIn");
+      sessionStorage.removeItem("__mockTransfers");
+      if (isDemo) clearDemoStorage();
+    } catch {}
     teardown();
     lastLogin.current = null;
     setState({ status: "idle" });
@@ -274,6 +279,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setTimeout(() => {
           try {
             sessionStorage.setItem("__mockLoggedIn", JSON.stringify({ user }));
+            // Seed demo fixtures on first login — provides 2 chats/shares/profiles/searches/buddies/transfers
+            if (isDemo) seedDemoStorage();
           } catch {}
           setState({ status: "connected", user, error: undefined });
           const result: BridgeOutboundMessage = {

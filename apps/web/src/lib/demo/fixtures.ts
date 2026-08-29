@@ -207,3 +207,144 @@ export function mockRecommendations(): import("@/lib/protocol").Recommendation[]
 export function mockSimilarUsers(): import("@/lib/protocol").SimilarUser[] {
   return DEMO_USERS.slice(0, 6).map((u, i) => ({ username: u, rating: 100 - i * 12 }));
 }
+
+// ------------------------------------------------------------------
+// Demo seed constants — single source of truth for all demo fixtures
+// ------------------------------------------------------------------
+export const DEMO_SEARCH_QUERIES: readonly string[] = ["linux iso", "tails 5.2 iso"] as const;
+export const DEMO_BROWSE_USERS: readonly string[] = ["jazzcat", "vinyl_hunter"] as const;
+export const DEMO_PROFILE_USERS: readonly string[] = ["jazzcat", "vinyl_hunter"] as const;
+export const DEMO_PRIVATE_CHAT_USERS: readonly string[] = ["jazzcat", "vinyl_hunter"] as const;
+export const DEMO_BUDDY_USERS: readonly string[] = ["jazzcat", "vinyl_hunter"] as const;
+
+export function mockBuddies(): import("@/lib/buddies").Buddy[] {
+  // Two curated demo buddies — online, trusted, with notes
+  const b = mockProfile("jazzcat");
+  const v = mockProfile("vinyl_hunter");
+  return [
+    {
+      username: "jazzcat",
+      note: "Jazz archivist — great shares",
+      trusted: true,
+      notify: true,
+      status: 2,
+      privileged: b.status.privileged,
+      country: b.country,
+      avgspeed: b.stats.avgspeed,
+      files: b.stats.files,
+      dirs: b.stats.dirs,
+    },
+    {
+      username: "vinyl_hunter",
+      note: "Vinyl ripper — soul & hip-hop",
+      trusted: true,
+      notify: true,
+      status: 2,
+      privileged: v.status.privileged,
+      country: v.country,
+      avgspeed: v.stats.avgspeed,
+      files: v.stats.files,
+      dirs: v.stats.dirs,
+    },
+  ];
+}
+
+export function mockDemoTransfers(): import("@/lib/protocol").Transfer[] {
+  // One downloading, one uploading — both Transferring with animated progress
+  const dlSize = 85_000_000; // ~85 MB
+  const dlCurrent = Math.floor(dlSize * 0.44); // 44%
+  const dlSpeed = 1_180_000; // ~1.1 MB/s
+  const ulSize = 46_500_000; // ~46 MB
+  const ulCurrent = Math.floor(ulSize * 0.68); // 68%
+  const ulSpeed = 620_000;
+  return [
+    {
+      id: "jazzcat::C:\\Users\\jazzcat\\Music\\Jazz\\linux iso - Midnight Groove - Blue Note Session [FLAC].flac",
+      username: "jazzcat",
+      virtualPath: "C:\\Users\\jazzcat\\Music\\Jazz\\linux iso - Midnight Groove - Blue Note Session [FLAC].flac",
+      fileName: "linux iso - Midnight Groove - Blue Note Session [FLAC].flac",
+      size: dlSize,
+      current: dlCurrent,
+      speed: dlSpeed,
+      avgSpeed: 980_000,
+      timeLeft: Math.ceil((dlSize - dlCurrent) / dlSpeed),
+      status: "Transferring",
+      queuePosition: null,
+      isUpload: false,
+    },
+    {
+      id: "vinyl_hunter::C:\\Users\\demo\\Shares\\Summer Rain - Lo-Fi Beats To Study To.mp3",
+      username: "vinyl_hunter",
+      virtualPath: "C:\\Users\\demo\\Shares\\Summer Rain - Lo-Fi Beats To Study To.mp3",
+      fileName: "Summer Rain - Lo-Fi Beats To Study To.mp3",
+      size: ulSize,
+      current: ulCurrent,
+      speed: ulSpeed,
+      avgSpeed: 540_000,
+      timeLeft: Math.ceil((ulSize - ulCurrent) / ulSpeed),
+      status: "Transferring",
+      queuePosition: null,
+      isUpload: true,
+    },
+  ];
+}
+
+export interface DemoPrivateMessage {
+  id: string;
+  username: string;
+  message: string;
+  timestamp: number;
+  isSelf: boolean;
+}
+
+export function mockPrivateConversations(): Record<string, DemoPrivateMessage[]> {
+  const now = Date.now();
+  return {
+    jazzcat: [
+      {
+        id: "demo-jazzcat-1",
+        username: "jazzcat",
+        message: "hey! saw you were looking for linux iso — I have a great collection. check my Jazz folder 🌱",
+        timestamp: now - 1000 * 60 * 23,
+        isSelf: false,
+      },
+      {
+        id: "demo-jazzcat-2",
+        username: "jazzcat",
+        message: "thanks! your shares look amazing, especially the Blue Note FLACs",
+        timestamp: now - 1000 * 60 * 19,
+        isSelf: true,
+      },
+      {
+        id: "demo-jazzcat-3",
+        username: "jazzcat",
+        message: "appreciate the taste! 🎶 lots more in my browse — demo mode, but imagine it auto-queuing at 1 MB/s",
+        timestamp: now - 1000 * 60 * 18,
+        isSelf: false,
+      },
+    ],
+    vinyl_hunter: [
+      {
+        id: "demo-vinyl-1",
+        username: "vinyl_hunter",
+        message: "yo! tails 5.2 iso is in my shares under Electronic — want me to queue it?",
+        timestamp: now - 1000 * 60 * 42,
+        isSelf: false,
+      },
+      {
+        id: "demo-vinyl-2",
+        username: "vinyl_hunter",
+        message: "yes please! trying to verify the download",
+        timestamp: now - 1000 * 60 * 41,
+        isSelf: true,
+      },
+      {
+        id: "demo-vinyl-3",
+        username: "vinyl_hunter",
+        message: "on it — demo mode so not actually queuing, but imagine it transferring at 800 KB/s 😉",
+        timestamp: now - 1000 * 60 * 40,
+        isSelf: false,
+      },
+    ],
+  };
+}

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
 import { useConfig } from "@/lib/config/provider";
 import type { ChatEvent } from "@/lib/protocol";
+import { isDemo } from "@/lib/demo";
+import { mockPrivateConversations } from "@/lib/demo/fixtures";
 
 function applyWordsPrivate(text: string, cfg: { censorwords: boolean; censored: string[]; replacewords: boolean; autoreplaced: Record<string, string> }): string {
   let out = text;
@@ -36,6 +38,30 @@ export function usePrivateChat() {
 
   const activeUserRef = useRef(activeUser);
   activeUserRef.current = activeUser;
+
+  // Demo: seed 2 fake private chats (jazzcat + vinyl_hunter) — per-mount seed (hook is per-page)
+  useEffect(() => {
+    if (!isDemo) return;
+    if (state.status !== "connected") return;
+    if (conversations.size !== 0) return;
+    const seeded = mockPrivateConversations();
+    const next = new Map<string, PrivateMessage[]>();
+    for (const [username, msgs] of Object.entries(seeded)) {
+      next.set(username, msgs.map((m) => ({ ...m })));
+    }
+    setConversations(next);
+    // default to first conversation
+    const first = Object.keys(seeded)[0];
+    if (first) setActiveUser(first);
+  }, [state.status, conversations.size]);
+
+  // Demo: clear on logout
+  useEffect(() => {
+    if (!isDemo) return;
+    if (state.status !== "idle") return;
+    setConversations(new Map());
+    setActiveUser(null);
+  }, [state.status]);
 
   useEffect(() => {
     if (state.status !== "connected") return;

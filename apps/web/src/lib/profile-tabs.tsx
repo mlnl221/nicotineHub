@@ -3,6 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSession } from "@/lib/session";
 import type { UserInfoEvent, UserInfoInterests, UserInfoProfile, UserInfoStats, UserInfoStatus } from "@/lib/protocol";
+import { isDemo } from "@/lib/demo";
+import { DEMO_PROFILE_USERS, mockProfile } from "@/lib/demo/fixtures";
 
 export interface UserProfile {
   username: string;
@@ -93,6 +95,41 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   tabsRef.current = tabs;
 
   useEffect(() => { persist(tabs, activeId); }, [tabs, activeId]);
+
+  // Demo: seed 2 fake profiles (jazzcat + vinyl_hunter) with mocked data
+  useEffect(() => {
+    if (!isDemo) return;
+    if (state.status !== "connected") return;
+    if (tabs.length !== 0) return;
+    try { if (sessionStorage.getItem("__demoProfileSeeded")) return; } catch {}
+    try { sessionStorage.setItem("__demoProfileSeeded", "1"); } catch {}
+    const newTabs: ProfileTab[] = [...DEMO_PROFILE_USERS].map((username) => {
+      const id = `p${++counter.current}`;
+      const bundle = mockProfile(username);
+      const profile: UserProfile = {
+        username,
+        status: bundle.status,
+        stats: bundle.stats,
+        interests: bundle.interests,
+        info: bundle.info,
+        country: bundle.country,
+        watchUser: bundle.watchUser,
+      };
+      return { id, username, profile, loading: false, error: null };
+    });
+    setTabs(newTabs);
+    setActiveId(newTabs[0]?.id ?? null);
+  }, [state.status, tabs.length]);
+
+  // Demo: clear on logout
+  useEffect(() => {
+    if (!isDemo) return;
+    if (state.status !== "idle") return;
+    setTabs([]);
+    setActiveId(null);
+    counter.current = 0;
+    try { sessionStorage.removeItem("__demoProfileSeeded"); } catch {}
+  }, [state.status]);
 
   // Subscribe to userinfo events
   useEffect(() => {
