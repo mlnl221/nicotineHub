@@ -9,7 +9,7 @@ import { useRooms } from "@/lib/rooms";
 export default function ChatRoomsPage() {
   const { state } = useSession();
   const router = useRouter();
-  const { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say } = useRooms();
+  const { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, closeAll } = useRooms();
   const [joinInput, setJoinInput] = useState("");
   const [sayInput, setSayInput] = useState("");
   const [filter, setFilter] = useState("");
@@ -57,6 +57,16 @@ export default function ChatRoomsPage() {
             ) : null}
           </div>
           <div className="flex items-center gap-2">
+            {joinedRooms.size > 0 ? (
+              <button
+                onClick={() => {
+                  if (confirm("Close all rooms? Leave all joined rooms.")) closeAll();
+                }}
+                className="rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container"
+              >
+                Close All
+              </button>
+            ) : null}
             {activeRoom ? (
               <button
                 onClick={() => leaveRoom(activeRoom)}
@@ -103,9 +113,19 @@ export default function ChatRoomsPage() {
               {/* Joined */}
               {joinedArray.length > 0 ? (
                 <div>
-                  <h4 className="px-3 py-1 font-label text-[10px] uppercase tracking-widest text-on-surface-variant">
-                    Joined Rooms
-                  </h4>
+                  <div className="flex items-center justify-between px-3 py-1">
+                    <h4 className="font-label text-[10px] uppercase tracking-widest text-on-surface-variant">
+                      Joined Rooms
+                    </h4>
+                    <button
+                      onClick={() => {
+                        if (confirm("Close all rooms?")) closeAll();
+                      }}
+                      className="font-label text-[10px] text-error hover:underline"
+                    >
+                      Close All
+                    </button>
+                  </div>
                   <ul className="space-y-1">
                     {joinedArray.map((r) => (
                       <li key={r.name}>

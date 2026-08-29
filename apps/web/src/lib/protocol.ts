@@ -443,7 +443,7 @@ export interface UserInfoFailedOutbound {
 }
 
 export type UserinfoRequestMessage =
-  | { type: "userinfo"; action: "watch" | "unwatch" | "get" | "interests"; username: string }
+  | { type: "userinfo"; action: "watch" | "unwatch" | "get" | "interests" | "peerAddress"; username: string }
   | { type: "userinfo"; action: "recommendations" | "globalRecommendations" | "similarUsers" | "checkPrivileges" }
   | { type: "userinfo"; action: "itemRecommendations" | "itemSimilarUsers"; item: string }
   | { type: "userinfo"; action: "addLike" | "removeLike" | "addHate" | "removeHate"; thing: string }

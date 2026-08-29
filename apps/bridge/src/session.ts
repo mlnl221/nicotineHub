@@ -1180,6 +1180,7 @@ export class SoulseekSession {
   }
   watchUser(username: string) { this.serverSocket?.write(buildWatchUser(username)); this.serverSocket?.write(buildGetUserStats(username)); }
   unwatchUser(username: string) { this.serverSocket?.write(buildUnwatchUser(username)); }
+  requestPeerAddress(username: string) { this.serverSocket?.write(buildGetPeerAddress(username)); }
   requestUserInterests(username: string) { this.serverSocket?.write(buildUserInterests(username)); }
   requestRecommendations() { this.serverSocket?.write(frameMessage(SERVER_MESSAGE_CODES.recommendations, Buffer.alloc(0))); }
   requestGlobalRecommendations() { this.serverSocket?.write(frameMessage(SERVER_MESSAGE_CODES.globalRecommendations, Buffer.alloc(0))); }

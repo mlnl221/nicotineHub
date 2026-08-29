@@ -11,7 +11,7 @@ function PrivateChatInner() {
   const router = useRouter();
   const params = useSearchParams();
   const initialUser = params.get("user") || "";
-  const { conversations, users, activeUser, setActiveUser, sendMessage } = usePrivateChat();
+  const { conversations, users, activeUser, setActiveUser, sendMessage, closeAll, closeConversation } = usePrivateChat();
   const [input, setInput] = useState("");
   const [newChatUser, setNewChatUser] = useState(initialUser);
   const [filter, setFilter] = useState("");
@@ -66,6 +66,16 @@ function PrivateChatInner() {
             ) : null}
           </div>
           <div className="flex items-center gap-2">
+            {users.length > 1 ? (
+              <button
+                onClick={() => {
+                  if (confirm("Close all chats?")) closeAll();
+                }}
+                className="hidden md:inline-flex rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container"
+              >
+                Close All
+              </button>
+            ) : null}
             {activeUser ? (
               <button
                 onClick={() => (window.location.href = `/profile/${encodeURIComponent(activeUser)}`)}
@@ -114,6 +124,19 @@ function PrivateChatInner() {
                 />
               </div>
             </div>
+            {users.length > 0 ? (
+              <div className="flex justify-between items-center px-2 py-1">
+                <span className="font-label text-[10px] uppercase tracking-widest text-outline">{users.length} chats</span>
+                <button
+                  onClick={() => {
+                    if (confirm("Close all chats?")) closeAll();
+                  }}
+                  className="font-label text-[10px] uppercase tracking-widest text-error hover:underline"
+                >
+                  Close All
+                </button>
+              </div>
+            ) : null}
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
               {filteredUsers.length === 0 ? (
                 <p className="p-4 text-center font-body text-sm text-outline">
@@ -139,6 +162,16 @@ function PrivateChatInner() {
                           {last ? (last.isSelf ? `You: ${last.message}` : last.message) : "No messages"}
                         </p>
                       </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          closeConversation(u);
+                        }}
+                        className="ml-2 rounded-full p-1 text-outline hover:bg-surface-container-high hover:text-error"
+                        title="Close"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">close</span>
+                      </button>
                     </button>
                   );
                 })

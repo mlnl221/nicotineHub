@@ -65,6 +65,7 @@ const UserInfoMessageSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("unwatch"), username: z.string().min(1).max(64) }),
   z.object({ action: z.literal("get"), username: z.string().min(1).max(64) }),
   z.object({ action: z.literal("interests"), username: z.string().min(1).max(64) }),
+  z.object({ action: z.literal("peerAddress"), username: z.string().min(1).max(64) }),
   z.object({ action: z.literal("recommendations") }),
   z.object({ action: z.literal("globalRecommendations") }),
   z.object({ action: z.literal("similarUsers") }),
@@ -597,6 +598,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           case "checkPrivileges": session.checkPrivileges(); break;
           case "changePassword": session.changePassword(msg.password); break;
           case "reportShares": session.reportShares(msg.dirs, msg.files); break;
+          case "peerAddress": {
+            const sessAny = session as unknown as { requestPeerAddress: (u:string)=>void };
+            if (sessAny.requestPeerAddress) sessAny.requestPeerAddress(msg.username);
+            break;
+          }
           case "setProfile":
             session.setProfile({ username: session.username, descr: msg.profile.descr, pic: msg.profile.pic ? Buffer.from(msg.profile.pic, "base64") : null, totalupl: msg.profile.totalupl, queuesize: msg.profile.queuesize, slotsavail: msg.profile.slotsavail, uploadallowed: msg.profile.uploadallowed });
             break;

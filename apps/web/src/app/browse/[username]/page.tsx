@@ -24,6 +24,7 @@ export default function BrowseUserPage() {
   const { requestDownload } = useTransfers();
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [fileQuery, setFileQuery] = useState("");
+  const [propsFile, setPropsFile] = useState<null | { name: string; size: number; ext: string; attrs: Array<[number, number]>; folder: string }>(null);
 
   useEffect(() => {
     if (state.status !== "connected") router.replace("/");
@@ -197,7 +198,10 @@ export default function BrowseUserPage() {
                   ) : (
                     <ul className="divide-y divide-surface-container-highest/30">
                       {visibleFiles.map((file) => {
-                        const shortName = file.name.split("\\\\").pop() || file.name;
+                        const shortName = file.name.split(/[\\\/]/).pop() || file.name;
+                        const attrsMap = new Map(file.attrs);
+                        const bitrate = attrsMap.get(0);
+                        const length = attrsMap.get(1);
                         return (
                           <li
                             key={file.name}
@@ -207,14 +211,21 @@ export default function BrowseUserPage() {
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-body text-sm font-medium text-on-surface">{shortName}</p>
                               <p className="font-label text-xs text-on-surface-variant">
-                                {formatBytes(file.size)} {file.ext ? `• ${file.ext}` : ""}
+                                {formatBytes(file.size)} {file.ext ? `• ${file.ext}` : ""} {bitrate ? `• ${bitrate}kbps` : ""} {length ? `• ${Math.floor(length/60)}:${String(length%60).padStart(2,"0")}` : ""}
                               </p>
                             </div>
+                            <button
+                              onClick={() => setPropsFile({ name: file.name, size: file.size, ext: file.ext, attrs: file.attrs, folder: activeFolder.name })}
+                              className="rounded-full bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-surface-variant"
+                              title="Properties"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">info</span>
+                            </button>
                             <button
                               onClick={() => {
                                 const virtualPath = `${activeFolder.name}\\\\${shortName}`;
                                 // If file.name already contains full path, prefer it
-                                const vp = file.name.includes("\\\\") ? file.name : virtualPath;
+                                const vp = file.name.includes("\\\\") || file.name.includes("/") ? file.name : virtualPath;
                                 requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName });
                               }}
                               className="rounded-full bg-primary px-4 py-2 font-label text-xs font-bold text-on-primary hover:bg-primary-container"
@@ -232,6 +243,54 @@ export default function BrowseUserPage() {
           </div>
         </div>
       </main>
+      {propsFile ? (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 p-4" onClick={() => setPropsFile(null)}>
+          <div
+            className="w-full max-w-md rounded-2xl bg-surface-container-lowest p-6 shadow-xl max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <h3 className="font-headline text-lg font-bold truncate">{propsFile.name.split("\\").pop()}</h3>
+              <button onClick={() => setPropsFile(null)} className="rounded-full p-2 hover:bg-surface-container-high">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <div className="mt-4 space-y-3 font-body text-sm">
+              <div className="flex justify-between"><span className="text-on-surface-variant">Folder</span><span className="font-mono text-xs truncate max-w-[60%] text-right">{propsFile.folder}</span></div>
+              <div className="flex justify-between"><span className="text-on-surface-variant">Full path</span><span className="font-mono text-xs truncate max-w-[60%] text-right">{propsFile.name}</span></div>
+              <div className="flex justify-between"><span className="text-on-surface-variant">Size</span><span>{formatBytes(propsFile.size)}</span></div>
+              <div className="flex justify-between"><span className="text-on-surface-variant">Extension</span><span>{propsFile.ext || "—"}</span></div>
+              {(() => {
+                const m = new Map(propsFile.attrs);
+                return (
+                  <>
+                    {m.has(0) ? <div className="flex justify-between"><span className="text-on-surface-variant">Bitrate</span><span>{m.get(0)} kbps {m.get(2) ? "(VBR)" : ""}</span></div> : null}
+                    {m.has(1) ? <div className="flex justify-between"><span className="text-on-surface-variant">Length</span><span>{Math.floor(m.get(1)!/60)}:{String(m.get(1)!%60).padStart(2,"0")} ({m.get(1)}s)</span></div> : null}
+                    {m.has(4) ? <div className="flex justify-between"><span className="text-on-surface-variant">Sample rate</span><span>{m.get(4)} Hz</span></div> : null}
+                    {m.has(5) ? <div className="flex justify-between"><span className="text-on-surface-variant">Bit depth</span><span>{m.get(5)} bit</span></div> : null}
+                    {propsFile.attrs.length === 0 ? <p className="text-xs text-outline">No audio attributes</p> : null}
+                  </>
+                );
+              })()}
+              <div className="flex justify-between"><span className="text-on-surface-variant">Virtual path</span><button onClick={() => { navigator.clipboard.writeText(propsFile.name); }} className="font-mono text-xs text-primary hover:underline">Copy</button></div>
+            </div>
+            <div className="mt-6 flex gap-2">
+              <button
+                onClick={() => {
+                  const shortName = propsFile.name.split("\\").pop() || propsFile.name;
+                  const vp = propsFile.name.includes("\\") ? propsFile.name : `${propsFile.folder}\\${shortName}`;
+                  requestDownload({ username, virtualPath: vp, size: propsFile.size, fileName: shortName });
+                  setPropsFile(null);
+                }}
+                className="flex-1 rounded-xl bg-primary py-3 font-label text-xs font-bold text-on-primary"
+              >
+                Download
+              </button>
+              <button onClick={() => setPropsFile(null)} className="rounded-xl bg-surface-container-high px-6 py-3 font-label text-xs">Close</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

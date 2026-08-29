@@ -85,6 +85,9 @@ function ProfileInner({ username }: { username: string }) {
   const [giftOpen, setGiftOpen] = useState(false);
   const [giftDays, setGiftDays] = useState("30");
   const [privilegesLeft, setPrivilegesLeft] = useState<number | null>(null);
+  const [ipInfo, setIpInfo] = useState<{ ip: string; port: number; country?: string } | null>(null);
+  const [loadingIp, setLoadingIp] = useState(false);
+  const [showIp, setShowIp] = useState(false);
 
   const flash = (msg: string) => {
     setToast(msg);
@@ -117,16 +120,27 @@ function ProfileInner({ username }: { username: string }) {
     send({ type: "userinfo", action: "checkPrivileges" });
     const unsub = subscribe((msg) => {
       if (msg.type !== "userinfo:event") return;
-      const ev = msg.event as unknown as { type: string; checkPrivileges?: number };
+      const ev = msg.event as unknown as { type: string; checkPrivileges?: number; peerAddress?: { ip: string; port: number }; username?: string };
       if (ev.type === "check-privileges" && typeof ev.checkPrivileges === "number") {
         setPrivilegesLeft(ev.checkPrivileges);
+      }
+      if (ev.type === "peer-address" && ev.username === username && ev.peerAddress) {
+        const pa = ev.peerAddress as unknown as { ip: string; port: number };
+        if (pa.ip === "0.0.0.0" || pa.port === 0) {
+          flash("User offline or IP unavailable");
+          setIpInfo(null);
+        } else {
+          setIpInfo({ ip: pa.ip, port: pa.port });
+          flash(`IP: ${pa.ip}:${pa.port}`);
+        }
+        setLoadingIp(false);
       }
       if (ev.type === "privileged-users" && Array.isArray((ev as unknown as { privilegedUsers: string[] }).privilegedUsers)) {
         // also handle
       }
     });
     return unsub;
-  }, [state.status, send, subscribe]);
+  }, [state.status, send, subscribe, username]);
 
   const statusLabel =
     profile.status?.status === 2 ? "Online" : profile.status?.status === 1 ? "Away" : "Offline";
@@ -246,8 +260,27 @@ function ProfileInner({ username }: { username: string }) {
                 <div className="mt-1 flex flex-wrap items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant dark:text-outline">
                   <span className={statusColor}>{statusLabel}</span>
                   {country ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-2 py-0.5 text-[11px] normal-case tracking-normal">
+                    <button
+                      onClick={() => {
+                        setShowIp((v) => !v);
+                        if (!ipInfo && !loadingIp) {
+                          setLoadingIp(true);
+                          send({ type: "userinfo", action: "peerAddress", username });
+                        }
+                      }}
+                      className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-2 py-0.5 text-[11px] normal-case tracking-normal hover:bg-surface-container-high"
+                      title="Click to show IP address"
+                    >
                       <span className="material-symbols-outlined text-[12px]">public</span> {country}
+                    </button>
+                  ) : null}
+                  {showIp && ipInfo ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-2 py-0.5 text-[11px] font-mono normal-case tracking-normal">
+                      {ipInfo.ip}:{ipInfo.port} {ipInfo.country ? `(${ipInfo.country})` : ""}
+                    </span>
+                  ) : showIp && loadingIp ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-2 py-0.5 text-[11px]">
+                      <span className="material-symbols-outlined animate-spin text-[12px]">progress_activity</span> fetching IP…
                     </span>
                   ) : null}
                   {profile.status?.privileged ? (
