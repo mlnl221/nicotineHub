@@ -57,8 +57,8 @@ export function SearchScreen() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-surface-container-low">
-      <header className="sticky top-0 z-20 bg-surface-container-low/95 backdrop-blur">
+    <div className="flex min-h-screen flex-col bg-surface-container-low dark:bg-inverse-surface">
+      <header className="sticky top-0 z-20 bg-surface-container-low/95 backdrop-blur dark:bg-inverse-surface/95">
         <SearchBar
           onSearch={startSearch}
           onToggleFilters={() => setShowFilters((v) => !v)}

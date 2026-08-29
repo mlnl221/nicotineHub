@@ -18,9 +18,9 @@ export default function SearchPage() {
   if (state.status !== "connected") return null;
 
   return (
-    <div className="flex min-h-screen bg-surface-container-low">
+    <div className="flex min-h-screen bg-surface-container-low dark:bg-inverse-surface">
       <Sidebar />
-      <main className="ml-72 flex min-h-screen flex-1 flex-col">
+      <main className="ml-72 flex min-h-screen flex-1 flex-col bg-surface-container-low dark:bg-inverse-surface">
         <SearchProvider>
           <SearchScreen />
         </SearchProvider>
