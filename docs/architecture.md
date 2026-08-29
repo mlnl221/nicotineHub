@@ -64,7 +64,7 @@ Bridge is **leaf-only**: sends `HaveNoParent 71` + `BranchLevel/Root` on login, 
 | Env | Default | Notes |
 |-----|---------|-------|
 | `PORT` | `8787` | WS port |
-| `LISTEN_PORT` | `2234` | Peer listener (port-forward) |
+| `LISTEN_PORT` | `62904` | Peer listener (port-forward TCP+UDP; editable via `server.portrange` in Settings → Network, persists to `DATA_DIR/listen_port`; env wins on boot, compose uses `${LISTEN_PORT:-62904}:${LISTEN_PORT:-62904}`) |
 | `DATA_DIR` | `/data` | Volume |
 | `BRIDGE_TOKEN` | *(open)* | `?token` / `Bearer` / `Sec-WebSocket-Protocol` → 401 |
 | `SHARED_DIRS` | `/data/shared` | `:` list auto-scanned |

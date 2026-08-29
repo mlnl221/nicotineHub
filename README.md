@@ -51,7 +51,7 @@ The browser can't open raw TCP sockets, so the bridge translates JSON over WebSo
 ```
 apps/bridge  — Bun bridge  (WebSocket `/ws` + `/health` + `/files/:token`)
 apps/web     — Next.js 15 PWA
-compose.yaml — web:3000 + bridge:8787/2234 → bridge-data:/data
+compose.yaml — web:3000 + bridge:8787/62904 → bridge-data:/data
 ```
 
 ---
@@ -139,7 +139,7 @@ Bridge URL: `NEXT_PUBLIC_BRIDGE_URL` (build) or `localStorage.nicotine.bridgeUrl
 |-----|---------|---------|
 | `BRIDGE_TOKEN` | *(open)* | Token auth for `/ws` |
 | `DATA_DIR` | `/data` | Volume for downloads / incomplete |
-| `LISTEN_PORT` | `2234` | Peer listener (port-forward) |
+| `LISTEN_PORT` | `62904` | Peer listener (port-forward TCP+UDP; editable in Settings → Network → Listening port, writes `DATA_DIR/listen_port` and reconnects — also set `LISTEN_PORT` env + `docker compose up -d` to update host mapping) |
 
 See `docs/architecture.md` for `SHARED_DIRS`, `UPLOAD_LIMIT`, `DISTRIB` etc.
 
