@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -87,6 +88,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const socketRef = useRef<WebSocket | null>(null);
   const generation = useRef(0);
   const listeners = useRef<Set<(msg: BridgeOutboundMessage) => void>>(new Set());
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   const teardown = useCallback(() => {
     generation.current += 1;
@@ -135,7 +138,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             break;
           case "error":
             // Only treat as a fatal login error if we aren't connected yet.
-            if (state.status !== "connected") {
+            if (stateRef.current.status !== "connected") {
               setState((s) => ({ ...s, status: "failed", error: data.error }));
             }
             break;
@@ -150,7 +153,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setState((s) => ({
           ...s,
           status: "failed",
-          error: "Could not reach the Nicotine bridge. Is it running?",
+          error: "Could not reach the Nicotine Hub bridge. Is it running?",
         }));
       };
 
@@ -163,7 +166,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         );
       };
     },
-    [state.status],
+    [],
   );
 
   const send = useCallback((msg: BridgeInboundMessage) => {

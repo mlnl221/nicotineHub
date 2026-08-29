@@ -1,8 +1,8 @@
 {
-  "name": "nicotine-mobile",
+  "name": "nicotine-hub",
   "version": "0.1.0",
   "private": true,
-  "description": "Mobile-first/browser-first Soulseek client (MVP: login).",
+  "description": "Browser-first Soulseek client — Nicotine Hub.",
   "workspaces": [
     "apps/*"
   ],

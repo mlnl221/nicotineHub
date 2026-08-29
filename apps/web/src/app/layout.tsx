@@ -6,14 +6,21 @@ import { ConfigProvider } from "@/lib/config/provider";
 import { TransfersProvider } from "@/lib/transfers";
 
 export const metadata: Metadata = {
-  title: "Nicotine Mobile",
+  title: "Nicotine Hub",
   description: "A mobile-first, browser-first Soulseek client.",
   manifest: "/manifest.webmanifest",
-  applicationName: "Nicotine Mobile",
+  applicationName: "Nicotine Hub",
+  icons: {
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Nicotine Mobile",
+    title: "Nicotine Hub",
   },
 };
 

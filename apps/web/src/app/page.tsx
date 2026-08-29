@@ -33,7 +33,7 @@ export default function Home() {
             <span className="font-headline text-3xl font-bold text-on-primary">N</span>
           </div>
           <h1 className="mb-3 font-headline text-3xl font-bold tracking-tight text-on-surface">
-            Nicotine Mobile
+            Nicotine Hub
           </h1>
           <p className="font-body text-sm text-on-surface-variant">
             Your Soulseek network, in the browser.

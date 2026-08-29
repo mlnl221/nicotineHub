@@ -611,5 +611,5 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
 
 if (import.meta.main) {
   diagLog("info", "bridge", `bridge listening on ws://localhost:${PORT}/ws ${BRIDGE_TOKEN ? "(token auth enabled)" : "(open)"} DATA_DIR=${DATA_DIR}`, { port: PORT, listenPort: LISTEN_PORT });
-  console.log(`Nicotine Mobile bridge listening on ws://localhost:${PORT}/ws ${BRIDGE_TOKEN ? "(token auth enabled)" : "(open)"} DATA_DIR=${DATA_DIR}`);
+  console.log(`Nicotine Hub bridge listening on ws://localhost:${PORT}/ws ${BRIDGE_TOKEN ? "(token auth enabled)" : "(open)"} DATA_DIR=${DATA_DIR}`);
 }

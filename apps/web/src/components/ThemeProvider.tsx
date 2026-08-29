@@ -14,30 +14,45 @@ type Theme = "light" | "dark";
 interface ThemeApi {
   theme: Theme;
   toggle: () => void;
+  setTheme: (t: Theme) => void;
 }
 
 const ThemeContext = createContext<ThemeApi | null>(null);
 
+function applyTheme(next: Theme) {
+  document.documentElement.classList.toggle("dark", next === "dark");
+  try {
+    localStorage.setItem("nicotine.theme", next);
+  } catch {}
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("light");
+  const [theme, setThemeState] = useState<Theme>("light");
 
   useEffect(() => {
-    const stored = localStorage.getItem("nicotine.theme") as Theme | null;
-    const initial: Theme = stored ?? "light";
-    setTheme(initial);
-    document.documentElement.classList.toggle("dark", initial === "dark");
+    try {
+      const stored = localStorage.getItem("nicotine.theme") as Theme | null;
+      if (stored === "dark" || stored === "light") {
+        setThemeState(stored);
+        document.documentElement.classList.toggle("dark", stored === "dark");
+      }
+    } catch {}
+  }, []);
+
+  const setTheme = useCallback((next: Theme) => {
+    setThemeState(next);
+    applyTheme(next);
   }, []);
 
   const toggle = useCallback(() => {
-    setTheme((prev) => {
+    setThemeState((prev) => {
       const next: Theme = prev === "dark" ? "light" : "dark";
-      document.documentElement.classList.toggle("dark", next === "dark");
-      localStorage.setItem("nicotine.theme", next);
+      applyTheme(next);
       return next;
     });
   }, []);
 
-  return <ThemeContext.Provider value={{ theme, toggle }}>{children}</ThemeContext.Provider>;
+  return <ThemeContext.Provider value={{ theme, toggle, setTheme }}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme(): ThemeApi {

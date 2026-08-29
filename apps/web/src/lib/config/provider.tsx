@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -40,12 +41,15 @@ const ConfigContext = createContext<ConfigApi | null>(null);
 
 export function ConfigProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(defaults);
+  const hydrated = useRef(false);
 
   useEffect(() => {
     setSettings(readStored());
+    hydrated.current = true;
   }, []);
 
   useEffect(() => {
+    if (!hydrated.current) return;
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
     } catch {

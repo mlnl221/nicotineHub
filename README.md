@@ -1,4 +1,4 @@
-# Nicotine Mobile
+# Nicotine Hub
 
 A **mobile-first / browser-first** web client for the [Soulseek](https://www.slsknet.org/) peer-to-peer network.
 

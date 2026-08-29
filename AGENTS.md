@@ -1,4 +1,4 @@
-# AGENTS.md — nicotine-mobile
+# AGENTS.md — nicotine-hub
 
 > **Before starting ANY task, read `mistakes.md` in the repo root. After any mistake or user correction, append an entry to `mistakes.md` immediately using the format inside it. Never repeat a recorded mistake.**
 
