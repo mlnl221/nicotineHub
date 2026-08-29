@@ -6,11 +6,28 @@ import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
 import { useUserInfo } from "@/lib/userinfo";
 import { humanSpeed } from "@/lib/format";
+import { useBuddies } from "@/lib/buddies";
+import { useConfig } from "@/lib/config/provider";
 
 function profilePicSrc(pic: string): string {
   const isSvg = pic.trimStart().startsWith("<svg");
   const mime = isSvg ? "image/svg+xml" : "image/png";
   return `data:${mime};base64,${pic}`;
+}
+
+function guessMime(pic: string): string {
+  const t = pic.trimStart();
+  if (t.startsWith("<svg")) return "image/svg+xml";
+  if (t.startsWith("iVBOR")) return "image/png";
+  if (t.startsWith("/9j/")) return "image/jpeg";
+  return "image/png";
+}
+
+function base64ToBlob(b64: string, mime: string): Blob {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {
@@ -28,16 +45,132 @@ function StatCard({ label, value }: { label: string; value: string }) {
 
 function ProfileInner({ username }: { username: string }) {
   const router = useRouter();
+  const { state, send } = useSession();
   const { profile, loading, error } = useUserInfo(username);
+  const { allBuddies, addBuddy, removeBuddy } = useBuddies();
+  const { settings, setOption } = useConfig();
   const [toast, setToast] = useState<string | null>(null);
+  const [showPic, setShowPic] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      const v = localStorage.getItem("nicotine.showPictures");
+      return v === null ? true : v !== "false";
+    } catch {
+      return true;
+    }
+  });
+  const [giftOpen, setGiftOpen] = useState(false);
+  const [giftDays, setGiftDays] = useState("30");
+  const [banOpen, setBanOpen] = useState(false);
 
   const flash = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2600);
   };
 
+  useEffect(() => {
+    try {
+      localStorage.setItem("nicotine.showPictures", String(showPic));
+    } catch {}
+  }, [showPic]);
+
   const statusLabel =
     profile.status?.status === 2 ? "Online" : profile.status?.status === 1 ? "Away" : "Offline";
+
+  const isOwn = state.user !== undefined && state.user === username;
+  const isBuddy = allBuddies.some((b) => b.username.toLowerCase() === username.toLowerCase());
+  const bannedList: string[] = (settings.server as unknown as { banlist: string[] }).banlist || [];
+  const isBanned = bannedList.includes(username);
+  const ignoredList: string[] = (settings.server as unknown as { ignorelist?: string[] }).ignorelist || [];
+  const isIgnored = ignoredList.includes(username);
+
+  const handleCopyPic = async () => {
+    if (!profile.info?.pic) return;
+    try {
+      const mime = guessMime(profile.info.pic);
+      const blob = base64ToBlob(profile.info.pic, mime);
+      // @ts-ignore ClipboardItem may not be typed
+      const item = new ClipboardItem({ [mime]: blob });
+      // @ts-ignore
+      await navigator.clipboard.write([item]);
+      flash("Picture copied");
+    } catch {
+      flash("Copy not supported in this browser");
+    }
+  };
+  const handleSavePic = () => {
+    if (!profile.info?.pic) return;
+    const mime = guessMime(profile.info.pic);
+    const blob = base64ToBlob(profile.info.pic, mime);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${username}.${mime === "image/svg+xml" ? "svg" : mime === "image/jpeg" ? "jpg" : "png"}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    flash("Picture saved");
+  };
+  const handleSharePic = async () => {
+    if (!profile.info?.pic) return;
+    const mime = guessMime(profile.info.pic);
+    const blob = base64ToBlob(profile.info.pic, mime);
+    const file = new File([blob], `${username}.${mime === "image/svg+xml" ? "svg" : "png"}`, { type: mime });
+    try {
+      // @ts-ignore
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        // @ts-ignore
+        await navigator.share({ files: [file], title: `${username} picture` });
+        flash("Shared");
+      } else if ((navigator as unknown as { share?: (d:unknown)=>Promise<void> }).share) {
+        // @ts-ignore
+        await navigator.share({ title: username, text: "Profile picture" });
+      } else {
+        handleSavePic();
+      }
+    } catch {
+      // user cancelled
+    }
+  };
+
+  const toggleBuddy = () => {
+    if (isBuddy) {
+      removeBuddy(username);
+      flash("Removed from buddies");
+    } else {
+      addBuddy(username);
+      flash("Added to buddies");
+    }
+  };
+
+  const handleBanToggle = () => {
+    const next = isBanned ? bannedList.filter((x) => x !== username) : [...bannedList, username];
+    setOption("server", "banlist", next);
+    flash(isBanned ? "Unbanned" : "Banned");
+    setBanOpen(false);
+  };
+  const handleIgnoreToggle = () => {
+    const next = isIgnored ? ignoredList.filter((x) => x !== username) : [...ignoredList, username];
+    setOption("server", "ignorelist", next);
+    flash(isIgnored ? "Unignored" : "Ignored");
+  };
+
+  const handleGift = async () => {
+    const days = parseInt(giftDays, 10);
+    if (!days || days < 1 || days > 3650) {
+      flash("Days must be 1-3650");
+      return;
+    }
+    // Use raw WS via session send
+    try {
+      // We will use fetch to bridge? Instead use window dispatch to trigger userinfo action
+      // Use direct WebSocket via session if available: we can use useSession send
+      // But we are inside ProfileInner, we have access to useSession via hook? Add it
+      flash("Privilege gift requires active session - use chat");
+      setGiftOpen(false);
+    } catch {}
+  };
 
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
@@ -46,13 +179,17 @@ function ProfileInner({ username }: { username: string }) {
         <header className="sticky top-0 z-40 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-10 py-8 flex flex-col gap-4 border-b border-transparent shadow-sm shadow-on-surface/5">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-4 min-w-0">
-              {profile.info?.pic ? (
+              {profile.info?.pic && showPic ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={profilePicSrc(profile.info.pic)}
                   alt={`${username} profile picture`}
                   className="h-16 w-16 rounded-full object-cover bg-surface-container-highest"
                 />
+              ) : profile.info?.pic && !showPic ? (
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-surface-container-high ghost-border">
+                  <span className="material-symbols-outlined text-outline">hide_image</span>
+                </div>
               ) : (
                 <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-container">
                   <span className="font-headline text-xl font-bold text-on-primary">
@@ -64,7 +201,7 @@ function ProfileInner({ username }: { username: string }) {
                 <h2 className="font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight truncate">
                   {username}
                 </h2>
-                <div className="mt-1 flex items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant dark:text-outline">
+                <div className="mt-1 flex flex-wrap items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant dark:text-outline">
                   <span>{statusLabel}</span>
                   {profile.status?.privileged ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-tertiary-container px-2 py-0.5 text-tertiary-on-container dark:bg-tertiary-fixed/30 dark:text-tertiary-fixed">
@@ -74,24 +211,58 @@ function ProfileInner({ username }: { username: string }) {
                       Privileged
                     </span>
                   ) : null}
+                  {isBuddy ? (
+                    <span className="rounded-full bg-primary-container/20 px-2 py-0.5 text-primary text-[10px]">Buddy</span>
+                  ) : null}
+                  {isBanned ? <span className="rounded-full bg-error-container px-2 py-0.5 text-on-error-container text-[10px]">Banned</span> : null}
+                  {isIgnored ? <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px]">Ignored</span> : null}
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => flash("Browse shares coming soon")}
+                onClick={() => router.push(`/browse/${encodeURIComponent(username)}`)}
                 className="rounded-xl bg-primary-container px-4 py-2.5 font-label text-xs font-semibold uppercase tracking-widest text-on-primary-container transition-colors hover:bg-primary hover:text-on-primary"
               >
                 Browse Files
               </button>
               <button
-                onClick={() => flash("Private chat coming soon")}
+                onClick={() => router.push(`/private-chat?user=${encodeURIComponent(username)}`)}
                 className="rounded-xl bg-surface-container-low px-4 py-2.5 font-label text-xs font-semibold uppercase tracking-widest text-on-surface transition-colors hover:bg-surface-container-high dark:bg-surface-container-high dark:text-on-surface"
               >
                 Send Message
               </button>
             </div>
           </div>
+          {profile.info?.pic ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setShowPic((v) => !v)}
+                className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-1.5 font-label text-xs hover:bg-surface-container-high"
+              >
+                <span className="material-symbols-outlined text-[16px]">{showPic ? "visibility_off" : "visibility"}</span>
+                {showPic ? "Hide" : "Show"} picture
+              </button>
+              <button
+                onClick={handleCopyPic}
+                className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-1.5 font-label text-xs hover:bg-surface-container-high"
+              >
+                <span className="material-symbols-outlined text-[16px]">content_copy</span> Copy
+              </button>
+              <button
+                onClick={handleSavePic}
+                className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-1.5 font-label text-xs hover:bg-surface-container-high"
+              >
+                <span className="material-symbols-outlined text-[16px]">download</span> Save
+              </button>
+              <button
+                onClick={handleSharePic}
+                className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-1.5 font-label text-xs hover:bg-surface-container-high"
+              >
+                <span className="material-symbols-outlined text-[16px]">share</span> Share
+              </button>
+            </div>
+          ) : null}
         </header>
 
         <div className="p-10 space-y-8 max-w-screen-2xl mx-auto w-full">
@@ -177,6 +348,86 @@ function ProfileInner({ username }: { username: string }) {
               </div>
             </section>
           ) : null}
+
+          <section className="bg-surface dark:bg-surface-container-low rounded-xl p-6 ghost-border">
+            <h3 className="font-label text-sm uppercase tracking-widest text-on-surface-variant dark:text-outline mb-4">
+              Actions
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <button
+                onClick={toggleBuddy}
+                className={`rounded-xl px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest ${isBuddy ? "bg-surface-container-high text-on-surface" : "bg-primary-container text-on-primary-container hover:bg-primary"}`}
+              >
+                {isBuddy ? "Remove Buddy" : "Add Buddy"}
+              </button>
+              {!isOwn ? (
+                <>
+                  <button
+                    onClick={handleBanToggle}
+                    className={`rounded-xl px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest ${isBanned ? "bg-error-container text-on-error-container" : "bg-surface-container-low hover:bg-surface-container-high"}`}
+                  >
+                    {isBanned ? "Unban" : "Ban"}
+                  </button>
+                  <button
+                    onClick={handleIgnoreToggle}
+                    className={`rounded-xl px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest ${isIgnored ? "bg-surface-container-high text-outline" : "bg-surface-container-low hover:bg-surface-container-high"}`}
+                  >
+                    {isIgnored ? "Unignore" : "Ignore"}
+                  </button>
+                  <button
+                    onClick={() => setGiftOpen(true)}
+                    className="rounded-xl bg-tertiary-container px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest text-on-tertiary-container hover:bg-tertiary"
+                  >
+                    Gift Privileges
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => router.push("/settings?tab=user-profile")}
+                  className="rounded-xl bg-surface-container-low px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest hover:bg-surface-container-high"
+                >
+                  Edit Profile
+                </button>
+              )}
+              <button
+                onClick={() => window.location.reload()}
+                className="rounded-xl bg-surface-container-low px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest hover:bg-surface-container-high"
+              >
+                Refresh
+              </button>
+            </div>
+            {giftOpen ? (
+              <div className="mt-6 rounded-xl bg-surface-container-high p-4">
+                <h4 className="font-label text-xs uppercase tracking-widest mb-2">Gift privileges</h4>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={3650}
+                    value={giftDays}
+                    onChange={(e) => setGiftDays(e.target.value)}
+                    className="w-24 rounded-lg bg-surface-container-lowest px-3 py-2 text-sm"
+                  />
+                  <span className="py-2 font-body text-sm">days</span>
+                  <button
+                    onClick={() => {
+                      const d = parseInt(giftDays, 10);
+                      if (!d || d < 1 || d > 3650) return flash("Days 1-3650");
+                      send({ type: "userinfo", action: "givePrivileges", username, days: d });
+                      flash(`Gifting ${d} days to ${username}`);
+                      setGiftOpen(false);
+                    }}
+                    className="rounded-lg bg-primary px-4 py-2 font-label text-xs text-on-primary"
+                  >
+                    Give
+                  </button>
+                  <button onClick={() => setGiftOpen(false)} className="rounded-lg bg-surface-container-lowest px-4 py-2 font-label text-xs">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </section>
         </div>
       </main>
 
@@ -203,7 +454,7 @@ function saveRecent(username: string) {
 export default function ProfilePage() {
   const params = useParams<{ username: string }>();
   const username = decodeURIComponent(params.username ?? "");
-  const { state } = useSession();
+  const { state, send } = useSession();
   const router = useRouter();
 
   useEffect(() => {
