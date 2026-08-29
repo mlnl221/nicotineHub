@@ -1,8 +1,8 @@
-# Next Phases — Roadmap after Search
+# Next Phases — Roadmap (archived — search + transfers + browse/chat done)
 
-> **Search is done.** `feat/search-page` (PR #4) shipped full global P2P search via the bridge (`FileSearch` 26 → `FileSearchResponse` 9 over `P`/`F` + `ConnectToPeer` 18 relay) with nicotine-parity filters and tabs. `bun test` 30 pass, `bun run build` green. This doc is the plan for what comes next.
+> **Search + transfers/browse/chat done.** `feat/search-page` (PR #4) global search, PR #19 bridge 1:1 parity (76/18/6/2 codes), PR #21 `F` streaming (`INCOMPLETE<md5>` + upload serving) + multi-mode search (`global`/`user`/`room`/`wishlist`/`buddies`) — `bun test` 75 pass, `bun run build` green. Mobile shell polished (TopBar/BottomNav). This doc is **archived**; phases 2-5 below are now done, left for historical reference.
 
-Source of truth for each phase: `docs/TRANSFERS.md` (phases 2–7), `docs/USER_PROFILES.md` (Phase 5), `docs/search/*` (done), `docs/workflow.md` (worktree → PR).
+Source of truth for any future work: `docs/TRANSFERS.md` (phases 2–7 now mostly done), `docs/USER_PROFILES.md` (Phase 5 done), `README.md` Roadmap.
 
 ---
 

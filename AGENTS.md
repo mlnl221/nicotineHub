@@ -6,11 +6,11 @@ This file is for AI coding agents working in this repo. See https://agents.md fo
 
 ## Project
 
-Mobile-first / browser-first Soulseek web client (MVP: login only). Monorepo with Bun workspaces.
+Mobile-first / browser-first Soulseek web client (beyond MVP — full 1:1 bridge). Monorepo with Bun workspaces.
 
-- `apps/bridge` — Bun: Soulseek login over raw TCP (`server.slsknet.org:2242`) + WebSocket bridge at `ws://host:8787/ws` + `/health`
-- `apps/web` — Next.js 15 (App Router) + Tailwind v4 PWA, connects directly to bridge
-- `compose.yaml` — `web:3000` + `bridge:8787` (no reverse proxy)
+- `apps/bridge` — Bun: Soulseek 1:1 bridge over raw TCP (`server.slsknet.org:2242`, P/F/D leaf) + WebSocket at `ws://host:8787/ws` + `/health` + `/files/:token` + volume `DATA_DIR`
+- `apps/web` — Next.js 15 (App Router) + Tailwind v4 PWA, mobile shell `TopBar`/`BottomNav`, pages for search (multi-mode), downloads/uploads (F streaming), browse, chat, buddies, interests, profiles
+- `compose.yaml` — `web:3000` + `bridge:8787/2234` (no reverse proxy)
 
 Reference protocol: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plus/nicotine-plus) and `apps/bridge/src/soulseek.ts` (framing: `[uint32 len][uint32 code][payload]`).
 
@@ -31,7 +31,7 @@ Bridge URL override: `NEXT_PUBLIC_BRIDGE_URL` (build-time) or `localStorage.nico
 ## Conventions
 
 - **Bun only** — use `bun`, not `npm`/`yarn`/`npx`. `bun.lock` is committed.
-- Keep login MVP minimal: no password persistence (`README` security note). Search results require a reachable inbound peer listener; `LISTEN_PORT` (default 2242/2234) must be port-forwarded on the homelab.
+- No password persistence (`README` security note). Search results require a reachable inbound peer listener; `LISTEN_PORT` (default 2234) must be port-forwarded on the homelab.
 - Client version is experimental `177/1` — do not reuse reserved major versions.
 - Mobile-first UI: touch targets, safe-area insets, PWA `manifest.webmanifest`.
 - Verify after changes: `bun test && bun run build`.
