@@ -156,7 +156,7 @@ const PluginReloadSchema = z.object({ type: z.literal("plugin:reload"), name: z.
 const PluginUninstallSchema = z.object({ type: z.literal("plugin:uninstall"), name: z.string().min(1).max(64) });
 const PluginSettingsSchema = z.object({ type: z.literal("plugin:settings"), name: z.string().min(1).max(64), settings: z.record(z.unknown()) });
 const PluginResetSettingsSchema = z.object({ type: z.literal("plugin:resetSettings"), name: z.string().min(1).max(64) });
-const PluginInstallSchema = z.object({ type: z.literal("plugin:install"), fileName: z.string().max(255).optional(), data: z.string().min(1) }); // base64 zip
+const PluginInstallSchema = z.object({ type: z.literal("plugin:install"), fileName: z.string().max(255).optional(), data: z.string().min(1).max(22_000_000) }); // base64 zip ~20MB zip cap
 const PluginInstallUrlSchema = z.object({ type: z.literal("plugin:installUrl"), url: z.string().url().max(2048) });
 
 const ConfigUpdateSchema = z.object({
@@ -249,27 +249,79 @@ function extractToken(req: Request): string | null {
   return null;
 }
 
-const CORS_HEADERS = {
-  "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET, POST, OPTIONS",
-  "access-control-allow-headers": "content-type, authorization",
+function getCorsHeaders(req?: Request): Record<string, string> {
+  const base: Record<string, string> = {
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "content-type, authorization",
+    "vary": "Origin",
+  };
+  const allowed = (process.env.ALLOWED_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (allowed.length > 0 && req) {
+    const origin = req.headers.get("origin");
+    if (origin && allowed.includes(origin)) {
+      base["access-control-allow-origin"] = origin;
+      base["access-control-allow-credentials"] = "true";
+    } else if (!origin) {
+      // non-browser (curl/healthcheck) — keep permissive for homelab
+      base["access-control-allow-origin"] = allowed[0] || "*";
+    }
+    // if origin present but not allowed → omit header (browser will block)
+  } else {
+    base["access-control-allow-origin"] = "*";
+  }
+  return base;
+}
+const CORS_HEADERS = getCorsHeaders();
+
+const SECURITY_HEADERS: Record<string, string> = {
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "strict-origin-when-cross-origin",
+  "permissions-policy": "camera=(), microphone=(), geolocation=()",
 };
+
+function sanitizeFileNameForHeader(name: string): string {
+  // Strict whitelist: strip CR/LF, quotes, slashes, control chars; fallback to "download"
+  let s = name.replace(/[\r\n"]/g, "").replace(/[/\\]/g, "_").trim();
+  // Remove control chars
+  s = s.replace(/[\x00-\x1f\x7f]/g, "");
+  // Allow only printable safe chars for filename, otherwise fallback to encodeURIComponent
+  if (!s || s.length > 255) s = "download";
+  const safe = s.replace(/[^a-zA-Z0-9._\- ()[\]{}!@#$%^&+=,;~`']/g, "_");
+  return safe || "download";
+}
 
 export const server = Bun.serve<{ session?: SoulseekSession; transfers?: TransferManager; logUnsub?: () => void; pluginManager?: PluginManager }>({
   port: PORT,
   async fetch(req, server) {
     const url = new URL(req.url);
+    // Homelab: warn if BRIDGE_TOKEN not set (LAN without auth)
+    if (import.meta.main && !BRIDGE_TOKEN) {
+      // logged once via diagLog below; keep fetch-side quiet
+    }
+    const cors = getCorsHeaders(req);
+    const secHeaders = { ...cors, ...SECURITY_HEADERS };
     if (req.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
+      return new Response(null, { status: 204, headers: cors });
     }
     if (url.pathname === "/health" && req.method === "GET") {
       // Detailed health JSON if ?json or Accept: application/json, else plain "ok" for compose healthcheck
       const wantJson = url.searchParams.has("json") || (req.headers.get("accept") || "").includes("application/json");
       if (wantJson) {
-        const peerCount = (() => {
-          // best-effort: count sessions — not tracked globally, so 0 here; diagnostics page uses WS-derived counts
-          return 0;
-        })();
+        // Keep detailed JSON behind token if BRIDGE_TOKEN set (info disclosure), but allow unauth plain check
+        if (BRIDGE_TOKEN) {
+          const tok = extractToken(req);
+          if (tok !== BRIDGE_TOKEN) {
+            // For homelab, don't hard-block health json — but gate dataDir/listenPort behind auth
+            return new Response(JSON.stringify({
+              ok: true,
+              ts: new Date().toISOString(),
+              uptime: process.uptime(),
+              port: PORT,
+              tokenAuth: true,
+            }), { status: 200, headers: { "content-type": "application/json", ...cors } });
+          }
+        }
         return new Response(JSON.stringify({
           ok: true,
           ts: new Date().toISOString(),
@@ -278,15 +330,15 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           listenPort: LISTEN_PORT,
           dataDir: DATA_DIR,
           tokenAuth: !!BRIDGE_TOKEN,
-        }), { status: 200, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+        }), { status: 200, headers: { "content-type": "application/json", ...cors } });
       }
-      return new Response("ok", { status: 200, headers: CORS_HEADERS });
+      return new Response("ok", { status: 200, headers: { "cache-control": "no-store", ...cors } });
     }
     if (url.pathname === "/logs" && req.method === "GET") {
       // Simple auth check via token param/header (mirror /ws)
       if (BRIDGE_TOKEN) {
         const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401 });
+        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
       }
       const tail = Math.min(Math.max(Number(url.searchParams.get("tail") || "500"), 1), 2000);
       const level = (url.searchParams.get("level") as LogLevel) || "debug";
@@ -294,12 +346,12 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       let entries = diagTail(2000, level as LogLevel);
       if (scope) entries = entries.filter((e) => e.scope === scope);
       entries = entries.slice(-tail);
-      return new Response(JSON.stringify({ entries, total: entries.length }), { status: 200, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+      return new Response(JSON.stringify({ entries, total: entries.length }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
     }
     if (url.pathname === "/diagnostics" && req.method === "GET") {
       if (BRIDGE_TOKEN) {
         const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401 });
+        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
       }
       const tail = Math.min(Math.max(Number(url.searchParams.get("tail") || "500"), 1), 2000);
       const level = (url.searchParams.get("level") as LogLevel) || "debug";
@@ -308,13 +360,13 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       return new Response(JSON.stringify({
         health: { ok: true, ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN },
         logs: entries,
-      }), { status: 200, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+      }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
     }
 
     if (url.pathname === "/plugins" && req.method === "GET") {
       if (BRIDGE_TOKEN) {
         const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401 });
+        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
       }
       const list = pluginManager.getInstalledPluginListWithStatus();
       // include meta for each + loaded settings/metasettings
@@ -323,46 +375,54 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         settings: pluginManager.getPluginSettings(p.name),
         metasettings: pluginManager.getPluginMetaSettings(p.name),
       }));
-      return new Response(JSON.stringify({ plugins: enriched, globalEnable: true }), { status: 200, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+      return new Response(JSON.stringify({ plugins: enriched, globalEnable: true }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
     }
     if (url.pathname === "/plugins/install" && req.method === "POST") {
       if (BRIDGE_TOKEN) {
         const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401 });
+        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
       }
       // expect multipart or raw zip; handle raw body as zip bytes (content-type octet-stream) or JSON {url}
       const ct = req.headers.get("content-type") || "";
+      // size guard: reject huge bodies before buffering (homelab: 20MB limit)
+      const clen = Number(req.headers.get("content-length") || "0");
+      if (clen > 20_000_000) return new Response(JSON.stringify({ error: "payload too large (max 20MB)" }), { status: 413, headers: { "content-type": "application/json", ...cors } });
       if (ct.includes("application/json")) {
         try {
           const body = (await req.json()) as { url?: string; data?: string; fileName?: string };
           if (body.url) {
             const name = await pluginManager.installFromUrl(body.url);
-            if (!name) return new Response(JSON.stringify({ error: "install failed" }), { status: 400, headers: { "content-type": "application/json", ...CORS_HEADERS } });
-            return new Response(JSON.stringify({ ok: true, name }), { status: 200, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+            if (!name) return new Response(JSON.stringify({ error: "install failed" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
+            return new Response(JSON.stringify({ ok: true, name }), { status: 200, headers: { "content-type": "application/json", ...cors } });
           }
           if (body.data) {
+            // 20MB base64 cap enforced via schema next, double-check here
+            if (body.data.length > 22_000_000) return new Response(JSON.stringify({ error: "base64 too large" }), { status: 413, headers: { "content-type": "application/json", ...cors } });
             const buf = Buffer.from(body.data, "base64");
-            const tmp = join(DATA_DIR, `.upload_${Date.now()}.zip`);
+            if (buf.length > 20_000_000) return new Response(JSON.stringify({ error: "zip too large (max 20MB)" }), { status: 413, headers: { "content-type": "application/json", ...cors } });
+            const safeFile = (body.fileName || "plugin.zip").replace(/[^a-zA-Z0-9._\-]/g, "_").slice(0, 64) || "plugin.zip";
+            const tmp = join(DATA_DIR, `.upload_${Date.now()}_${safeFile}`);
             try { mkdirSync(DATA_DIR, { recursive: true }); } catch {}
             writeFileSync(tmp, buf);
             const name = await (pluginManager as unknown as { installPluginFromZip: (p: string) => Promise<string | null> }).installPluginFromZip(tmp);
             try { rmSync(tmp, { force: true }); } catch {}
-            if (!name) return new Response(JSON.stringify({ error: "install failed" }), { status: 400, headers: { "content-type": "application/json", ...CORS_HEADERS } });
-            return new Response(JSON.stringify({ ok: true, name }), { status: 200, headers: { "content-type": "application/json", ...CORS_HEADERS } });
+            if (!name) return new Response(JSON.stringify({ error: "install failed" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
+            return new Response(JSON.stringify({ ok: true, name }), { status: 200, headers: { "content-type": "application/json", ...cors } });
           }
-        } catch (e) { return new Response(JSON.stringify({ error: (e as Error).message }), { status: 400, headers: { "content-type": "application/json", ...CORS_HEADERS } }); }
+        } catch (e) { return new Response(JSON.stringify({ error: (e as Error).message }), { status: 400, headers: { "content-type": "application/json", ...cors } }); }
       }
       // raw zip bytes
       try {
         const buf = Buffer.from(await req.arrayBuffer());
-        if (buf.length === 0) return new Response("Missing zip body", { status: 400 });
+        if (buf.length === 0) return new Response("Missing zip body", { status: 400, headers: cors });
+        if (buf.length > 20_000_000) return new Response(JSON.stringify({ error: "zip too large (max 20MB)" }), { status: 413, headers: { "content-type": "application/json", ...cors } });
         const tmp = join(DATA_DIR, `.upload_${Date.now()}.zip`);
         writeFileSync(tmp, buf);
         const name = await (pluginManager as unknown as { installPluginFromZip: (p: string) => Promise<string | null> }).installPluginFromZip(tmp);
         try { rmSync(tmp, { force: true }); } catch {}
-        if (!name) return new Response(JSON.stringify({ error: "install failed" }), { status: 400, headers: { "content-type": "application/json", ...CORS_HEADERS } });
-        return new Response(JSON.stringify({ ok: true, name }), { status: 200, headers: { "content-type": "application/json", ...CORS_HEADERS } });
-      } catch (e) { return new Response(JSON.stringify({ error: (e as Error).message }), { status: 500, headers: { "content-type": "application/json", ...CORS_HEADERS } }); }
+        if (!name) return new Response(JSON.stringify({ error: "install failed" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
+        return new Response(JSON.stringify({ ok: true, name }), { status: 200, headers: { "content-type": "application/json", ...cors } });
+      } catch (e) { return new Response(JSON.stringify({ error: (e as Error).message }), { status: 500, headers: { "content-type": "application/json", ...cors } }); }
     }
 
     if (url.pathname === "/ws") {
@@ -377,27 +437,29 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     }
 
     // GET /files/:token — serve finished downloads from DATA_DIR/downloads
+    // Homelab: if BRIDGE_TOKEN set, require valid token (LAN auth); otherwise open but still strict lookup
     if (url.pathname.startsWith("/files/") && req.method === "GET") {
       const tokenStr = url.pathname.slice("/files/".length).split("/")[0];
       const token = Number(tokenStr);
-      if (!Number.isFinite(token)) return new Response("Not found", { status: 404 });
-      // Try to locate file in DATA_DIR/downloads by token — we don't have ws context here,
-      // so attempt direct FS lookup: scan downloads dir for files and also check downloads.json
+      if (!Number.isFinite(token)) return new Response("Not found", { status: 404, headers: secHeaders });
+      // Auth gate — mirrors /ws when token enabled; never leak files without valid token
+      if (BRIDGE_TOKEN) {
+        const tok = extractToken(req);
+        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
+      }
       try {
-        const { existsSync, readFileSync, createReadStream } = require("node:fs") as typeof import("node:fs");
-        const { join } = require("node:path") as typeof import("node:path");
-        // Try to find transfer by token via downloads.json
+        const { existsSync, readFileSync } = require("node:fs") as typeof import("node:fs");
+        const { join, basename, resolve } = require("node:path") as typeof import("node:path");
+        // Strict lookup: only Finished entries match token; no fallback to arbitrary first file
         const dlPath = join(DATA_DIR, "downloads.json");
         let fileName: string | undefined;
-        let size: number | undefined;
         if (existsSync(dlPath)) {
           try {
             const arr = JSON.parse(readFileSync(dlPath, "utf8")) as Array<{ token?: number; fileName?: string; size?: number; status?: string }>;
             const entry = arr.find((e) => e.token === token && e.status === "Finished");
-            if (entry) { fileName = entry.fileName; size = entry.size; }
+            if (entry) fileName = entry.fileName;
           } catch {}
         }
-        // Fallback: try transfers.json
         if (!fileName) {
           const alt = join(DATA_DIR, "transfers.json");
           if (existsSync(alt)) {
@@ -408,28 +470,35 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             } catch {}
           }
         }
+        if (!fileName) return new Response("Not found", { status: 404, headers: secHeaders });
+        // Sanitize: basename + whitelist, prevent traversal/CRLF
+        const safeName = sanitizeFileNameForHeader(basename(fileName));
+        const downloadsDir = resolve(join(DATA_DIR, "downloads"));
+        const cand = resolve(join(downloadsDir, safeName));
+        // containment check
+        if (!cand.startsWith(downloadsDir + "/") && cand !== downloadsDir) return new Response("Not found", { status: 404, headers: secHeaders });
+        // Also try exact safeName first, then original sanitized if different (for legacy entries with underscores)
         let filePath: string | undefined;
-        if (fileName) {
-          const cand = join(DATA_DIR, "downloads", fileName);
-          if (existsSync(cand)) filePath = cand;
+        if (existsSync(cand)) filePath = cand;
+        else {
+          // Fallback: try original fileName sanitized differently (legacy) but still contained
+          const altSafe = sanitizeFileNameForHeader(fileName);
+          const altCand = resolve(join(downloadsDir, altSafe));
+          if (altCand.startsWith(downloadsDir + "/") && existsSync(altCand)) filePath = altCand;
         }
-        if (!filePath) {
-          // Last resort: first file in downloads
-          const { readdirSync } = require("node:fs") as typeof import("node:fs");
-          try {
-            const files = readdirSync(join(DATA_DIR, "downloads"));
-            if (files.length === 1) filePath = join(DATA_DIR, "downloads", files[0]);
-          } catch {}
-        }
-        if (!filePath || !existsSync(filePath)) return new Response("Not found", { status: 404 });
+        if (!filePath || !existsSync(filePath)) return new Response("Not found", { status: 404, headers: secHeaders });
         const file = Bun.file(filePath);
+        const safeDisposition = sanitizeFileNameForHeader(safeName);
+        const encoded = encodeURIComponent(safeDisposition).replace(/'/g, "%27");
         const headers: Record<string, string> = {
-          "Content-Disposition": `attachment; filename="${(fileName || "download").replace(/"/g, "")}"`,
+          "Content-Disposition": `attachment; filename="${safeDisposition}"; filename*=UTF-8''${encoded}`,
+          "X-Content-Type-Options": "nosniff",
+          "Cache-Control": "private, no-store",
+          "Content-Security-Policy": "default-src 'none'",
         };
-        // Let Bun handle range/streaming
-        return new Response(file as unknown as never, { headers });
+        return new Response(file as unknown as never, { headers: { ...headers, ...cors } });
       } catch {
-        return new Response("Not found", { status: 404 });
+        return new Response("Not found", { status: 404, headers: secHeaders });
       }
     }
 
@@ -473,8 +542,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       } catch {}
     },
     async message(ws, raw) {
+      // Homelab guard: reject huge WS frames before JSON.parse (1MB)
+      const rawStr = String(raw);
+      if (rawStr.length > 1_000_000) { try { ws.close(1009, "frame too large"); } catch {} return; }
       let parsed: unknown;
-      try { parsed = JSON.parse(String(raw)); } catch { ws.send(errorMessage("Invalid JSON payload.")); return; }
+      try { parsed = JSON.parse(rawStr); } catch { ws.send(errorMessage("Invalid JSON payload.")); return; }
       const data = parsed as { type?: string };
 
       if (data.type === "login") {
@@ -1090,7 +1162,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (!res.success) { ws.send(errorMessage(res.error.issues[0].message)); return; }
         try {
           const buf = Buffer.from(res.data.data, "base64");
-          const tmp = join(DATA_DIR, `.ws_upload_${Date.now()}_${res.data.fileName ?? "plugin.zip"}`);
+          if (buf.length > 20_000_000) { ws.send(errorMessage("zip too large (max 20MB)")); return; }
+          const safeName = (res.data.fileName || "plugin.zip").replace(/[^a-zA-Z0-9._\-]/g, "_").slice(0, 64) || "plugin.zip";
+          const tmp = join(DATA_DIR, `.ws_upload_${Date.now()}_${safeName}`);
           try { mkdirSync(DATA_DIR, { recursive: true }); } catch {}
           writeFileSync(tmp, buf);
           const name = await (pluginManager as unknown as { installPluginFromZip: (p: string) => Promise<string | null> }).installPluginFromZip(tmp);
@@ -1127,6 +1201,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
 });
 
 if (import.meta.main) {
-  diagLog("info", "bridge", `bridge listening on ws://localhost:${PORT}/ws ${BRIDGE_TOKEN ? "(token auth enabled)" : "(open)"} DATA_DIR=${DATA_DIR}`, { port: PORT, listenPort: LISTEN_PORT });
+  if (!BRIDGE_TOKEN) {
+    diagLog("warn", "bridge", `bridge running open (no BRIDGE_TOKEN) — LAN-only, set BRIDGE_TOKEN for auth (e.g. BRIDGE_TOKEN=$(openssl rand -hex 32))`, { port: PORT, listenPort: LISTEN_PORT });
+    console.warn(`[homelab] BRIDGE_TOKEN not set — bridge open on LAN. For auth: BRIDGE_TOKEN=$(openssl rand -hex 32) docker compose up`);
+  }
+  diagLog("info", "bridge", `bridge listening on ws://localhost:${PORT}/ws ${BRIDGE_TOKEN ? "(token auth enabled)" : "(open)"} DATA_DIR=${DATA_DIR} ${process.env.ALLOWED_ORIGINS ? `ALLOWED_ORIGINS=${process.env.ALLOWED_ORIGINS}` : ""}`, { port: PORT, listenPort: LISTEN_PORT });
   console.log(`Nicotine Hub bridge listening on ws://localhost:${PORT}/ws ${BRIDGE_TOKEN ? "(token auth enabled)" : "(open)"} DATA_DIR=${DATA_DIR}`);
 }

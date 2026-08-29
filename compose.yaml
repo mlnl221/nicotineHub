@@ -10,6 +10,11 @@ services:
       LISTEN_PORT: "62904"
       DATA_DIR: "/data"
       BRIDGE_TOKEN: "${BRIDGE_TOKEN:-}"
+      # Homelab hardening: optionally restrict browser origins (e.g. ALLOWED_ORIGINS=https://hub.example.com,http://nas:3000)
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
+    # Homelab: bridge stays host-exposed so browser can ws://nas:8787/ws directly.
+    # For reverse-proxy only (internal), use compose.override.yaml:
+    #   services: { bridge: { ports: !["127.0.0.1:8787:8787"] } } and set NEXT_PUBLIC_BRIDGE_URL via web env.
     ports:
       - "8787:8787"
       - "62904:62904"

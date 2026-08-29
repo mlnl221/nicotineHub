@@ -10,7 +10,14 @@ export function ToastHost() {
       const { title, body } = ce.detail;
       const el = document.createElement("div");
       el.className = "pointer-events-auto mb-2 max-w-sm rounded-2xl bg-surface-container-high px-4 py-3 shadow-lg dark:bg-surface-container-high";
-      el.innerHTML = `<div class="font-label text-sm font-semibold text-on-surface">${title}</div><div class="text-xs text-on-surface-variant line-clamp-2">${body}</div>`;
+      const titleEl = document.createElement("div");
+      titleEl.className = "font-label text-sm font-semibold text-on-surface";
+      titleEl.textContent = title;
+      const bodyEl = document.createElement("div");
+      bodyEl.className = "text-xs text-on-surface-variant line-clamp-2";
+      bodyEl.textContent = body;
+      el.appendChild(titleEl);
+      el.appendChild(bodyEl);
       containerRef.current?.appendChild(el);
       setTimeout(() => el.remove(), 4000);
     };

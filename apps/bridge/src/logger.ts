@@ -86,9 +86,12 @@ function persist(entry: LogEntry) {
 function redactMeta(meta?: Record<string, unknown>): Record<string, unknown> | undefined {
   if (!meta) return undefined;
   const out: Record<string, unknown> = {};
+  const SENSITIVE_KEYS = new Set(["password", "pass", "pwd", "token", "bridge_token", "bridgetoken", "authorization", "sec-websocket-protocol", "sec_websocket_protocol"]);
   for (const [k, v] of Object.entries(meta)) {
-    if (k === "password" || k === "pass" || k === "pwd") out[k] = "***";
+    const lk = k.toLowerCase();
+    if (SENSITIVE_KEYS.has(lk) || lk.includes("token")) out[k] = "***";
     else if (typeof v === "string" && v.length > 500) out[k] = v.slice(0, 500) + "…";
+    else if (typeof v === "string" && /(?:\btoken=|\bbridge_token=|bearer\s+)/i.test(v)) out[k] = v.replace(/(token\s*[:=]\s*)[^\s&"']+/gi, "$1***").replace(/(bearer\s+)[^\s"']+/gi, "$1***");
     else out[k] = v;
   }
   return out;
