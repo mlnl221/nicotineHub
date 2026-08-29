@@ -12,6 +12,9 @@ RUN bun install --frozen-lockfile
 # ---- builder ----
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
+COPY package.json bun.lock ./
+COPY apps/bridge/package.json apps/bridge/package.json
+COPY apps/web/package.json apps/web/package.json
 COPY apps/bridge apps/bridge
 WORKDIR /app/apps/bridge
 RUN bun run build

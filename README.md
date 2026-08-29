@@ -90,6 +90,34 @@ docker pull ghcr.io/mlnl221/nicotinehub-bridge:0.2.0
 ```
 
 > First publish requires making each GHCR package **Public** (GitHub → Packages → Settings → Change visibility) so `docker pull` works without `docker login ghcr.io`.
+
+### Branching & promotion
+
+Default branch is **`stage`**. All feature PRs target `stage`.
+
+```
+feature/*  →  stage  (PR, dry-run docker build)  →  main  (promotion, builds & pushes GHCR)
+```
+
+- **Feature → stage:** open PR against `stage`. CI runs `docker.yml` as dry-run (`push: false`) for both images (`linux/amd64,linux/arm64`, `cache: gha`) — validates Dockerfiles without pushing. Merge to `stage` does **not** publish images.
+- **Stage → main:** promotion only. Either:
+  - **Scheduled:** `.github/workflows/promote.yml` runs `cron: 0 2 * * 1` (Mondays 02:00 UTC) and via `workflow_dispatch` — if `stage` is ahead of `main` and no open `stage→main` PR exists, it auto-creates `chore: promote stage → main`.
+  - **Manual:** `gh pr create --base main --head stage --title "chore: promote stage → main"` or via GitHub UI (base `main`, compare `stage`).
+
+  Merging the promotion PR (push to `main`) triggers GHCR publish: `ghcr.io/mlnl221/nicotinehub-bridge|web:latest` + `sha-<short>` and on `v*.*.*` tags `0.2.0`/`0.2`/`0` + `latest` + `sha-`. Both services are versioned together; `compose.yaml` pins them via `${TAG:-latest}`.
+
+```bash
+# contributor flow
+git checkout -b feat/my-change
+git push -u origin feat/my-change
+gh pr create --base stage --title "feat: ..."   # targets stage
+
+# weekly promotion (auto or manual)
+gh workflow run promote.yml                      # or wait for Monday schedule
+# then merge the auto-created stage→main PR on GitHub
+```
+
+> Tags `v*.*.*` should be cut from `main` after promotion (e.g. `git tag v0.2.0 && git push origin v0.2.0`).
 ```
 
 Bridge URL: `NEXT_PUBLIC_BRIDGE_URL` (build) or `localStorage.nicotine.bridgeUrl` (runtime).
