@@ -47,6 +47,26 @@ export interface SearchRequest {
   query: string;
 }
 
+export interface SearchUserRequest {
+  type: "search:user";
+  searchId: string;
+  username: string;
+  query: string;
+}
+
+export interface SearchRoomRequest {
+  type: "search:room";
+  searchId: string;
+  room: string;
+  query: string;
+}
+
+export interface SearchWishlistRequest {
+  type: "search:wishlist";
+  searchId: string;
+  query: string;
+}
+
 export interface SearchStopRequest {
   type: "search:stop";
   searchId: string;
@@ -559,6 +579,9 @@ export type BridgeOutboundMessage =
 export type BridgeInboundMessage =
   | LoginRequest
   | SearchRequest
+  | SearchUserRequest
+  | SearchRoomRequest
+  | SearchWishlistRequest
   | SearchStopRequest
   | DownloadRequest
   | DownloadControlRequest

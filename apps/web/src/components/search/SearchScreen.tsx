@@ -82,6 +82,7 @@ export function SearchScreen() {
             {visibleRows.length} of {activeTab.total} results
             {activeTab.status === "searching" ? " · searching…" : ""}
             {activeTab.reason === "max_results" ? " · limit reached" : ""}
+            {activeTab.mode !== "global" ? ` · ${activeTab.mode}${activeTab.target ? `:${activeTab.target}` : ""}` : ""}
           </span>
         </div>
       ) : null}
@@ -148,7 +149,7 @@ export function SearchScreen() {
               icon="account_tree"
               label="Browse user's files"
               onClick={() => {
-                flash(`Browse ${sheetRow.user} (not implemented yet)`);
+                if (sheetRow) router.push(`/browse/${encodeURIComponent(sheetRow.user)}`);
                 setSheetRow(null);
               }}
             />

@@ -33,6 +33,7 @@ import {
   buildPeerInit,
   buildPierceFireWall,
   buildPlaceInQueueRequest,
+  buildPlaceInQueueResponse,
   buildQueueUpload,
   buildRemoveThingIHate,
   buildRemoveThingILike,
@@ -140,6 +141,7 @@ export interface SessionOptions {
   // F-stream wiring to TransferManager (Phase 4)
   onFileConnection?: (token: number, socket: Socket) => void;
   onFileChunk?: (token: number, chunk: Buffer) => void;
+  getQueuePlace?: (file: string) => number;
 }
 export interface UserInfoEvent {
   type: "user-status" | "user-stats" | "user-interests" | "recommendations" | "global-recommendations"
@@ -1124,7 +1126,15 @@ export class SoulseekSession {
       } else if (msg.code === PEER_MESSAGE_CODES.queueUpload) {
         try { const q = parseQueueUpload(msg.payload); const file = typeof q === "string" ? q : (q as { file: string }).file; this.emitTransfer({ type: "queue-upload", username: state.username, file }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.placeInQueueRequest) {
-        try { const file = msg.payload.length >= 4 ? (() => { const l = msg.payload.readUInt32LE(0); return msg.payload.subarray(4, 4 + l).toString("utf8"); })() : ""; try { (peer as Socket).write(buildPlaceInQueueRequest(file)); } catch {} } catch {}
+        try {
+          const file = msg.payload.length >= 4 ? (() => { const l = msg.payload.readUInt32LE(0); return msg.payload.subarray(4, 4 + l).toString("utf8"); })() : "";
+          let place = 1;
+          try {
+            const getter = (this.opts as unknown as { getQueuePlace?: (f: string) => number }).getQueuePlace;
+            if (getter) place = getter(file) ?? 1;
+          } catch {}
+          try { (peer as Socket).write(buildPlaceInQueueResponse(file, place)); } catch { try { (peer as Socket).write(buildPlaceInQueueRequest(file)); } catch {} }
+        } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.placeInQueueResponse) {
         try { const p = parsePlaceInQueueResponse(msg.payload); this.emitTransfer({ type: "place-in-queue", username: state.username, file: p.file, place: p.place }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.uploadFailed || msg.code === PEER_MESSAGE_CODES.uploadDenied) {

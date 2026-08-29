@@ -342,6 +342,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           onFileChunk: (token, chunk) => {
             try { (ws.data.transfers as unknown as { handleFileChunk: (t:number,c:Buffer)=>void })?.handleFileChunk(token, chunk); } catch {}
           },
+          getQueuePlace: (file: string) => {
+            try { return (ws.data.transfers as unknown as { getQueuePlace: (f:string)=>number })?.getQueuePlace(file) ?? 1; } catch { return 1; }
+          },
           onUserEvent: (event) => {
             logger.debug("server", "user event", { type: event.type, username: event.username });
             try { ws.send(JSON.stringify({ type: "userinfo:event", event })); } catch {}

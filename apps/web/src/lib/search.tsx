@@ -17,12 +17,13 @@ import {
   type SearchRow,
 } from "@/lib/protocol";
 
-export type SearchMode = "global";
+export type SearchMode = "global" | "user" | "room" | "wishlist" | "buddies";
 
 export interface SearchTab {
   id: string;
   query: string;
   mode: SearchMode;
+  target?: string; // username for user/buddies display, room for room
   status: "searching" | "ended";
   reason?: string;
   rows: SearchRow[];
@@ -34,7 +35,7 @@ interface SearchApi {
   tabs: SearchTab[];
   activeId: string | null;
   activeTab: SearchTab | null;
-  startSearch: (query: string, mode?: SearchMode) => void;
+  startSearch: (query: string, opts?: { mode?: SearchMode; target?: string }) => void;
   stopSearch: (id: string) => void;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
@@ -72,14 +73,46 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   }, [subscribe]);
 
   const startSearch = useCallback(
-    (query: string, mode: SearchMode = "global") => {
+    (query: string, opts?: { mode?: SearchMode; target?: string }) => {
+      const mode = opts?.mode ?? "global";
+      const target = opts?.target?.trim();
       const id = `s${++counter.current}`;
       setTabs((prev) => [
         ...prev,
-        { id, query, mode, status: "searching", rows: [], total: 0, filters: emptyFilters() },
+        { id, query, mode, target, status: "searching", rows: [], total: 0, filters: emptyFilters() },
       ]);
       setActiveId(id);
-      send({ type: "search", searchId: id, query });
+      if (mode === "user" && target) {
+        send({ type: "search:user", searchId: id, username: target, query } as unknown as never);
+      } else if (mode === "room" && target) {
+        send({ type: "search:room", searchId: id, room: target, query } as unknown as never);
+      } else if (mode === "wishlist") {
+        send({ type: "search:wishlist", searchId: id, query } as unknown as never);
+      } else if (mode === "buddies") {
+        let buddies: string[] = [];
+        if (target) {
+          buddies = target.split(",").map((s) => s.trim()).filter(Boolean);
+        } else {
+          // load from localStorage nicotine.buddies (up to 100)
+          try {
+            const raw = localStorage.getItem("nicotine.buddies");
+            if (raw) {
+              const arr = JSON.parse(raw) as Array<{ username?: string } | string>;
+              buddies = arr.map((b) => typeof b === "string" ? b : b.username ?? "").filter(Boolean).slice(0, 20);
+            }
+          } catch {}
+        }
+        if (buddies.length) {
+          for (const buddy of buddies) {
+            send({ type: "search:user", searchId: id, username: buddy, query } as unknown as never);
+          }
+        } else {
+          // no buddies: fallback to global with flash via tab label
+          send({ type: "search", searchId: id, query });
+        }
+      } else {
+        send({ type: "search", searchId: id, query });
+      }
     },
     [send],
   );
