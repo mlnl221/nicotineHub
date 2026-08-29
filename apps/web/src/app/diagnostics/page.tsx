@@ -26,7 +26,7 @@ const LEVEL_COLOR: Record<DiagLevel, string> = {
 function formatTime(iso: string, fmt?: string): string {
   try {
     const d = new Date(iso);
-    if (fmt && fmt !== "%x %X") return formatStrftime(d, fmt);
+    if (fmt && fmt !== "%x %X") return formatStrftime(d.getTime(), fmt);
     return d.toISOString().slice(11, 19) + "." + String(d.getMilliseconds()).padStart(3, "0");
   } catch { return iso; }
 }
