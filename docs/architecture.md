@@ -13,7 +13,7 @@ The browser cannot open raw TCP; the bridge is the only SLSK speaker. JSON over 
                                         --D--> distrib (leaf only)
 ```
 
-Reference: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plus/nicotine-plus) and `apps/bridge/src/soulseek.ts` (76 server / 18 peer / 6 distrib / 2 file codes, 1:1 parity).
+Reference: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plus/nicotine-plus) (GPL-3.0-or-later) and `apps/bridge/src/soulseek.ts` (76 server / 18 peer / 6 distrib / 2 file codes, 1:1 parity). See `ATTRIBUTION.md` and `COPYING` — this bridge is a port of `pynicotine/slskmessages.py`/`slskproto.py` under GPL-3.0-or-later.
 
 ## Login
 

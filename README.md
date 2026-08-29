@@ -65,6 +65,25 @@ See `docs/architecture.md` for `SHARED_DIRS`, `UPLOAD_LIMIT`, `DISTRIB` etc.
 
 ---
 
+## Legal and Acknowledgements
+
+**License:** [`GPL-3.0-or-later`](./COPYING) (`LICENSES/GPL-3.0-or-later.txt`).
+© 2001–2026 Nicotine+, Nicotine and PySoulSeek Contributors; © 2025–2026 nicotine-mobile Contributors.
+
+This project is a **1:1 TypeScript port** of [Nicotine+](https://github.com/nicotine-plus/nicotine-plus)
+— especially `pynicotine/slskmessages.py` + `slskproto.py`, `transfers.py`, `shares.py`,
+`pluginsystem.py` and `doc/SLSKPROTOCOL.md` — used under `GPL-3.0-or-later` with huge thanks
+to the Nicotine+ team (`AUTHORS.md`). See [`ATTRIBUTION.md`](./ATTRIBUTION.md) for the full
+file-by-file mapping and upstream commit `8d81e66`.
+
+**Soulseek:** The Soulseek network and `server.slsknet.org` are operated by Soulseek
+volunteers and are **not affiliated** with this project or Nicotine+. Trademark “Soulseek”
+belongs to its owners (nominative fair use). By connecting you agree to the Soulseek
+[rules](https://www.slsknet.org/news/node/681) and [Terms of Service](https://www.slsknet.org/news/node/682).
+Soulseek is unencrypted; see Security above.
+
+---
+
 ## Docs
 
 - `docs/architecture.md` — bridge, search & protocol details

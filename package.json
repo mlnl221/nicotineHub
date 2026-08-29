@@ -1,7 +1,8 @@
 {
   "name": "nicotine-hub",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "license": "GPL-3.0-or-later",
   "description": "Browser-first Soulseek client — Nicotine Hub.",
   "workspaces": [
     "apps/*"

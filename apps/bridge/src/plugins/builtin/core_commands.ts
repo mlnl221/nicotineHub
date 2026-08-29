@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2001-2026 Nicotine+ Contributors
+// SPDX-FileCopyrightText: 2025-2026 nicotine-mobile Contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions based on nicotine-plus pynicotine/plugins/core_commands/__init__.py
+
 /**
  * Minimal core_commands plugin — TS port of pynicotine/plugins/core_commands/__init__.py
  * Only implements /help and /plugin for now. More commands can be added as plugins.

@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2001-2026 Nicotine+ Contributors
+// SPDX-FileCopyrightText: 2025-2026 nicotine-mobile Contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions based on nicotine-plus pynicotine/slskproto.py login flow
+
 /**
  * Performs the Soulseek login handshake over a raw TCP socket.
  * Uses Bun's Bun.connect().
