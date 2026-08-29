@@ -11,8 +11,20 @@ import { useEffect } from "react";
 export default function StatisticsPage() {
   const { state } = useSession();
   const router = useRouter();
-  useEffect(() => { if (state.status !== "connected") router.replace("/"); }, [state.status, router]);
-  if (state.status !== "connected") return null;
+  useEffect(() => {
+    if (state.status === "idle" || state.status === "connecting") return;
+    if (state.status !== "connected") router.replace("/");
+  }, [state.status, router]);
+  if (state.status !== "connected") {
+    if (state.status === "idle" || state.status === "connecting") {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-surface-dim dark:bg-inverse-surface">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      );
+    }
+    return null;
+  }
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
