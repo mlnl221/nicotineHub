@@ -54,7 +54,42 @@ bun run --cwd apps/web dev      # http://localhost:3000
 
 bun test        # unit tests
 bun run build   # prod builds
-docker compose up --build  # http://localhost:3000
+docker compose up --build  # http://localhost:3000 (build from source)
+```
+
+### Docker (GHCR — no build required)
+
+Images are published to GHCR on every `main` push and on version tags (`v*.*.*`). Both services are versioned together and shipped via one `compose.yaml`.
+
+```bash
+# latest (default)
+docker compose pull
+docker compose up -d
+# http://localhost:3000 + bridge ws://localhost:8787/ws
+
+# pinned release — both services locked to the same version
+TAG=v0.2.0 docker compose pull
+TAG=v0.2.0 docker compose up -d
+
+# pinned commit (per-build reproducibility)
+TAG=sha-abc1234 docker compose pull
+TAG=sha-abc1234 docker compose up -d
+```
+
+Images:
+
+- `ghcr.io/mlnl221/nicotinehub-bridge` — Bun bridge (`:latest`, `:sha-<short>`, `:<semver>` e.g. `:0.2.0`, `:0.2`, `:0`)
+- `ghcr.io/mlnl221/nicotinehub-web` — Next.js PWA (same tags)
+
+Manual pulls:
+
+```bash
+docker pull ghcr.io/mlnl221/nicotinehub-bridge:latest
+docker pull ghcr.io/mlnl221/nicotinehub-web:latest
+docker pull ghcr.io/mlnl221/nicotinehub-bridge:0.2.0
+```
+
+> First publish requires making each GHCR package **Public** (GitHub → Packages → Settings → Change visibility) so `docker pull` works without `docker login ghcr.io`.
 ```
 
 Bridge URL: `NEXT_PUBLIC_BRIDGE_URL` (build) or `localStorage.nicotine.bridgeUrl` (runtime).
