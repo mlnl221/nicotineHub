@@ -97,6 +97,22 @@ function compare(value: number, op: string, target: number): boolean {
   }
 }
 
+function matchCountry(row: SearchRow, expr: string): boolean {
+  if (!expr.trim()) return true;
+  const tokens = expr.split(/[,;\s|]+/).filter(Boolean);
+  const cc = (row.country || "").toUpperCase();
+  const includes: string[] = [];
+  const excludes: string[] = [];
+  for (const t of tokens) {
+    const raw = t.trim().toUpperCase();
+    if (raw.startsWith("!") || raw.startsWith("-")) excludes.push(raw.slice(1));
+    else includes.push(raw);
+  }
+  if (includes.length && !includes.includes(cc)) return false;
+  if (excludes.includes(cc)) return false;
+  return true;
+}
+
 function matchDigit(expr: string, value: number, kind: "size" | "bitrate" | "length"): boolean {
   const orGroups = expr.split("|").map((g) => g.trim()).filter(Boolean);
   if (!orGroups.length) return true;
@@ -126,7 +142,7 @@ export function applyFilters(rows: SearchRow[], f: FilterState): SearchRow[] {
     if (f.size && !matchDigit(f.size, row.size, "size")) return false;
     if (f.bitrate && !matchDigit(f.bitrate, row.quality, "bitrate")) return false;
     if (f.length && !matchDigit(f.length, row.length, "length")) return false;
-    if (f.country.trim()) return true; // country not available in result rows yet
+    if (f.country.trim() && !matchCountry(row, f.country)) return false;
     if (f.freeSlot && !row.slotFree) return false;
     if (f.publicOnly && row.private) return false;
     return true;

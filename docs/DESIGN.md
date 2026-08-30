@@ -28,3 +28,13 @@ A scholarly, premium reading experience. Dense information made effortless throu
 ## Rules
 - Use whitespace as structure. Serif for narrative text. One primary action per view.
 - Never use sharp corners — minimum `sm` roundness.
+
+## Omitted Nicotine+ Controls — Intentional
+
+Per Phase A/B decision (2026-08-30), the following nicotine+ `userinterface.ui` controls are **omitted** to preserve `DESIGN.md` editorial consistency:
+
+- **Color pickers** (`chatme/chatcommand/chathilite/urlcolor/useronline/useraway/useroffline/chatremote/chatlocal/textbg/search/inputcolor/tab_default/tab_hilite/tab_changed` — 15 hex keys): Replaced by fixed `primary #094cb2 / tertiary #6d5e00 / surface tiers` palette. User theming stays `dark_mode` boolean only.
+- **Font pickers** (`globalfont/textviewfont/chatfont/searchfont/listfont/browserfont/transfersfont`): Replaced by `Noto Serif / Inter / Public Sans` stack via `apps/web/src/app/layout.tsx:56` preconnect. No runtime font selection.
+- **Tab position selectors** (`tabmain/tabrooms/tabprivate/tabinfo/tabbrowse/tabsearch` Top/Bottom/Left/Right): Mobile PWA uses fixed `BottomNav` + desktop `Sidebar` — no user reposition.
+- **Rationale:** Keeps `Primary only for links/actions`, `surface tiers for elevation`, `ghost-border` boundaries and `backdrop-blur` glass tokens consistent; prevents user CSS fragmentation.
+- **Diagnostics:** Stays routed at `/diagnostics` (500-line tail + 2000 stored + download JSONL) rather than docked MainWindow pane — intentional for mobile viewport; see `apps/web/src/app/diagnostics/page.tsx`.

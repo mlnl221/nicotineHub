@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useTransfers } from "@/lib/transfers";
+import { useConfig } from "@/lib/config/provider";
 
 type NavItem = { icon: string; label: string; href: string };
 
@@ -41,11 +42,14 @@ export function BottomNav() {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
   const { downloads, uploads } = useTransfers();
+  const { settings } = useConfig();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const transferCount = mounted ? downloads.length + uploads.length : 0;
-
-  const moreActive = mounted && MORE.some((i) => isActive(pathname, i.href));
+  const visibleMap = settings.ui.modes_visible || {};
+  const hrefToKey: Record<string, string> = { "/search": "search", "/downloads": "downloads", "/private-chat": "privateChat", "/browse": "browse", "/buddies": "buddies", "/uploads": "uploads", "/chat": "chat", "/profile": "profile", "/interests": "interests" };
+  const moreFiltered = mounted ? MORE.filter((i) => visibleMap[hrefToKey[i.href]] !== false) : MORE;
+  const moreActive = mounted && moreFiltered.some((i) => isActive(pathname, i.href));
 
   return (
     <>
@@ -64,7 +68,7 @@ export function BottomNav() {
         <div className="p-2">
           <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-outline-variant/40" />
           <div className="grid grid-cols-3 gap-2 p-2">
-            {MORE.map((item) => {
+            {moreFiltered.map((item) => {
               const active = mounted ? isActive(pathname, item.href) : false;
               return (
                 <Link
@@ -84,7 +88,7 @@ export function BottomNav() {
         </div>
       </div>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-50 flex flex-col rounded-t-xl bg-surface-container-lowest/80 backdrop-blur-xl shadow-[0_-4px_20px_rgba(0,0,0,0.06)] border-t border-outline-variant/10 dark:bg-surface-container-low/90 md:hidden overflow-hidden max-w-[100vw]">
+      <nav className="fixed bottom-0 left-0 right-0 z-50 flex flex-col rounded-t-xl bg-surface-container-lowest/80 backdrop-blur-xl shadow-[0_-4px_20px_rgba(0,0,0,0.06)] border-t border-outline-variant/10 dark:bg-surface-container-low/90 md:hidden overflow-hidden max-w-full">
         <div className="flex items-center gap-0 px-1 sm:px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] w-full max-w-full">
           {PRIMARY.map((item) => {
             const active = mounted ? isActive(pathname, item.href) : false;

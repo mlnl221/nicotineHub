@@ -11,7 +11,7 @@ import { StatisticsProvider } from "@/lib/statistics";
 import { ToastHost } from "@/components/ToastHost";
 import { NowPlayingSync } from "@/components/NowPlayingSync";
 import { WebVitals } from "@/components/WebVitals";
-import { Footer } from "@/components/Footer";
+import { GlobalContextMenu } from "@/components/ui/GlobalContextMenu";
 
 export const metadata: Metadata = {
   title: "Nicotine Hub",
@@ -22,8 +22,11 @@ export const metadata: Metadata = {
     icon: [
       { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
       { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+      { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon-16.png", sizes: "16x16", type: "image/png" },
+      { url: "/favicon.ico", sizes: "any", type: "image/x-icon" },
     ],
-    apple: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
   },
   appleWebApp: {
     capable: true,
@@ -60,11 +63,11 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "try{var t=localStorage.getItem('nicotine.theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}",
+              "try{var t=localStorage.getItem('nicotineHub.theme')||localStorage.getItem('nicotine.theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}",
           }}
         />
       </head>
-      <body className="min-h-dvh max-w-[100vw] overflow-x-hidden bg-surface-container-low font-body text-on-surface antialiased selection:bg-primary/30 dark:bg-inverse-surface dark:text-inverse-on-surface">
+      <body className="min-h-dvh max-w-full overflow-x-clip bg-surface-container-low font-body text-on-surface antialiased selection:bg-primary/30 dark:bg-inverse-surface dark:text-inverse-on-surface">
         <DemoBanner />
         <ThemeProvider>
           <ConfigProvider>
@@ -75,8 +78,8 @@ export default function RootLayout({
                     <ConfigBridgeSync />
                     <NowPlayingSync />
                     {children}
-                    <Footer />
                     <ToastHost />
+                    <GlobalContextMenu />
                   </TransfersProvider>
                 </StatisticsProvider>
               </WishlistProvider>

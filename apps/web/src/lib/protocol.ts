@@ -110,6 +110,7 @@ export interface SearchRow {
   /** duration seconds (0 if unknown) */
   length: number;
   private: boolean;
+  country?: string;
   attributes: {
     bitrate?: number;
     length?: number;
@@ -294,6 +295,18 @@ export interface RoomEvent {
     | "room-tickers"
     | "ticker-added"
     | "ticker-removed"
+    | "room-member-added"
+    | "room-member-removed"
+    | "cancel-membership"
+    | "cancel-ownership"
+    | "membership-granted"
+    | "membership-revoked"
+    | "operator-added"
+    | "operator-removed"
+    | "operatorship-granted"
+    | "operatorship-revoked"
+    | "room-operators"
+    | "enable-room-invitations"
     | "privileged-users"
     | "cant-create-room"
     | "admin-message";
@@ -314,9 +327,10 @@ export interface RoomEventMessage {
 
 export interface ChatRoomRequest {
   type: "chat:room";
-  action: "join" | "leave" | "say" | "ticker" | "setTicker";
+  action: "join" | "leave" | "say" | "ticker" | "setTicker" | "addOperator" | "removeOperator" | "cancelMembership" | "cancelOwnership";
   room: string;
   message?: string;
+  username?: string;
 }
 
 export interface ChatPrivateRequest {

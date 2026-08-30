@@ -24,25 +24,28 @@ export function useNotifications() {
 
   const maybeNotify = useCallback((title: string, body: string, enabled: boolean) => {
     if (!enabled) return;
-    // Window title
     if (settings.notifications.notification_window_title) {
       try { document.title = `${title} — Nicotine Hub`; setTimeout(() => { document.title = "Nicotine Hub"; }, 4000); } catch {}
     }
-    // Tab color (via favicon flash) simplified as console
     if (settings.notifications.notification_tab_colors) {
       try { document.documentElement.style.setProperty("--notif-flash", "#497EC2"); setTimeout(() => document.documentElement.style.removeProperty("--notif-flash"), 1500); } catch {}
     }
-    // Browser Notification API
     try {
-      if (Notification && Notification.permission === "granted") {
-        new Notification(title, { body, icon: "/icon-192.png" });
-      } else if (Notification && Notification.permission !== "denied") {
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        // Prefer ServiceWorker showNotification for better persistence
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.ready.then((reg) => {
+            try { reg.showNotification(title, { body, icon: "/icon-192.png" }); } catch { new Notification(title, { body, icon: "/icon-192.png" }); }
+          }).catch(() => { try { new Notification(title, { body, icon: "/icon-192.png" }); } catch {} });
+        } else {
+          new Notification(title, { body, icon: "/icon-192.png" });
+        }
+      } else if (typeof Notification !== "undefined" && Notification.permission !== "denied") {
         Notification.requestPermission().catch(() => {});
       }
     } catch {}
-    // Fallback toast via custom event
     try {
-      window.dispatchEvent(new CustomEvent("nicotine:toast", { detail: { title, body } }));
+      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title, body } }));
     } catch {}
     maybePlaySound();
   }, [settings.notifications.notification_window_title, settings.notifications.notification_tab_colors, maybePlaySound]);

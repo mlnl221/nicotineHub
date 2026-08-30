@@ -3,6 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   ...(process.env.VERCEL ? {} : { output: "standalone" as const }),
+  // Shave Docker build time: lint/typecheck done via separate `bun run typecheck` / CI, not in `next build`
+  eslint: { ignoreDuringBuilds: true },
+  typescript: { ignoreBuildErrors: true },
   compress: true,
   images: {
     formats: ["image/avif", "image/webp"],
@@ -28,6 +31,17 @@ const nextConfig: NextConfig = {
       {
         source: "/:all*(svg|jpg|jpeg|png|webp|avif|woff|woff2)",
         headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      },
+      // Homelab: minimal security headers without breaking LAN use
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+          // no HSTS here (homelab often http); set via reverse proxy if needed
+        ],
       },
     ];
   },

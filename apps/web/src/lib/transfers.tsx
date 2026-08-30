@@ -31,12 +31,12 @@ interface TransfersApi {
 
 const TransfersContext = createContext<TransfersApi | null>(null);
 
-const STORAGE_KEY = "nicotine.transfers.mock";
+const STORAGE_KEY = "nicotineHub.transfers.mock";
 
 function loadInitial(): Transfer[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = (window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(STORAGE_KEY.replace("nicotineHub.", "nicotine.")));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) return parsed as Transfer[];

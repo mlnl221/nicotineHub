@@ -5,30 +5,34 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useSession } from "@/lib/session";
 import { useTransfers } from "@/lib/transfers";
+import { useConfig } from "@/lib/config/provider";
 
 const NAV = [
-  { icon: "search_check", label: "Search Files", href: "/search" },
-  { icon: "downloading", label: "Downloads", href: "/downloads" },
-  { icon: "upload", label: "Uploads", href: "/uploads" },
-  { icon: "forum", label: "Private Chat", href: "/private-chat" },
-  { icon: "folder_managed", label: "Browse Shares", href: "/browse" },
-  { icon: "account_circle", label: "User Profiles", href: "/profile" },
-  { icon: "group", label: "Buddies", href: "/buddies" },
-  { icon: "groups", label: "Chat Rooms", href: "/chat" },
-  { icon: "interests", label: "Interests", href: "/interests" },
+  { icon: "search_check", label: "Search Files", href: "/search", key: "search" },
+  { icon: "downloading", label: "Downloads", href: "/downloads", key: "downloads" },
+  { icon: "upload", label: "Uploads", href: "/uploads", key: "uploads" },
+  { icon: "forum", label: "Private Chat", href: "/private-chat", key: "privateChat" },
+  { icon: "folder_managed", label: "Browse Shares", href: "/browse", key: "browse" },
+  { icon: "account_circle", label: "User Profiles", href: "/profile", key: "profile" },
+  { icon: "group", label: "Buddies", href: "/buddies", key: "buddies" },
+  { icon: "groups", label: "Chat Rooms", href: "/chat", key: "chat" },
+  { icon: "interests", label: "Interests", href: "/interests", key: "interests" },
 ];
 
 export function Sidebar() {
   const { logout, state } = useSession();
   const pathname = usePathname();
-  // Hydration-safe: TransfersProvider now starts [] then hydrates after mount; gate counts + isActive until mounted
-  // to avoid Sidebar.tsx:79 badge " (2)" mismatch (server 0 vs client localStorage 2). Also fixes conditional hook try/catch.
+  const { settings } = useConfig();
   const { downloads, uploads } = useTransfers();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const downloadsCount = mounted ? downloads.length : 0;
   const uploadsCount = mounted ? uploads.length : 0;
   const displayUser = mounted ? (state.user ?? "System Administrator") : "System Administrator";
+  const visibleMap = settings.ui.modes_visible || {};
+  const order = settings.ui.modes_order || NAV.map((n) => n.key);
+  const orderedNav = [...NAV].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+  const filteredNav = mounted ? orderedNav.filter((n) => visibleMap[n.key] !== false) : orderedNav;
 
   return (
     <nav className="fixed left-0 top-0 z-50 hidden h-full w-72 flex-col space-y-8 bg-surface-container-low/90 p-6 backdrop-blur-md dark:bg-surface-container-low/90 md:flex">
@@ -42,9 +46,13 @@ export function Sidebar() {
       </div>
 
       <div className="flex items-center space-x-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-container">
-          <span className="font-headline text-sm font-bold text-on-primary">N</span>
-        </div>
+        <img
+          src="/icon-512.png"
+          alt=""
+          width={40}
+          height={40}
+          className="h-10 w-10 rounded-xl object-contain bg-white p-1 shadow-sm ring-1 ring-black/5 dark:bg-white"
+        />
         <div className="font-label text-sm font-semibold text-primary dark:text-inverse-primary" suppressHydrationWarning>
           {displayUser}
         </div>
@@ -56,7 +64,7 @@ export function Sidebar() {
       </button>
 
       <ul className="mt-8 flex-1 space-y-2">
-        {NAV.map((item) => {
+        {filteredNav.map((item) => {
           const isActive = mounted ? (pathname === item.href || (item.href !== "#" && pathname.startsWith(item.href))) : false;
           const badge =
             item.label === "Downloads" && downloadsCount > 0 ? ` (${downloadsCount})`
@@ -116,27 +124,9 @@ export function Sidebar() {
           <span className="font-label text-xs uppercase tracking-widest">Logoff</span>
         </button>
         <div className="pt-4 text-[10px] leading-relaxed text-on-surface-variant/60 dark:text-outline/60">
-          <p className="font-label uppercase tracking-widest">GPL-3.0-or-later</p>
-          <p>
-            Based on{" "}
-            <a href="https://github.com/nicotine-plus/nicotine-plus" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">
-              Nicotine+
-            </a>
-            . Not affiliated with{" "}
-            <a href="https://www.slsknet.org/" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">
-              Soulseek
-            </a>
-            .
-          </p>
-          <p className="mt-1">
-            <a href="https://github.com/mlnl221/nicotineHub" target="_blank" rel="noopener noreferrer" className="underline decoration-dotted hover:text-primary">
-              Source
-            </a>{" "}
-            •{" "}
-            <a href="https://github.com/mlnl221/nicotineHub/blob/main/ATTRIBUTION.md" target="_blank" rel="noopener noreferrer" className="underline decoration-dotted hover:text-primary">
-              Attribution
-            </a>
-          </p>
+          <a href="/settings?tab=about#about" className="font-label uppercase tracking-widest underline decoration-dotted hover:text-primary">
+            About
+          </a>
         </div>
       </div>
     </nav>

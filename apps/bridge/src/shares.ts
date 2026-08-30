@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2001-2026 Nicotine+ Contributors
-// SPDX-FileCopyrightText: 2025-2026 nicotine-mobile Contributors
+// SPDX-FileCopyrightText: 2025-2026 Nicotine Hub Contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Portions based on nicotine-plus pynicotine/shares.py
 
@@ -24,6 +24,14 @@ export interface ShareFile {
 export interface ShareFolder {
   name: string;
   files: ShareFile[];
+  level?: PermissionLevel;
+}
+
+export enum PermissionLevel {
+  PUBLIC = "public",
+  BUDDY = "buddy",
+  TRUSTED = "trusted",
+  BANNED = "banned",
 }
 
 function defaultDataDir(): string {
@@ -36,7 +44,10 @@ function sharesPath(): string {
 }
 
 export class ShareDB {
-  private folders: ShareFolder[] = [];
+  private folders: ShareFolder[] = []; // combined view (legacy + privacy-filtered)
+  private publicFolders: ShareFolder[] = [];
+  private buddyFolders: ShareFolder[] = [];
+  private trustedFolders: ShareFolder[] = [];
   private excludedPhrases = new Set<string>();
   private allowedTokens = new Set<number>(); // gated responses — not used for shares but for search
   private dataDir: string;
@@ -47,6 +58,10 @@ export class ShareDB {
   private folderFilterRegexes: RegExp[] = [];
   private fileMtimes = new Map<string, number>(); // realPath -> mtimeMs for incremental rescan (pynicotine shares.py:616)
   private watchers: Array<ReturnType<typeof import("node:fs").watch>> = [];
+  private virtual2real = new Map<string, string>();
+  private real2virtual = new Map<string, string>();
+  private revealBuddyShares = false;
+  private revealTrustedShares = false;
 
   constructor(opts?: { dataDir?: string; shareFilters?: string[] }) {
     this.dataDir = opts?.dataDir || defaultDataDir();
@@ -54,11 +69,21 @@ export class ShareDB {
     else this.compileShareFilters();
     this.load();
     // Auto-scan if folders empty and shared dirs exist on FS
-    if (this.folders.length === 0) {
+    if (this.folders.length === 0 && this.publicFolders.length === 0) {
       const auto = this.scanFsShares();
       if (auto.length > 0) {
-        this.folders = auto;
+        this.publicFolders = auto;
+        this.rebuildCombined();
         this.persist();
+      }
+    } else {
+      this.rebuildCombined();
+    }
+    // Trigger async enrichment in background (buildAttrs sync is empty, async fills via music-metadata)
+    if (this.folders.length > 0) {
+      const hasEmptyAttrs = this.folders.some(f => f.files.some(file => !file.attrs || file.attrs.length === 0));
+      if (hasEmptyAttrs) {
+        this.rescanAsync().catch(() => {});
       }
     }
     // fs.watch incremental — debounce 2s, mirrors pynicotine Scanner rescanning
@@ -92,7 +117,18 @@ export class ShareDB {
           const raw = JSON.parse(readFileSync(alt, "utf8"));
           if (Array.isArray(raw.folders)) {
             this.folders = raw.folders;
+            // legacy file has no split — treat as public
+            this.publicFolders = raw.folders;
+            if (Array.isArray(raw.publicFolders)) this.publicFolders = raw.publicFolders;
+            if (Array.isArray(raw.buddyFolders)) this.buddyFolders = raw.buddyFolders;
+            if (Array.isArray(raw.trustedFolders)) this.trustedFolders = raw.trustedFolders;
+            if (typeof raw.revealBuddyShares === "boolean") this.revealBuddyShares = raw.revealBuddyShares;
+            if (typeof raw.revealTrustedShares === "boolean") this.revealTrustedShares = raw.revealTrustedShares;
             if (Array.isArray(raw.shareFilters)) { this.shareFilters = raw.shareFilters; this.compileShareFilters(); }
+          } else if (Array.isArray(raw.publicFolders)) {
+            this.publicFolders = raw.publicFolders;
+            this.buddyFolders = raw.buddyFolders || [];
+            this.trustedFolders = raw.trustedFolders || [];
           }
         } catch {}
       }
@@ -102,20 +138,43 @@ export class ShareDB {
       const raw = JSON.parse(readFileSync(p, "utf8"));
       if (Array.isArray(raw.folders)) {
         this.folders = raw.folders;
+        if (Array.isArray(raw.publicFolders)) this.publicFolders = raw.publicFolders;
+        else this.publicFolders = raw.folders;
+        if (Array.isArray(raw.buddyFolders)) this.buddyFolders = raw.buddyFolders;
+        if (Array.isArray(raw.trustedFolders)) this.trustedFolders = raw.trustedFolders;
+        if (typeof raw.revealBuddyShares === "boolean") this.revealBuddyShares = raw.revealBuddyShares;
+        if (typeof raw.revealTrustedShares === "boolean") this.revealTrustedShares = raw.revealTrustedShares;
         if (Array.isArray(raw.shareFilters)) { this.shareFilters = raw.shareFilters; this.compileShareFilters(); }
       }
       else if (Array.isArray(raw)) this.folders = raw;
+      else {
+        if (Array.isArray(raw.publicFolders)) this.publicFolders = raw.publicFolders;
+        if (Array.isArray(raw.buddyFolders)) this.buddyFolders = raw.buddyFolders;
+        if (Array.isArray(raw.trustedFolders)) this.trustedFolders = raw.trustedFolders;
+      }
     } catch {}
+  }
+
+  private rebuildCombined() {
+    this.folders = [...this.publicFolders, ...this.buddyFolders, ...this.trustedFolders];
+    this.rebuildVirtualMaps();
+  }
+  private rebuildVirtualMaps() {
+    this.virtual2real.clear();
+    this.real2virtual.clear();
+    // Rebuild from current folders by scanning SHARED_DIRS mapping? Best-effort: derive virtual->real via walkDir already populates during scan.
+    // For persisted loads, we lack real paths — virtual2real will be rebuilt on next scanFsShares (which walks FS and knows realPath).
   }
 
   persist() {
     try {
       const p = sharesPath();
       mkdirSync(join(p, ".."), { recursive: true });
-      writeFileSync(p, JSON.stringify({ folders: this.folders, shareFilters: this.shareFilters }, null, 2));
+      const payload = { folders: this.folders, publicFolders: this.publicFolders, buddyFolders: this.buddyFolders, trustedFolders: this.trustedFolders, shareFilters: this.shareFilters, revealBuddyShares: this.revealBuddyShares, revealTrustedShares: this.revealTrustedShares };
+      writeFileSync(p, JSON.stringify(payload, null, 2));
       // also mirror to DATA_DIR/shares.json
       const alt = join(this.dataDir, "shares.json");
-      if (alt !== p) writeFileSync(alt, JSON.stringify({ folders: this.folders, shareFilters: this.shareFilters }, null, 2));
+      if (alt !== p) writeFileSync(alt, JSON.stringify(payload, null, 2));
     } catch {}
   }
 
@@ -160,18 +219,62 @@ export class ShareDB {
     return false;
   }
 
-  setFolders(folders: ShareFolder[]) {
-    this.folders = folders;
+  setFolders(folders: ShareFolder[], level: PermissionLevel = PermissionLevel.PUBLIC) {
+    if (level === PermissionLevel.BUDDY) this.buddyFolders = folders;
+    else if (level === PermissionLevel.TRUSTED) this.trustedFolders = folders;
+    else this.publicFolders = folders;
+    this.rebuildCombined();
     this.persist();
-    return this.folders;
+    return folders;
   }
 
-  getFolders(): ShareFolder[] { return this.folders; }
+  getFolders(level?: PermissionLevel): ShareFolder[] {
+    if (level === PermissionLevel.PUBLIC) return [...this.publicFolders];
+    if (level === PermissionLevel.BUDDY) return [...this.buddyFolders];
+    if (level === PermissionLevel.TRUSTED) return [...this.trustedFolders];
+    return [...this.folders];
+  }
+  getFoldersForPermission(permission: PermissionLevel): ShareFolder[] {
+    // Mirrors shares.py create_compressed_shares_message reveal logic
+    if (permission === PermissionLevel.BANNED) return [];
+    if (permission === PermissionLevel.PUBLIC) {
+      const base = [...this.publicFolders];
+      if (this.revealBuddyShares) base.push(...this.buddyFolders);
+      if (this.revealTrustedShares) base.push(...this.trustedFolders);
+      return base;
+    }
+    if (permission === PermissionLevel.BUDDY) {
+      const base = [...this.publicFolders, ...this.buddyFolders];
+      if (this.revealTrustedShares) base.push(...this.trustedFolders);
+      return base;
+    }
+    // TRUSTED
+    return [...this.publicFolders, ...this.buddyFolders, ...this.trustedFolders];
+  }
+  setRevealFlags(revealBuddy: boolean, revealTrusted: boolean) {
+    this.revealBuddyShares = !!revealBuddy;
+    this.revealTrustedShares = !!revealTrusted;
+    this.persist();
+  }
+  getRevealFlags(): { revealBuddyShares: boolean; revealTrustedShares: boolean } {
+    return { revealBuddyShares: this.revealBuddyShares, revealTrustedShares: this.revealTrustedShares };
+  }
+  checkSharesAvailable(): boolean {
+    return this.folders.length > 0 && this.folders.some(f => f.files.length > 0);
+  }
+  getVirtual2Real(virtualPath: string): string | undefined { return this.virtual2real.get(virtualPath); }
+  getReal2Virtual(realPath: string): string | undefined { return this.real2virtual.get(realPath); }
 
   getSharedCounts(): { dirs: number; files: number } {
     let files = 0;
     for (const f of this.folders) files += f.files.length;
     return { dirs: this.folders.length, files };
+  }
+  getSharedCountsForPermission(permission: PermissionLevel): { dirs: number; files: number } {
+    const folders = this.getFoldersForPermission(permission);
+    let files = 0;
+    for (const f of folders) files += f.files.length;
+    return { dirs: folders.length, files };
   }
 
   /** Flood protection: 0.4s per user — mirrors nicotine shares.py:_requested_share_times */
@@ -216,6 +319,9 @@ export class ShareDB {
     const folderTest = `${virtualPath}\\`;
     if (this.isFolderFiltered(folderTest) || this.isFolderFiltered(virtualPath)) return;
     const files: ShareFile[] = [];
+    // virtual2real for folder itself
+    this.virtual2real.set(virtualPath, realPath);
+    this.real2virtual.set(realPath, virtualPath);
     for (const ent of entries) {
       const full = join(realPath, ent);
       let st;
@@ -239,11 +345,16 @@ export class ShareDB {
         if (prevMtime !== undefined && prevMtime === mtime && prevByName?.has(vName)) {
           const prev = prevByName.get(vName)!;
           files.push({ ...prev, size: st.size }); // keep attrs, update size if changed
+          // populate virtual maps for file
+          this.virtual2real.set(vName, full);
+          this.real2virtual.set(full, vName);
           continue;
         }
         this.fileMtimes.set(full, mtime);
         const attrs = this.buildAttrs(full, ext, st.size);
         files.push({ name: vName, size: st.size, ext, attrs });
+        this.virtual2real.set(vName, full);
+        this.real2virtual.set(full, vName);
       }
     }
     if (files.length) out.push({ name: virtualPath, files: files.sort((a,b)=> a.name.localeCompare(b.name)) });
@@ -287,6 +398,8 @@ export class ShareDB {
     const prevByName = new Map<string, ShareFile>();
     for (const fo of this.folders) for (const f of fo.files) prevByName.set(f.name, f);
     const files: ShareFile[] = [];
+    this.virtual2real.set(virtualPath, realPath);
+    this.real2virtual.set(realPath, virtualPath);
     for (const ent of entries) {
       const full = join(realPath, ent);
       let st;
@@ -304,11 +417,15 @@ export class ShareDB {
         if (prevMtime !== undefined && prevMtime === mtime && prevByName.has(vName)) {
           const prev = prevByName.get(vName)!;
           files.push({ ...prev, size: st.size });
+          this.virtual2real.set(vName, full);
+          this.real2virtual.set(full, vName);
           continue;
         }
         this.fileMtimes.set(full, mtime);
         const attrs = await this.buildAttrsAsync(full, ext);
         files.push({ name: vName, size: st.size, ext, attrs });
+        this.virtual2real.set(vName, full);
+        this.real2virtual.set(full, vName);
       }
     }
     if (files.length) out.push({ name: virtualPath, files: files.sort((a,b)=> a.name.localeCompare(b.name)) });
@@ -338,7 +455,8 @@ export class ShareDB {
   async rescanAsync(): Promise<ShareFolder[]> {
     const scanned = await this.scanFsSharesAsync();
     if (scanned.length > 0) {
-      this.folders = scanned;
+      this.publicFolders = scanned;
+      this.rebuildCombined();
       this.persist();
     }
     return this.folders;
@@ -348,7 +466,8 @@ export class ShareDB {
   rescan(): ShareFolder[] {
     const scanned = this.scanFsShares();
     if (scanned.length > 0) {
-      this.folders = scanned;
+      this.publicFolders = scanned;
+      this.rebuildCombined();
       this.persist();
     }
     return this.folders;
@@ -380,13 +499,14 @@ export class ShareDB {
     return out.sort((a,b)=> a.name.localeCompare(b.name));
   }
 
-  /** Build SharedFileListResponse 5 payload (zlib lvl4, sorted) */
-  buildSharedFileListResponse(): Buffer {
+  /** Build SharedFileListResponse 5 payload (zlib lvl4, sorted) — respects PermissionLevel + reveal flags (shares.py:392) */
+  buildSharedFileListResponse(permission: PermissionLevel = PermissionLevel.PUBLIC): Buffer {
+    const folders = this.getFoldersForPermission(permission);
     // inner payload: uint32 ndirs, then for each dir: string name, uint32 nfiles, then files
     const parts: Buffer[] = [];
-    parts.push(packUint32(this.folders.length));
+    parts.push(packUint32(folders.length));
     // sorted folders
-    const sorted = [...this.folders].sort((a,b)=> a.name.localeCompare(b.name));
+    const sorted = [...folders].sort((a,b)=> a.name.localeCompare(b.name));
     for (const folder of sorted) {
       parts.push(packString(folder.name));
       parts.push(packUint32(folder.files.length));
@@ -413,9 +533,10 @@ export class ShareDB {
     return frameMessage(PEER_MESSAGE_CODES.sharedFileListResponse, compressed);
   }
 
-  /** Build FolderContentsResponse 37 */
-  buildFolderContentsResponse(token: number, dir: string): Buffer {
-    const folder = this.folders.find(f => f.name === dir);
+  /** Build FolderContentsResponse 37 — respects PermissionLevel */
+  buildFolderContentsResponse(token: number, dir: string, permission: PermissionLevel = PermissionLevel.PUBLIC): Buffer {
+    const folders = this.getFoldersForPermission(permission);
+    const folder = folders.find(f => f.name === dir);
     const files = folder ? [...folder.files].sort((a,b)=> a.name.localeCompare(b.name)) : [];
     const parts: Buffer[] = [];
     parts.push(packUint32(token >>> 0));
@@ -439,10 +560,20 @@ export class ShareDB {
     return frameMessage(PEER_MESSAGE_CODES.folderContentsResponse, compressed);
   }
 
-  /** Build FileSearchResponse 9 for inbound FileSearch queries (if someone searches us) */
-  buildFileSearchResponse(token: number, username: string, query: string, freeSlots = true, speed = 0, inQueue = 0): Buffer | null {
+  /** Build FileSearchResponse 9 for inbound FileSearch queries (if someone searches us) — respects permission */
+  buildFileSearchResponse(token: number, username: string, query: string, freeSlots = true, speed = 0, inQueue = 0, permission: PermissionLevel = PermissionLevel.PUBLIC): Buffer | null {
     if (this.isExcluded(query)) return null;
-    const results = this.search(query);
+    // Filter search results by permission level's folders only
+    const folders = this.getFoldersForPermission(permission);
+    const lower = query.toLowerCase();
+    const tokens = lower.split(/\s+/).filter(Boolean);
+    const filtered: ShareFile[] = [];
+    for (const folder of folders) {
+      for (const f of folder.files) {
+        if (tokens.every(t => f.name.toLowerCase().includes(t))) filtered.push(f);
+      }
+    }
+    const results = filtered.sort((a,b)=> a.name.localeCompare(b.name));
     if (!results.length) return null;
     // Build result payload similar to parseFileSearchResponse expectation: zlib compressed
     const parts: Buffer[] = [];

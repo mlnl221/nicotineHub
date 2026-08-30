@@ -1,11 +1,11 @@
-// SPDX-FileCopyrightText: 2025-2026 nicotine-mobile Contributors
+// SPDX-FileCopyrightText: 2025-2026 Nicotine Hub Contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 export function Footer() {
   return (
     <footer className="w-full border-t border-outline-variant/10 bg-surface-container-lowest/40 px-4 py-4 text-center text-[11px] leading-relaxed text-on-surface-variant/80 dark:bg-surface-container-low/40 dark:text-outline md:ml-72 md:w-[calc(100%-18rem)] pb-[calc(1rem+env(safe-area-inset-bottom,0px)+68px)] md:pb-4">
       <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-center gap-x-3 gap-y-1">
-        <span className="font-label uppercase tracking-widest">© 2025–2026 nicotine-mobile</span>
+        <span className="font-label uppercase tracking-widest">© 2025–2026 Nicotine Hub</span>
         <span className="hidden sm:inline opacity-30">•</span>
         <a
           href="https://github.com/mlnl221/nicotineHub"

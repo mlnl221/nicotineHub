@@ -36,13 +36,13 @@ interface ProfileTabsApi {
 
 const ProfileTabsContext = createContext<ProfileTabsApi | null>(null);
 
-const STORAGE_KEY = "nicotine.profileTabs";
+const STORAGE_KEY = "nicotineHub.profileTabs";
 const MAX_TABS = 10;
 
 function loadPersisted(): { tabs: Array<{ id: string; username: string }>; activeId: string | null } | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = (localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(STORAGE_KEY.replace("nicotineHub.", "nicotine.")));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { tabs?: Array<{ id: string; username: string }>; activeId?: string | null };
     if (!parsed || !Array.isArray(parsed.tabs)) return null;
@@ -231,8 +231,8 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     }
     // also save recent
     try {
-      const key = "nicotine.recentProfiles";
-      const raw = localStorage.getItem(key);
+      const key = "nicotineHub.recentProfiles";
+      const raw = (localStorage.getItem(key) ?? localStorage.getItem(key.replace ? key.replace("nicotineHub.", "nicotine.") : key));
       const list: string[] = raw ? JSON.parse(raw) : [];
       const next = [username, ...list.filter((x: string) => x.toLowerCase() !== username.toLowerCase())].slice(0, 20);
       localStorage.setItem(key, JSON.stringify(next));

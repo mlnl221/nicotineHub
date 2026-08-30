@@ -46,31 +46,53 @@ Reference: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plu
 
 - `SayChatroom 13`, `MessageUser 22`+`MessageAcked 23`/`MessageUsers 149`, `JoinRoom 14`/`LeaveRoom 15`/`UserJoined/Left 16/17`/`RoomList 64`/`RoomMembers 133`/`Add/RemoveMember 134/135`/`RoomTickers 113-116`/`GlobalRoom 150-152`
 - `WatchUser 5`/`Unwatch 6`/`GetUserStatus 7`/`GetUserStats 36`/`UserInterests 57`/`Recommendations 54/56`/`SimilarUsers 110`/`ItemRecommendations 111`/`ItemSimilarUsers 112`/`GivePrivileges 123`/`CheckPrivileges 92`/`ChangePassword 142`
+- `UserInfo` `descr/pic/totalupl/queuesize/slotsavail/uploadallowed` via `UserProfileSection.tsx`: `userinfo: {action:"setProfile", profile: {descr,pic,totalupl,queuesize,slotsavail,uploadallowed}}` → `buildSetUploadSpeed` + `UserInfoResponse` (`server.ts:106`, `session.ts` `setProfile`); debounced 800 ms when `useSession` `connected`, base64 `pic` 5 MB guard + WebP 512 px resize
 
-## Distributed (leaf-only)
+## WebSocket JSON bridge (`apps/bridge/src/server.ts`)
 
-Bridge is **leaf-only**: sends `HaveNoParent 71` + `BranchLevel/Root` on login, handles `PossibleParents 102` (10 parallel `D` dials), `ParentMinSpeed 83`/`Ratio 84` → `maxChildren`, forwards `DistribSearch 3`/`EmbeddedMessage 93` (`DistribSearch` again), ignores `DistribPing 0`, re-bootstraps on `ResetDistributed 130`. Does not act as parent (no child aggregation) — matches nicotine leaf mode. `D` framing is `[len][uint8 code]` vs `P`/`S` `[len][uint32 code]`.
+Browser ↔ bridge JSON (all `zod` validated, 1 MB frame guard):
+
+```
+login {type:"login", username,password, host?,port?} → {type:"login:result", ok}
+search {type:"search", searchId, query} | {type:"search:user", username,query} | {type:"search:room", room,query} | {type:"search:wishlist"} → {type:"search:start",token} + {type:"search:result",rows} + {type:"search:end"}
+search:stop / search:page / browse:page (5-min `searchCache`/`browseCache`, `bridgeCaches` 5m LRU 100)
+browse {type:"browse", action:"shares"|"folder", username,folder?,token?} → {type:"browse:shares"|"browse:folder"}
+chat:room {action:"join"|"leave"|"say"|"ticker"|"setTicker"|...} + chat:private {action:"send"|"ack"} → {type:"chat:event"|"room:event"}
+download:request {username,virtualPath,size,fileName?} + download:control/upload:control {id,action} → {type:"transfer:update/stats/queue/finished"}
+userinfo {action:"watch"|"unwatch"|"get"|"peerAddress"|"recommendations"|...} → {type:"userinfo:event"}
+plugin:list / toggle / reload / uninstall / install{fileName,data} / installUrl{url} + plugin:settings / resetSettings → {type:"plugin:list"|"plugin:installed"|"plugin:toggled"|...} (bridge `PluginManager`)
+config:update {section,key,value} / wishlist:update {terms} + statistics:request / reset + ping→pong
+diagnostics + /health?json: {ok, ts, uptime, port, listenPort, dataDir, tokenAuth} (gated via `BRIDGE_TOKEN` if set)
+```
+
+## Distributed (leaf-only, `stage` `d395cc6`+)
+
+Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): sends `HaveNoParent 71` + `BranchLevel 126/Distrib 4` (+1) + `BranchRoot 127/5` + server notify on login, handles `PossibleParents 102` (10 parallel `D` dials, `_adoptParent` on `DistribSearch 3`), `ParentMinSpeed 83`/`Ratio 84` → `maxChildren = min(speed//ratio//100,10)`, forwards `DistribSearch 3`/`EmbeddedMessage 93` (`DistribSearch` again), ignores `DistribPing 0`, re-bootstraps on `ResetDistributed 130` + `AcceptChildren 100` toggle (uploadSpeed). `D` framing is `[len][uint8 code]` vs `P`/`S` `[len][uint32 code]`; `server.ts:185` `Bun.listen` advertises `LISTEN_PORT` via `SetWaitPort 2` + `PortMapper`.
 
 ## Bridge files
 
-- `soulseek.ts` — framing/packing, builders/parsers for all codes
-- `session.ts` — server socket + `Bun.listen` (`P` vs `F` demux via `pendingFileTokens` + heuristic), peer states (`buf/initDone/isFileConn/fileToken`), idle sweep (2s init, 10s ghost, 60s max), `GetPeerAddress` cache, search/browses
-- `shares.ts` — `ShareDB` (`DATA_DIR/shares.json`, in-memory folders, search, `build*Response`)
-- `transfers.ts` — `TransferManager` (Map `id→Transfer`, queued/active, 2s `transfer:stats`, 300s `PlaceInQueue` poll, `INCOMPLETE<md5>` + `downloads.json`)
-- `server.ts` — `Bun.serve` (`/ws` zod, `/health`, `/logs`, `/diagnostics`, `/files/:token`) + token via `?token`/`Authorization`/`Sec-WebSocket-Protocol`
+- `soulseek.ts` — framing/packing, builders/parsers for all codes (76 server / 18 peer / 6 distrib / 2 file)
+- `session.ts` — server socket + `Bun.listen` (`P` vs `F` demux via `pendingFileTokens` + heuristic), peer states (`buf/initDone/isFileConn/fileToken`), idle sweep (2s init, 10s ghost, 60s max), `GetPeerAddress` cache 30m single-flight, search/browses, distributed leaf bootstrap (`HaveNoParent 71`, `PossibleParents 102` 10 dials, `BranchLevel/Root`), `PortMapper` (`portmapper.ts` NAT-PMP → UPnP) on login/disconnect/port change
+- `shares.ts` — `ShareDB` (`DATA_DIR/shares.json`, in-memory folders, search, `buildSharedFileListResponse 5`/`FolderContents 36/37` zlib lvl4, `shouldThrottle` 400 ms)
+- `transfers.ts` — `TransferManager` (Map `id→Transfer`, queued/active, 2s `transfer:stats`, 300s `PlaceInQueue` poll, `INCOMPLETE<md5>` + atomic `downloads.json` + `GET /files/:token`)
+- `portmapper.ts` — `NATPMP` (RFC6886 UDP 5351 → gateway from `/proc/net/route`, lease 43200 s / renewal 7200 s, NAT-PMP AddPortMapping) + `UPnP` (SSDP multicast 239.255.255.250:1900, device desc fetch, SOAP AddPortMapping/DeletePortMapping) + `PortMapper` orchestrator (NAT-PMP fallback UPnP, `setPort`/`add`/`remove` like `pynicotine/portmapper.py:PortMapper`)
+- `server.ts` — `Bun.serve` (`/ws` zod, `/health`→`listenPort`, `/logs`, `/diagnostics`, `/files/:token` sanitized `Content-Disposition`, `/plugins` + `/plugins/install`) + token via `?token`/`Authorization`/`Sec-WebSocket-Protocol` + CORS/CSP (`getCorsHeaders`, `SECURITY_HEADERS`) + 1 MB WS guard + 5-min `searchCache`/`browseCache`
+- `plugins/manager.ts` (+ `builtin/core_commands`, `builtin/spamfilter`) — `PluginManager` (`plugins.json` `installed/enabled`, `PLUGININFO/metasettings`, `returncode.zap/break/pass`, 32 `core_commands` cmds) — WS `plugin:list/toggle/reload/uninstall/install{fileName,data}` + `installUrl` (GitHub-only, 20 MB zip / 1 GiB unzip + path-traversal guard)
 
 ## Env (full)
 
 | Env | Default | Notes |
 |-----|---------|-------|
-| `PORT` | `8787` | WS port |
-| `LISTEN_PORT` | `2234` | Peer listener (port-forward) |
-| `DATA_DIR` | `/data` | Volume |
-| `BRIDGE_TOKEN` | *(open)* | `?token` / `Bearer` / `Sec-WebSocket-Protocol` → 401 |
-| `SHARED_DIRS` | `/data/shared` | `:` list auto-scanned |
-| `SHARES_DIR` | `DATA_DIR` | Persist path |
-| `UPLOAD_LIMIT`/`DOWNLOAD_LIMIT` | `0` | KB/s, aliases `UPLOADLIMIT`/`DOWNLOADLIMIT` |
+| `PORT` | `8787` | WS port (`apps/bridge/src/server.ts:186`) |
+| `LISTEN_PORT` | `62904` | Peer listener — **default since `d395cc6`** (was `2234` in early docs; `DEFAULT_LISTEN_PORT` `apps/web/src/lib/config/defaults.ts:194`). Editable via `server.portrange` in Settings → Network (`NetworkSection.tsx:82`), persists to `DATA_DIR/listen_port` (env `LISTEN_PORT` wins on boot), triggers `SetWaitPort 2` + `PortMapper.setPort` + reconnect. Compose maps `${LISTEN_PORT:-62904}:${LISTEN_PORT:-62904}` TCP+UDP (branch from `LISTEN_PORT` env or `listen_port` file). |
+| `DATA_DIR` | `/data` | Volume (`/data` in compose, `/tmp` fallback in tests) |
+| `BRIDGE_TOKEN` | *(open)* | `?token` / `Bearer` / `Sec-WebSocket-Protocol` → 401 on `/ws`, `/files/:token`, `/logs`, `/diagnostics`, `/plugins/*` |
+| `SHARED_DIRS` | `/data/shared` | `:` list auto-scanned via `ShareDB.scanFsShares` + `music-metadata` attrs `0/1/4/5` |
+| `SHARES_DIR` | `DATA_DIR` | Persist path for `shares.json` |
+| `UPLOAD_LIMIT`/`DOWNLOAD_LIMIT` | `0` | KB/s (`0` = unlimited), aliases `UPLOADLIMIT`/`DOWNLOADLIMIT`; adaptive throttle + `DOWNLOAD_LIMIT` stored in `transfer:stats` 2 s |
 | `ENABLE_SERVER_PING` | `1` | `0` disables `ServerPing 32` fallback |
+| `ALLOWED_ORIGINS` | *(open)* | CSV — if set, `getCorsHeaders` (`server.ts:265`) only allows listed `Origin` (homelab lock-down) |
+| `NEXT_PUBLIC_BRIDGE_URL` | `ws://host:8787/ws` | Build-time WS override; runtime `localStorage.nicotineHub.bridgeUrl` wins |
 
 ## Tests
 

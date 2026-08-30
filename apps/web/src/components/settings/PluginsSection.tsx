@@ -185,7 +185,7 @@ export function PluginsSection() {
         description="TS-only plugins (parity with nicotine-plus pynicotine/pluginsystem.py). Plugins run on the bridge with full Node access — only install trusted code. Settings persist in DATA_DIR/plugins.json."
       >
         <div className="rounded-xl bg-amber-500/10 px-4 py-3 font-body text-xs leading-relaxed text-amber-900 dark:text-amber-200">
-          <span className="font-semibold">Security:</span> Plugins have unrestricted filesystem &amp; network access on the bridge (like nicotine-plus). Review code before installing. Built-in <span className="font-mono">core_commands</span> and <span className="font-mono">spamfilter</span> are sandboxed via try/catch only — no VM isolation (see docs).
+          <span className="font-semibold">Security:</span> Plugins have unrestricted filesystem &amp; network access on the bridge (same as nicotine-plus desktop). Review source before installing — you assume full risk for any zip you upload. URL installs are restricted to GitHub (<span className="font-mono">github.com</span> / <span className="font-mono">githubusercontent.com</span>) and capped at 20 MB; direct zip uploads have same checks (no shell, no path-traversal, 1 GiB uncompressed limit). Built-ins <span className="font-mono">core_commands</span> / <span className="font-mono">spamfilter</span> are try/catch-only, no VM isolation.
         </div>
         <div className="py-2 flex items-center justify-between">
           <span className="font-label text-sm font-medium">Enable plugins (master)</span>
@@ -208,12 +208,12 @@ export function PluginsSection() {
             </div>
           </div>
           <div className="border-t border-surface-container-high dark:border-surface-container-highest/40 pt-4">
-            <div className="font-label text-xs font-medium mb-2">From URL (GitHub index)</div>
+            <div className="font-label text-xs font-medium mb-2">From URL (GitHub only)</div>
             <div className="flex gap-2">
-              <input value={urlInstall} onChange={(e) => setUrlInstall(e.target.value)} placeholder="https://github.com/user/plugin/archive/main.zip or raw zip URL" className="flex-1 rounded-xl bg-surface-container-lowest px-3 py-2 text-sm ghost-border" />
+              <input value={urlInstall} onChange={(e) => setUrlInstall(e.target.value)} placeholder="https://github.com/user/repo/archive/main.zip or https://raw.githubusercontent.com/..." className="flex-1 rounded-xl bg-surface-container-lowest px-3 py-2 text-sm ghost-border" />
               <button onClick={handleUrlInstall} disabled={!urlInstall.trim() || installing} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary disabled:opacity-50">Install</button>
             </div>
-            <div className="mt-2 font-body text-xs text-on-surface-variant">Example: <span className="font-mono">https://example.com/my-plugin.zip</span> — bridge will fetch & extract to DATA_DIR/plugins.</div>
+            <div className="mt-2 font-body text-xs text-on-surface-variant">Only <span className="font-mono">https://github.com</span> / <span className="font-mono">*.githubusercontent.com</span> allowed (10 s timeout, 20 MB). Direct zips bypass this but are still validated for shell/traversal. You are responsible for code you install.</div>
           </div>
           {error ? <div className="rounded-xl bg-error-container px-3 py-2 text-xs text-on-error-container">{error}</div> : null}
         </div>
@@ -256,7 +256,20 @@ export function PluginsSection() {
                       <button onClick={() => openSettings(p)} className="font-label text-xs text-primary underline">{expandedSettings === p.name ? "Hide settings" : "Settings…"}</button>
                       {expandedSettings === p.name ? (
                         <div className="mt-3 rounded-xl bg-surface-container-lowest p-4 ghost-border">
-                          {Object.entries(metas as Record<string, MetaSetting>).map(([k, meta]) => renderField(k, meta, editValues[k]))}
+                          {(() => {
+                            const grouped = new Map<string, Array<[string, MetaSetting]>>();
+                            for (const [k, meta] of Object.entries(metas as Record<string, MetaSetting>)) {
+                              const g = meta.group || "General";
+                              if (!grouped.has(g)) grouped.set(g, []);
+                              grouped.get(g)!.push([k, meta]);
+                            }
+                            return Array.from(grouped.entries()).map(([group, fields]) => (
+                              <div key={group} className="mb-4 rounded-lg bg-surface-container-low p-3">
+                                <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant mb-2">{group}</h4>
+                                {fields.map(([k, meta]) => renderField(k, meta, editValues[k]))}
+                              </div>
+                            ));
+                          })()}
                           <div className="mt-4 flex gap-2">
                             <button onClick={() => saveSettings(p.name)} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary">Save</button>
                             <button onClick={() => resetSettings(p.name)} className="rounded-xl bg-surface-container-high px-4 py-2 text-sm">Reset</button>

@@ -1,17 +1,45 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useConfig } from "@/lib/config/provider";
 import { SectionCard, ToggleControl } from "@/components/settings/controls";
 
 export function NotificationsSection() {
   const { settings, setOption } = useConfig();
   const n = settings.notifications;
+  const [perm, setPerm] = useState<string>(() => typeof Notification !== "undefined" ? Notification.permission : "unsupported");
+  const [swReady, setSwReady] = useState(false);
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      // try register minimal sw for push display
+      navigator.serviceWorker.register("/sw.js").then(() => setSwReady(true)).catch(() => setSwReady(false));
+    }
+  }, []);
+
+  const requestPush = async () => {
+    try {
+      const p = await Notification.requestPermission();
+      setPerm(p);
+      if (p === "granted" && "serviceWorker" in navigator) {
+        const reg = await navigator.serviceWorker.ready;
+        // show test notification via SW if possible
+        try { await reg.showNotification("Nicotine Hub", { body: "Notifications enabled", icon: "/icon-192.png" }); } catch {}
+      }
+    } catch {}
+  };
 
   return (
     <SectionCard
       title="Notifications"
-      description="Choose which events raise a browser notification or sound."
+      description="Choose which events raise a browser notification or sound. Web Push uses Service Worker when available."
     >
+      <div className="rounded-xl bg-surface-container-low p-4 flex items-center justify-between gap-4">
+        <div>
+          <p className="font-label text-xs font-bold">Web Push permission</p>
+          <p className="font-body text-xs text-on-surface-variant">Browser {perm} {swReady ? "• SW ready" : "• no SW"}</p>
+        </div>
+        <button onClick={requestPush} className="rounded-full bg-primary px-4 py-2 font-label text-xs font-bold text-on-primary">Enable</button>
+      </div>
       <ToggleControl
         label="Window title"
         description="Show an alert in the document title."

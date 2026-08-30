@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2001-2026 Nicotine+ Contributors
 // SPDX-FileCopyrightText: 2003-2004 Hyriand <hyriand@thegraveyard.org>
 // SPDX-FileCopyrightText: 2007-2009 daelstorm <daelstorm@gmail.com>
-// SPDX-FileCopyrightText: 2025-2026 nicotine-mobile Contributors
+// SPDX-FileCopyrightText: 2025-2026 Nicotine Hub Contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Portions based on nicotine-plus pynicotine/slskmessages.py + pynicotine/slskproto.py + doc/SLSKPROTOCOL.md
 
@@ -404,6 +404,13 @@ export function buildRoomTickers(room: string): Buffer { return Buffer.alloc(0);
 export function buildSetRoomTicker(room: string, msg: string): Buffer {
   return frameMessage(SERVER_MESSAGE_CODES.setRoomTicker, Buffer.concat([packString(room), packString(msg)]));
 }
+export function buildEnableRoomInvitations(enabled: boolean): Buffer {
+  return frameMessage(SERVER_MESSAGE_CODES.enableRoomInvitations, Buffer.from([enabled ? 1 : 0]));
+}
+export function buildCancelRoomMembership(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.cancelRoomMembership, packString(room)); }
+export function buildCancelRoomOwnership(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.cancelRoomOwnership, packString(room)); }
+export function buildAddRoomOperator(room: string, username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.addRoomOperator, Buffer.concat([packString(room), packString(username)])); }
+export function buildRemoveRoomOperator(room: string, username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.removeRoomOperator, Buffer.concat([packString(room), packString(username)])); }
 export function buildRecommendationsEmpty(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.recommendations, Buffer.alloc(0)); }
 export function buildGlobalRecommendationsEmpty(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.globalRecommendations, Buffer.alloc(0)); }
 export function buildSimilarUsersEmpty(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.similarUsers, Buffer.alloc(0)); }
@@ -810,6 +817,12 @@ export function parseRoomMembers(payload: Buffer): { room: string; members: stri
 export function parseRoomMember(payload: Buffer): { room: string; username: string } {
   const r = new SlskReader(payload);
   return { room: r.string(), username: r.string() };
+}
+export function parseRoomOperators(payload: Buffer): { room: string; operators: string[] } {
+  const r = new SlskReader(payload);
+  const room = r.string(); const n = r.uint32(); const ops: string[] = [];
+  for(let i=0;i<n;i++) ops.push(r.string());
+  return { room, operators: ops };
 }
 export function parseGlobalRoomMessage(payload: Buffer): ChatMessage {
   const r = new SlskReader(payload);

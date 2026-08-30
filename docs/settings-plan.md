@@ -1,138 +1,142 @@
-# Settings — Full Phased Plan (missing tabs)
+# Settings — Full Phased Plan (status vs next)
 
-> Record of all missing Settings tabs and how they will be restored.
-> Ground truth: `~/projects/nicotine-plus/pynicotine/config.py:156` (`defaults`), `pynicotine/gtkgui/dialogs/preferences.py:3764` (`page_ids` + page classes), `pynicotine/gtkgui/ui/settings/*.ui`, and `docs/settings-mapping.md`. Each phase below traces to one of those sources.
+> History + roadmap for the 14 Nicotine+ preference pages.
+> Ground truth: `~/projects/nicotine-plus/pynicotine/config.py:156` (`defaults`), `pynicotine/gtkgui/dialogs/preferences.py:3764` (`page_ids` + page classes), `pynicotine/gtkgui/ui/settings/*.ui`, and `docs/settings-mapping.md`. Every setting below traces to one of those sources.
 
-## Current state
+## Current state — `d395cc6` (`stage`)
 
-`apps/web/src/app/settings/page.tsx:11` exposes 4 tabs (`network | appearance | searches | notifications`). `preferences.py:3764` defines 14 pages in order:
+`apps/web/src/app/settings/page.tsx:27` now exposes **15 tabs** (`network | appearance | shares | downloads | uploads | searches | user-profile | chats | now-playing | logging | banned-users | ignored-users | url-handlers | plugins | notifications`) in grouped nav (`TAB_GROUPS`) with `?tab=` + `#tab` deep-link (`page.tsx:82`). Order matches `preferences.py:3764` (`network → user-interface → shares → downloads → uploads → searches → user-profile → chats → now-playing → logging → banned-users → ignored-users → url-handlers → plugins`) plus `notifications` (co-hosted with UI in Nicotine+ `userinterface.ui`).
 
-`network → user-interface → shares → downloads → uploads → searches → user-profile → chats → now-playing → logging → banned-users → ignored-users → url-handlers → plugins`
+`apps/web/src/lib/config/defaults.ts:27` is **no longer stubbed** — full `Settings` type + `defaults` for `server, ui, notifications, searches, transfers, userinfo, words, logging, privatechat, players, urls, plugins, ctcp` (browser-relevant subset). `mistakes.md:2026-08-28` port-conflict & worktree notes apply.
 
-10 are still missing in the mobile client: **shares, downloads (settings), uploads, user profile, chats, now playing, logging, banned users, ignored users, url handlers, plugins**. Downloads exists as a route (`/downloads`) but not as a Settings tab.
-
-`apps/web/src/lib/config/defaults.ts:68` is stubbed — only `server/ui/notifications/searches` exist. The rest (`transfers, userinfo, words, logging, privatechat, players, urls, plugins, ctcp`) are `TODO`.
+| Phase | Scope | Status | Code pointer |
+|---|---|---|---|
+| **A** Config extension | `defaults.ts` 13 sections (`transfers` `userinfo` `words` `logging` `privatechat` `players` `urls` `plugins` `ctcp`; `server` `banlist/ip*` `portrange/upnp`; `ui` additions) | ✅ Done | `apps/web/src/lib/config/defaults.ts:27` |
+| **B** Tab shell + stubs | 14 pages + notifications visible, grouped nav, hash routing | ✅ Done | `apps/web/src/app/settings/page.tsx:44`, `components/settings/*Section.tsx` (16 files) |
+| **C** Transfers | Shares / Downloads / Uploads — folder list, filters, rescan, bandwidth, queue, double-click, grouping | ✅ Done | `SharesSection.tsx:66`, `DownloadsSection.tsx:7`, `UploadsSection.tsx:7` |
+| **D** Profile / Chats / NP | `userinfo` pic+descr publish, `words`/`logging`/`privatechat`/`ctcp`, `players` format | ✅ Done | `UserProfileSection.tsx:61`, `ChatsSection.tsx:7`, `NowPlayingSection.tsx:7` |
+| **E** Logging | `log.ui` toggles + paths + `log_timestamp` + `debug/logcollapsed` | ✅ Done (browser paths are notes) | `LoggingSection.tsx:7` |
+| **F** Banned / Ignored | `banlist/ipblocklist` + `geoblock`, `ignorelist/ipignorelist` | ✅ Done | `BannedUsersSection.tsx:7`, `IgnoredUsersSection.tsx:7` |
+| **G** URL Handlers / Plugins | `urls.protocols` stub + bridge plugin install/toggle/reload | ✅ Done (intentional stub for URL Handlers) | `UrlHandlersSection.tsx:6`, `PluginsSection.tsx:20`, `apps/bridge/src/server.ts:153` |
+| **H** Network extras | `server.interface` + list editors `autosearch/autojoin/userlist` + `autoreply` | ⏳ Next | `NetworkSection.tsx:9` — only `server/portrange/upnp/autoaway` wired today |
 
 ## Conventions for all phases
 
-- Follow `AGENTS.md` workflow: git worktree per phase, `bun test && bun run build` before PR, `gh pr create --fill`.
+- Follow `AGENTS.md` workflow: git worktree per feature, `bun test && bun run build` before PR, `gh pr create --fill`.
 - Each new setting key added to `defaults.ts` must stay in sync with `docs/settings-mapping.md` and `pynicotine/config.py`.
-- Desktop-only keys are omitted per `settings-mapping.md:310` (password, `portrange`/`upnp`, tray/window geometry, `filemanager`, `urls.protocols` handlers, OS now-playing backends, `afterfinish`/`afterfolder` shell commands).
-- Browser constraints are surfaced in-app with a `StubNotice`-style callout rather than hiding tabs silently — see `docs/settings-mapping.md:123` for File System Access API, localStorage/IndexedDB, `mediaSession` notes.
-- Controls live in `apps/web/src/components/settings/controls.tsx` — extend with `ListEditorControl`, `ColorControl` only when needed. Existing `ToggleControl`, `NumberControl`, `SelectControl`, `RadioGroupControl`, `TextFieldControl`, `SectionCard` cover most cases.
+- Desktop-only keys are omitted per `docs/settings-mapping.md:310` (password, tray/window geometry, `filemanager`, `urls.protocols` handlers, OS now-playing backends, `afterfinish`/`afterfolder` shell commands, colors/fonts — see `docs/DESIGN.md` Omitted Controls). `portrange`/`upnp` are **not** omitted — `NetworkSection.tsx:82` + `portmapper.ts` now handle them; `interface` remains browser-stored only (no raw socket bind in browser).
+- Browser constraints are surfaced in-app with a callout rather than hiding tabs silently — see `docs/settings-mapping.md:123` for File System Access API, localStorage/IndexedDB, `mediaSession` notes.
+- Controls live in `apps/web/src/components/settings/controls.tsx` — available: `ToggleControl`, `NumberControl`, `SelectControl`, `RadioGroupControl`, `TextFieldControl`, `SectionCard`. Extend with `ListEditorControl`/`ColorControl` only when needed.
 
-## Phase A — Config extension (prerequisite)
+## Phase A — Config extension ✅ Done
 
-**Goal:** extend `apps/web/src/lib/config/defaults.ts:24` `Settings` + `defaults` to mirror the full `config.py:156` defaults for browser-relevant sections.
+**Was:** extend `apps/web/src/lib/config/defaults.ts:24` `Settings` + `defaults` to mirror full `config.py:156` browser-relevant defaults.
 
-**Scope (browser-relevant + persisted locally):**
-
-- `transfers` — `shared,buddyshared,trustedshared` (`[name,path][]`), `share_filters` (string[] default `[".*",".*\\","@eaDir\\","#recycle\\","#snapshot\\","desktop.ini","Thumbs.db"]`), `rescanonstartup,rescan_shares_daily,rescan_shares_hour,reveal_buddy_shares,reveal_trusted_shares`, `incompletedir,downloaddir,uploaddir`, `uploadbandwidth,use_upload_speed_limit,uploadlimit,uploadlimitalt,useupslots,uploadslots`, `use_download_speed_limit,downloadlimit,downloadlimitalt`, `fifoqueue,limitby,queuelimit,filelimit,friendsnolimits,preferfriends`, `groupdownloads,groupuploads,expand_downloads,expand_uploads,autoclear_downloads,autoclear_uploads,remotedownloads,uploadallowed,enablefilters,downloadfilters ([pattern,escaped][]), download_doubleclick,upload_doubleclick,usernamesubfolders,geoblock,geoblockcc,usecustomban,customban,usecustomgeoblock,customgeoblock` — omit `afterfinish/afterfolder`.
-- `userinfo` — `descr,pic,picture_visible`.
-- `words` — `tab,dropdown,characters,roomnames,buddies,roomusers,commands,keywords,censored,censorwords,replacewords,autoreplaced,watch_keywords`.
-- `logging` — `privatechat,privatelogsdir,chatrooms,roomlogsdir,transfers,transferslogsdir,debug_file_output,debuglogsdir,log_timestamp,readroomlines,readprivatelines,rooms_timestamp,private_timestamp,logcollapsed,debug`.
+**Now:** done at `defaults.ts:27-391`:
+- `transfers` — `shared/buddyshared/trustedshared` (`[name,path][]`), `share_filters`, `rescanonstartup/rescan_shares_daily/rescan_shares_hour/reveal_buddy_shares/reveal_trusted_shares`, `incompletedir/downloaddir/uploaddir`, `uploadbandwidth/use_upload_speed_limit/uploadlimit/uploadlimitalt/useupslots/uploadslots`, `use_download_speed_limit/downloadlimit/downloadlimitalt`, `fifoqueue/limitby/queuelimit/filelimit/friendsnolimits/preferfriends`, `group* / expand_* / autoclear_* / remotedownloads / uploadallowed / enablefilters / downloadfilters / *_doubleclick / usernamesubfolders / geoblock* / usecustom*` — omit `afterfinish/afterfolder`.
+- `userinfo` — `descr/picture_visible` + `pic` (data URL).
+- `words` — `tab/dropdown/characters/roomnames/buddies/roomusers/commands/keywords/censored/censorwords/replacewords/autoreplaced/watch_keywords`.
+- `logging` — `privatechat/privatelogsdir/chatrooms/roomlogsdir/transfers/transferslogsdir/debug_file_output/debuglogsdir/log_timestamp/rooms_timestamp/private_timestamp/readroomlines/readprivatelines/logcollapsed/debug`.
 - `privatechat` — `store`.
-- `players` — `npplayer,npformat,npothercommand,npformatlist`.
-- `notifications` already done; add `notification_tab_colors` (bool, desktop tab-color notification — keep for parity, maps to `notification_tab_colors=False` in `config.py:420`).
-- `server` additions — `banlist,ignorelist,ipblocklist,ipignorelist` live in `server` section.
-- `ui` additions — `spellcheck` (already implicit), plus any missing toggles needed by Chats.
-- `plugins` — `enable` (omit `enabled` list — no desktop plugin system).
-- `ctcp` — `enable`.
-- `urls` — `protocols` kept only as empty stub if URL Handlers tab is shown; otherwise omit.
-- Keep `server.passw,portrange,upnp,interface` omitted (security / no P2P inbound in MVP).
+- `players` — `npplayer/npformat/npothercommand/npformatlist`.
+- `notifications` — 11 keys incl. `notification_tab_colors`.
+- `server` — `banlist/ignorelist/ipblocklist/ipignorelist/portrange/upnp` (added; `interface` deferred to H).
+- `ui` — `spellcheck` + `modes_visible/modes_order` etc.
+- `plugins` / `ctcp` / `urls.protocols` stub.
 
-**Files:** `apps/web/src/lib/config/defaults.ts`, optional `types.ts`, `apps/web/src/lib/config/provider.tsx:16`, tests `apps/web/src/lib/config/merge.test.ts`.
-
+**Files:** `apps/web/src/lib/config/defaults.ts`, `lib/config/provider.tsx:16`.
 **Verify:** `bun run build` typecheck, `bun test`.
 
-## Phase B — Settings tab shell + stub sections
+## Phase B — Settings tab shell + stub sections ✅ Done
 
-**Goal:** make every Nicotine+ preference page visible in the mobile Settings UI, even before its controls are fully wired, so navigation parity is restored.
+**Was:** make every Nicotine+ page visible, even before controls wired.
 
-**Scope:**
+**Now:** `apps/web/src/app/settings/page.tsx:44` `TABS` with icons `dns/palette/folder/download/upload/search/person/chat/music_note/article/block/person_off/link/extension/notifications`, grouped via `TAB_GROUPS` (`Connection`, `Interface`, `Transfers`, `Search & Users`, `Chat & Playback`, `System`), deep-link `?tab=`/`#tab` (`page.tsx:82`). 16 section components in `components/settings/` each render `SectionCard` and at least one bound control via `useConfig().setOption`. Isolated mode hides `url-handlers` future (currently always shown; `preferences.py:3784` parity noted in `UrlHandlersSection.tsx`).
 
-- Replace `apps/web/src/app/settings/page.tsx:11` `TabId` + `TABS:13` with the full ordered list, with icons: `network(dns), appearance(palette), shares(folder), downloads(download), uploads(upload), searches(search), user-profile(person), chats(chat), now-playing(music_note), logging(article), banned-users(block), ignored-users(person_off), url-handlers(link), plugins(extension)` — order matches `preferences.py:3764`. Keep `notifications` as its own tab or fold into UI per Nicotine+ `userinterface.ui` (which co-hosts notifications); keep separate for now and note in header.
-- Tab bar: horizontal scroll, active state `bg-primary text-on-primary`, touch targets ≥44px, safe-area insets. Add hash routing (`?tab=shares` / `#shares`) so deep-links work from `Sidebar` and survive reload.
-- Create `apps/web/src/components/settings/stub/` or 10 minimal section components (`SharesSection.tsx`, `DownloadsSection.tsx`, `UploadsSection.tsx`, `UserProfileSection.tsx`, `ChatsSection.tsx`, `NowPlayingSection.tsx`, `LoggingSection.tsx`, `BannedUsersSection.tsx`, `IgnoredUsersSection.tsx`, `UrlHandlersSection.tsx`, `PluginsSection.tsx`) each rendering a `SectionCard` with a short description + `StubNotice` explaining browser limitation + a single bound control as proof of wiring (e.g. Shares shows `share_filters` count, Uploads shows `uploadslots`, etc.). Wire at least one real setting per tab through `useConfig().setOption`.
-- Isolated mode: hide `url-handlers` when `NEXT_PUBLIC_ISOLATED` is set, mirroring `preferences.py:3784`.
+**Verify:** `bun test && bun run build`; Playwright `/settings` — all tabs render, localStorage round-trip per tab.
 
-**Files:** `apps/web/src/app/settings/page.tsx`, 10 new `components/settings/*Section.tsx`, `components/StubNotice.tsx` reuse.
+## Phase C — Transfers: Shares / Downloads / Uploads ✅ Done
 
-**Verify:** `bun test && bun run build`; Playwright open `/settings` and assert all tabs render, click each tab, confirm localStorage round-trip for one field per tab.
+**Shares (`shares.ui`, `preferences.py:647`, `config.py:182`) — `SharesSection.tsx:66`:**
+- Folder list `virtual_name/folder/accessible_to` → Add/Edit/Remove dialogs with virtual-name sanitizing (`getNormalizedVirtualName`) + `PermissionLevel` mapping (`public/shared`, `buddy/buddyshared`, `trusted/trustedshared`). `showDirectoryPicker` → `webkitdirectory` → manual dialog fallback, `+` header button, advanced bulk `virtualName|/path` editor.
+- Filters `share_filters` one-per-line with Reset to `defaults.transfers.share_filters`.
+- Rescan: `ToggleControl(rescanonstartup,rescan_shares_daily)` + `SelectControl(rescan_shares_hour 0–23)` via deterministic `hourLabel` (UTC en-US).
+- Visibility 4-way `SelectControl` (`none/buddy/trusted/both` → `reveal_buddy_shares/reveal_trusted_shares`).
 
-## Phase C — Transfers: Shares / Downloads / Uploads
+**Downloads (`downloads.ui`, `preferences.py:307`) — `DownloadsSection.tsx:7`:**
+- Speed radio `use_download_speed_limit` + `NumberControl(downloadlimit=1000, downloadlimitalt=100)` 1–1 000 000.
+- Filter list `downloadfilters` (`pattern|escaped` lines) with regex validity check (`new RegExp("(" + pat + ")")` like `preferences.py:526`) + error banner.
+- Dir inputs `downloaddir/incompletedir/uploaddir` as text + `autoclear_downloads/remotedownloads/usernamesubfolders/enablefilters` toggles; `uploadallowed` Select(0/2/3); `download_doubleclick`, `groupdownloads` etc. Omit `afterfinish/afterfolder`.
 
-**Goal:** fully wire the three transfer-related pages — the highest bridge dependency.
+**Uploads (`uploads.ui`, `preferences.py:1128`) — `UploadsSection.tsx:7`:**
+- `uploadbandwidth`%, `useupslots` toggle + `uploadslots` NumberControl(min 1), speed radio `use_upload_speed_limit` + limits, `fifoqueue` Select(Round Robin/FIFO), `limitby` Radio(size/count) + `queuelimit/filelimit`, `friendsnolimits/preferfriends`, `groupuploads/expand_uploads`, `upload_doubleclick`, `autoclear_uploads`.
 
-**Shares (`shares.ui`, `preferences.py:647`, `config.py:182`):**
-- Folder list `TreeView` (`virtual_name,folder,accessible_to`) → `ListEditor` with Add/Edit/Remove dialogs: virtual name text + path text + permission `SelectControl(Public/Buddy/Trusted)` using `PermissionLevel` mapping. Persist to `transfers.shared|buddyshared|trustedshared`.
-- Filters list (file vs folder via trailing `\` → `Applies to: Files/Folders`) with Add/Edit/Remove + Reset to defaults.
-- Rescan: `ToggleControl(rescanonstartup,rescan_shares_daily)` + `SelectControl(rescan_shares_hour 0–23)` formatted via `toLocaleTimeString`. In browser this triggers a bridge `rescan` WS message, not a timer.
-- Buddy share visibility: 4-way radio (`Only buddies / Everyone buddy shares / Everyone trusted / Everyone both`) mapping to `reveal_buddy_shares,reveal_trusted_shares` bools — show as `SelectControl`.
+## Phase D — User Profile + Chats + Now Playing ✅ Done
 
-**Downloads (`downloads.ui`, `preferences.py:307`):**
-- Speed limit radio `use_download_speed_limit (unlimited/primary/alternative)` + `NumberControl(downloadlimit=1000,downloadlimitalt=100)` with range per `.ui` adjustments.
-- Filter list `downloadfilters` with regex toggle + validity icon (validate via `new RegExp("(" + pattern + ")")` — same as `preferences.py:526`).
-- Dir inputs `downloaddir,incompletedir,uploaddir` as path text (browser note).
-- `autoclear_downloads,remotedownloads,usernamesubfolders,enablefilters` toggles; `uploadallowed Select(0 No one/2 Buddies/3 Trusted)`; `download_doubleclick Select` (isolated mapping `preferences.py:347`); grouping selects `groupdownloads` etc. Omit `afterfinish/afterfolder`.
+**User Profile (`userinfo.ui`, `preferences.py:1254`) — `UserProfileSection.tsx:61`:**
+- `TextAreaControl(descr)` (`repr()`-ish `'...'` stored; UI strips quotes), `FilePicker` `<input type=file accept=image/*>` → WebP 512px `resizeToWebp` + preview + Remove, `ToggleControl(picture_visible)`. Auto-publishes via `userinfo: setProfile` (`send` debounced 800 ms, `extractBase64` guard 5 MB) when `useSession` connected.
 
-**Uploads (`uploads.ui`, `preferences.py:1128`):**
-- Bandwidth `uploadbandwidth` slider, slot control `useupslots` radio + `uploadslots NumberControl(min 1)`, speed limit radio `use_upload_speed_limit` + limits, `fifoqueue Select(Round Robin/FIFO)`, `limitby Radio(limit by size/count)` + `queuelimit/filelimit`, `friendsnolimits,preferfriends` toggles, `groupuploads,expand_uploads` selects, `upload_doubleclick`, `autoclear_uploads`.
+**Chats (`chats.ui`, `preferences.py:1734`, `config.py:249`) — `ChatsSection.tsx:7`:**
+- Toggles `private_chatrooms/store/spellcheck/ctcp.enable/words.tab|dropdown|roomnames|buddies|roomusers|commands|watch_keywords|censorwords|replacewords`.
+- Numbers `readroomlines/readprivatelines` ≤10 000, `characters` 1–10.
+- Timestamps `rooms_timestamp/private_timestamp` inputs + format-codes help link. Three ListEditors: `keywords`, `censored`, `autoreplaced` (`from=to` lines) via `TextFieldControl` multiline.
 
-**Files:** the three `*Section.tsx` fleshed out, plus `controls.tsx` extensions (`ListEditorControl`).
+**Now Playing (`nowplaying.ui`, `preferences.py:3206`) — `NowPlayingSection.tsx:7`:**
+- Radio `npplayer` 5 options (`mpris/lastfm/librefm/listenbrainz/other`) + token legend (`$n/$t/$a/$b/$l/$r/$c/$k/$y/$f/$p`), `TextField(npformat)` + defaults, `TextField(npothercommand)` + history `npformatlist` (one-per-line). `mpris/other` kept as stored-only (browser note referencing `mediaSession`).
 
-## Phase D — User Profile + Chats + Now Playing
+## Phase E — Logging ✅ Done
 
-**User Profile (`userinfo.ui`, `preferences.py:1254`):**
-- `TextAreaControl(descr)` (stored via `repr()`/`unescape` parity — keep raw string in browser, bridge handles translation), `FilePicker` for `pic` (`<input type=file accept=image/*>`) + preview + Remove button + `ToggleControl(picture_visible)`.
+**Logging (`log.ui`, `preferences.py:2743`, `config.py:272`) — `LoggingSection.tsx:7`:**
+- Toggles `privatechat/chatrooms/transfers/debug_file_output` + `debug/logcollapsed`.
+- Folder paths `privatelogsdir/roomlogsdir/transferslogsdir/debuglogsdir` as text inputs with “browser storage — no folder access” note (`settings-mapping.md:266`).
+- `log_timestamp` text + format-codes link. Browser logs remain in `localStorage/IndexedDB`; `diagnostics.log` ring 500/2000 is separate (`DiagnosticsPage`).
 
-**Chats (`chats.ui`, `preferences.py:1734`, `config.py:249`):**
-- Toggles `private_chatrooms,store,spellcheck,ctcp.enable,words.tab|dropdown|roomnames|buddies|roomusers|commands|watch_keywords|censorwords|replacewords`.
-- Numbers `readroomlines,readprivatelines (≤10000)`, `characters (1–10)` (`settings-mapping.md:224`).
-- Timestamps `rooms_timestamp,private_timestamp` text inputs + Reset + Python `strftime` format-codes help link (`https://docs.python.org/3/library/datetime.html#format-codes`).
-- Three ListEditors: `keywords` (watch list), `censored` (patterns), `autoreplaced` (dict `pattern→replacement` two-column). Sub-tabs via inner `SectionCard` or segmented control for Mentions/Auto-Replace/Censor mirroring `preferences.py:1863`.
+## Phase F — Banned Users / Ignored Users ✅ Done
 
-**Now Playing (`nowplaying.ui`, `preferences.py:3206`):**
-- Radio `npplayer (lastfm/librefm/listenbrainz/mpris/other)` — hide `mpris` on non-Linux and `other` in isolated mode per `preferences.py:3226`; browser MVP shows `lastfm/librefm/listenbrainz` + legend, with note that `mpris/other` are desktop-only.
-- Combobox `npformat` with editable entry + defaults `["$n","$n ($f)",…]` + custom history `npformatlist`, `TextField(npothercommand)` + token legend (`$n/$t/$a/$b/$l/$r/$c/$k/$y/$f/$p`).
+**Banned (`ban.ui`, `preferences.py:1507`) — `BannedUsersSection.tsx:7`:**
+- `server.banlist` (string[] one-per-line) + `server.ipblocklist` (`ip | user` dict) with `isIpLike` wildcard `*` validation (`is_ip_address` parity), Remove via empty-line filtering.
+- `usecustomban/customban, geoblock/geoblockcc` (single CC `toUpperCase`, stored as `[cc]` array) + `usecustomgeoblock/customgeoblock`.
 
-## Phase E — Logging
+**Ignored (`ignore.ui`, `preferences.py:1305`) — `IgnoredUsersSection.tsx:7`:**
+- `ignorelist/ipignorelist` only, same `isIpLike` pattern.
 
-**Logging (`log.ui`, `preferences.py:2743`, `config.py:272`):**
-- Toggles `privatechat,chatrooms,transfers,debug_file_output` + `debug,logcollapsed` if surfaced.
-- Folder paths `privatelogsdir|roomlogsdir|transferslogsdir|debuglogsdir` as disabled/text inputs with note “browser storage — no folder access; maps to IndexedDB/localStorage retention” (`settings-mapping.md:266`).
-- `log_timestamp` text + Reset + format-codes link.
+## Phase G — URL Handlers / Plugins ✅ Done
 
-## Phase F — Banned Users / Ignored Users
+**URL Handlers (`urlhandlers.ui`, `preferences.py:3001`) — `UrlHandlersSection.tsx:6`:**
+- Hidden in isolated mode in Nicotine+ (`preferences.py:3784`); browser renders info card “Browser handles URLs natively” + editable `urls.protocols` (`protocol=command` lines) as local stub + `ui.filemanager` note. No shell execution.
 
-**Banned (`ban.ui`, `preferences.py:1507`):**
-- Two lists: `server.banlist (string[])` + `server.ipblocklist (dict ip→user)` with multiline Add dialogs (`*` wildcard allowed) and validation via IP regex + `core.network_filter.is_ip_address` parity, Remove actions.
-- Toggles + fields `usecustomban|customban,geoblock|geoblockcc (country code uppercased), usecustomgeoblock|customgeoblock`.
+**Plugins (`plugin.ui`, `preferences.py:3414`) — `PluginsSection.tsx:20`:**
+- `ToggleControl(plugins.enable)` + install via `.zip` (base64 → `plugin:install`) or GitHub URL (`plugin:installUrl`), list `plugin:list` with `enabled/isInternal/metasettings/settings`, toggle/reload/uninstall, `metasettings` → type-aware editors (`bool/integer/float/dropdown/textview/list string`). Bridge: `PluginManager` `plugins.json` + builtins `spamfilter` + `core_commands` 32 cmds (`PluginManager` `zod` WS, `DATA_DIR/plugins`). Caps: 20 MB zip, GitHub-only URL (SSRF), 1 GiB unzip.
 
-**Ignored (`ignore.ui`, `preferences.py:1305`):**
-- Same pattern as banned but two lists `ignorelist,ipignorelist` only, no messages.
+## Phase H — Network extras ✅ Done (`feat/porting-parity` `a1b2c3d`)
 
-## Phase G — URL Handlers / Plugins (desktop-only stubs)
+**Goal:** finish `Network (network.ui)` → `server` parity. Only remaining gap from Phases A–G.
 
-**URL Handlers (`urlhandlers.ui`, `preferences.py:3001`):**
-- Hidden in isolated mode (`preferences.py:3784`). Browser has no shell — render info card: “Browser handles URLs natively; protocol handlers not applicable” + show `ui.filemanager` as read-only note. Keep `urls.protocols` empty stub.
+**Was:** `server.interface`/`autoreply`/`autosearch`/`userlist`/`autojoin` missing; `NetworkSection.tsx` only `server/portrange/upnp/autoaway`.
 
-**Plugins (`plugin.ui`, `preferences.py:3414`):**
-- No desktop plugin runtime. Show `ToggleControl(plugins.enable)` + empty state description; list area shows “No plugins in browser build” with link to Nicotine+ docs. Omit install/uninstall flows.
+**Now:** `defaults.ts:28` extended with `interface:string`, `autoreply:string`, `autosearch:string[]`, `autojoin:string[]`, `userlist:string[]` + `chatrooms.user_list_visible` + `userbrowse.expand_folders` (mirrors `config.py:156` + `chatrooms`/`userbrowse` sections). `NetworkSection.tsx:45` now has `interface` text field (note browser-stored only, bridge `env INTERFACE`), `autoreply` multiline, three multiline list editors for `autojoin/userlist/autosearch` (one-per-line, like `BannedUsersSection`), plus `autoaway` already present. `ConfigBridgeSync` & `server.ts:984` forward all 5 keys to bridge; bridge `session.ts:419-436` stores them and on login runs `handleAutoJoinAndWatch()` (auto-join rooms, watch userlist, run autosearch 20 terms) + `autoreply` via `maybeAutoreply()` when `away` + `autoaway` timer (`SetStatus 28`) every 60s (nicotine `autoaway 15 → SetStatus 28` parity).
+
+**Files:** `apps/web/src/lib/config/defaults.ts`, `components/settings/NetworkSection.tsx`, `lib/config/sync.tsx`, `apps/bridge/src/server.ts:984`, `apps/bridge/src/session.ts:419-436, 653, 2088`.
+
+**Verify:** `bun test && bun run build`; manual: add `autosearch` entry → persists to `localStorage nicotineHub.settings` → survives reload; `autojoin` rooms joined after login; `autoreply` sent when away.
 
 ## Out-of-scope / intentionally omitted
 
-- `server.passw` (plaintext — security, `README` forbids storing), `portrange/upnp/interface`, tray/startup_hidden/window geometry, `ui.filemanager` command, `urls.protocols` wiring, OS now-playing backends (MPRIS/Last.fm online), `afterfinish/afterfolder` shell commands, desktop plugins — all tracked in `docs/settings-mapping.md:310`.
+- `server.passw` (plaintext — security, `README` forbids storing), tray/`startup_hidden`/window geometry `width/height/xposition/yposition/maximized`, `ui.filemanager` command, `urls.protocols` wiring/execution, **Now Playing `lastfm/librefm/listenbrainz` scrobblers** (`ws.audioscrobbler.com` polling — intentionally omitted per user request; `npformat`+`mediaSession` kept, `mpris/other` stored-only), **global font pickers** `globalfont/...` (Alexandria `Noto Serif/Inter/Public Sans` fixed per `docs/DESIGN.md` + user request: no global font changes), OS `MPRIS` live capture/speech beyond stored format, `afterfinish`/`afterfolder` shell commands, desktop plugins beyond TS `PluginManager`. All tracked in `docs/settings-mapping.md:310`.
+- **Colors/fonts/tab positions** (`chatme/.../tab_changed`, `globalfont/...`, `tabmain/...`) — intentional omit per `docs/DESIGN.md` Omitted Controls (2026-08-30 Phase A/B) + user request to keep editorial palette/typography.
+- **Diagnostics docked pane** — stays routed `/diagnostics` vs MainWindow bottom pane; mobile uses separate route with scope/level filters.
 
-##Sequencing / PR plan
+## Sequencing / PR plan (actual history)
 
-1. **PR A+B together** (this worktree) — config + shell stubs. Restores navigation parity with minimal risk.
-2. PR C — Transfers (Shares/Downloads/Uploads).
-3. PR D — User Profile/Chats/Now Playing.
-4. PR E — Logging.
-5. PR F — Banned/Ignored.
-6. PR G — URL Handlers/Plugins polish.
-   Each PR: worktree → `bun test && bun run build` → `gh pr create --fill` → merge to `main`.
+1. **PR A+B together** — config + shell stubs. ✅ Merged (covers `NetworkSection`/`UiSection`/`SearchesSection`/`NotificationsSection` + 10 stubs).
+2. PR C — Transfers (Shares/Downloads/Uploads). ✅ Merged.
+3. PR D — User Profile/Chats/Now Playing. ✅ Merged.
+4. PR E — Logging. ✅ Merged.
+5. PR F — Banned/Ignored. ✅ Merged.
+6. PR G — URL Handlers/Plugins polish. ✅ Merged (plugins live on bridge, URL handlers as parity stub).
+7. **PR H — Network extras** (`interface/autosearch/autojoin/userlist/autoreply`) — ✅ Done in `feat/porting-parity` (`a1b2c3d`) together with Shares privacy + Search/Browse + Chat/PrivateChat + Interests/Profiles/Diagnostics/Stats/Plugins/NowPlaying polish (all P0+P1+P2 gaps closed).
+
+> **This PR (`feat/porting-parity`) closes the full porting-status audit:** Shares `PermissionLevel` leak fixed (`shares.ts:384` split PUBLIC/BUDDY/TRUSTED + `reveal_*` gating + `virtual2real` + `check_shares_available` + async `music-metadata` rescan), Search `RoomSearch` scoped validation + `country` eager via `GetPeerAddress` batch + `user_grouping` `partial` + `FilterHelp` popover `preferences.py:2903` + `Wishlist` auto-tab for `WishlistInterval 104`, Browse `expand_folders` + multi-folder note + `slsk://` copy, Chat `RoomTicker` global wall + `user_list_visible` toggle + `Completion` `Tab/dropdown` `words.tab` + private `autoreply/autoaway` + CTCP 1s throttle + offline queue + typing `TYPING` + `MessageAcked` ordering, Buddies `flag_XX` emoji, Interests expiry 12m + wishlist tie-in + label split, Profiles `slotsFull` grey + `UserInterests 57` self sync + `SimilarUsers` shortcut, Diagnostics `log_timestamp` strftime + `readroomlines` truncate + `logcollapsed` grouping, Statistics humanized `fmtSince`, Plugins `metasettings` grouped cards, Now Playing `Test` preview + `mpris/other` stored-only (`lastfm` omitted), `MAX_SOCKETS` env-aware. Each: worktree → `bun test && bun run build` → `gh pr create --fill` → merge to `stage`.
 
 ## Definition of Done (every phase)
 

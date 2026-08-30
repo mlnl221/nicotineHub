@@ -17,7 +17,7 @@ export default function ChatRoomPage() {
       // navigate to main chat with room active via query param hack? For now push to /chat and rely on shared state.
       // We store desired room in sessionStorage so ChatRoomsPage can pick it up.
       try {
-        sessionStorage.setItem("nicotine.activeRoom", room);
+        sessionStorage.setItem("nicotineHub.activeRoom", room);
       } catch {}
       router.replace("/chat");
     }

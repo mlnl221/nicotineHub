@@ -297,6 +297,59 @@ export interface DemoPrivateMessage {
   isSelf: boolean;
 }
 
+export function mockStats(): import("@/lib/statistics").StatsData {
+  const nowSec = Math.floor(Date.now() / 1000);
+  // Deterministic demo stats — mirrors pynicotine/transfers.py:Statistics shape
+  return {
+    since_timestamp: nowSec - 86400 * 17, // ~17 days ago
+    started_downloads: 142,
+    completed_downloads: 128,
+    downloaded_size: 12_842_000_000, // ~12 GB
+    started_uploads: 89,
+    completed_uploads: 84,
+    uploaded_size: 7_310_000_000, // ~7.3 GB
+  };
+}
+
+export function mockSessionStats(): import("@/lib/statistics").StatsData {
+  const nowSec = Math.floor(Date.now() / 1000);
+  return {
+    since_timestamp: nowSec - 3600 * 3, // session ~3h
+    started_downloads: 7,
+    completed_downloads: 6,
+    downloaded_size: 842_000_000, // ~842 MB
+    started_uploads: 3,
+    completed_uploads: 3,
+    uploaded_size: 310_000_000,
+  };
+}
+
+export function mockDiagnosticsEntries(): import("@/lib/protocol").DiagEntry[] {
+  const now = Date.now();
+  const iso = (offMs: number) => new Date(now - offMs).toISOString();
+  return [
+    { ts: iso(1000 * 60 * 2), level: "info", scope: "server", msg: "Connected to server.slsknet.org:2242", meta: { user: "demo" } },
+    { ts: iso(1000 * 60 * 1 + 500), level: "info", scope: "system", msg: "Demo session started", meta: { mode: "demo", user: "demo" } },
+    { ts: iso(1000 * 45), level: "debug", scope: "search", msg: "Search finished", meta: { query: "linux iso", results: 24 } },
+    { ts: iso(1000 * 30), level: "info", scope: "chat", msg: "Joined room", meta: { room: "Jazz" } },
+    { ts: iso(1000 * 18), level: "debug", scope: "transfer", msg: "Download queued", meta: { user: "jazzcat", file: "Midnight Groove - Blue Note Session [FLAC].flac" } },
+    { ts: iso(1000 * 12), level: "info", scope: "transfer", msg: "Transfer progress", meta: { id: "jazzcat::...", progress: "44%", speed: "1.1 MB/s" } },
+    { ts: iso(1000 * 6), level: "warn", scope: "peer", msg: "Peer connection retry", meta: { user: "vinyl_hunter", attempt: 2 } },
+    { ts: iso(1000 * 2), level: "info", scope: "bridge", msg: "Diagnostics — demo logs (offline, no bridge)", meta: { entries: 8 } },
+  ];
+}
+
+export function mockDiagnosticsHealth(): import("@/lib/protocol").DiagnosticsHealth {
+  return {
+    ts: new Date().toISOString(),
+    uptime: 3600 * 3 + 42, // 3h +42s
+    port: 8787,
+    listenPort: 62904,
+    dataDir: "/data (demo — ephemeral)",
+    tokenAuth: false,
+  };
+}
+
 export function mockPrivateConversations(): Record<string, DemoPrivateMessage[]> {
   const now = Date.now();
   return {

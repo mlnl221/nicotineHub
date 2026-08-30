@@ -35,6 +35,13 @@ export interface Settings {
     ignorelist: string[];
     ipblocklist: Record<string, string>;
     ipignorelist: Record<string, string>;
+    portrange: [number, number];
+    upnp: boolean;
+    interface: string;
+    autoreply: string;
+    autosearch: string[];
+    autojoin: string[];
+    userlist: string[];
   };
   ui: {
     dark_mode: boolean;
@@ -49,6 +56,8 @@ export interface Settings {
     tab_select_previous: boolean;
     buddylistinchatrooms: "tab" | "chatrooms" | "always";
     exitdialog: number;
+    modes_visible: Record<string, boolean>;
+    modes_order: string[];
   };
   notifications: {
     notification_window_title: boolean;
@@ -181,12 +190,20 @@ export interface Settings {
   ctcp: {
     enable: boolean;
   };
+  chatrooms: {
+    user_list_visible: boolean;
+  };
+  userbrowse: {
+    expand_folders: string;
+  };
 }
 
 export const DEFAULT_SERVER_HOST = "server.slsknet.org";
 export const DEFAULT_SERVER_PORT = 2242;
 
 // Mirrors pynicotine/config.py defaults (browser-relevant subset)
+export const DEFAULT_LISTEN_PORT = 62904;
+
 export const defaults: Settings = {
   server: {
     server: { host: DEFAULT_SERVER_HOST, port: DEFAULT_SERVER_PORT },
@@ -198,6 +215,13 @@ export const defaults: Settings = {
     ignorelist: [],
     ipblocklist: {},
     ipignorelist: {},
+    portrange: [DEFAULT_LISTEN_PORT, DEFAULT_LISTEN_PORT],
+    upnp: true,
+    interface: "",
+    autoreply: "",
+    autosearch: [],
+    autojoin: [],
+    userlist: [],
   },
   ui: {
     dark_mode: false,
@@ -212,6 +236,18 @@ export const defaults: Settings = {
     tab_select_previous: true,
     buddylistinchatrooms: "tab",
     exitdialog: 1,
+    modes_visible: {
+      search: true,
+      browse: true,
+      downloads: true,
+      uploads: true,
+      chat: true,
+      privateChat: true,
+      buddies: true,
+      interests: true,
+      profile: true,
+    },
+    modes_order: ["search", "browse", "downloads", "uploads", "chat", "privateChat", "buddies", "interests", "profile"],
   },
   notifications: {
     notification_window_title: true,
@@ -367,5 +403,11 @@ export const defaults: Settings = {
   },
   ctcp: {
     enable: true,
+  },
+  chatrooms: {
+    user_list_visible: true,
+  },
+  userbrowse: {
+    expand_folders: "all",
   },
 };

@@ -10,27 +10,31 @@ export function BrowseTabs() {
       {tabs.map((tab) => {
         const active = tab.id === activeId;
         return (
-          <div
+          <button
             key={tab.id}
-            className={`group flex shrink-0 snap-start items-center gap-1.5 rounded-full px-3 py-1.5 font-label text-xs transition-colors min-h-9 ${
-              active ? "bg-primary-container text-on-primary-container" : "bg-surface-container-lowest text-on-surface-variant ghost-border"
+            type="button"
+            onClick={() => setActive(tab.id)}
+            className={`group flex shrink-0 snap-start items-center gap-1.5 rounded-full px-3 py-1.5 font-label text-xs transition-colors min-h-9 text-left cursor-pointer ${
+              active ? "bg-primary-container text-on-primary-container" : "bg-surface-container-lowest text-on-surface-variant ghost-border hover:bg-surface-container-low"
             }`}
           >
-            <span className="material-symbols-outlined text-[14px] opacity-70 shrink-0">folder_managed</span>
-            <button type="button" onClick={() => setActive(tab.id)} className="max-w-[28vw] truncate whitespace-nowrap min-h-[28px] flex items-center gap-1">
+            <span className="material-symbols-outlined text-[14px] opacity-70 shrink-0 pointer-events-none">folder_managed</span>
+            <span className="max-w-[28vw] truncate whitespace-nowrap min-h-[28px] flex items-center gap-1 pointer-events-none">
               <span className="truncate">{tab.username}</span>
               {tab.loading ? <span className="ml-1 animate-pulse">•</span> : null}
               {!tab.loading && tab.folders.length ? <span className="opacity-60">({tab.folders.length})</span> : null}
-            </button>
-            <button
-              type="button"
+            </span>
+            <span
+              role="button"
+              tabIndex={0}
               aria-label="Close browse"
-              onClick={(e) => { e.stopPropagation(); closeBrowse(tab.id); }}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); closeBrowse(tab.id); }}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); closeBrowse(tab.id); } }}
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-on-surface-variant/70 hover:text-error hover:bg-surface-container-high -mr-1"
             >
               <span className="material-symbols-outlined text-[14px]">close</span>
-            </button>
-          </div>
+            </span>
+          </button>
         );
       })}
     </div>

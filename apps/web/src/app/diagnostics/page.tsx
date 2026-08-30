@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
@@ -10,6 +11,9 @@ import { BottomNav } from "@/components/mobile/BottomNav";
 import type { DiagEntry, DiagLevel, DiagnosticsHealth } from "@/lib/protocol";
 import { PortChecker } from "@/components/PortChecker";
 import { StatisticsPanel } from "@/components/StatisticsPanel";
+import { useConfig } from "@/lib/config/provider";
+import { formatStrftime } from "@/lib/chatFormat";
+import { isDemo } from "@/lib/demo";
 
 const LEVELS: DiagLevel[] = ["debug", "info", "warn", "error"];
 const LEVEL_COLOR: Record<DiagLevel, string> = {
@@ -19,9 +23,10 @@ const LEVEL_COLOR: Record<DiagLevel, string> = {
   error: "text-error",
 };
 
-function formatTime(iso: string): string {
+function formatTime(iso: string, fmt?: string): string {
   try {
     const d = new Date(iso);
+    if (fmt && fmt !== "%x %X") return formatStrftime(d.getTime(), fmt);
     return d.toISOString().slice(11, 19) + "." + String(d.getMilliseconds()).padStart(3, "0");
   } catch { return iso; }
 }
@@ -40,9 +45,9 @@ function HealthCard({ title, icon, children }: { title: string; icon: string; ch
 
 export default function DiagnosticsPage() {
   const { state, send, subscribe } = useSession();
+  const { settings } = useConfig();
   const router = useRouter();
-  let transfersApi: ReturnType<typeof useTransfers> | null = null;
-  try { transfersApi = useTransfers(); } catch { transfersApi = null; }
+  const transfersApi = useTransfers();
 
   const [health, setHealth] = useState<DiagnosticsHealth | null>(null);
   const [healthLatency, setHealthLatency] = useState<number | null>(null);
@@ -54,8 +59,10 @@ export default function DiagnosticsPage() {
   const [autoScroll, setAutoScroll] = useState(true);
   const logRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const [bridgeUrlDisplay, setBridgeUrlDisplay] = useState("ws://localhost:8787/ws");
 
   useEffect(() => {
+    if (state.status === "idle" || state.status === "connecting") return;
     if (state.status !== "connected") router.replace("/");
   }, [state.status, router]);
 
@@ -84,13 +91,15 @@ export default function DiagnosticsPage() {
   }, [state.status, subscribe, send, levelFilter, paused]);
 
   // HTTP fallback: fetch logs directly from bridge (covers mock mode and early ws miss)
+  // Demo has no bridge — skip HTTP poll entirely, mock supplies via WS.
   useEffect(() => {
+    if (isDemo) return;
     if (state.status !== "connected") return;
     let cancelled = false;
     const fetchLogs = async () => {
       const bridgeHttpUrl = (() => {
         try {
-          const override = localStorage.getItem("nicotine.bridgeUrl");
+          const override = (localStorage.getItem("nicotineHub.bridgeUrl") ?? localStorage.getItem("nicotine.bridgeUrl"));
           if (override) {
             const u = new URL(override);
             const scheme = u.protocol === "wss:" ? "https:" : "http:";
@@ -98,8 +107,18 @@ export default function DiagnosticsPage() {
             return `${scheme}//${u.hostname}:${port}/logs?tail=500`;
           }
         } catch {}
+        const envUrl = process.env.NEXT_PUBLIC_BRIDGE_URL;
+        if (envUrl) {
+          try {
+            const u = new URL(envUrl);
+            const scheme = u.protocol === "wss:" ? "https:" : "http:";
+            const port = u.port || "8787";
+            return `${scheme}//${u.hostname}:${port}/logs?tail=500`;
+          } catch {}
+        }
         const scheme = window.location.protocol === "https:" ? "https:" : "http:";
-        return `${scheme}//${window.location.hostname}:8787/logs?tail=500`;
+        const port = window.location.port === "3001" ? "8789" : window.location.port === "3002" ? "8790" : "8787";
+        return `${scheme}//${window.location.hostname}:${port}/logs?tail=500`;
       })();
       // worktree bridge is on 8788, but http fetch above derives from bridgeUrl or hostname:8787
       // if bridgeUrl override points to 8788, we will use it
@@ -125,12 +144,13 @@ export default function DiagnosticsPage() {
 
   // poll health via HTTP if WS doesn't supply
   useEffect(() => {
+    if (isDemo) return;
     if (state.status !== "connected") return;
     let timer: ReturnType<typeof setInterval>;
     const fetchHealth = async () => {
       const bridgeUrl = (() => {
         try {
-          const override = localStorage.getItem("nicotine.bridgeUrl");
+          const override = (localStorage.getItem("nicotineHub.bridgeUrl") ?? localStorage.getItem("nicotine.bridgeUrl"));
           if (override) {
             try {
               const u = new URL(override);
@@ -141,8 +161,18 @@ export default function DiagnosticsPage() {
             } catch { return null; }
           }
         } catch {}
+        const envUrl = process.env.NEXT_PUBLIC_BRIDGE_URL;
+        if (envUrl) {
+          try {
+            const u = new URL(envUrl);
+            u.searchParams.delete("token");
+            const scheme = u.protocol === "wss:" ? "https:" : "http:";
+            return `${scheme}//${u.hostname}:${u.port || "8787"}/health?json=1`;
+          } catch {}
+        }
         const scheme = window.location.protocol === "https:" ? "https:" : "http:";
-        return `${scheme}//${window.location.hostname}:8787/health?json=1`;
+        const port = window.location.port === "3001" ? "8789" : window.location.port === "3002" ? "8790" : "8787";
+        return `${scheme}//${window.location.hostname}:${port}/health?json=1`;
       })();
       if (!bridgeUrl) return;
       const start = performance.now();
@@ -156,7 +186,7 @@ export default function DiagnosticsPage() {
             ts: data.ts || new Date().toISOString(),
             uptime: data.uptime || prev?.uptime || 0,
             port: data.port || 8787,
-            listenPort: data.listenPort || 2234,
+            listenPort: data.listenPort || 62904,
             dataDir: data.dataDir || "/data",
             tokenAuth: !!data.tokenAuth,
           }));
@@ -186,6 +216,15 @@ export default function DiagnosticsPage() {
     }
     return true;
   });
+  const isCollapsed = settings.logging.logcollapsed ?? true;
+  const grouped = isCollapsed ? (() => {
+    const m = new Map<string, DiagEntry[]>();
+    for (const e of filtered) {
+      if (!m.has(e.scope)) m.set(e.scope, []);
+      m.get(e.scope)!.push(e);
+    }
+    return Array.from(m.entries());
+  })() : null;
 
   const handleCopy = useCallback(async () => {
     const text = filtered.map((e) => `[${e.ts}] ${e.level.toUpperCase()} [${e.scope}] ${e.msg}${e.meta ? " " + JSON.stringify(e.meta) : ""}`).join("\n");
@@ -225,32 +264,46 @@ export default function DiagnosticsPage() {
     };
   }, [state.status, state.user, handleBrowserLog]);
 
-  if (state.status !== "connected") return null;
-
-  const bridgeUrlDisplay = (() => {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     try {
-      const v = localStorage.getItem("nicotine.bridgeUrl");
-      if (v) return v.replace(/token=[^&]+/, "token=***");
+      const v = (window.localStorage.getItem("nicotineHub.bridgeUrl") ?? window.localStorage.getItem("nicotine.bridgeUrl"));
+      if (v) { setBridgeUrlDisplay(v.replace(/token=[^&]+/, "token=***")); return; }
     } catch {}
-    return `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:8787/ws`;
-  })();
+    if (isDemo) { setBridgeUrlDisplay("demo (offline — no bridge)"); return; }
+    try {
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      setBridgeUrlDisplay(`${proto}//${window.location.hostname}:8787/ws`);
+    } catch {}
+  }, []);
 
-  const stats = transfersApi?.stats;
+  if (state.status !== "connected") {
+    if (state.status === "idle" || state.status === "connecting") {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-surface-dim dark:bg-inverse-surface">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      );
+    }
+    return null;
+  }
+
+  const stats = transfersApi.stats;
 
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Diagnostics" />
-      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <div className="pointer-events-none absolute inset-0 opacity-20" style={{ background: "radial-gradient(circle at 50% 0%, rgba(51,102,204,0.12) 0%, transparent 60%)" }} />
         <header className="relative z-10 hidden md:flex w-full items-center justify-between px-4 py-3 md:px-10 md:py-6">
           <div>
             <h1 className="font-headline text-2xl font-light tracking-tight text-on-surface dark:text-inverse-primary">Diagnostics</h1>
             <p className="font-body text-xs text-on-surface-variant dark:text-outline">System diagnostics and connection health — live logs (500 lines, persistent).</p>
           </div>
-          <a href="/search" className="hidden items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant transition-colors hover:text-primary dark:text-outline sm:flex">
+          <Link href="/search" className="hidden items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant transition-colors hover:text-primary dark:text-outline sm:flex">
             <span className="material-symbols-outlined text-[16px]">arrow_back</span> Back to search
-          </a>
+          </Link>
         </header>
 
         <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 md:gap-6 px-4 pb-6 md:px-10 md:pb-8">
@@ -267,7 +320,7 @@ export default function DiagnosticsPage() {
                 {healthLatency !== null && <span className="text-on-surface-variant">· {healthLatency} ms</span>}
               </div>
               <div className="break-all text-[11px] text-on-surface-variant">{bridgeUrlDisplay}</div>
-              <div>Port {health?.port ?? 8787} · Listen {health?.listenPort ?? 2234} {health?.tokenAuth ? "· token auth" : "· open"}</div>
+              <div>Port {health?.port ?? 8787} · Listen {health?.listenPort ?? 62904} {health?.tokenAuth ? "· token auth" : "· open"}</div>
               <div className="text-[11px]">Uptime {health ? `${Math.floor(health.uptime)}s` : "—"} · {health ? new Date(health.ts).toLocaleString() : "—"}</div>
             </HealthCard>
             <HealthCard title="Soulseek" icon="cloud">
@@ -280,9 +333,9 @@ export default function DiagnosticsPage() {
                 <>
                   <div>↓ {((stats.downloadSpeed||0)/1024).toFixed(1)} KB/s · ↑ {((stats.uploadSpeed||0)/1024).toFixed(1)} KB/s</div>
                   <div>Active ↓ {stats.activeDownloads} ↑ {stats.activeUploads} · Queued ↓ {stats.queuedDownloads} ↑ {stats.queuedUploads}</div>
-                  <div className="text-[11px] text-on-surface-variant">Total {transfersApi?.transfers.length ?? 0} tracked</div>
+                  <div className="text-[11px] text-on-surface-variant">Total {transfersApi.transfers.length} tracked</div>
                 </>
-              ) : <span className="text-on-surface-variant">No stats yet</span>}
+              ) : <span className="text-on-surface-variant">No stats yet {isDemo ? "· demo offline" : ""}</span>}
             </HealthCard>
           </div>
 
@@ -333,9 +386,26 @@ export default function DiagnosticsPage() {
             >
               {filtered.length === 0 ? (
                 <div className="py-8 text-center font-body text-xs text-on-surface-variant dark:text-outline">No logs yet — logs appear here in real time (bridge + browser). Try a search or download.</div>
+              ) : isCollapsed && grouped ? (
+                grouped.map(([scope, entries]) => (
+                  <details key={scope} open className="mb-2">
+                    <summary className="cursor-pointer font-semibold text-xs uppercase tracking-widest text-on-surface-variant">{scope} — {entries.length}</summary>
+                    <div className="mt-1 space-y-1">
+                      {entries.map((e, i) => (
+                        <div key={i} className="flex gap-2 whitespace-pre-wrap break-words">
+                          <span className="shrink-0 text-on-surface-variant dark:text-outline">{formatTime(e.ts, settings.logging.log_timestamp)}</span>
+                          <span className={`shrink-0 font-semibold uppercase ${LEVEL_COLOR[e.level]}`}>{e.level}</span>
+                          <span className="shrink-0 rounded bg-surface-container-high px-1 py-0 dark:bg-surface-variant">{e.scope}</span>
+                          <span className="text-on-surface dark:text-inverse-on-surface">{e.msg}</span>
+                          {e.meta && <span className="text-on-surface-variant dark:text-outline">{JSON.stringify(e.meta)}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                ))
               ) : filtered.map((e, i) => (
                 <div key={i} className="flex gap-2 whitespace-pre-wrap break-words">
-                  <span className="shrink-0 text-on-surface-variant dark:text-outline">{formatTime(e.ts)}</span>
+                  <span className="shrink-0 text-on-surface-variant dark:text-outline">{formatTime(e.ts, settings.logging.log_timestamp)}</span>
                   <span className={`shrink-0 font-semibold uppercase ${LEVEL_COLOR[e.level]}`}>{e.level}</span>
                   <span className="shrink-0 rounded bg-surface-container-high px-1 py-0 dark:bg-surface-variant">{e.scope}</span>
                   <span className="text-on-surface dark:text-inverse-on-surface">{e.msg}</span>

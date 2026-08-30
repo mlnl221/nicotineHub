@@ -13,12 +13,25 @@ function humanSize(n: number): string {
 function fmtSince(ts: number): string {
   if (!ts) return "—";
   const d = new Date(ts * 1000);
-  return d.toLocaleDateString();
+  const now = Date.now();
+  const diff = now - d.getTime();
+  const days = Math.floor(diff / (24 * 60 * 60 * 1000));
+  const hours = Math.floor(diff / (60 * 60 * 1000));
+  const date = d.toLocaleDateString();
+  if (days === 0) {
+    if (hours === 0) return `${date} — less than an hour ago`;
+    return `${date} — ${hours} hour${hours === 1 ? "" : "s"} ago`;
+  }
+  if (days === 1) return `${date} — 1 day ago`;
+  if (days < 30) return `${date} — ${days} days ago`;
+  const months = Math.floor(days / 30);
+  if (months === 1) return `${date} — 1 month ago`;
+  return `${date} — ${months} months ago`;
 }
 
 export function StatisticsPanel() {
-  const { total, session, refresh, loading } = useStatistics();
-  if (!total && !session) {
+  const { total, session, refresh, reset, loading } = useStatistics() as unknown as { total: ReturnType<typeof useStatistics>["total"]; session: ReturnType<typeof useStatistics>["session"]; refresh: () => void; reset: () => void; loading: boolean };
+  if (!total || !session) {
     return (
       <div className="glass-panel rounded-2xl p-4">
         <div className="mb-2 flex items-center justify-between">
@@ -26,16 +39,20 @@ export function StatisticsPanel() {
           <button onClick={refresh} disabled={loading} className="rounded-lg bg-surface-container-high px-3 py-1 text-xs">{loading ? "…" : "Refresh"}</button>
         </div>
         <p className="text-xs text-on-surface-variant">No statistics yet — connect to the bridge to load.</p>
+        {loading && <p className="mt-2 text-[11px] text-on-surface-variant">Loading…</p>}
       </div>
     );
   }
-  const t = total!;
-  const s = session!;
+  const t = total;
+  const s = session;
   return (
     <div className="glass-panel rounded-2xl p-4">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="font-label text-sm font-semibold">Statistics</h3>
-        <button onClick={refresh} disabled={loading} className="rounded-lg bg-surface-container-high px-3 py-1 text-xs">{loading ? "…" : "Refresh"}</button>
+        <div className="flex gap-2">
+          <button onClick={refresh} disabled={loading} className="rounded-lg bg-surface-container-high px-3 py-1 text-xs">{loading ? "…" : "Refresh"}</button>
+          <button onClick={() => { if (confirm("Reset all statistics? This mirrors pynicotine/transfers.py:Statistics reset.")) reset(); }} className="rounded-lg bg-error-container px-3 py-1 text-xs text-on-error-container">Reset</button>
+        </div>
       </div>
       <p className="mb-3 text-xs text-on-surface-variant">Since {fmtSince(t.since_timestamp)} — mirrors <code>pynicotine/transfers.py:Statistics</code></p>
       <div className="overflow-x-auto">

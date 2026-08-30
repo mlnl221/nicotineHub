@@ -15,11 +15,14 @@ compose.override.yaml
 
 # bun / npm
 bun.lockb
-bun.lock
 
 # logs
 *.log
 npm-debug.log*
+
+# geoip data — fetched at docker build, not committed (3.9M)
+apps/bridge/src/data/ip_country_data.csv
+apps/bridge/dist/data/ip_country_data.csv
 
 # os / editor
 .DS_Store

@@ -30,15 +30,15 @@ export function TopBar({ title = "Nicotine Hub", subtitle, showBack, backHref }:
   };
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between gap-2 bg-surface-container-lowest/80 backdrop-blur-xl border-b border-outline-variant/10 px-4 pl-[calc(1rem+env(safe-area-inset-left,0px))] pr-[calc(1rem+env(safe-area-inset-right,0px))] pt-[calc(0.75rem+env(safe-area-inset-top,0px))] pb-3 shadow-sm dark:bg-surface-container-low/80 md:hidden max-w-[100vw] overflow-hidden">
+    <header className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between gap-2 bg-surface-container-lowest/80 backdrop-blur-xl border-b border-outline-variant/10 px-4 pl-[calc(1rem+env(safe-area-inset-left,0px))] pr-[calc(1rem+env(safe-area-inset-right,0px))] pt-[calc(0.75rem+env(safe-area-inset-top,0px))] pb-3 shadow-sm dark:bg-surface-container-low/80 md:hidden max-w-full overflow-x-clip">
       <div className="flex items-center gap-2 min-w-0 flex-1">
         {showBack && backHref ? (
           <Link href={backHref} className="flex h-11 w-11 shrink-0 items-center justify-center -ml-2 rounded-full hover:bg-surface-container-high active:scale-95 transition-colors">
             <span className="material-symbols-outlined text-[20px] text-on-surface-variant">arrow_back</span>
           </Link>
         ) : (
-          <Link href="/search" className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-on-primary font-headline font-black text-sm shrink-0">
-            N
+          <Link href="/search" className="flex h-8 w-8 items-center justify-center rounded-lg bg-white p-0.5 shadow-sm ring-1 ring-black/5 shrink-0">
+            <img src="/icon-512.png" alt="" width={32} height={32} className="h-full w-full rounded-md object-contain" />
           </Link>
         )}
         <div className="min-w-0 flex-1 overflow-hidden">

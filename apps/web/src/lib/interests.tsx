@@ -4,13 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import { useSession } from "@/lib/session";
 import type { Recommendation, SimilarUser, UserInfoEvent } from "@/lib/protocol";
 
-const LIKES_KEY = "nicotine.likes";
-const HATES_KEY = "nicotine.hates";
+const LIKES_KEY = "nicotineHub.likes";
+const HATES_KEY = "nicotineHub.hates";
 
 function loadArray(key: string): string[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(key);
+    const raw = (localStorage.getItem(key) ?? localStorage.getItem(key.replace ? key.replace("nicotineHub.", "nicotine.") : key));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : [];
@@ -69,8 +69,18 @@ export function useInterests() {
       send({ type: "userinfo", action: "recommendations" });
       send({ type: "userinfo", action: "similarUsers" });
     }
+    // Expiry 12m like nicotine: auto-refresh recommendations after 12 minutes
+    const EXPIRY_MS = 12 * 60 * 1000;
+    const expiryTimer = setInterval(() => {
+      if (likes.length === 0) send({ type: "userinfo", action: "globalRecommendations" });
+      else {
+        send({ type: "userinfo", action: "recommendations" });
+        send({ type: "userinfo", action: "similarUsers" });
+      }
+    }, EXPIRY_MS);
     return () => {
       unsub();
+      clearInterval(expiryTimer);
     };
   }, [state.status, subscribe, send, likes.length, itemName]);
 

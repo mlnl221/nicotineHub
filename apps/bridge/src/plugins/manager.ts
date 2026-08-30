@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2001-2026 Nicotine+ Contributors
-// SPDX-FileCopyrightText: 2025-2026 nicotine-mobile Contributors
+// SPDX-FileCopyrightText: 2025-2026 Nicotine Hub Contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Portions based on nicotine-plus pynicotine/pluginsystem.py
 
@@ -475,34 +475,62 @@ export class PluginManager {
 
   // ---- plugin file operations ----
 
+  // helpers for safe unzip without shell
+  private async spawnUnzip(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    const proc = Bun.spawn(["unzip", ...args], { stdout: "pipe", stderr: "pipe" });
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+    return { stdout, stderr, exitCode };
+  }
+
+  private isSafeZipEntry(entry: string): boolean {
+    // Reject absolute, traversal, null bytes, Windows drive, leading slash
+    if (!entry || entry.includes("\0")) return false;
+    if (entry.startsWith("/") || entry.startsWith("\\")) return false;
+    if (/^[a-zA-Z]:[\\/]/.test(entry)) return false;
+    if (entry.split("/").some((p) => p === "..")) return false;
+    // Reject entries that would escape userPluginsDir after join
+    const resolved = resolve(join(userPluginsDir(), entry));
+    if (!resolved.startsWith(resolve(userPluginsDir()) + "/") && resolved !== resolve(userPluginsDir())) return false;
+    return true;
+  }
+
   async installPluginFromZip(zipPath: string): Promise<string | null> {
-    // mirror Python install_plugin: unzip to userPluginsDir, 1GiB cap
-    const maxSize = 1024 * 1024 * 1024;
+    const maxSize = 1024 * 1024 * 1024; // 1 GiB cap like Python
     let pluginName: string | null = null;
     let folderPrefix: string | null = null;
+    let tmpRoot: string | null = null;
     try {
-      const zipData = readFileSync(zipPath);
-      // Use unzip via Bun's unzip? Use JS zip parser minimal: rely on unzip via system or JS library
-      // For now, require unzip command or fallback to simple extraction via `unzip` if available
-      // Instead use Node's `yauzl` style: attempt to use `Bun.file` + manual? Simpler: use `unzip` shell if available
-      // We will implement via `zip` JS if available; fallback to requiring `unzip` binary via `Bun.spawn`
-      // Try using `jszip` if installed, else use `unzip`
-      const { execSync } = await import("node:child_process");
-      // list contents to find PLUGININFO
-      // Use python's zipfile behavior: find entry ending with PLUGININFO
-      // We'll use `unzip -l`
+      const stat = (() => { try { return Bun.file(zipPath); } catch { return null; } })();
+      // size guard on zip file itself (20MB already checked in server.ts, but double-check)
+      try { const { statSync } = await import("node:fs"); if (statSync(zipPath).size > 20_000_000) throw new Error("zip too large"); } catch (e) { throw e; }
+
+      // List entries safely via unzip -Z1 (names only) without shell
       let entries: string[] = [];
-      try {
-        const out = execSync(`unzip -l "${zipPath}" 2>/dev/null | awk 'NR>3 {print $4}' | head -n 200`, { encoding: "utf8" });
-        entries = out.split("\n").filter(Boolean).filter((e) => !e.startsWith("----") && !e.startsWith("Archive"));
-      } catch {
-        entries = [];
+      let totalUncompressed = 0;
+      {
+        const { stdout, exitCode } = await this.spawnUnzip(["-Z1", zipPath]);
+        if (exitCode !== 0) throw new Error("Unable to list zip (unzip failed)");
+        entries = stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+        // limit entries to prevent DoS
+        if (entries.length > 5000) throw new Error("zip has too many entries");
+        // For size cap, also get -l output (bytes)
+        const lOut = await this.spawnUnzip(["-l", zipPath]);
+        if (lOut.exitCode === 0) {
+          // Parse lines like: "  123  2021-01-01 12:00   filename"
+          for (const line of lOut.stdout.split("\n")) {
+            const m = line.match(/^\s*(\d+)\s+\d{4}-\d{2}-\d{2}/);
+            if (m) totalUncompressed += Number(m[1]) || 0;
+          }
+        }
+        if (totalUncompressed > maxSize) throw new Error(`zip uncompressed size ${totalUncompressed} exceeds 1 GiB`);
+        // Validate each entry for zip-slip before extraction
+        for (const ent of entries) {
+          if (!this.isSafeZipEntry(ent)) throw new Error(`unsafe zip entry: ${ent}`);
+        }
       }
-      // if unzip not available, try to fallback to reading via JS (simple)
-      if (entries.length === 0) {
-        // attempt jszip-like: try to use Node's zlib? For MVP, reject
-        throw new Error("Unable to list zip (unzip not available)");
-      }
+      if (entries.length === 0) throw new Error("empty zip");
       // find plugin folder prefix
       for (const ent of entries) {
         if (basename(ent) === "PLUGININFO" || basename(ent) === "plugin.json") {
@@ -517,51 +545,94 @@ export class PluginManager {
         }
       }
       if (!pluginName) {
-        // try fallback: zip contains single top folder
         const top = entries[0]?.split("/")[0];
         if (top) { pluginName = top; folderPrefix = top; }
         else pluginName = basename(zipPath, ".zip");
       }
-      if (pluginName && pluginName.includes("=")) throw new Error("Invalid plugin name");
+      if (pluginName && (pluginName.includes("=") || pluginName.includes("/") || pluginName.includes("\\") || pluginName.includes("\0"))) throw new Error("Invalid plugin name");
       if (this.isInternalPlugin(pluginName!)) throw new Error(`Plugin ${pluginName} conflicts with builtin`);
+      // sanitize pluginName
+      pluginName = pluginName!.replace(/[^a-zA-Z0-9._\-]/g, "_").slice(0, 64);
+      if (!pluginName) throw new Error("Invalid plugin name after sanitization");
+      if (folderPrefix) folderPrefix = folderPrefix.replace(/[^a-zA-Z0-9._\-]/g, "_");
 
-      // ensure size check: sum uncompressed sizes via unzip -l
-      // skip for MVP (trust)
-
-      // extract
       this.ensureDirs();
       const dest = join(userPluginsDir(), pluginName!);
-      // remove existing
       if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
       mkdirSync(dest, { recursive: true });
-      // unzip -j? we need to strip prefix
+
+      // Extract without shell: unzip -q zipPath -d tmpRoot (or dest)
       if (folderPrefix) {
-        // unzip stripping prefix: use `unzip -q -d dest` then move?
-        // Simpler: unzip to temp and move inner
-        const tmpRoot = join(userPluginsDir(), `.tmp_${pluginName}_${Date.now()}`);
+        tmpRoot = join(userPluginsDir(), `.tmp_${pluginName}_${Date.now()}`);
         mkdirSync(tmpRoot, { recursive: true });
-        execSync(`unzip -q "${zipPath}" -d "${tmpRoot}"`);
+        const ex = await this.spawnUnzip(["-q", zipPath, "-d", tmpRoot]);
+        if (ex.exitCode !== 0) throw new Error(`unzip extract failed: ${ex.stderr.slice(0, 500)}`);
+        // Validate extracted files are still inside tmpRoot and not symlinks escaping
+        const { lstatSync, readlinkSync, readdirSync: rs } = await import("node:fs");
+        const seen: string[] = [];
+        const walk = (dir: string) => {
+          for (const ent of rs(dir)) {
+            const p = join(dir, ent);
+            const st = lstatSync(p);
+            if (st.isSymbolicLink()) {
+              const target = readlinkSync(p);
+              // reject absolute or traversal symlink
+              if (target.startsWith("/") || target.includes("..")) throw new Error(`symlink escape blocked: ${ent} -> ${target}`);
+              const resolved = resolve(p, target);
+              if (!resolved.startsWith(resolve(tmpRoot!) + "/")) throw new Error(`symlink escape blocked: ${ent}`);
+              // remove symlink (don't follow)
+              rmSync(p, { force: true });
+              continue;
+            }
+            if (st.isDirectory()) walk(p);
+            else seen.push(p);
+          }
+        };
+        walk(tmpRoot);
         const inner = join(tmpRoot, folderPrefix);
         const src = existsSync(inner) ? inner : tmpRoot;
-        // move contents to dest
-        const items = readdirSync(src);
-        for (const it of items) {
+        for (const it of readdirSync(src)) {
+          // Validate item name
+          if (it.includes("/") || it.includes("\\") || it.includes("\0") || it === "..") throw new Error(`invalid entry name: ${it}`);
           const s = join(src, it);
           const d = join(dest, it);
-          execSync(`mv "${s}" "${d}"`);
+          const destResolved = resolve(d);
+          if (!destResolved.startsWith(resolve(dest) + "/") && destResolved !== resolve(dest)) throw new Error(`path traversal blocked: ${it}`);
+          // Use renameSync (no shell) — handles files and dirs
+          const { renameSync } = await import("node:fs");
+          renameSync(s, d);
         }
-        rmSync(tmpRoot, { recursive: true, force: true });
       } else {
-        execSync(`unzip -q "${zipPath}" -d "${dest}"`);
+        const ex = await this.spawnUnzip(["-q", zipPath, "-d", dest]);
+        if (ex.exitCode !== 0) throw new Error(`unzip extract failed: ${ex.stderr.slice(0, 500)}`);
+        // Post-extract symlink check
+        const { lstatSync, readlinkSync, readdirSync: rs2 } = await import("node:fs");
+        const walk2 = (dir: string) => {
+          for (const ent of rs2(dir)) {
+            const p = join(dir, ent);
+            const st = lstatSync(p);
+            if (st.isSymbolicLink()) {
+              const target = readlinkSync(p);
+              if (target.startsWith("/") || target.includes("..")) throw new Error(`symlink escape blocked: ${ent}`);
+              const resolved = resolve(p, target);
+              if (!resolved.startsWith(resolve(dest) + "/")) throw new Error(`symlink escape`);
+              rmSync(p, { force: true });
+            } else if (st.isDirectory()) walk2(p);
+          }
+        };
+        walk2(dest);
       }
 
       logger.info("bridge", `installed plugin ${pluginName}`, { pluginName });
-      // reload if was loaded
       if (this.isPluginLoaded(pluginName!)) await this.reloadPlugin(pluginName!);
       return pluginName!;
     } catch (e) {
       logger.error("bridge", `failed to install plugin`, { error: (e as Error).message });
+      // cleanup dest on failure
+      try { if (pluginName) { const d = join(userPluginsDir(), pluginName); if (existsSync(d)) rmSync(d, { recursive: true, force: true }); } } catch {}
       return null;
+    } finally {
+      if (tmpRoot) try { rmSync(tmpRoot, { recursive: true, force: true }); } catch {}
     }
   }
 
@@ -884,12 +955,32 @@ export class PluginManager {
     // Note: core_commands hidden from list; handled separately if needed
   }
 
-  // GitHub index install (download zip)
+  // GitHub index install (download zip) — homelab: only GitHub hosts, https, size/timeout capped
   async installFromUrl(url: string): Promise<string | null> {
+    const ALLOWED_HOSTS = new Set(["github.com", "raw.githubusercontent.com", "objects.githubusercontent.com", "codeload.github.com", "api.github.com", "githubusercontent.com"]);
+    // also allow subdomains like *.githubusercontent.com
+    const isAllowedHost = (h: string) => {
+      if (ALLOWED_HOSTS.has(h)) return true;
+      if (h.endsWith(".githubusercontent.com")) return true;
+      if (h.endsWith(".github.com")) return true;
+      return false;
+    };
     try {
-      const res = await fetch(url);
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:") throw new Error("only https:// URLs allowed for plugin install");
+      if (!isAllowedHost(parsed.hostname.toLowerCase())) throw new Error(`host not allowed: ${parsed.hostname} (only github.com and githubusercontent.com)`);
+      // SSRF extra: block private IPs if hostname is IP literal (github should be DNS, not IP)
+      if (/^\d+\.\d+\.\d+\.\d+$/.test(parsed.hostname) || parsed.hostname === "localhost" || parsed.hostname === "::1") throw new Error("IP literals not allowed");
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 10_000);
+      const res = await fetch(url, { redirect: "error", signal: controller.signal });
+      clearTimeout(t);
       if (!res.ok) throw new Error(`fetch ${url} -> ${res.status}`);
+      const lenHeader = res.headers.get("content-length");
+      if (lenHeader && Number(lenHeader) > 20_000_000) throw new Error("remote zip too large (max 20MB)");
       const buf = await res.arrayBuffer();
+      if (buf.byteLength > 20_000_000) throw new Error("remote zip too large (max 20MB)");
+      if (buf.byteLength === 0) throw new Error("empty response");
       const tmp = join(userPluginsDir(), `.dl_${Date.now()}.zip`);
       this.ensureDirs();
       writeFileSync(tmp, Buffer.from(buf));
@@ -897,7 +988,8 @@ export class PluginManager {
       try { rmSync(tmp, { force: true }); } catch {}
       return name;
     } catch (e) {
-      logger.error("bridge", `installFromUrl failed`, { url, error: (e as Error).message });
+      const msg = (e as Error).name === "AbortError" ? "fetch timeout (10s)" : (e as Error).message;
+      logger.error("bridge", `installFromUrl failed`, { url: String(url).slice(0, 200), error: msg });
       return null;
     }
   }

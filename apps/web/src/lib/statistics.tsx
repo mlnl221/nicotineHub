@@ -34,6 +34,13 @@ export function StatisticsProvider({ children }: { children: React.ReactNode }) 
     setTimeout(() => setLoading(false), 1200);
   }, [send, state.status]);
 
+  const reset = useCallback(() => {
+    if (state.status !== "connected") return;
+    send({ type: "statistics:reset" } as unknown as never);
+    setLoading(true);
+    setTimeout(() => setLoading(false), 800);
+  }, [send, state.status]);
+
   useEffect(() => {
     const unsub = subscribe((msg) => {
       const m = msg as unknown as { type: string; total?: StatsData; session?: StatsData };
@@ -42,19 +49,26 @@ export function StatisticsProvider({ children }: { children: React.ReactNode }) 
         if (m.session) setSessionStat(m.session);
         setLoading(false);
       }
+      if ((m as unknown as { type: string }).type === "statistics:reset:ok") {
+        // avoid calling refresh() which would capture stale closure — re-request directly
+        send({ type: "statistics:request" } as unknown as never);
+        setLoading(true);
+        setTimeout(() => setLoading(false), 1200);
+      }
     });
     return unsub;
-  }, [subscribe]);
+  }, [subscribe, send]);
 
   useEffect(() => {
     if (state.status === "connected") refresh();
-  }, [state.status, refresh]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.status]);
 
-  return <StatsContext.Provider value={{ total, session: sessionStat, refresh, loading }}>{children}</StatsContext.Provider>;
+  return <StatsContext.Provider value={{ total, session: sessionStat, refresh, reset, loading } as StatsApi & { reset: () => void }}>{children}</StatsContext.Provider>;
 }
 
 export function useStatistics() {
   const ctx = useContext(StatsContext);
   if (!ctx) throw new Error("useStatistics must be used within StatisticsProvider");
-  return ctx;
+  return ctx as StatsApi & { reset: () => void };
 }

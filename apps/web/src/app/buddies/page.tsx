@@ -1,19 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { useBuddies } from "@/lib/buddies";
+import { ContextMenu } from "@/components/ui/ContextMenu";
+import { buddyMenu } from "@/lib/context-menu/menus";
 
 export default function BuddiesPage() {
   const { state } = useSession();
   const router = useRouter();
-  const { buddies, filter, setFilter, addBuddy, removeBuddy, setTrusted, setNotify } = useBuddies();
+  const { buddies, filter, setFilter, addBuddy, removeBuddy, setTrusted, setNotify, setNote } = useBuddies();
   const [addInput, setAddInput] = useState("");
   const [noteEdit, setNoteEdit] = useState<string | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; username: string } | null>(null);
 
   useEffect(() => {
     if (state.status !== "connected") router.replace("/");
@@ -33,18 +37,25 @@ export default function BuddiesPage() {
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
-      <TopBar title="Buddies" subtitle="Trusted peers • watch status" />
-      <main className="md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <TopBar title="Buddies" subtitle={`${buddies.length} buddies • ${onlineCount} online`} />
+      <main className="md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+        <header className="hidden md:flex sticky top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
+          <div>
+            <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Buddies</h2>
+            <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">{buddies.length} buddies • {onlineCount} online • Trusted peers • watch status</p>
+          </div>
+          <div className="flex items-center gap-2 md:gap-4">
+            <Link href="/settings?tab=network#network" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Buddies settings">
+              <span className="material-symbols-outlined">settings</span>
+            </Link>
+          </div>
+        </header>
           <div className="mx-auto w-full max-w-screen-2xl flex-1 px-4 sm:px-6 py-8 md:px-10 overflow-x-hidden max-w-full">
           <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
-              <h1 className="font-headline text-4xl font-bold tracking-tight text-on-background">Buddies</h1>
-              <p className="mt-2 max-w-2xl font-body text-sm leading-relaxed text-on-surface-variant">
+              <p className="max-w-2xl font-body text-sm leading-relaxed text-on-surface-variant">
                 Manage your curated circle of trusted peers. Your buddy list is stored locally and watched for status
                 changes.
-              </p>
-              <p className="mt-1 font-label text-xs uppercase tracking-widest text-outline">
-                {buddies.length} buddies • {onlineCount} online
               </p>
             </div>
             <div className="flex gap-2 min-w-0">
@@ -102,6 +113,14 @@ export default function BuddiesPage() {
                 return (
                   <div
                     key={b.username}
+                    onDoubleClick={() => {
+                      const note = prompt(`Note for ${b.username}`, b.note ?? "");
+                      if (note !== null) setNote(b.username, note);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setMenuAnchor({ x: e.clientX, y: e.clientY, username: b.username });
+                    }}
                     className="group relative flex flex-col rounded-xl bg-surface-container-lowest p-5 shadow-[0_2px_10px_rgba(0,0,0,0.04)] ring-1 ring-outline-variant/15 transition-all hover:-translate-y-1 hover:shadow-[0_10px_40px_rgba(0,0,0,0.06)]"
                   >
                     <div className="mb-4 flex items-start justify-between">
@@ -137,7 +156,7 @@ export default function BuddiesPage() {
                     <h3 className="truncate font-headline text-base font-semibold text-on-surface">{b.username}</h3>
                     <p className="mt-1 flex items-center gap-1 font-label text-xs text-on-surface-variant">
                       <span className="material-symbols-outlined text-[14px]">{isOnline ? "public" : "schedule"}</span>
-                      {b.country ? `${b.country} • ` : ""}
+                      {b.country ? `${(() => { try { const cc = b.country!.toUpperCase(); if (cc.length !== 2) return `${cc} • `; const A = 0x1F1E6; return `${String.fromCodePoint(A + cc.charCodeAt(0) - 65, A + cc.charCodeAt(1) - 65)} ${cc} • `; } catch { return `${b.country} • `; } })()}` : ""}
                       {isOnline ? "Online" : isAway ? "Away" : b.lastSeen ? `Last seen ${b.lastSeen}` : "Offline"}
                       {b.privileged ? " • ★ Privileged" : ""}
                     </p>
@@ -162,13 +181,13 @@ export default function BuddiesPage() {
 
                     <div className="mt-4 grid grid-cols-2 gap-2">
                       <button
-                        onClick={() => (window.location.href = `/private-chat?user=${encodeURIComponent(b.username)}`)}
+                        onClick={() => router.push(`/private-chat?user=${encodeURIComponent(b.username)}`)}
                         className="flex items-center justify-center gap-1 rounded-lg bg-primary-fixed/30 py-2 font-label text-xs font-semibold text-on-primary-fixed hover:bg-primary-container hover:text-on-primary-container"
                       >
                         <span className="material-symbols-outlined text-sm">chat_bubble</span> Chat
                       </button>
                       <button
-                        onClick={() => (window.location.href = `/profile/${encodeURIComponent(b.username)}`)}
+                        onClick={() => router.push(`/profile/${encodeURIComponent(b.username)}`)}
                         className="flex items-center justify-center gap-1 rounded-lg bg-surface-container-high py-2 font-label text-xs font-semibold text-on-surface hover:bg-surface-variant"
                       >
                         <span className="material-symbols-outlined text-sm">person</span> Profile
@@ -176,7 +195,7 @@ export default function BuddiesPage() {
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-2">
                       <button
-                        onClick={() => (window.location.href = `/browse/${encodeURIComponent(b.username)}`)}
+                        onClick={() => router.push(`/browse/${encodeURIComponent(b.username)}`)}
                         className="rounded-lg bg-surface-container-low py-2 font-label text-xs font-semibold text-primary hover:bg-surface-container"
                       >
                         Browse
@@ -196,6 +215,21 @@ export default function BuddiesPage() {
         </div>
       </main>
       <BottomNav />
+      {menuAnchor ? (
+        <ContextMenu
+          x={menuAnchor.x}
+          y={menuAnchor.y}
+          items={buddyMenu(menuAnchor.username, {
+            onNote: () => {
+              const cur = buddies.find((x) => x.username === menuAnchor.username);
+              const note = prompt(`Note for ${menuAnchor.username}`, cur?.note ?? "");
+              if (note !== null) setNote(menuAnchor.username, note);
+            },
+            onRemove: () => removeBuddy(menuAnchor.username),
+          })}
+          onClose={() => setMenuAnchor(null)}
+        />
+      ) : null}
     </div>
   );
 }

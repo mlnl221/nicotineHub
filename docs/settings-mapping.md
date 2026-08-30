@@ -1,6 +1,6 @@
 # Settings Port — Mapping from Nicotine+ to Web/Mobile
 
-This document maps the Nicotine+ desktop settings system to the `nicotine_mobile` web/mobile
+This document maps the Nicotine+ desktop settings system to the `nicotineHub` web/mobile
 client. It is the authoritative reference for porting preferences. Every ported screen should
 trace back to one of the 15 preference pages below.
 
@@ -17,7 +17,7 @@ Nicotine+ stores configuration as a **two-level dictionary**: `section` → `key
 
 ```
 "sections": {
-    "server":     { "portrange": (2234,2234), "auto_connect_startup": True, ... },
+    "server":     { "portrange": (62904,62904), "auto_connect_startup": True, ... },
     "transfers":  { "downloaddir": "...", "uploadslots": 3, ... },
     "searches":   { "maxresults": 300, ... },
     ...
@@ -43,8 +43,8 @@ url-handlers, plugins. (`url-handlers` is hidden in isolated mode.)
 | `interface`        | `""`                        | string              | Text field (opt.)                                 |
 | `autosearch`       | `[]`                        | list[string]        | List editor (future)                              |
 | `autoreply`        | `""`                        | string              | Multi-line text                                   |
-| `portrange`        | `(2234,2234)`               | (min,max) ints      | Range inputs — **omit** (no inbound P2P in MVP)   |
-| `upnp`             | `True`                      | bool                | Toggle — **omit** (no P2P)                        |
+| `portrange`        | `(62904,62904)`             | (min,max) ints → single-ended `[port,port]` in `defaults.ts:207` | Number input **implemented** — Settings → Network «Listening port» (`NetworkSection.tsx:82`) persists to `DATA_DIR/listen_port` and triggers `SetWaitPort 2` + `PortMapper.setPort` + reconnect; compose maps `${LISTEN_PORT:-62904}:${LISTEN_PORT:-62904}` |
+| `upnp`             | `True`                      | bool                | **Implemented** — Toggle `NetworkSection.tsx:109` → bridge `PortMapper` (NAT-PMP → UPnP fallback, lease 43200 / renew 7200) per `docs/architecture.md:57`; disable for manual forward |
 | `auto_connect_startup` | `True`                  | bool                | Toggle                                            |
 | `userlist`         | `[]`                        | list[string]        | List editor (future)                              |
 | `banlist`          | `[]`                        | list[string]        | (see Banned Users page)                           |
@@ -238,14 +238,11 @@ Words/Mentions (completion, watching, censoring, replacement):
 | Config key     | Default  | Type       | Web/mobile component              |
 |----------------|----------|------------|-----------------------------------|
 | `npformat`     | `""`     | string     | Combobox + format tokens (`$n $t $a $b ...`) with help |
-| `npothercommand` | `""`   | string     | Text input (custom command)     |
-| `npplayer`      | `"mpris"`| string enum| Radio (lastfm/librefm/listenbrainz/mpris/other) |
+| `npothercommand` | `""`   | string     | Text input (custom command, stored-only, not executed) |
+| `npplayer`      | `"mpris"`| string enum| Radio (`mpris`/`other` stored-only; `lastfm`/`librefm`/`listenbrainz` **intentionally omitted** — see below) |
 | `npformatlist`  | `[]`    | list[string]| Saved custom formats            |
 
-**Browser limitation:** MPRIS/Last.fm/Libre.fm/ListenBrainz are desktop/cloud integrations.
-For the web client, keep the Now Playing *format* model (`npformat`) for when a soundtrack
-source exists (e.g., `navigator.mediaSession`), but **omit** the desktop player-specific
-backends initially.
+**Browser limitation — intentionally omitted per user request:** `lastfm`/`librefm`/`listenbrainz` (`ws.audioscrobbler.com` polling) are desktop/cloud scrobblers with no browser API. The web client **omits** these backends entirely (no polling, no credentials UI beyond stored `npothercommand`). Keep the Now Playing *format* model (`npformat` + `npformatlist`) for when a soundtrack source exists via `navigator.mediaSession` (`NowPlayingSync` polling 5s), and keep `mpris`/`other` as **stored-only** (not executed in browser). Token legend `$n $t $a $b $l $r $c $k $y $f $p` + `Test` preview covers parity.
 
 ### 10. Logging (`log.ui`) → section `logging`
 
@@ -310,11 +307,14 @@ retention/storage toggle rather than a filesystem path.
 ## Browser-omitted settings (no meaningful web equivalent)
 
 - Plaintext password storage (`server.passw`) — security (README already forbids storing it).
-- P2P listen port / UPnP (`server.portrange`, `upnp`) — no inbound sockets in browser/bridge MVP.
-- Tray icon / startup hidden / window geometry — desktop-only.
-- File manager command (`ui.filemanager`), URL protocol handlers (`urls.protocols`).
-- OS-level Now Playing backends (MPRIS, speech) — replaced by `mediaSession` later.
-- Desktop plugins (`plugins.*`), post-transfer shell commands (`afterfinish`, `afterfolder`).
+- Raw `interface` bind (`server.interface`) — stored locally but no effect without raw socket bind in browser; bridge may read env `INTERFACE` if set.
+- Tray icon / startup hidden / window geometry `width/height/xposition/yposition/maximized` — desktop-only.
+- File manager command (`ui.filemanager`), URL protocol handler execution (`urls.protocols` — stored as `protocol=command` lines in `UrlHandlersSection.tsx` but not executed).
+- OS-level Now Playing backends — `lastfm`/`librefm`/`listenbrainz` (`ws.audioscrobbler.com` polling) **intentionally omitted per user request** (no browser scrobbler API; `npformat`+`mediaSession` kept); `MPRIS` live capture + `other` shell kept as **stored-only** (not executed); `speech` deprecated `3.4.0`.
+- Desktop plugins shell (`plugins.enabled` list beyond `plugins.enable`) is replaced by TS `PluginManager` (`plugins.json`); post-transfer shell commands (`afterfinish`/`afterfolder`).
+- **Colors/fonts/tab positions** (`chatme/.../tab_changed`, `globalfont/...`, `tabmain/...`) — intentional omit per `docs/DESIGN.md` Omitted Controls (2026-08-30 Phase A/B) + **user request (no global font changes)** to keep Alexandria editorial palette/typography (`Noto Serif/Inter/Public Sans` fixed in `layout.tsx:56`).
+- **Diagnostics docked pane** — stays routed `/diagnostics` vs MainWindow bottom pane; mobile uses separate route with scope/level filters, not docked log view.
+- Note: `portrange`/`upnp` are **not** omitted — `LISTEN_PORT` 62904 is editable in Settings → Network (`NetworkSection.tsx:82`) via `server.portrange` + bridge `PortMapper` (`portmapper.ts` NAT-PMP → UPnP, see `docs/architecture.md`).
 
 ## Legend of future-proofing notes
 

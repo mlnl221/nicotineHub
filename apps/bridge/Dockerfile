@@ -1,5 +1,5 @@
 # ---- Bridge: Bun WebSocket + Soulseek login server ----
-FROM oven/bun:1.2 AS base
+FROM oven/bun:1.4 AS base
 WORKDIR /app
 
 # ---- deps: workspace-aware install ----
@@ -11,8 +11,13 @@ RUN bun install --frozen-lockfile
 
 # ---- builder ----
 FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
+COPY package.json bun.lock ./
+COPY apps/bridge/package.json apps/bridge/package.json
+COPY apps/web/package.json apps/web/package.json
 COPY apps/bridge apps/bridge
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/bridge/node_modules ./apps/bridge/node_modules
+COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 WORKDIR /app/apps/bridge
 RUN bun run build
 
@@ -26,6 +31,11 @@ ENV NODE_ENV=production
 ENV DATA_DIR=/data
 WORKDIR /app
 COPY --from=builder /app/apps/bridge/dist ./dist
+# GeoIP: fetch at build time (not committed — see .gitignore). Fallback to empty if offline.
+RUN mkdir -p ./dist/data && \
+    (curl -fsSL https://raw.githubusercontent.com/nicotine-plus/nicotine-plus/master/pynicotine/external/data/ip_country_data.csv -o ./dist/data/ip_country_data.csv || \
+     wget -qO ./dist/data/ip_country_data.csv https://raw.githubusercontent.com/nicotine-plus/nicotine-plus/master/pynicotine/external/data/ip_country_data.csv || \
+     echo "GeoIP fetch failed — geoblock will be no-op" && rm -f ./dist/data/ip_country_data.csv)
 COPY COPYING ./COPYING
 COPY LICENSES ./LICENSES
 COPY ATTRIBUTION.md ./ATTRIBUTION.md

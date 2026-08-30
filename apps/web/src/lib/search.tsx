@@ -95,21 +95,52 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsub = subscribe((msg) => {
       if (msg.type === "search:result") {
-        setTabs((prev) =>
-          prev.map((t) =>
-            t.id === msg.searchId ? { ...t, rows: [...t.rows, ...msg.rows], total: t.total + msg.rows.length } : t,
-          ),
-        );
+        const searchId = (msg as { searchId: string }).searchId;
+        const rows = (msg as { rows: SearchRow[] }).rows || [];
+        // Eager country fetch: trigger GetPeerAddress for responders to populate SearchRow.country via bridge cache + future peer-address country (porting-status country eager parity)
+        if (rows.length) {
+          const uniq = Array.from(new Set(rows.map((r) => r.user).filter(Boolean))).slice(0, 20);
+          for (const u of uniq) {
+            try { send({ type: "userinfo", action: "peerAddress", username: u } as unknown as never); } catch {}
+          }
+        }
+        const isWishlist = typeof searchId === "string" && searchId.startsWith("wishlist:");
+        setTabs((prev) => {
+          const exists = prev.some((t) => t.id === searchId);
+          if (isWishlist && !exists) {
+            // Auto-create wishlist tab on interval hit (needs UI tab for wishlist:*)
+            const term = searchId.split(":")[1] || searchId;
+            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [...rows], total: rows.length, filters: emptyFilters() };
+            setActiveId(searchId);
+            return [...prev, wlTab];
+          }
+          return prev.map((t) =>
+            t.id === searchId ? { ...t, rows: [...t.rows, ...rows], total: t.total + rows.length } : t,
+          );
+        });
       } else if (msg.type === "search:end") {
+        const searchId = (msg as { searchId: string }).searchId;
         setTabs((prev) =>
           prev.map((t) =>
-            t.id === msg.searchId ? { ...t, status: "ended", reason: msg.reason } : t,
+            t.id === searchId ? { ...t, status: "ended", reason: (msg as { reason: string }).reason } : t,
           ),
         );
+      } else if (msg.type === "search:start") {
+        const searchId = (msg as { searchId: string }).searchId;
+        const isWishlist = typeof searchId === "string" && searchId.startsWith("wishlist:");
+        if (isWishlist) {
+          setTabs((prev) => {
+            if (prev.some((t) => t.id === searchId)) return prev;
+            const term = searchId.split(":")[1] || searchId;
+            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [], total: 0, filters: emptyFilters() };
+            setActiveId(searchId);
+            return [...prev, wlTab];
+          });
+        }
       }
     });
     return unsub;
-  }, [subscribe]);
+  }, [subscribe, send]);
 
   const startSearch = useCallback(
     (query: string, opts?: { mode?: SearchMode; target?: string }) => {
@@ -154,9 +185,9 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         if (target) {
           buddies = target.split(",").map((s) => s.trim()).filter(Boolean);
         } else {
-          // load from localStorage nicotine.buddies (up to 100)
+          // load from localStorage nicotineHub.buddies (up to 100)
           try {
-            const raw = localStorage.getItem("nicotine.buddies");
+            const raw = (localStorage.getItem("nicotineHub.buddies") ?? localStorage.getItem("nicotine.buddies"));
             if (raw) {
               const arr = JSON.parse(raw) as Array<{ username?: string } | string>;
               buddies = arr.map((b) => typeof b === "string" ? b : b.username ?? "").filter(Boolean).slice(0, 20);
@@ -225,4 +256,8 @@ export function useSearches(): SearchApi {
   const ctx = useContext(SearchContext);
   if (!ctx) throw new Error("useSearches must be used within SearchProvider");
   return ctx;
+}
+
+export function useSearchesOptional(): SearchApi | null {
+  return useContext(SearchContext);
 }
