@@ -185,7 +185,7 @@ function defaultProfile(username: string) {
   return { username, descr: "", pic: null, totalupl: 0, queuesize: 0, slotsavail: true, uploadallowed: 1 };
 }
 
-let LISTEN_PORT = Number(process.env.LISTEN_PORT || 62904);
+let LISTEN_PORT = Number(process.env.LISTEN_PORT || 49127);
 const PORT = Number(process.env.PORT || 8787);
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || "";
 const DATA_DIR = process.env.DATA_DIR || "/data";
@@ -215,6 +215,9 @@ pluginManager.registerBuiltin("leech_detector", leechManifest as unknown as Reco
 pluginManager.start().catch((e) => logger.warn("bridge", "plugin manager start failed", { error: (e as Error).message }));
 // expose for http handlers
 (globalThis as unknown as Record<string, unknown>).__pluginManager = pluginManager;
+
+// Active Soulseek sessions across all WS connections (for global port sync)
+const activeSessions = new Set<SoulseekSession>();
 
 // ── 5-minute in-memory caches (per-process, ephemeral) ──
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -620,7 +623,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const { username, password, host, port } = result.data;
         logger.info("auth", "login attempt", { username, host: host || "server.slsknet.org", port: port || 2242 });
         // Close previous session if any
-        ws.data.session?.close();
+        if (ws.data.session) {
+          try { activeSessions.delete(ws.data.session); } catch {}
+          ws.data.session?.close();
+        }
         const session = new SoulseekSession({
           username, password, host, port, listenPort: LISTEN_PORT, profile: defaultProfile(username), dataDir: DATA_DIR,
           onFileConnection: (token, socket) => {
@@ -738,14 +744,22 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           onServerEvent: (event) => {
             if (event.type === "reconnect") pluginManager.serverConnectNotification();
             else if (event.type === "reconnect-failed") pluginManager.serverDisconnectNotification(false);
+            else if (event.type === "reconnected") pluginManager.serverConnectNotification();
             logger.info("server", "server reconnect", event as unknown as Record<string, unknown>);
             try {
               const { type: _t, ...rest } = event as unknown as Record<string, unknown> & { type: string };
-              ws.send(JSON.stringify({ type: "server:reconnect", ...(rest as Record<string, unknown>), attempt: (event as unknown as { attempt?: number }).attempt, delay: (event as unknown as { delay?: number }).delay, error: (event as unknown as { error?: string }).error }));
+              if (event.type === "reconnected") {
+                ws.send(JSON.stringify({ type: "server:reconnect", ok: true, listenPort: (event as unknown as { listenPort: number }).listenPort }));
+                // Also push fresh health so UI can update without poll
+                try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: (event as unknown as { listenPort: number }).listenPort, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE } })); } catch {}
+              } else {
+                ws.send(JSON.stringify({ type: "server:reconnect", ...(rest as Record<string, unknown>), attempt: (event as unknown as { attempt?: number }).attempt, delay: (event as unknown as { delay?: number }).delay, error: (event as unknown as { error?: string }).error }));
+              }
             } catch {}
           },
         });
         ws.data.session = session;
+        try { activeSessions.add(session); } catch {}
         // Ensure TransferManager can call back into session
         try { ws.data.transfers?.setSessionGetter(() => session as unknown as never); } catch {}
         try { pluginManager.setSessionGetter(() => session as unknown as ReturnType<PluginManager["setSessionGetter"]> extends never ? never : unknown as never); } catch {}
@@ -757,6 +771,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           })
           .catch((err: Error) => {
             logger.warn("auth", "login failed", { username, error: err.message });
+            try { activeSessions.delete(session); } catch {}
             ws.send(JSON.stringify({ type: "login:result", ok: false, error: err.message }));
           });
         return;
@@ -1081,24 +1096,36 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                 const prevPort = LISTEN_PORT;
                 LISTEN_PORT = newPort;
                 try { writeFileSync(join(DATA_DIR, "listen_port"), String(newPort)); } catch {}
+                // Also write host.env for Docker .env sync (bind-mount ./data:/data or named volume inspect)
+                try { writeFileSync(join(DATA_DIR, "host.env"), `LISTEN_PORT=${newPort}\n`); } catch {}
                 const sess = session as unknown as { setListenPort?: (p: number) => Promise<void>; reconnect?: (r: string) => void } | undefined;
                 if (sess?.setListenPort) {
-                  // Fire-and-forget, report via WS
+                  // Fire-and-forget, report via WS — trigger fresh Soulseek reconnect (WS stays open)
                   (sess.setListenPort(newPort) as Promise<void>).then(() => {
                     logger.info("server", "listen port updated via config", { oldPort: prevPort, newPort });
                     try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: newPort })); } catch {}
-                    // Notify web of new health
+                    // Notify all WS clients of new health (so UI Save shows success without poll)
                     try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: newPort, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE } })); } catch {}
+                    // Also update other active sessions' listenPort silently (they'll reconnect lazily)
+                    for (const s of activeSessions) {
+                      if (s !== sess) {
+                        try { (s as unknown as { _listenPort: number })._listenPort = newPort; (s as unknown as { portMapper: { setPort: (p:number,ip:string)=>void } }).portMapper?.setPort(newPort, (s as unknown as { _localIpAddress: string })._localIpAddress || "0.0.0.0"); } catch {}
+                      }
+                    }
                   }).catch((e: Error) => {
                     // Revert global on bind failure
                     LISTEN_PORT = prevPort;
                     try { writeFileSync(join(DATA_DIR, "listen_port"), String(prevPort)); } catch {}
+                    try { writeFileSync(join(DATA_DIR, "host.env"), `LISTEN_PORT=${prevPort}\n`); } catch {}
                     logger.warn("server", "listen port change failed, reverted", { newPort, error: e.message });
                     ws.send(JSON.stringify({ type: "error", error: `Cannot listen on port ${newPort}: ${e.message}` }));
+                    // Also send config:updated with old value so UI can revert pending
+                    try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: prevPort })); } catch {}
+                    try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: prevPort, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE } })); } catch {}
                   });
                   return; // avoid double config:updated below
                 } else {
-                  // No active session yet — next login will use new port
+                  // No active session yet — next login will use new port (persisted)
                   logger.info("server", "listen port updated (no active session)", { oldPort: prevPort, newPort });
                 }
               }
@@ -1328,6 +1355,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     close(ws) {
       try { (ws.data as unknown as { logUnsub?: () => void }).logUnsub?.(); } catch {}
       logger.info("bridge", "ws close");
+      if (ws.data.session) {
+        try { activeSessions.delete(ws.data.session); } catch {}
+      }
       ws.data.session?.close();
       ws.data.transfers?.close();
       ws.data = {};

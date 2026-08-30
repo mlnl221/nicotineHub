@@ -136,7 +136,7 @@ export interface SearchEndPayload { searchId: string; reason: "max_results" | "s
 export interface SearchHandlers { onResult: (p: SearchResultPayload) => void; onEnd: (p: SearchEndPayload) => void; timeoutMs?: number; }
 interface ActiveSearch extends SearchHandlers { searchId: string; timer?: ReturnType<typeof setTimeout>; users: Set<string>; count: number; maxResults: number; }
 interface PeerState { buf: Buffer; initDone: boolean; username?: string; outbound?: boolean; connType?: string; lastActive: number; isFileConn?: boolean; fileToken?: number; createdAt: number; }
-export type ServerEvent = { type: "reconnect"; attempt: number; delay: number } | { type: "reconnect-failed"; error: string };
+export type ServerEvent = { type: "reconnect"; attempt: number; delay: number } | { type: "reconnect-failed"; error: string } | { type: "reconnected"; listenPort: number };
 export interface BrowseEvent {
   type: "browse-shares" | "browse-folder" | "browse-error";
   username: string;
@@ -240,6 +240,7 @@ export class SoulseekSession {
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectAttempts = 0;
   private shouldReconnect = true;
+  private reconnectPending = false;
   private branchLevel = 0;
   private branchRoot: string | undefined;
   private parent: ParentCandidate | null = null;
@@ -784,6 +785,7 @@ export class SoulseekSession {
     logger.info("server", "manual reconnect", { reason, listenPort: this._listenPort, username: this.username });
     this.shouldReconnect = true;
     this.reconnectAttempts = 0;
+    this.reconnectPending = true;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
     // Portmapper: remove before reconnect (nicotine _server_disconnect)
     try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}
@@ -952,9 +954,18 @@ export class SoulseekSession {
         this.restartWishlistTimer();
         this.restartAutoawayTimer();
         this.handleAutoJoinAndWatch();
-        this.loginResolve?.(resp);
-        this.loginResolve = undefined;
-        this.loginReject = undefined;
+        if (this.loginResolve) {
+          this.loginResolve?.(resp);
+          this.loginResolve = undefined;
+          this.loginReject = undefined;
+        } else if (this.reconnectPending) {
+          // This was a reconnect (e.g. after port change) – WS stays open, notify UI to go back to connected
+          this.reconnectPending = false;
+          logger.info("server", "reconnected after port change", { listenPort: this._listenPort });
+          this.emitServer({ type: "reconnected", listenPort: this._listenPort });
+        } else {
+          this.reconnectPending = false;
+        }
       } else {
         logger.warn("server", "login rejected", { reason: resp.rejectionReason, detail: resp.rejectionDetail?.slice(0,120) });
         this.shouldReconnect = false;

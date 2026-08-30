@@ -6,7 +6,7 @@ import { defaults, DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, DEFAULT_LISTEN_PORT
 import { SectionCard, TextFieldControl, ToggleControl, NumberControl } from "@/components/settings/controls";
 import { useSession } from "@/lib/session";
 
-function useBridgeListenPort(): { current: number | null; bridgeUrl: string } {
+function useBridgeListenPort(): { current: number | null; bridgeUrl: string; setCurrent: (n: number | null) => void } {
   const [current, setCurrent] = useState<number | null>(null);
   const [bridgeUrl, setBridgeUrl] = useState<string>("");
   useEffect(() => {
@@ -39,17 +39,99 @@ function useBridgeListenPort(): { current: number | null; bridgeUrl: string } {
     const id = setInterval(fetchPort, 15000);
     return () => clearInterval(id);
   }, []);
-  return { current, bridgeUrl };
+  return { current, bridgeUrl, setCurrent };
 }
 
 export function NetworkSection() {
   const { settings, setOption } = useConfig();
   const server = settings.server;
-  const { state } = useSession();
-  const { current: bridgePort } = useBridgeListenPort();
+  const { state, subscribe, send } = useSession();
+  const { current: bridgePort, setCurrent: setBridgePort } = useBridgeListenPort();
   // Normalize portrange: nicotine-plus stores [port, port]; UI edits first element
   const listenPort = Array.isArray(server.portrange) ? server.portrange[0] : (server as unknown as { portrange?: number }).portrange ?? DEFAULT_LISTEN_PORT;
   const isConnected = state.status === "connected";
+
+  // Save-gated editing: pending is local until Save triggers fresh connect (WS stays open)
+  const [pendingPort, setPendingPort] = useState<number>(listenPort);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  useEffect(() => {
+    // Sync pending from persisted listenPort when not dirty or after external update (e.g. successful bridge reconfigure)
+    if (saveStatus !== "saving") setPendingPort(listenPort);
+  }, [listenPort, saveStatus]);
+  // Subscribe to bridge feedback for save lifecycle (no WS drop)
+  useEffect(() => {
+    const unsub = subscribe((msg) => {
+      const t = (msg as { type: string }).type;
+      if (t === "diagnostics:health") {
+        const h = (msg as unknown as { health: { listenPort?: number } }).health;
+        if (typeof h.listenPort === "number") {
+          setBridgePort(h.listenPort);
+          if (saveStatus === "saving" && h.listenPort === pendingPort) {
+            setSaveStatus("success");
+            setSaveError(null);
+            setTimeout(() => setSaveStatus("idle"), 3000);
+          }
+        }
+      } else if (t === "server:reconnect") {
+        const d = msg as unknown as { error?: string; ok?: boolean; listenPort?: number };
+        if (d.ok && typeof d.listenPort === "number") {
+          setBridgePort(d.listenPort);
+          if (saveStatus === "saving") {
+            setSaveStatus("success");
+            setSaveError(null);
+            setTimeout(() => setSaveStatus("idle"), 3000);
+          }
+        } else if (d.error && saveStatus === "saving") {
+          setSaveStatus("error");
+          setSaveError(d.error);
+        }
+      } else if (t === "error") {
+        const err = (msg as unknown as { error: string }).error || "";
+        if (saveStatus === "saving" && /Cannot listen on port|Invalid listen port/i.test(err)) {
+          setSaveStatus("error");
+          setSaveError(err);
+          // Revert pending to last good (bridgePort or listenPort) so UI doesn't stay dirty on failure
+          const fallback = bridgePort ?? listenPort;
+          setPendingPort(fallback);
+        }
+      } else if (t === "config:updated") {
+        const d = msg as unknown as { section: string; key: string; value: unknown };
+        if (d.section === "server" && d.key === "portrange" && Array.isArray(d.value) && saveStatus === "saving") {
+          // config:updated with old value on revert also handled via diagnostics:health/error
+        }
+      }
+    });
+    return unsub;
+  }, [subscribe, saveStatus, pendingPort, bridgePort, listenPort, setBridgePort]);
+  const dirty = pendingPort !== listenPort;
+  const isSaving = saveStatus === "saving" || state.status === "connecting";
+  const handleSave = () => {
+    const p = Math.max(1024, Math.min(65535, Number(pendingPort) || DEFAULT_LISTEN_PORT));
+    setPendingPort(p);
+    setSaveError(null);
+    // Persist locally (so reload keeps 49127) – triggers ConfigBridgeSync but we also send explicitly for instant feedback
+    setOption("server", "portrange", [p, p] as unknown as never);
+    if (!isConnected) {
+      setSaveStatus("success");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+      return;
+    }
+    setSaveStatus("saving");
+    try {
+      send({ type: "config:update", section: "server", key: "portrange", value: [p, p] } as unknown as never);
+    } catch (e) {
+      setSaveStatus("error");
+      setSaveError((e as Error).message);
+    }
+    // Fallback: if bridge doesn't respond in 8s, clear saving (health poll will catch)
+    setTimeout(() => setSaveStatus((s) => (s === "saving" ? "idle" : s)), 8000);
+  };
+  const handleCancel = () => {
+    setPendingPort(listenPort);
+    setSaveStatus("idle");
+    setSaveError(null);
+  };
 
   return (
     <>
@@ -84,25 +166,56 @@ export function NetworkSection() {
         <NumberControl
           label="Listening port"
           description={
-            bridgePort && bridgePort !== listenPort
-              ? `Inbound peer port. Bridge is currently on ${bridgePort} — change applies after reconnect (port-forward TCP+UDP ${listenPort}).`
-              : `Inbound peer port for direct searches & transfers. Requires port-forward of TCP+UDP ${listenPort} on your router. Changing triggers reconnect (like nicotine-plus).`
+            dirty
+              ? `Inbound peer port. Bridge is currently on ${bridgePort ?? "—"} — click Save to hot-swap Bun.listen + reconnect Soulseek (WS stays up). Will re-advertise via SetWaitPort ${pendingPort}.`
+              : bridgePort && bridgePort !== listenPort
+                ? `Inbound peer port. Bridge is currently on ${bridgePort} — pending save for ${listenPort}.`
+                : `Inbound peer port for direct searches & transfers. Requires port-forward of TCP+UDP ${pendingPort} on your VPN/router. Save triggers fresh connect (like nicotine-plus). Default ${DEFAULT_LISTEN_PORT} for VPN forward.`
           }
-          value={listenPort}
+          value={pendingPort}
           min={1024}
           max={65535}
           step={1}
           hideSlider
           onChange={(v) => {
             const p = Math.max(1024, Math.min(65535, Number(v) || DEFAULT_LISTEN_PORT));
-            setOption("server", "portrange", [p, p] as unknown as never);
+            setPendingPort(p);
+            if (saveStatus !== "idle") { setSaveStatus("idle"); setSaveError(null); }
           }}
-          onReset={() => setOption("server", "portrange", [DEFAULT_LISTEN_PORT, DEFAULT_LISTEN_PORT] as unknown as never)}
+          onReset={() => {
+            setPendingPort(DEFAULT_LISTEN_PORT);
+            setOption("server", "portrange", [DEFAULT_LISTEN_PORT, DEFAULT_LISTEN_PORT] as unknown as never);
+            setSaveStatus("idle");
+            setSaveError(null);
+          }}
         />
+        {/* Save-gated port apply – UI stays up, bridge hot-swaps + Soulseek reconnect */}
+        <div className="flex flex-wrap items-center gap-3 pb-2">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!dirty || isSaving}
+            className={`rounded-xl px-5 py-2.5 font-label text-sm font-medium transition-all ${!dirty || isSaving ? "bg-surface-container-high text-on-surface-variant/60 cursor-not-allowed" : "bg-primary text-on-primary hover:bg-primary/90 shadow-sm"}`}
+          >
+            {saveStatus === "saving" || state.status === "connecting" ? "Saving…" : "Save"}
+          </button>
+          <button
+            type="button"
+            onClick={handleCancel}
+            disabled={!dirty || isSaving}
+            className={`rounded-xl px-4 py-2.5 font-label text-xs uppercase tracking-widest ${!dirty || isSaving ? "text-on-surface-variant/30 cursor-not-allowed" : "text-tertiary hover:underline"}`}
+          >
+            Cancel
+          </button>
+          {dirty ? <span className="font-body text-xs text-amber-700 dark:text-amber-300">Unsaved change: {listenPort} → {pendingPort}</span> : null}
+          {saveStatus === "success" ? <span className="font-body text-xs text-green-700 dark:text-green-300">✓ Saved – bridge reconnected on {pendingPort}</span> : null}
+          {saveStatus === "error" && saveError ? <span className="font-body text-xs text-error">{saveError}</span> : null}
+          {state.status === "connecting" && saveStatus === "saving" ? <span className="font-body text-xs text-on-surface-variant">Reconnecting Soulseek… WS stays open</span> : null}
+        </div>
         {bridgePort ? (
           <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs text-on-surface-variant dark:bg-surface-container-highest/40">
-            Bridge reports <span className="font-mono font-medium text-on-surface">{bridgePort}</span> via <span className="font-mono">/health?json</span>. If you change the listening port, the bridge will reconnect (like nicotine-plus <span className="font-mono">portrange</span>) and re-advertise via <span className="font-mono">SetWaitPort</span>. Ensure your router forwards <span className="font-mono">TCP+UDP {listenPort}</span> and Docker maps <span className="font-mono">{listenPort}:{listenPort}</span>.
-            {!isConnected ? <span className="block pt-1 text-amber-700 dark:text-amber-300">Not connected — change will apply on next login.</span> : null}
+            Bridge reports <span className="font-mono font-medium text-on-surface">{bridgePort}</span> via <span className="font-mono">/health?json</span> + WS. Click Save to hot-swap <span className="font-mono">Bun.listen</span> and fresh Soulseek connect – re-advertises via <span className="font-mono">SetWaitPort {pendingPort}</span>. For VPN (forwarded {DEFAULT_LISTEN_PORT}) use <span className="font-mono">network_mode: host</span> (see compose.override.example.yaml) – then no Docker recreate needed; otherwise Docker host mapping needs <span className="font-mono">LISTEN_PORT={pendingPort} docker compose up -d</span>.
+            {!isConnected ? <span className="block pt-1 text-amber-700 dark:text-amber-300">Not connected — Save will apply on next login.</span> : null}
           </div>
         ) : null}
         <ToggleControl

@@ -51,7 +51,8 @@ export function ConfigBridgeSync() {
         ignorelist: settings.server.ignorelist,
         ipblocklist: settings.server.ipblocklist,
         ipignorelist: settings.server.ipignorelist,
-        portrange: settings.server.portrange,
+        // portrange is save-gated in NetworkSection (explicit Save → config:update + hot-swap, WS stays open)
+        // to avoid auto-reconnect on every keystroke; do not auto-sync here
         upnp: settings.server.upnp,
         interface: settings.server.interface,
         autoreply: settings.server.autoreply,

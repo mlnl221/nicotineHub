@@ -542,6 +542,11 @@ export interface ServerReconnectFailedMessage {
   type: "server:reconnect";
   error: string;
 }
+export interface ServerReconnectedMessage {
+  type: "server:reconnect";
+  ok: true;
+  listenPort: number;
+}
 
 /* ------------------------------------------------------------------ *
  * Heartbeat (bridge <-> web keepalive, 25s)
@@ -718,6 +723,7 @@ export type BridgeOutboundMessage =
   | BrowseFolderMessage
   | ServerReconnectMessage
   | ServerReconnectFailedMessage
+  | ServerReconnectedMessage
   | DiagnosticsInitMessage
   | DiagnosticsLogMessage
   | DiagnosticsHealthMessage
