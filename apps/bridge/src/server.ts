@@ -1032,8 +1032,24 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         // Bridge-relevant mappings
         try {
           if (section === "transfers") {
-            const cfg: Record<string, unknown> = { [key]: value };
-            tm?.setConfig?.(cfg);
+            // Real file sharing: web's virtualName|path lists need to become bridge ShareDB folders.
+            // Bridge scans those host paths (must be mounted into DATA_DIR / SHARED_DIRS) and rebuilds the compressed shares.
+            if (["shared", "buddyshared", "trustedshared"].includes(key) && Array.isArray(value)) {
+              try {
+                const pairs = value as [string, string][];
+                const levelMap: Record<string, string> = { shared: "public", buddyshared: "buddy", trustedshared: "trusted" };
+                const level = levelMap[key] || "public";
+                (session as unknown as { setShareRoots?: (roots: [string, string][], lvl: string) => void })?.setShareRoots?.(pairs, level);
+              } catch (e) {
+                logger.warn("bridge", `setShareRoots failed for ${key}`, { error: (e as Error).message });
+              }
+              // also persist via TransferManager for diagnostics if needed
+              tm?.setConfig?.({ [key]: value });
+              // post-rescan report will be triggered by setShareRoots
+            } else {
+              const cfg: Record<string, unknown> = { [key]: value };
+              tm?.setConfig?.(cfg);
+            }
             // Also update session network filters if relevant
             if (["banlist", "ipblocklist", "geoblock", "geoblockcc", "usecustomban", "customban", "usecustomgeoblock", "customgeoblock"].includes(key)) {
               (session as unknown as { setNetworkFilters?: (o: unknown) => void })?.setNetworkFilters?.({ [key]: value });
@@ -1114,6 +1130,14 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           } else if (section === "logging" && ["readroomlines", "readprivatelines", "rooms_timestamp", "private_timestamp"].includes(key)) {
             // logging caps are web-only, but acknowledge
             void value;
+          } else if (section === "searches" && ["maxresults", "max_displayed_results", "search_results", "private_search_results"].includes(key)) {
+            (session as unknown as { setSearchConfig?: (o: Record<string, unknown>) => void })?.setSearchConfig?.({ [key]: value });
+          } else if (section === "plugins" && key === "enable") {
+            (pluginManager as unknown as { setGlobalEnable?: (b: boolean) => void }).setGlobalEnable?.(Boolean(value));
+            logger.info("bridge", `plugins ${Boolean(value) ? "enabled" : "disabled"} via config`, { enable: Boolean(value) });
+          } else if (section === "server" && (key === "server" || key === "auto_connect_startup")) {
+            // Stored for login defaults; web handles auto_connect_startup gate, bridge just acks.
+            logger.debug("bridge", "server config stored", { key, value: typeof value === "object" ? JSON.stringify(value).slice(0,120) : String(value).slice(0,80) });
           }
           logger.debug("bridge", "config update", { section, key });
           ws.send(JSON.stringify({ type: "config:updated", section, key }));

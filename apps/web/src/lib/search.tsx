@@ -96,7 +96,9 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     const unsub = subscribe((msg) => {
       if (msg.type === "search:result") {
         const searchId = (msg as { searchId: string }).searchId;
-        const rows = (msg as { rows: SearchRow[] }).rows || [];
+        let rows = (msg as { rows: SearchRow[] }).rows || [];
+        // Respect searches.max_displayed_results (nicotine-plus parity) — cap before append
+        const cap = settings.searches.max_displayed_results ?? 2500;
         // Eager country fetch: trigger GetPeerAddress for responders to populate SearchRow.country via bridge cache + future peer-address country (porting-status country eager parity)
         if (rows.length) {
           const uniq = Array.from(new Set(rows.map((r) => r.user).filter(Boolean))).slice(0, 20);
@@ -110,13 +112,18 @@ export function SearchProvider({ children }: { children: ReactNode }) {
           if (isWishlist && !exists) {
             // Auto-create wishlist tab on interval hit (needs UI tab for wishlist:*)
             const term = searchId.split(":")[1] || searchId;
-            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [...rows], total: rows.length, filters: emptyFilters() };
+            const capped = cap > 0 ? rows.slice(0, cap) : rows;
+            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [...capped], total: capped.length, filters: emptyFilters() };
             setActiveId(searchId);
             return [...prev, wlTab];
           }
-          return prev.map((t) =>
-            t.id === searchId ? { ...t, rows: [...t.rows, ...rows], total: t.total + rows.length } : t,
-          );
+          return prev.map((t) => {
+            if (t.id !== searchId) return t;
+            const remaining = cap > 0 ? Math.max(0, cap - t.rows.length) : rows.length;
+            if (remaining <= 0) return t;
+            const slice = rows.slice(0, remaining);
+            return { ...t, rows: [...t.rows, ...slice], total: t.total + slice.length };
+          });
         });
       } else if (msg.type === "search:end") {
         const searchId = (msg as { searchId: string }).searchId;
@@ -140,7 +147,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       }
     });
     return unsub;
-  }, [subscribe, send]);
+  }, [subscribe, send, settings.searches.max_displayed_results]);
 
   const startSearch = useCallback(
     (query: string, opts?: { mode?: SearchMode; target?: string }) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSession } from "@/lib/session";
 import { useConfig } from "@/lib/config/provider";
 import { DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT } from "@/lib/config/defaults";
@@ -16,6 +16,12 @@ export function LoginForm() {
   const [host, setHost] = useState(settings.server.server.host);
   const [port, setPort] = useState(String(settings.server.server.port));
 
+  // Keep host/port in sync when Settings → Network changes them (settings-audit P0)
+  useEffect(() => {
+    setHost(settings.server.server.host);
+    setPort(String(settings.server.server.port));
+  }, [settings.server.server.host, settings.server.server.port]);
+
   const busy = state.status === "connecting";
   const succeeded = state.status === "connected";
 
@@ -30,10 +36,13 @@ export function LoginForm() {
     const hostValue = host.trim() || DEFAULT_SERVER_HOST;
     const portValue = Number(port) || DEFAULT_SERVER_PORT;
     setOption("server", "server", { host: hostValue, port: portValue });
+    // Settings → Network host/port is authoritative: always send it (nicotine-plus server tuple parity).
+    // Keep showServer toggle for UI disclosure, but login always respects Settings.
     login({
       username: username.trim(),
       password,
-      ...(showServer ? { host: hostValue, port: portValue } : {}),
+      host: hostValue,
+      port: portValue,
     });
   };
 

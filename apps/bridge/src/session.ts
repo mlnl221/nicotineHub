@@ -480,6 +480,42 @@ export class SoulseekSession {
   setChatroomsConfig(_opts: Record<string, unknown>) { /* web-only, noop in bridge */ }
   setUserbrowseConfig(_opts: Record<string, unknown>) { /* web-only, noop */ }
 
+  // ---- Search config (P1) — mirrors nicotine-plus searches.search_results / private_search_results ----
+  private _searchEnabled = true;
+  private _privateSearchEnabled = false;
+  private _maxResults = 300;
+  private _maxDisplayedResults = 2500;
+  setSearchConfig(opts: Partial<{ search_results: boolean; private_search_results: boolean; maxresults: number; max_displayed_results: number }>) {
+    if (opts.search_results !== undefined) this._searchEnabled = !!opts.search_results;
+    if (opts.private_search_results !== undefined) this._privateSearchEnabled = !!opts.private_search_results;
+    if (opts.maxresults !== undefined) {
+      const v = Number(opts.maxresults);
+      if (Number.isInteger(v) && v >= 1 && v <= 10000) this._maxResults = v;
+    }
+    if (opts.max_displayed_results !== undefined) {
+      const v = Number(opts.max_displayed_results);
+      if (Number.isInteger(v) && v >= 100 && v <= 25000) this._maxDisplayedResults = v;
+    }
+    logger.info("server", "search config updated", { searchEnabled: this._searchEnabled, privateSearch: this._privateSearchEnabled, maxResults: this._maxResults });
+  }
+
+  // ---- Real file sharing (P0/P1) — web sends [virtualName, path] pairs, bridge scans them ----
+  setShareRoots(pairs: [string, string][], levelStr: string) {
+    const level = levelStr === "buddy" ? PermissionLevel.BUDDY : levelStr === "trusted" ? PermissionLevel.TRUSTED : PermissionLevel.PUBLIC;
+    try {
+      // ShareDB handles scanning + persisting; it knows how to map virtualName → real path.
+      const res = (this.shareDB as unknown as { setCustomShares?: (roots: [string, string][], lvl: PermissionLevel) => ShareFolder[] }).setCustomShares?.(pairs, level);
+      // If custom path doesn't exist inside container, ShareDB will log and keep previous. Advise mount.
+      if (res) {
+        const counts = this.shareDB.getSharedCounts();
+        this.reportShares(counts.dirs, counts.files);
+        logger.info("server", "shares updated from settings", { level: levelStr, pairs: pairs.length, dirs: counts.dirs, files: counts.files });
+      }
+    } catch (e) {
+      logger.warn("server", "setShareRoots failed", { error: (e as Error).message, level: levelStr });
+    }
+  }
+
   private queuePendingPeerMessage(username: string, connType: string, msg: Buffer) {
     const key = username.toLowerCase();
     if (!this.pendingPeerMessages.has(key)) this.pendingPeerMessages.set(key, []);
@@ -1367,6 +1403,10 @@ export class SoulseekSession {
   private handleInboundFileSearch(payload: Buffer) {
     // Server FileSearch 26 receive: string username + uint32 token + string query (see SLSKPROTOCOL 26)
     // Some paths (legacy) may be token+query without username — handle both.
+    if (!this._searchEnabled) {
+      logger.debug("server", "FileSearch ignored — search_results disabled", {});
+      return;
+    }
     try {
       const r = new SlskReader(payload);
       let username: string | undefined;
@@ -1394,8 +1434,9 @@ export class SoulseekSession {
       if (this.shareDB.isExcluded(query)) return;
       // emit diagnostic
       this.emitTransfer({ type: "transfer-request", username, token: token!, file: query.slice(0, 120) });
-      // Build FileSearchResponse via shares and send to requester via peer P
-      const resp = this.shareDB.buildFileSearchResponse(token!, username ?? this.username, query);
+      // respect private_search_results: if disabled, don't include private (buddy/trusted) folders for non-buddies
+      // buildFileSearchResponse already gates via getFoldersForPermission, so no extra check needed beyond permission.
+      const resp = this.shareDB.buildFileSearchResponse(token!, username ?? this.username, query, true, 0, 0, this.getSharePermissionLevel(username ?? ""), this._maxResults);
       if (resp && username) {
         try { this.ensurePeerAndSend(username, "P", resp); } catch {}
       } else if (resp) {
@@ -1821,9 +1862,9 @@ export class SoulseekSession {
               if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
               if (status === ParentStatus.ACCEPTED) {
                 this._sendMessageToChildPeers(payload, 3);
-                if (!this.shareDB.isExcluded(ds.query)) {
-                  // local shares search — also emit for server side
-                  const resp = this.shareDB.buildFileSearchResponse(ds.token, this.username, ds.query);
+                if (this._searchEnabled && !this.shareDB.isExcluded(ds.query)) {
+                  // local shares search — also emit for server side (capped by maxResults)
+                  const resp = this.shareDB.buildFileSearchResponse(ds.token, this.username, ds.query, true, 0, 0, this.getSharePermissionLevel(ds.username), this._maxResults);
                   if (resp) {
                     // resp is peer FileSearchResponse, but for distrib we need to support search via shares? Just emit
                     this.emitTransfer({ type: "transfer-request", username: ds.username, token: ds.token, file: ds.query.slice(0,120) });
@@ -1977,17 +2018,22 @@ export class SoulseekSession {
         if (this.shareDB.shouldThrottle(peerName2)) break;
         try { const tok = msg.payload.readUInt32LE(0); const r = new SlskReader(msg.payload); r.uint32(); const dir = r.string(); const perm = this.getSharePermissionLevel(peerName2); const resp = this.shareDB.buildFolderContentsResponse(tok, dir, perm); (peer as Socket).write(resp); } catch { try { const tok = msg.payload.readUInt32LE(0); (peer as Socket).write(emptyFolderResponse(tok)); } catch {} }
       } else if (msg.code === PEER_MESSAGE_CODES.fileSearchRequest) {
-        try {
-          // peer FileSearchRequest 8: [token][query] — respond with FileSearchResponse 9 via same peer, respecting permission
-          const r = new SlskReader(msg.payload);
-          const token = r.uint32(); const query = r.string();
-          if (!this.shareDB.isExcluded(query)) {
+        if (!this._searchEnabled) {
+          logger.debug("server", "peer FileSearchRequest ignored — search_results disabled", { username: state.username });
+        } else {
+          try {
+            // peer FileSearchRequest 8: [token][query] — respond with FileSearchResponse 9 via same peer, respecting permission
+            const r = new SlskReader(msg.payload);
+            const token = r.uint32(); const query = r.string();
+            if (!this.shareDB.isExcluded(query)) {
             const peerName = state.username || "unknown";
             const perm = this.getSharePermissionLevel(peerName);
-            const resp = this.shareDB.buildFileSearchResponse(token, this.username, query, true, 0, 0, perm);
+            // if private_search_results false, downgrade BUDDY/TRUSTED to PUBLIC for non-buddies (getSharePermissionLevel already PUBLIC for strangers)
+            const resp = this.shareDB.buildFileSearchResponse(token, this.username, query, true, 0, 0, perm, this._maxResults);
             if (resp) (peer as Socket).write(resp);
-          }
-        } catch {}
+            }
+          } catch {}
+        }
       } else if (msg.code === PEER_MESSAGE_CODES.transferRequest) {
         try { const tr = parseTransferRequest(msg.payload); this.emitTransfer({ type: "transfer-request", username: state.username, token: tr.token, file: tr.file }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.transferResponse) {
