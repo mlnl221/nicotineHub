@@ -356,6 +356,9 @@ export function mockDiagnosticsHealth(): import("@/lib/protocol").DiagnosticsHea
     listenPort: 62904,
     dataDir: "/data (demo — ephemeral)",
     tokenAuth: false,
+    version: process.env.NEXT_PUBLIC_BUILD_TAG || process.env.NEXT_PUBLIC_APP_VERSION || "0.1.0",
+    commitSha: (process.env.NEXT_PUBLIC_COMMIT_SHA || process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || "demo").slice(0, 7),
+    buildDate: new Date().toISOString().split("T")[0],
   };
 }
 
