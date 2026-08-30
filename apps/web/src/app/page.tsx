@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { LoginForm } from "@/components/LoginForm";
@@ -8,23 +8,15 @@ import { LoginForm } from "@/components/LoginForm";
 export default function Home() {
   const { state } = useSession();
   const router = useRouter();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (state.status === "connected") router.replace("/search");
   }, [state.status, router]);
 
-  if (!mounted) {
-    // Option A: avoid flash that mimics button loading — render nothing on first paint
-    // (server and client both render null, then after mount show real Home with img + LoginForm)
-    return null;
-  }
-
   if (state.status === "connected") return null;
 
   return (
-    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-surface font-body text-on-surface dark:bg-inverse-surface dark:text-inverse-on-surface px-6 py-12">
+    <div suppressHydrationWarning className="relative flex min-h-dvh items-center justify-center overflow-x-hidden bg-surface font-body text-on-surface dark:bg-inverse-surface dark:text-inverse-on-surface px-6 py-12">
       {/* Ambient background */}
       <div
         className="pointer-events-none absolute inset-0 opacity-40 dark:opacity-20"
