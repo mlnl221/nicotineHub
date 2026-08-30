@@ -658,6 +658,10 @@ export interface PluginInstallUrlRequest {
   type: "plugin:installUrl";
   url: string;
 }
+export interface PluginInstallGithubTsRequest {
+  type: "plugin:installGithubTs";
+  url: string;
+}
 
 export interface PluginListMessage {
   type: "plugin:list";
@@ -752,4 +756,5 @@ export type BridgeInboundMessage =
   | PluginResetSettingsRequest
   | PluginInstallRequest
   | PluginInstallUrlRequest
+  | PluginInstallGithubTsRequest
   | PingRequest;

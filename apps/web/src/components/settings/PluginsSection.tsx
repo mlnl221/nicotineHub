@@ -26,6 +26,7 @@ export function PluginsSection() {
   const [editing, setEditing] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, unknown>>({});
   const [urlInstall, setUrlInstall] = useState("");
+  const [githubTsUrl, setGithubTsUrl] = useState("");
   const [installing, setInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedSettings, setExpandedSettings] = useState<string | null>(null);
@@ -93,6 +94,19 @@ export function PluginsSection() {
     if (!urlInstall.trim()) return;
     setInstalling(true); setError(null);
     send({ type: "plugin:installUrl", url: urlInstall.trim() });
+    setTimeout(() => setInstalling(false), 4000);
+  };
+  const handleGithubTsInstall = () => {
+    const url = githubTsUrl.trim();
+    if (!url) return;
+    const lower = url.toLowerCase();
+    const isTsJs = lower.endsWith(".ts") || lower.endsWith(".js") || lower.endsWith(".mts") || lower.endsWith(".mjs");
+    if (!isTsJs) {
+      setError("Only TypeScript/JavaScript allowed (.ts/.js/.mts/.mjs) — Python (.py) and other languages are blocked. URL must end with .ts or .js");
+      return;
+    }
+    setInstalling(true); setError(null);
+    send({ type: "plugin:installGithubTs", url });
     setTimeout(() => setInstalling(false), 4000);
   };
 
@@ -182,10 +196,10 @@ export function PluginsSection() {
     <div className="flex flex-col gap-6">
       <SectionCard
         title="Plugins"
-        description="TS-only plugins (parity with nicotine-plus pynicotine/pluginsystem.py). Plugins run on the bridge with full Node access — only install trusted code. Settings persist in DATA_DIR/plugins.json."
+        description="TS/JS-only plugins (parity with nicotine-plus pynicotine/pluginsystem.py — Python .py is blocked). Plugins run on the bridge with full Node access — only install trusted code. Settings persist in DATA_DIR/plugins.json."
       >
         <div className="rounded-xl bg-amber-500/10 px-4 py-3 font-body text-xs leading-relaxed text-amber-900 dark:text-amber-200">
-          <span className="font-semibold">Security:</span> Plugins have unrestricted filesystem &amp; network access on the bridge (same as nicotine-plus desktop). Review source before installing — you assume full risk for any zip you upload. URL installs are restricted to GitHub (<span className="font-mono">github.com</span> / <span className="font-mono">githubusercontent.com</span>) and capped at 20 MB; direct zip uploads have same checks (no shell, no path-traversal, 1 GiB uncompressed limit). Built-ins <span className="font-mono">core_commands</span> / <span className="font-mono">spamfilter</span> are try/catch-only, no VM isolation.
+          <span className="font-semibold">Security:</span> Plugins have unrestricted filesystem &amp; network access on the bridge (same as nicotine-plus desktop). Only <span className="font-mono">.ts</span>/<span className="font-mono">.js</span> plugins are allowed — Python (<span className="font-mono">.py</span>) and other languages are blocked (both zip and GitHub). Review source before installing — you assume full risk. GitHub installs are restricted to <span className="font-mono">github.com</span> / <span className="font-mono">githubusercontent.com</span> (10 s, 20 MB zip / 200 KB single file) and validated (zip-slip, path-traversal, 1 GiB, <span className="font-mono">export class Plugin extends BasePlugin</span> + <span className="font-mono">types.js</span> import, TS syntax). Built-ins <span className="font-mono">core_commands</span> / <span className="font-mono">spamfilter</span> are try/catch-only, no VM isolation.
         </div>
         <div className="py-2 flex items-center justify-between">
           <span className="font-label text-sm font-medium">Enable plugins (master)</span>
@@ -196,7 +210,7 @@ export function PluginsSection() {
 
       <SectionCard
         title="Install plugin"
-        description="Upload a .zip (folder with plugin.json/PLUGININFO + index.js) or install from GitHub URL (raw zip)."
+        description="Upload a .zip (folder with plugin.json/PLUGININFO + index.ts/.js) or install from GitHub (.ts/.js single file or zip). Only TypeScript/JavaScript — Python (.py) and other languages are blocked."
       >
         <div className="flex flex-col gap-4 py-4">
           <div>
@@ -204,16 +218,25 @@ export function PluginsSection() {
             <div className="flex gap-2">
               <input ref={fileInputRef} type="file" accept=".zip" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
               <button onClick={() => fileInputRef.current?.click()} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary" disabled={installing}>Choose .zip</button>
-              <span className="font-body text-xs text-on-surface-variant self-center">{installing ? "Installing…" : "Zips like nicotine-plus (1 GiB limit)"}</span>
+              <span className="font-body text-xs text-on-surface-variant self-center">{installing ? "Installing…" : "Zips like nicotine-plus (1 GiB, only .ts/.js)"}</span>
             </div>
+            <div className="mt-2 font-body text-xs text-on-surface-variant">Zip must contain <span className="font-mono">plugin.json</span> (or inline <span className="font-mono">export const manifest</span>) + <span className="font-mono">index.ts</span>/<span className="font-mono">index.js</span> with <span className="font-mono">export class Plugin extends BasePlugin</span>. Only <span className="font-mono">.ts</span>/<span className="font-mono">.js</span> code is allowed — <span className="font-mono">.py</span> is blocked.</div>
           </div>
           <div className="border-t border-surface-container-high dark:border-surface-container-highest/40 pt-4">
-            <div className="font-label text-xs font-medium mb-2">From URL (GitHub only)</div>
+            <div className="font-label text-xs font-medium mb-2">Add from GitHub — single file (.ts/.js) <span className="rounded-full bg-primary-container px-2 py-0.5 font-mono text-[10px]">NEW</span></div>
             <div className="flex gap-2">
-              <input value={urlInstall} onChange={(e) => setUrlInstall(e.target.value)} placeholder="https://github.com/user/repo/archive/main.zip or https://raw.githubusercontent.com/..." className="flex-1 rounded-xl bg-surface-container-lowest px-3 py-2 text-sm ghost-border" />
+              <input value={githubTsUrl} onChange={(e) => setGithubTsUrl(e.target.value)} placeholder="https://raw.githubusercontent.com/user/repo/main/plugins/myplugin/index.ts or https://github.com/.../blob/.../index.ts" className="flex-1 rounded-xl bg-surface-container-lowest px-3 py-2 text-sm ghost-border" />
+              <button onClick={handleGithubTsInstall} disabled={!githubTsUrl.trim() || installing} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary disabled:opacity-50">Add</button>
+            </div>
+            <div className="mt-2 font-body text-xs text-on-surface-variant">Only <span className="font-mono">.ts</span>/<span className="font-mono">.js</span> (<span className="font-mono">.mts</span>/<span className="font-mono">.mjs</span> too) — Python (<span className="font-mono">.py</span>) and other languages are blocked. Must be raw GitHub URL (<span className="font-mono">raw.githubusercontent.com</span> or <span className="font-mono">github.com/.../blob/...</span> auto-normalized), 200 KB, 10 s. Requires <span className="font-mono">export class Plugin extends BasePlugin</span> + <span className="font-mono">from &quot;../types.js&quot;</span>. Mirrors nicotine-plus <span className="font-mono">PLUGININFO</span> + <span className="font-mono">__init__.py</span> but for TS/JS. <span className="font-mono">plugin.json</span> is fetched as sibling if present, otherwise inline <span className="font-mono">export const manifest</span> is used.</div>
+          </div>
+          <div className="border-t border-surface-container-high dark:border-surface-container-highest/40 pt-4">
+            <div className="font-label text-xs font-medium mb-2">From URL — GitHub zip (legacy)</div>
+            <div className="flex gap-2">
+              <input value={urlInstall} onChange={(e) => setUrlInstall(e.target.value)} placeholder="https://github.com/user/repo/archive/main.zip or https://raw.githubusercontent.com/.../plugin.zip" className="flex-1 rounded-xl bg-surface-container-lowest px-3 py-2 text-sm ghost-border" />
               <button onClick={handleUrlInstall} disabled={!urlInstall.trim() || installing} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary disabled:opacity-50">Install</button>
             </div>
-            <div className="mt-2 font-body text-xs text-on-surface-variant">Only <span className="font-mono">https://github.com</span> / <span className="font-mono">*.githubusercontent.com</span> allowed (10 s timeout, 20 MB). Direct zips bypass this but are still validated for shell/traversal. You are responsible for code you install.</div>
+            <div className="mt-2 font-body text-xs text-on-surface-variant">Only <span className="font-mono">https://github.com</span> / <span className="font-mono">*.githubusercontent.com</span> allowed (10 s timeout, 20 MB zip, 1 GiB uncompressed). Zip is validated same as above (only <span className="font-mono">.ts</span>/<span className="font-mono">.js</span>, no <span className="font-mono">.py</span>). You are responsible for code you install.</div>
           </div>
           {error ? <div className="rounded-xl bg-error-container px-3 py-2 text-xs text-on-error-container">{error}</div> : null}
         </div>
@@ -285,12 +308,14 @@ export function PluginsSection() {
         )}
       </SectionCard>
 
-      <SectionCard title="Authoring" description="Write a TS plugin in apps/bridge/src/plugins/builtin/ or as a user plugin (zip).">
+      <SectionCard title="Authoring" description="Write a TS/JS plugin in apps/bridge/src/plugins/builtin/ or as a user plugin (zip/GitHub .ts/.js). Only .ts/.js — Python is blocked.">
         <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs leading-relaxed text-on-surface-variant dark:bg-surface-container-highest/40 font-mono whitespace-pre-wrap">
-{`// myplugin/plugin.json
-{"Name":"My Plugin","Version":"1.0","Description":"Demo"}
- // myplugin/index.js
-import { BasePlugin, returncode } from "./types.js";
+{`// myplugin/plugin.json  — required (mirrors nicotine-plus PLUGININFO + __init__.py but for TS/JS)
+{"Name":"My Plugin","Version":"1.0","Description":"Demo","entry":"index.ts"}
+// OR inline: export const manifest = {Name:"My Plugin",Version:"1.0",Description:"Demo"} in index.ts
+ // myplugin/index.ts  (or index.js) — only .ts/.js allowed, .py blocked
+import { BasePlugin, returncode } from "../types.js"; // must import from ../types.js
+export const manifest = { Name: "My Plugin", Version: "1.0", Description: "Demo" }; // optional if plugin.json present
 export class Plugin extends BasePlugin {
   init() { this.settings = {greet:"hi"}; this.metasettings={greet:{description:"Greet",type:"string"}} }
   incoming_public_chat_event(room,user,line){

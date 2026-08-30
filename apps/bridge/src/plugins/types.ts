@@ -5,7 +5,8 @@
 
 /**
  * Plugin types — mirrors pynicotine/pluginsystem.py BasePlugin surface.
- * TS-only, no Python compat.
+ * TS/JS-only — Python (.py) and any non-TS/JS language is explicitly forbidden.
+ * See apps/bridge/src/plugins/manager.ts: TS/JS-only enforcement (allowed .ts/.mts/.js/.mjs + .json/.md).
  */
 
 export const returncode = {

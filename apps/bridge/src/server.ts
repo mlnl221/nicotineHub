@@ -159,6 +159,7 @@ const PluginSettingsSchema = z.object({ type: z.literal("plugin:settings"), name
 const PluginResetSettingsSchema = z.object({ type: z.literal("plugin:resetSettings"), name: z.string().min(1).max(64) });
 const PluginInstallSchema = z.object({ type: z.literal("plugin:install"), fileName: z.string().max(255).optional(), data: z.string().min(1).max(22_000_000) }); // base64 zip ~20MB zip cap
 const PluginInstallUrlSchema = z.object({ type: z.literal("plugin:installUrl"), url: z.string().url().max(2048) });
+const PluginInstallGithubTsSchema = z.object({ type: z.literal("plugin:installGithubTs"), url: z.string().url().max(2048) });
 
 const ConfigUpdateSchema = z.object({
   type: z.literal("config:update"),
@@ -403,10 +404,15 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (clen > 20_000_000) return new Response(JSON.stringify({ error: "payload too large (max 20MB)" }), { status: 413, headers: { "content-type": "application/json", ...cors } });
       if (ct.includes("application/json")) {
         try {
-          const body = (await req.json()) as { url?: string; data?: string; fileName?: string };
+          const body = (await req.json()) as { url?: string; githubTsUrl?: string; data?: string; fileName?: string };
+          if (body.githubTsUrl) {
+            const name = await (pluginManager as unknown as { installFromGithubTs: (u: string) => Promise<string | null> }).installFromGithubTs(body.githubTsUrl);
+            if (!name) return new Response(JSON.stringify({ error: "install failed — only .ts/.js with Plugin class allowed (Python .py blocked)" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
+            return new Response(JSON.stringify({ ok: true, name }), { status: 200, headers: { "content-type": "application/json", ...cors } });
+          }
           if (body.url) {
             const name = await pluginManager.installFromUrl(body.url);
-            if (!name) return new Response(JSON.stringify({ error: "install failed" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
+            if (!name) return new Response(JSON.stringify({ error: "install failed — zip must contain .ts/.js and Python is blocked" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
             return new Response(JSON.stringify({ ok: true, name }), { status: 200, headers: { "content-type": "application/json", ...cors } });
           }
           if (body.data) {
@@ -1289,7 +1295,17 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const res = PluginInstallUrlSchema.safeParse(parsed);
         if (!res.success) { ws.send(errorMessage(res.error.issues[0].message)); return; }
         const name = await pluginManager.installFromUrl(res.data.url);
-        if (!name) { ws.send(errorMessage("Install from URL failed")); return; }
+        if (!name) { ws.send(errorMessage("Install from URL failed — zip must contain .ts/.js and Python .py is blocked")); return; }
+        ws.send(JSON.stringify({ type: "plugin:installed", name, ok: true }));
+        const list = pluginManager.getInstalledPluginListWithStatus().map((p) => ({ ...p, settings: pluginManager.getPluginSettings(p.name), metasettings: pluginManager.getPluginMetaSettings(p.name) }));
+        ws.send(JSON.stringify({ type: "plugin:list", plugins: list }));
+        return;
+      }
+      if (data.type === "plugin:installGithubTs") {
+        const res = PluginInstallGithubTsSchema.safeParse(parsed);
+        if (!res.success) { ws.send(errorMessage(res.error.issues[0].message)); return; }
+        const name = await (pluginManager as unknown as { installFromGithubTs: (u: string) => Promise<string | null> }).installFromGithubTs(res.data.url);
+        if (!name) { ws.send(errorMessage("Install from GitHub failed — only .ts/.js with 'export class Plugin extends BasePlugin' allowed (Python .py blocked, need .ts/.js)")); return; }
         ws.send(JSON.stringify({ type: "plugin:installed", name, ok: true }));
         const list = pluginManager.getInstalledPluginListWithStatus().map((p) => ({ ...p, settings: pluginManager.getPluginSettings(p.name), metasettings: pluginManager.getPluginMetaSettings(p.name) }));
         ws.send(JSON.stringify({ type: "plugin:list", plugins: list }));

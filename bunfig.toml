@@ -1,0 +1,3 @@
+[test]
+# Exclude Playwright e2e specs from bun test (they run via `npx playwright test`)
+pathIgnorePatterns = ["e2e/**"]
