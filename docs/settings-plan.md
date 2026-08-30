@@ -3,11 +3,11 @@
 > History + roadmap for the 14 Nicotine+ preference pages.
 > Ground truth: `~/projects/nicotine-plus/pynicotine/config.py:156` (`defaults`), `pynicotine/gtkgui/dialogs/preferences.py:3764` (`page_ids` + page classes), `pynicotine/gtkgui/ui/settings/*.ui`, and `docs/settings-mapping.md`. Every setting below traces to one of those sources.
 
-## Current state — `d395cc6` (`stage`)
+## Current state — `76e27a5` (`fix/settings-audit-p0p1` — PR #55, 2026-08-30)
 
 `apps/web/src/app/settings/page.tsx:27` now exposes **15 tabs** (`network | appearance | shares | downloads | uploads | searches | user-profile | chats | now-playing | logging | banned-users | ignored-users | url-handlers | plugins | notifications`) in grouped nav (`TAB_GROUPS`) with `?tab=` + `#tab` deep-link (`page.tsx:82`). Order matches `preferences.py:3764` (`network → user-interface → shares → downloads → uploads → searches → user-profile → chats → now-playing → logging → banned-users → ignored-users → url-handlers → plugins`) plus `notifications` (co-hosted with UI in Nicotine+ `userinterface.ui`).
 
-`apps/web/src/lib/config/defaults.ts:27` is **no longer stubbed** — full `Settings` type + `defaults` for `server, ui, notifications, searches, transfers, userinfo, words, logging, privatechat, players, urls, plugins, ctcp` (browser-relevant subset). `mistakes.md:2026-08-28` port-conflict & worktree notes apply.
+`apps/web/src/lib/config/defaults.ts:27` is **no longer stubbed** — full `Settings` type + `defaults` for `server, ui, notifications, searches, transfers, userinfo, words, logging, privatechat, players, urls, plugins, ctcp` (browser-relevant subset). `docs/settings-audit.md` audit closed — all P0/P1/P2 wired, 0 open bugs.
 
 | Phase | Scope | Status | Code pointer |
 |---|---|---|---|
@@ -19,6 +19,7 @@
 | **F** Banned / Ignored | `banlist/ipblocklist` + `geoblock`, `ignorelist/ipignorelist` | ✅ Done | `BannedUsersSection.tsx:7`, `IgnoredUsersSection.tsx:7` |
 | **G** URL Handlers / Plugins | `urls.protocols` stub + bridge plugin install/toggle/reload | ✅ Done (intentional stub for URL Handlers) | `UrlHandlersSection.tsx:6`, `PluginsSection.tsx:20`, `apps/bridge/src/server.ts:153` |
 | **H** Network extras | `server.interface` + list editors `autosearch/autojoin/userlist` + `autoreply` | ✅ Done (`feat/porting-parity` `a1b2c3d`) | `NetworkSection.tsx:45` — `interface` + `autoreply` + `autosearch/autojoin/userlist` wired, `session.ts:419` `handleAutoJoinAndWatch()` + `autoreply` |
+| **I** Settings audit P0/P1/P2 | Sync `chatrooms/userbrowse/plugins/searches/shared` + duplicate fix; `auto_connect/host/port` gate; `shares→ShareDB.setCustomShares`; `search_results/maxResults` gating; `file_size_unit`/`usernamehotspots`/`spellcheck`/`tabclosers`/`tab_select_previous`/`header_bar`/`exitdialog`; `watch_keywords` highlight; `rescan` cron | ✅ Done (`fix/settings-audit-p0p1` `0eba35a` + `76e27a5`, PR #55) | `lib/config/sync.tsx:19`, `server.ts:1036`, `session.ts:490/505/521`, `lib/format.ts:3`, `lib/chatFormat.ts:49`, `SearchTabs.tsx:25` etc |
 
 ## Conventions for all phases
 
@@ -137,8 +138,9 @@
 5. PR F — Banned/Ignored. ✅ Merged.
 6. PR G — URL Handlers/Plugins polish. ✅ Merged (plugins live on bridge, URL handlers as parity stub).
 7. **PR H — Network extras** (`interface/autosearch/autojoin/userlist/autoreply`) — ✅ Done in `feat/porting-parity` (`a1b2c3d`) together with Shares privacy + Search/Browse + Chat/PrivateChat + Interests/Profiles/Diagnostics/Stats/Plugins/NowPlaying polish (all P0+P1+P2 gaps closed).
+8. **PR I — Settings audit P0/P1/P2** (`fix/settings-audit-p0p1` PR #55 `76e27a5`) — ✅ Done — sync `chatrooms/userbrowse/plugins/searches/shared` + duplicate fix; `auto_connect/host/port` gate; `shares→ShareDB.setCustomShares`; `search_results/maxResults` gating; `file_size_unit`/`usernamehotspots`/`spellcheck`/`tabclosers`/`tab_select_previous`/`header_bar`/`exitdialog`; `watch_keywords` highlight; `rescan` cron.
 
-> **This PR (`feat/porting-parity`) closes the full porting-status audit:** Shares `PermissionLevel` leak fixed (`shares.ts:384` split PUBLIC/BUDDY/TRUSTED + `reveal_*` gating + `virtual2real` + `check_shares_available` + async `music-metadata` rescan), Search `RoomSearch` scoped validation + `country` eager via `GetPeerAddress` batch + `user_grouping` `partial` + `FilterHelp` popover `preferences.py:2903` + `Wishlist` auto-tab for `WishlistInterval 104`, Browse `expand_folders` + multi-folder note + `slsk://` copy, Chat `RoomTicker` global wall + `user_list_visible` toggle + `Completion` `Tab/dropdown` `words.tab` + private `autoreply/autoaway` + CTCP 1s throttle + offline queue + typing `TYPING` + `MessageAcked` ordering, Buddies `flag_XX` emoji, Interests expiry 12m + wishlist tie-in + label split, Profiles `slotsFull` grey + `UserInterests 57` self sync + `SimilarUsers` shortcut, Diagnostics `log_timestamp` strftime + `readroomlines` truncate + `logcollapsed` grouping, Statistics humanized `fmtSince`, Plugins `metasettings` grouped cards, Now Playing `Test` preview + `mpris/other` stored-only (`lastfm` omitted), `MAX_SOCKETS` env-aware. Each: worktree → `bun test && bun run build` → `gh pr create --fill` → merge to `stage`.
+> **Previous `feat/porting-parity` closes the full porting-status audit:** Shares `PermissionLevel` leak fixed (`shares.ts:384` split PUBLIC/BUDDY/TRUSTED + `reveal_*` gating + `virtual2real` + `check_shares_available` + async `music-metadata` rescan), Search `RoomSearch` scoped validation + `country` eager via `GetPeerAddress` batch + `user_grouping` `partial` + `FilterHelp` popover `preferences.py:2903` + `Wishlist` auto-tab for `WishlistInterval 104`, Browse `expand_folders` + multi-folder note + `slsk://` copy, Chat `RoomTicker` global wall + `user_list_visible` toggle + `Completion` `Tab/dropdown` `words.tab` + private `autoreply/autoaway` + CTCP 1s throttle + offline queue + typing `TYPING` + `MessageAcked` ordering, Buddies `flag_XX` emoji, Interests expiry 12m + wishlist tie-in + label split, Profiles `slotsFull` grey + `UserInterests 57` self sync + `SimilarUsers` shortcut, Diagnostics `log_timestamp` strftime + `readroomlines` truncate + `logcollapsed` grouping, Statistics humanized `fmtSince`, Plugins `metasettings` grouped cards, Now Playing `Test` preview + `mpris/other` stored-only (`lastfm` omitted), `MAX_SOCKETS` env-aware. Each: worktree → `bun test && bun run build` → `gh pr create --fill` → merge to `stage`.
 
 ## Definition of Done (every phase)
 
