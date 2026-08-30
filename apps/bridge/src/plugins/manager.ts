@@ -11,7 +11,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, statSync } from "node:fs";
 import { join, basename, resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { BasePlugin, returncode, type CommandDef, type PluginManifest } from "./types.ts";
+import { BasePlugin, returncode, type CommandDef, type PluginManifest, type PluginCoreShim } from "./types.ts";
 import { logger } from "../logger.ts";
 
 // ---- persistence file DATA_DIR/plugins.json ----
@@ -125,7 +125,12 @@ function humanNameFromManifest(manifest: PluginManifest, fallback: string): stri
 type SessionLike = {
   sayChatroom: (room: string, text: string) => void;
   sendPrivateMessage: (user: string, text: string) => void;
+  watchUser?: (user: string) => void;
+  getUserStats?: (user: string) => void;
+  requestSharedFileList?: (user: string) => void;
+  requestUserShares?: (user: string) => void;
   // we also proxy others as needed
+  isBuddy?: (user: string) => boolean;
 };
 
 export class PluginManager {
@@ -361,7 +366,29 @@ export class PluginManager {
       echoPrivate: (_user, _text) => {
         logger.info("chat", `[echo private] ${_user}: ${_text}`);
       },
-    };
+      // leech_detector helpers — delegate to session if available
+      requestUserStats: (user: string) => {
+        try {
+          const s = session as unknown as { watchUser?: (u: string) => void; getUserStats?: (u: string) => void };
+          if (s?.watchUser) s.watchUser(user);
+          else if (s?.getUserStats) s.getUserStats(user);
+        } catch {}
+      },
+      requestUserShares: (user: string) => {
+        try {
+          const s = session as unknown as { requestSharedFileList?: (u: string) => void; requestUserShares?: (u: string) => void };
+          if (s?.requestSharedFileList) s.requestSharedFileList(user);
+          else if (s?.requestUserShares) s.requestUserShares(user);
+        } catch {}
+      },
+      isBuddy: (user: string) => {
+        try {
+          const s = session as unknown as { isBuddy?: (u: string) => boolean };
+          if (s?.isBuddy) return !!s.isBuddy(user);
+        } catch {}
+        return false;
+      },
+    } as unknown as PluginCoreShim;
     // override log to use logger (+ optional forward to ws)
     const human = plugin.humanName || plugin.internalName;
     const mgr = this;

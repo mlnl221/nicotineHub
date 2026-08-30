@@ -9,13 +9,7 @@ import {
   RadioGroupControl,
 } from "@/components/settings/controls";
 
-const LANGUAGES = [
-  { value: "", label: "System default" },
-  { value: "en", label: "English" },
-  { value: "de", label: "Deutsch" },
-  { value: "fr", label: "Français" },
-  { value: "es", label: "Español" },
-];
+const LANGUAGES = [{ value: "en", label: "English — app is English-only" }] as const;
 
 export function UiSection() {
   const { settings, setOption } = useConfig();
@@ -39,10 +33,10 @@ export function UiSection() {
       />
       <SelectControl
         label="Language"
-        description="Interface language (currently cosmetic)."
-        value={ui.language}
-        onChange={(v) => setOption("ui", "language", v)}
-        options={LANGUAGES}
+        description="English-only by design — no other locales planned (see docs/settings-mapping.md:310, docs/DESIGN.md)."
+        value="en"
+        onChange={() => {}}
+        options={[...LANGUAGES]}
       />
       <ToggleControl
         label="Colorise usernames"

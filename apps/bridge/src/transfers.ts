@@ -646,16 +646,50 @@ export class TransferManager {
       this.emit(t);
       return t;
     }
-    // 3. file_is_shared stub: check data/shares.json if exists
-    let shared = true;
+    // 3. file_is_shared — check shares.json if exists, else verify file exists in shared dirs (deny by default, not allow)
+    let shared = false;
+    let shareCheckedViaJson = false;
     try {
       const sharesPath = join(this.dataDir, "shares.json");
       if (existsSync(sharesPath)) {
-        const shares = JSON.parse(readFileSync(sharesPath, "utf8")) as Record<string, string> | Array<string>;
-        if (Array.isArray(shares)) shared = shares.includes(virtualPath);
-        else shared = Object.keys(shares).some((k) => virtualPath.startsWith(k));
+        shareCheckedViaJson = true;
+        const raw = JSON.parse(readFileSync(sharesPath, "utf8")) as Record<string, unknown>;
+        // shares.json format: { folders: ShareFolder[], publicFolders, ... } or legacy { [virtualPath]: realPath }
+        if (Array.isArray((raw as { folders?: unknown[] }).folders)) {
+          const folders = (raw as { folders: Array<{ name?: string; files: Array<{ name?: string }> }> }).folders;
+          shared = folders.some((fo) => fo.files?.some((f) => f.name === virtualPath) || virtualPath.startsWith((fo.name || "") + "\\"));
+          // fallback to publicFolders if not found in combined
+          if (!shared && Array.isArray((raw as { publicFolders?: unknown[] }).publicFolders)) {
+            const pub = (raw as { publicFolders: Array<{ name?: string; files: Array<{ name?: string }> }> }).publicFolders;
+            shared = pub.some((fo) => fo.files?.some((f) => f.name === virtualPath) || virtualPath.startsWith((fo.name || "") + "\\"));
+          }
+        } else if (Array.isArray(raw)) {
+          shared = (raw as string[]).includes(virtualPath);
+        } else {
+          shared = Object.keys(raw).some((k) => virtualPath.startsWith(k) || virtualPath === k);
+        }
       }
-    } catch { shared = true; }
+    } catch { shared = false; }
+    // If not found via JSON, check FS shared dirs (like startUploadStream) — file must exist on disk to be shared
+    if (!shared) {
+      try {
+        const base = fileNameOf(virtualPath);
+        const candidates: string[] = [];
+        const sharedEnv = process.env.SHARED_DIRS || process.env.SHARES_DIR || "";
+        if (sharedEnv) candidates.push(...sharedEnv.split(":").map((s) => s.trim()).filter(Boolean));
+        candidates.push(join(this.dataDir, "shared"), join(this.dataDir, "shares"), join(this.dataDir, "uploads"), this.dataDir);
+        // If shares.json was checked and no match, still allow if file exists on disk in shared dirs (covers FS scan without persist)
+        // If shares.json not present, require file existence
+        for (const dir of candidates) {
+          const cand = join(dir, base);
+          if (existsSync(cand)) { shared = true; break; }
+          // also check exact virtual path mapping via walk? For now basename check is sufficient homelab.
+        }
+        // If still not shared and we had no shares.json, deny (no dummy file serving)
+        if (!shared && !shareCheckedViaJson) shared = false;
+        // If shares.json existed but no FS file, keep JSON result (already false) — deny
+      } catch { shared = false; }
+    }
     if (!shared) {
       const t: BridgeTransfer = {
         id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "File not shared.", queuePosition: null, isUpload: true,
@@ -748,7 +782,21 @@ export class TransferManager {
     }
 
     if (!candidate) return;
-    // Validate online (stub assume online)
+    // Validate online — check cached user status if available (0 = offline per SLSKPROTOCOL.md)
+    try {
+      const sess = this.session as unknown as { getUserStatus?: (u: string) => number | undefined; getCachedUserStatus?: (u: string) => number | undefined };
+      const st = sess?.getUserStatus?.(candidate.username) ?? sess?.getCachedUserStatus?.(candidate.username);
+      if (st === 0) {
+        candidate.status = "User logged off";
+        candidate.queuePosition = null;
+        this.emit(candidate);
+        this.emitStats();
+        this.persist();
+        logger.info("transfer", "upload deferred — user offline", { username: candidate.username });
+        this.scheduleRetry(candidate.id, 30000);
+        return;
+      }
+    } catch {}
     candidate.status = "Transferring";
     candidate._startTime = Date.now();
     // Update counter for round robin
@@ -1054,54 +1102,16 @@ export class TransferManager {
       }
     } catch {}
     if (!realPath) {
-      // No real file — stream dummy zeros of fileSize (or t.size) to demonstrate protocol
-      const remaining = Math.max(0, (fileSize || t.size || 1024 * 1024) - offset);
-      const dummyChunk = Buffer.alloc(Math.min(64 * 1024, remaining));
-      let sent = 0;
-      const ulLimit = this.getUploadLimit();
-      const start = Date.now();
-      const sendLoop = () => {
-        if (sent >= remaining) {
-          t.current = fileSize || t.size;
-          t.status = "Finished";
-          t.speed = 0;
-          this.statsManager.recordUploadCompleted(t.size || fileSize);
-          this.emit(t);
-          this.emitStats();
-          if (this.config.autoclear_uploads) {
-            setTimeout(() => {
-              if (this.transfers.has(t.id) && t.status === "Finished") {
-                this.transfers.delete(t.id);
-                this.onRemoved(t.id);
-                this.emitStats();
-                this.persist();
-              }
-            }, 100);
-          } else {
-            this.persist();
-          }
-          try { socket.end(); } catch {}
-          try { this.session?.sendUploadSpeed(t.avgSpeed || 0); } catch {}
-          // try next queued upload
-          setTimeout(() => this.checkUploadQueue(), 100);
-          return;
-        }
-        const toSend = Math.min(dummyChunk.length, remaining - sent);
-        const slice = dummyChunk.subarray(0, toSend);
-        try { socket.write(slice); } catch { t.status = "Connection closed"; this.emit(t); try { socket.end(); } catch {} return; }
-        sent += toSend;
-        t.current = offset + sent;
-        const elapsed = (Date.now() - start) / 1000;
-        const speed = elapsed > 0 ? sent / elapsed : toSend * 2;
-        t.speed = ulLimit ? Math.min(speed, ulLimit) : speed;
-        t.avgSpeed = speed;
-        this.emit(t);
-        this.emitStats();
-        const delay = ulLimit ? this.limiterDelay(toSend, ulLimit) : 0;
-        if (delay > 5) setTimeout(sendLoop, delay);
-        else setImmediate(sendLoop);
-      };
-      setImmediate(sendLoop);
+      // No real file on disk — deny (do not stream dummy zeros). Previously was demo fallback.
+      t.status = "File not shared.";
+      this.emit(t);
+      this.emitStats();
+      this.persist();
+      try { socket.end(); } catch {}
+      const stall2 = (t as unknown as { _stallTimer?: Timer })._stallTimer;
+      if (stall2) { clearTimeout(stall2); (t as unknown as { _stallTimer?: Timer })._stallTimer = undefined; }
+      setTimeout(() => this.checkUploadQueue(), 100);
+      logger.warn("transfer", "upload denied — file not shared (no real path)", { username: t.username, virtualPath: t.virtualPath });
       return;
     }
     // Real file streaming
