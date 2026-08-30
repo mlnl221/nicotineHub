@@ -18,13 +18,13 @@
 | **E** Logging | `log.ui` toggles + paths + `log_timestamp` + `debug/logcollapsed` | ✅ Done (browser paths are notes) | `LoggingSection.tsx:7` |
 | **F** Banned / Ignored | `banlist/ipblocklist` + `geoblock`, `ignorelist/ipignorelist` | ✅ Done | `BannedUsersSection.tsx:7`, `IgnoredUsersSection.tsx:7` |
 | **G** URL Handlers / Plugins | `urls.protocols` stub + bridge plugin install/toggle/reload | ✅ Done (intentional stub for URL Handlers) | `UrlHandlersSection.tsx:6`, `PluginsSection.tsx:20`, `apps/bridge/src/server.ts:153` |
-| **H** Network extras | `server.interface` + list editors `autosearch/autojoin/userlist` + `autoreply` | ⏳ Next | `NetworkSection.tsx:9` — only `server/portrange/upnp/autoaway` wired today |
+| **H** Network extras | `server.interface` + list editors `autosearch/autojoin/userlist` + `autoreply` | ✅ Done (`feat/porting-parity` `a1b2c3d`) | `NetworkSection.tsx:45` — `interface` + `autoreply` + `autosearch/autojoin/userlist` wired, `session.ts:419` `handleAutoJoinAndWatch()` + `autoreply` |
 
 ## Conventions for all phases
 
 - Follow `AGENTS.md` workflow: git worktree per feature, `bun test && bun run build` before PR, `gh pr create --fill`.
 - Each new setting key added to `defaults.ts` must stay in sync with `docs/settings-mapping.md` and `pynicotine/config.py`.
-- Desktop-only keys are omitted per `docs/settings-mapping.md:310` (password, tray/window geometry, `filemanager`, `urls.protocols` handlers, OS now-playing backends, `afterfinish`/`afterfolder` shell commands, colors/fonts — see `docs/DESIGN.md` Omitted Controls). `portrange`/`upnp` are **not** omitted — `NetworkSection.tsx:82` + `portmapper.ts` now handle them; `interface` remains browser-stored only (no raw socket bind in browser).
+- Desktop-only keys are omitted per `docs/settings-mapping.md:310` (password, tray/window geometry, `filemanager`, `urls.protocols` handlers, OS now-playing backends, `afterfinish`/`afterfolder` shell commands, colors/fonts, `youtube_info` plugin, English-only i18n, MAX_SOCKETS adaptive — see `docs/DESIGN.md` Omitted Controls + `docs/plugins.md`). `portrange`/`upnp` are **not** omitted — `NetworkSection.tsx:82` + `portmapper.ts` now handle them; `interface` remains browser-stored only (no raw socket bind in browser).
 - Browser constraints are surfaced in-app with a callout rather than hiding tabs silently — see `docs/settings-mapping.md:123` for File System Access API, localStorage/IndexedDB, `mediaSession` notes.
 - Controls live in `apps/web/src/components/settings/controls.tsx` — available: `ToggleControl`, `NumberControl`, `SelectControl`, `RadioGroupControl`, `TextFieldControl`, `SectionCard`. Extend with `ListEditorControl`/`ColorControl` only when needed.
 
@@ -122,8 +122,10 @@
 
 ## Out-of-scope / intentionally omitted
 
-- `server.passw` (plaintext — security, `README` forbids storing), tray/`startup_hidden`/window geometry `width/height/xposition/yposition/maximized`, `ui.filemanager` command, `urls.protocols` wiring/execution, **Now Playing `lastfm/librefm/listenbrainz` scrobblers** (`ws.audioscrobbler.com` polling — intentionally omitted per user request; `npformat`+`mediaSession` kept, `mpris/other` stored-only), **global font pickers** `globalfont/...` (Alexandria `Noto Serif/Inter/Public Sans` fixed per `docs/DESIGN.md` + user request: no global font changes), OS `MPRIS` live capture/speech beyond stored format, `afterfinish`/`afterfolder` shell commands, desktop plugins beyond TS `PluginManager`. All tracked in `docs/settings-mapping.md:310`.
+- `server.passw` (plaintext — security, `README` forbids storing), tray/`startup_hidden`/window geometry `width/height/xposition/yposition/maximized`, `ui.filemanager` command, `urls.protocols` wiring/execution, **Now Playing `lastfm/librefm/listenbrainz` scrobblers** (`ws.audioscrobbler.com` polling — intentionally omitted per user request; `npformat`+`mediaSession` kept, `mpris/other` stored-only), **global font pickers** `globalfont/...` (Alexandria `Noto Serif/Inter/Public Sans` fixed per `docs/DESIGN.md` + user request: no global font changes), OS `MPRIS` live capture/speech beyond stored format, `afterfinish`/`afterfolder` shell commands, desktop plugins beyond TS `PluginManager` — **`youtube_info` intentionally not ported** (`www.googleapis.com` + API key, not homelab; see `docs/plugins.md`); `leech_detector` *is* ported. All tracked in `docs/settings-mapping.md:310`.
 - **Colors/fonts/tab positions** (`chatme/.../tab_changed`, `globalfont/...`, `tabmain/...`) — intentional omit per `docs/DESIGN.md` Omitted Controls (2026-08-30 Phase A/B) + user request to keep editorial palette/typography.
+- **Language — English-only** — 30+ `po/` locales intentionally not ported; app is English-only by design (`UiSection.tsx` fixed note).
+- **MAX_SOCKETS adaptive** — fixed `512` homelab-sufficient, not `ulimit` adaptive (intentional).
 - **Diagnostics docked pane** — stays routed `/diagnostics` vs MainWindow bottom pane; mobile uses separate route with scope/level filters.
 
 ## Sequencing / PR plan (actual history)

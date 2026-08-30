@@ -579,6 +579,9 @@ export interface DiagnosticsHealth {
   listenPort: number;
   dataDir: string;
   tokenAuth: boolean;
+  version?: string;
+  commitSha?: string;
+  buildDate?: string;
 }
 
 export interface DiagnosticsInitMessage {

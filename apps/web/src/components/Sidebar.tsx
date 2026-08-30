@@ -7,6 +7,7 @@ import { useSession } from "@/lib/session";
 import { useTransfers } from "@/lib/transfers";
 import { useConfig } from "@/lib/config/provider";
 import { useSidebarCollapsed } from "@/components/SidebarContext";
+import { AboutDialog } from "@/components/AboutDialog";
 
 const NAV = [
   { icon: "downloading", label: "Downloads", href: "/downloads", key: "downloads" },
@@ -27,6 +28,7 @@ export function Sidebar() {
   const { downloads, uploads } = useTransfers();
   const { collapsed, toggle } = useSidebarCollapsed();
   const [mounted, setMounted] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   useEffect(() => setMounted(true), []);
   const downloadsCount = mounted ? downloads.length : 0;
   const uploadsCount = mounted ? uploads.length : 0;
@@ -41,45 +43,57 @@ export function Sidebar() {
   const paddingClass = collapsed ? "p-3" : "p-6";
 
   return (
-    <nav className={`fixed left-0 top-0 z-50 hidden h-full ${widthClass} flex-col backdrop-blur-md dark:bg-surface-container-low/90 md:flex bg-surface-container-low/90 border-r border-outline-variant/5 ${paddingClass} transition-all duration-300`}>
-      {/* Header + collapse toggle */}
-      <div className={`flex items-center ${collapsed ? "justify-center" : "justify-between"} gap-2`}>
-        {!collapsed ? (
-          <div>
-            <div className="mb-1 font-headline text-lg font-black text-on-surface dark:text-inverse-primary">
-              NICOTINE HUB
-            </div>
-            <div className="font-label text-xs uppercase tracking-widest text-on-surface-variant dark:text-outline">
-              Secure Homelab Node
-            </div>
-          </div>
-        ) : (
-          <div className="font-headline text-sm font-black text-on-surface dark:text-inverse-primary">NH</div>
-        )}
-        <button
-          onClick={toggle}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="hidden md:flex h-8 w-8 items-center justify-center rounded-lg bg-surface-container-high/60 hover:bg-surface-container-high text-on-surface-variant dark:text-outline transition-colors"
-          title={collapsed ? "Expand" : "Collapse"}
-        >
-          <span className="material-symbols-outlined text-[18px]">{collapsed ? "chevron_right" : "chevron_left"}</span>
-        </button>
-      </div>
+    <>
+      <nav className={`fixed left-0 top-0 z-50 hidden h-full ${widthClass} flex-col backdrop-blur-md dark:bg-surface-container-low/90 md:flex bg-surface-container-low/90 border-r border-outline-variant/5 ${paddingClass} transition-all duration-300`}>
+        {/* Header + collapse toggle — logo area opens About like nicotine-plus Help > About */}
+        <div className={`flex items-center ${collapsed ? "justify-center" : "justify-between"} gap-2`}>
+          {!collapsed ? (
+            <button type="button" onClick={() => setAboutOpen(true)} className="text-left rounded-lg -mx-1 px-1 py-1 hover:bg-surface-container-high/60 transition-colors" aria-label="About Nicotine Hub" title="About Nicotine Hub">
+              <div className="mb-1 font-headline text-lg font-black text-on-surface dark:text-inverse-primary">
+                NICOTINE HUB
+              </div>
+              <div className="font-label text-xs uppercase tracking-widest text-on-surface-variant dark:text-outline">
+                Secure Homelab Node
+              </div>
+            </button>
+          ) : (
+            <button type="button" onClick={() => setAboutOpen(true)} className="font-headline text-sm font-black text-on-surface dark:text-inverse-primary rounded-lg px-2 py-1 hover:bg-surface-container-high/60" aria-label="About Nicotine Hub" title="About Nicotine Hub">
+              NH
+            </button>
+          )}
+          <button
+            onClick={toggle}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="hidden md:flex h-8 w-8 items-center justify-center rounded-lg bg-surface-container-high/60 hover:bg-surface-container-high text-on-surface-variant dark:text-outline transition-colors"
+            title={collapsed ? "Expand" : "Collapse"}
+          >
+            <span className="material-symbols-outlined text-[18px]">{collapsed ? "chevron_right" : "chevron_left"}</span>
+          </button>
+        </div>
 
-      <div className={`mt-6 flex items-center ${collapsed ? "justify-center" : "space-x-3"}`}>
-        <img
-          src="/icon-512.png"
-          alt=""
-          width={40}
-          height={40}
-          className="h-10 w-10 rounded-xl object-contain bg-white p-1 shadow-sm ring-1 ring-black/5 dark:bg-white shrink-0"
-        />
-        {!collapsed ? (
-          <div className="font-label text-sm font-semibold text-primary dark:text-inverse-primary truncate" suppressHydrationWarning title={displayUser}>
-            {displayUser}
-          </div>
-        ) : null}
-      </div>
+        <button
+          type="button"
+          onClick={() => setAboutOpen(true)}
+          className={`mt-6 flex items-center ${collapsed ? "justify-center" : "space-x-3"} rounded-xl -mx-1 px-1 py-1 hover:bg-surface-container-high/40 transition-colors text-left w-full`}
+          aria-label="About Nicotine Hub"
+          title="About Nicotine Hub"
+        >
+          <img
+            src="/icon-512.png"
+            alt=""
+            width={40}
+            height={40}
+            className="h-10 w-10 rounded-xl object-contain bg-white p-1 shadow-sm ring-1 ring-black/5 dark:bg-white shrink-0"
+          />
+          {!collapsed ? (
+            <div className="min-w-0 flex-1">
+              <div className="font-label text-sm font-semibold text-primary dark:text-inverse-primary truncate" suppressHydrationWarning title={displayUser}>
+                {displayUser}
+              </div>
+              <div className="font-label text-[10px] uppercase tracking-widest text-outline">About</div>
+            </div>
+          ) : null}
+        </button>
 
       {/* Primary Search — single blue button (replaces old New Transfer + former Search nav) */}
       <Link
@@ -165,12 +179,18 @@ export function Sidebar() {
         </button>
         {!collapsed ? (
           <div className="pt-3 text-[10px] leading-relaxed text-on-surface-variant/60 dark:text-outline/60">
-            <a href="/settings?tab=about#about" className="font-label uppercase tracking-widest underline decoration-dotted hover:text-primary">
+            <button type="button" onClick={() => setAboutOpen(true)} className="font-label uppercase tracking-widest underline decoration-dotted hover:text-primary">
               About
+            </button>
+            <span className="mx-1 opacity-30">•</span>
+            <a href="/settings?tab=about#about" className="underline decoration-dotted hover:text-primary">
+              Settings
             </a>
           </div>
         ) : null}
-      </div>
-    </nav>
+        </div>
+      </nav>
+      <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+    </>
   );
 }

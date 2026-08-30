@@ -530,7 +530,21 @@ export class ShareDB {
       const bitsPerSample = (meta.format as unknown as { bitsPerSample?: number }).bitsPerSample;
       if (bitrate) attrs.push([0, bitrate]);
       if (duration) attrs.push([1, duration]);
-      // VBR detection via codec profile — stub 0 for now
+      // VBR: attribute 2 — detect via codecProfile containing VBR/CBR or mode, else infer for mp3
+      if (["mp3", "m4a", "ogg", "opus", "wma", "aac"].includes(ext)) {
+        const profile = (meta.format.codecProfile as string | undefined) || "";
+        const isVbr = /vbr/i.test(profile) || (meta.format as unknown as { isVbr?: boolean }).isVbr === true;
+        const isCbr = /cbr/i.test(profile);
+        if (isVbr) attrs.push([2, 1]);
+        else if (isCbr) attrs.push([2, 0]);
+        else if (ext === "mp3" && bitrate) {
+          // Fallback: mp3 without profile — assume CBR if bitrate is standard (128/192/256/320), else VBR
+          // Homelab: treat unknown mp3 as CBR 0 to avoid false filtering
+          attrs.push([2, 0]);
+        } else if (profile) {
+          attrs.push([2, 0]);
+        }
+      }
       if (sampleRate) attrs.push([4, sampleRate]);
       if (bitsPerSample) attrs.push([5, bitsPerSample]);
       return attrs;

@@ -23,6 +23,7 @@ import { diagClear, diagLog, diagTail, diagSubscribe, logger, type LogLevel } fr
 import { PluginManager } from "./plugins/manager.ts";
 import { Plugin as CoreCommandsPlugin, manifest as coreCommandsManifest } from "./plugins/builtin/core_commands.ts";
 import { Plugin as SpamfilterPlugin, manifest as spamManifest } from "./plugins/builtin/spamfilter.ts";
+import { Plugin as LeechDetectorPlugin, manifest as leechManifest } from "./plugins/builtin/leech_detector.ts";
 import { listDirectory } from "./files.ts";
 
 /* Schemas */
@@ -188,6 +189,9 @@ let LISTEN_PORT = Number(process.env.LISTEN_PORT || 62904);
 const PORT = Number(process.env.PORT || 8787);
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || "";
 const DATA_DIR = process.env.DATA_DIR || "/data";
+const APP_VERSION = process.env.APP_VERSION || process.env.BUILD_TAG || process.env.TAG || "0.1.0";
+const COMMIT_SHA = (process.env.COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 7);
+const BUILD_DATE = process.env.BUILD_DATE || process.env.NEXT_PUBLIC_BUILD_DATE || "";
 
 // Persisted listen port override (homelab: survives restart without compose change)
 // File DATA_DIR/listen_port overrides env default but env wins if explicitly set.
@@ -206,6 +210,7 @@ try {
 const pluginManager = new PluginManager({ dataDir: DATA_DIR });
 pluginManager.registerBuiltin("core_commands", coreCommandsManifest as unknown as Record<string, unknown>, () => new CoreCommandsPlugin());
 pluginManager.registerBuiltin("spamfilter", spamManifest as unknown as Record<string, unknown>, () => new SpamfilterPlugin());
+pluginManager.registerBuiltin("leech_detector", leechManifest as unknown as Record<string, unknown>, () => new LeechDetectorPlugin());
 // start async (don't block serve)
 pluginManager.start().catch((e) => logger.warn("bridge", "plugin manager start failed", { error: (e as Error).message }));
 // expose for http handlers
@@ -334,6 +339,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
               uptime: process.uptime(),
               port: PORT,
               tokenAuth: true,
+              version: APP_VERSION,
+              commitSha: COMMIT_SHA,
             }), { status: 200, headers: { "content-type": "application/json", ...cors } });
           }
         }
@@ -345,6 +352,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           listenPort: LISTEN_PORT,
           dataDir: DATA_DIR,
           tokenAuth: !!BRIDGE_TOKEN,
+          version: APP_VERSION,
+          commitSha: COMMIT_SHA,
+          buildDate: BUILD_DATE,
         }), { status: 200, headers: { "content-type": "application/json", ...cors } });
       }
       return new Response("ok", { status: 200, headers: { "cache-control": "no-store", ...cors } });
@@ -373,7 +383,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       let entries = diagTail(2000, level as LogLevel);
       entries = entries.slice(-tail);
       return new Response(JSON.stringify({
-        health: { ok: true, ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN },
+        health: { ok: true, ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE },
         logs: entries,
       }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
     }
@@ -593,7 +603,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       } catch {}
       // Send initial diagnostics health
       try {
-        ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN } }));
+        ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE } }));
       } catch {}
     },
     async message(ws, raw) {
@@ -1094,7 +1104,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                     logger.info("server", "listen port updated via config", { oldPort: prevPort, newPort });
                     try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: newPort })); } catch {}
                     // Notify web of new health
-                    try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: newPort, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN } })); } catch {}
+                    try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: newPort, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE } })); } catch {}
                   }).catch((e: Error) => {
                     // Revert global on bind failure
                     LISTEN_PORT = prevPort;

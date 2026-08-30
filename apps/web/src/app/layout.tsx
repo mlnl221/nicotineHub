@@ -45,11 +45,13 @@ export const viewport: Viewport = {
   themeColor: "#faf9fa",
 };
 
+const isDemoBuild = process.env.NEXT_PUBLIC_DEMO === "true";
+
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning data-demo={isDemoBuild ? "true" : undefined} style={isDemoBuild ? ({ ["--demo-banner-h" as string]: "32px" } as React.CSSProperties) : undefined}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />

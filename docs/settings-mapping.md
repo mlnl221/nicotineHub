@@ -64,7 +64,7 @@ UI section:
 |---------------------|------------------|-------------------|--------------------------------------------|
 | `dark_mode`         | `False`          | bool              | Toggle (theme)                             |
 | `header_bar`        | `True`           | bool              | Toggle (widget style)                      |
-| `language`          | `""`             | string (locale)   | Combobox (select)                          |
+| `language`          | `""`             | string (locale)   | **English-only** — app is English-only by design (`UiSection.tsx` shows "English — app is English-only" note, no locale selector). 30+ `po/` locales (`af,ar,ca…zh_CN`) intentionally not ported; `config.py` `language` stored as `""`/`"en"` only. |
 | `icontheme`         | `""`             | string            | **Omit** (system icons)                    |
 | `chatme/chatcommand/chathilite/urlcolor/useronline/useraway/useroffline` | hex  | string (hex) | Color input (Gtk color button → native color input) |
 | `chatremote/chatlocal/textbg/search/inputcolor` | `""` | string (hex) | Color input (empty = default)   |
@@ -311,8 +311,11 @@ retention/storage toggle rather than a filesystem path.
 - Tray icon / startup hidden / window geometry `width/height/xposition/yposition/maximized` — desktop-only.
 - File manager command (`ui.filemanager`), URL protocol handler execution (`urls.protocols` — stored as `protocol=command` lines in `UrlHandlersSection.tsx` but not executed).
 - OS-level Now Playing backends — `lastfm`/`librefm`/`listenbrainz` (`ws.audioscrobbler.com` polling) **intentionally omitted per user request** (no browser scrobbler API; `npformat`+`mediaSession` kept); `MPRIS` live capture + `other` shell kept as **stored-only** (not executed); `speech` deprecated `3.4.0`.
+- **Plugins `youtube_info`** — YouTube Data v3 `www.googleapis.com` with external API key, HTTP fetch per chat line (`pynicotine/plugins/youtube_info/__init__.py`). **Intentionally not ported** — requires external API key, not homelab-relevant, chat can paste YouTube links without metadata enrichment. `leech_detector` *is* ported (`plugins/builtin/leech_detector.ts`); `youtube_info` will remain omitted (see `docs/plugins.md`).
 - Desktop plugins shell (`plugins.enabled` list beyond `plugins.enable`) is replaced by TS `PluginManager` (`plugins.json`); post-transfer shell commands (`afterfinish`/`afterfolder`).
+- **Language / i18n** — app is **English-only** by design. `config.py` `ui.language` 30+ `po/` locales intentionally not ported; `UiSection.tsx` shows fixed English note instead of combobox.
 - **Colors/fonts/tab positions** (`chatme/.../tab_changed`, `globalfont/...`, `tabmain/...`) — intentional omit per `docs/DESIGN.md` Omitted Controls (2026-08-30 Phase A/B) + **user request (no global font changes)** to keep Alexandria editorial palette/typography (`Noto Serif/Inter/Public Sans` fixed in `layout.tsx:56`).
+- **MAX_SOCKETS adaptive** — homelab-sufficient fixed `512` (`env MAX_SOCKETS` configurable) intentionally not adaptive `ulimit` (`slskproto.py` `resource.RLIMIT_NOFILE`); see `docs/porting-status.md` Network row.
 - **Diagnostics docked pane** — stays routed `/diagnostics` vs MainWindow bottom pane; mobile uses separate route with scope/level filters, not docked log view.
 - Note: `portrange`/`upnp` are **not** omitted — `LISTEN_PORT` 62904 is editable in Settings → Network (`NetworkSection.tsx:82`) via `server.portrange` + bridge `PortMapper` (`portmapper.ts` NAT-PMP → UPnP, see `docs/architecture.md`).
 

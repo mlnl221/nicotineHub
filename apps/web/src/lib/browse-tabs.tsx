@@ -92,6 +92,8 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   const tabsRef = useRef<BrowseTab[]>([]);
   tabsRef.current = tabs;
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // track pending folder request per tab to avoid cross-tab stale updates when same username in multiple tabs
+  const pendingFolderRef = useRef<Map<string, string>>(new Map());
 
   // persist on change (debounced via effect)
   useEffect(() => { persist(tabs, activeId); }, [tabs, activeId]);
@@ -122,7 +124,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
     try { sessionStorage.removeItem("__demoBrowseSeeded"); } catch {}
   }, [state.status]);
 
-  // Subscribe to browse messages — multiplex by username
+  // Subscribe to browse messages — multiplex by username, folder precise to avoid stale cross-tab updates
   useEffect(() => {
     const unsub = subscribe((msg) => {
       if (msg.type === "browse:shares") {
@@ -144,7 +146,14 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
         const lower = m.username.toLowerCase();
         setTabs((prev) => prev.map((t) => {
           if (t.username.toLowerCase() !== lower) return t;
-          if (m.error) return { ...t, error: m.error };
+          // only update the tab that actually requested this folder (prevents stale files in other tab with same user)
+          const pending = pendingFolderRef.current.get(t.id);
+          const shouldUpdate = pending ? pending === m.folder : t.currentFolder === m.folder;
+          // if no pending and no currentFolder match, but single tab for user -> still update (legacy)
+          const singleTabForUser = prev.filter((x) => x.username.toLowerCase() === lower).length === 1;
+          if (!shouldUpdate && !singleTabForUser) return t;
+          if (pending === m.folder) pendingFolderRef.current.delete(t.id);
+          if (m.error) return { ...t, error: m.error, currentFiles: null };
           return { ...t, currentFolder: m.folder, currentFiles: m.files, error: null };
         }));
       }
@@ -203,6 +212,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   const closeBrowse = useCallback((id: string) => {
     const timer = timersRef.current.get(id);
     if (timer) { clearTimeout(timer); timersRef.current.delete(id); }
+    pendingFolderRef.current.delete(id);
     const next = tabsRef.current.filter((t) => t.id !== id);
     setTabs(next);
     setActiveId((cur) => cur === id ? (next[next.length - 1]?.id ?? null) : cur);
@@ -217,6 +227,13 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   const openFolder = useCallback((id: string, folder: string) => {
     const tab = tabsRef.current.find((t) => t.id === id);
     if (!tab) return;
+    // Demo: resolve locally from cached folders — no bridge round-trip needed; avoids stale currentFiles races
+    if (isDemo) {
+      const f = tab.folders.find((x) => x.name === folder);
+      setTabs((prev) => prev.map((t) => t.id === id ? { ...t, currentFolder: folder, currentFiles: f ? f.files : null, error: null } : t));
+      return;
+    }
+    pendingFolderRef.current.set(id, folder);
     setTabs((prev) => prev.map((t) => t.id === id ? { ...t, currentFolder: folder, currentFiles: null } : t));
     send({ type: "browse", action: "folder", username: tab.username, folder });
   }, [send]);
