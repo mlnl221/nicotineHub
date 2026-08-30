@@ -56,7 +56,7 @@ export function userMenu(username: string, tabName: string, opts?: { onBrowse?: 
   return items;
 }
 
-export function searchResultMenu(row: { user: string; path: string; filename: string; folder: string }, opts: { onDownload: () => void }) : MenuItem[] {
+export function searchResultMenu(row: { user: string; path: string; filename: string; folder: string }, opts: { onDownload: () => void; onProps?: () => void }) : MenuItem[] {
   const fileUrl = `slsk://${encodeURIComponent(row.user)}/${row.path.replace(/\\/g, "/")}`;
   const folderPath = row.path.replace(/[^\\]*$/, "").replace(/\\$/, "");
   const folderUrl = `slsk://${encodeURIComponent(row.user)}/${folderPath.replace(/\\/g, "/")}`;
@@ -67,7 +67,7 @@ export function searchResultMenu(row: { user: string; path: string; filename: st
     { id: "download-to", label: "Download File To…", icon: "download", action: () => toast("Download To — folder picker unavailable") },
     { id: "download-folder", label: "Download Folder…", icon: "folder", action: () => toast("Download folder — use Download File") },
     { id: "sep2", label: "---", icon: "" },
-    { id: "props", label: "File Properties", icon: "info", action: () => toast(`${row.filename} • ${row.path}`) },
+    { id: "props", label: "File Properties", icon: "info", action: opts.onProps ?? (() => toast(`${row.filename} • ${row.path}`)) },
     { id: "sep3", label: "---", icon: "" },
     { id: "view-profile", label: "View User Profile", icon: "account_circle", action: () => navigate(`/profile/${encodeURIComponent(row.user)}`) },
     { id: "browse-folder", label: "Browse Folder", icon: "folder_managed", action: () => navigate(`/browse/${encodeURIComponent(row.user)}`) },

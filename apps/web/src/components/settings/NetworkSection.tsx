@@ -77,6 +77,7 @@ export function NetworkSection() {
           value={server.server.port}
           min={1}
           max={65535}
+          hideSlider
           onChange={(v) => setOption("server", "server", { ...server.server, port: v || DEFAULT_SERVER_PORT })}
           onReset={() => setOption("server", "server", { ...server.server, port: DEFAULT_SERVER_PORT })}
         />
@@ -91,6 +92,7 @@ export function NetworkSection() {
           min={1024}
           max={65535}
           step={1}
+          hideSlider
           onChange={(v) => {
             const p = Math.max(1024, Math.min(65535, Number(v) || DEFAULT_LISTEN_PORT));
             setOption("server", "portrange", [p, p] as unknown as never);

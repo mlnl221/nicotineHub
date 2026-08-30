@@ -18,6 +18,7 @@ import { ContextMenu } from "@/components/ui/ContextMenu";
 import { searchResultMenu, searchTabMenu } from "@/lib/context-menu/menus";
 import { useContextMenu } from "@/lib/context-menu/useContextMenu";
 import { useWishlist } from "@/lib/wishlist";
+import { humanLength, humanQuality, humanSize } from "@/lib/format";
 
 export function SearchScreen() {
   const { activeTab, activeId, tabs, setActive, closeTab, startSearch, stopSearch, setFilters, clearFilters } = useSearches();
@@ -30,6 +31,7 @@ export function SearchScreen() {
   const [toast, setToast] = useState<string | null>(null);
   const ctxMenu = useContextMenu();
   const [menuRow, setMenuRow] = useState<SearchRow | null>(null);
+  const [propsRow, setPropsRow] = useState<SearchRow | null>(null);
   const [tabMenuAnchor, setTabMenuAnchor] = useState<{ x: number; y: number; tab: import("@/lib/search").SearchTab } | null>(null);
 
   const deferredRows = useDeferredValue(activeTab?.rows ?? []);
@@ -222,10 +224,15 @@ export function SearchScreen() {
               e.preventDefault();
               const user = rowEl.dataset.rowUser;
               const path = rowEl.dataset.rowPath || "";
-              const filename = rowEl.dataset.rowFilename || "";
-              const folder = rowEl.dataset.rowFolder || "";
-              const size = Number(rowEl.dataset.rowSize || "0");
-              setMenuRow({ user, path, filename, folder, size, fileType: "", slotFree: false, speed: 0, inQueue: 0, quality: 0, length: 0, private: false, attributes: {} });
+              // resolve full row from visibleRows to get mocked attributes/size
+              const full = visibleRows.find((r) => r.user === user && r.path === path) || null;
+              if (full) setMenuRow(full);
+              else {
+                const filename = rowEl.dataset.rowFilename || "";
+                const folder = rowEl.dataset.rowFolder || "";
+                const size = Number(rowEl.dataset.rowSize || "0");
+                setMenuRow({ user, path, filename, folder, size, fileType: "", slotFree: false, speed: 0, inQueue: 0, quality: 0, length: 0, private: false, attributes: {} });
+              }
               ctxMenu.open(e);
             }
           }}
@@ -352,12 +359,52 @@ export function SearchScreen() {
                 flash(`Queued "${menuRow.filename}"`);
               }
             },
+            onProps: () => {
+              if (menuRow) setPropsRow(menuRow);
+            },
           })}
           onClose={() => {
             ctxMenu.close();
             setMenuRow(null);
           }}
         />
+      ) : null}
+      {propsRow ? (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 p-4" onClick={() => setPropsRow(null)}>
+          <div className="w-full max-w-md rounded-2xl bg-surface-container-lowest p-6 shadow-xl max-h-[80vh] overflow-y-auto ghost-border" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4">
+              <h3 className="font-headline text-lg font-bold truncate">{propsRow.filename}</h3>
+              <button onClick={() => setPropsRow(null)} className="rounded-full p-2 hover:bg-surface-container-high"><span className="material-symbols-outlined">close</span></button>
+            </div>
+            <div className="mt-1 font-label text-xs text-on-surface-variant truncate">{propsRow.user} · {propsRow.folder}</div>
+            <div className="mt-4 space-y-3 font-body text-sm">
+              <div className="flex justify-between gap-4"><span className="text-on-surface-variant shrink-0">Full path</span><span className="font-mono text-xs truncate max-w-[60%] text-right">{propsRow.path}</span></div>
+              <div className="flex justify-between"><span className="text-on-surface-variant">Size</span><span>{humanSize(propsRow.size)}</span></div>
+              <div className="flex justify-between"><span className="text-on-surface-variant">Type</span><span>{propsRow.fileType || propsRow.filename.split(".").pop() || "—"}</span></div>
+              <div className="flex justify-between"><span className="text-on-surface-variant">Quality</span><span>{humanQuality(propsRow.attributes) || (propsRow.quality ? `${propsRow.quality} kbps` : "—")}</span></div>
+              <div className="flex justify-between"><span className="text-on-surface-variant">Length</span><span>{humanLength(propsRow.length) || "—"}</span></div>
+              <div className="flex justify-between"><span className="text-on-surface-variant">Slot</span><span className={propsRow.slotFree ? "text-tertiary font-semibold" : ""}>{propsRow.slotFree ? "Free" : `Queued (pos ${propsRow.inQueue ?? "?"})`}</span></div>
+              <div className="flex justify-between"><span className="text-on-surface-variant">Speed</span><span>{propsRow.speed ? humanSize(propsRow.speed) + "/s" : "—"}</span></div>
+              <div className="flex justify-between"><span className="text-on-surface-variant">Folder</span><span className="font-mono text-xs truncate max-w-[60%] text-right">{propsRow.folder}</span></div>
+              <div className="flex justify-between"><span className="text-on-surface-variant">Virtual path</span><button onClick={() => { navigator.clipboard.writeText(propsRow.path); flash("Path copied"); }} className="font-mono text-xs text-primary hover:underline">Copy</button></div>
+            </div>
+            <div className="mt-6 flex gap-2">
+              <button
+                onClick={() => {
+                  if (propsRow) {
+                    if (isDemo) flash("Demo — downloads disabled");
+                    else { requestDownload({ username: propsRow.user, virtualPath: propsRow.path, size: propsRow.size, fileName: propsRow.filename }); flash(`Queued "${propsRow.filename}"`); }
+                  }
+                  setPropsRow(null);
+                }}
+                className={`flex-1 rounded-xl py-3 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline" : "bg-primary text-on-primary hover:bg-primary-container"}`}
+              >
+                {isDemo ? "Download disabled in demo" : "Download"}
+              </button>
+              <button onClick={() => setPropsRow(null)} className="rounded-xl bg-surface-container-high px-6 py-3 font-label text-xs">Close</button>
+            </div>
+          </div>
+        </div>
       ) : null}
       {tabMenuAnchor ? (
         <ContextMenu

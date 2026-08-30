@@ -12,6 +12,7 @@ import { ToastHost } from "@/components/ToastHost";
 import { NowPlayingSync } from "@/components/NowPlayingSync";
 import { WebVitals } from "@/components/WebVitals";
 import { GlobalContextMenu } from "@/components/ui/GlobalContextMenu";
+import { SidebarProvider } from "@/components/SidebarContext";
 
 export const metadata: Metadata = {
   title: "Nicotine Hub",
@@ -69,6 +70,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-dvh max-w-full overflow-x-clip bg-surface-container-low font-body text-on-surface antialiased selection:bg-primary/30 dark:bg-inverse-surface dark:text-inverse-on-surface">
         <DemoBanner />
+        <SidebarProvider>
         <ThemeProvider>
           <ConfigProvider>
             <SessionProvider>
@@ -86,6 +88,7 @@ export default function RootLayout({
             </SessionProvider>
           </ConfigProvider>
         </ThemeProvider>
+        </SidebarProvider>
         <WebVitals />
       </body>
     </html>

@@ -87,7 +87,7 @@ function UploadsInner() {
           {isDemo ? (
             <div className="rounded-xl bg-tertiary-fixed/20 dark:bg-tertiary-container/20 px-4 py-3 flex items-center gap-3 ghost-border">
               <span className="material-symbols-outlined text-tertiary">info</span>
-              <p className="font-label text-xs font-semibold text-on-tertiary-container dark:text-tertiary-fixed">Demo preview — 1 upload simulated below (see Downloads for both). New transfers are disabled on Vercel.</p>
+              <p className="font-label text-xs font-semibold text-on-tertiary-container dark:text-tertiary-fixed">Demo preview — 1 download + 1 upload simulated below (animated). New downloads are disabled on Vercel — search, chat, profiles &amp; browse are mocked.</p>
             </div>
           ) : null}
           <ThroughputChart />
