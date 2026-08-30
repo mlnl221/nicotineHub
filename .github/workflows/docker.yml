@@ -68,5 +68,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            TAG=${{ steps.meta.outputs.version }}
+            BUILD_TAG=${{ steps.meta.outputs.version }}
+            COMMIT_SHA=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

@@ -191,3 +191,30 @@ body {
     margin-left: 4rem !important;
   }
 }
+
+/* Demo mode — push all fixed/sticky headers below the demo banner (demo only) */
+html[data-demo="true"] {
+  --demo-banner-h: 32px;
+}
+html[data-demo="true"] header.fixed.top-0 {
+  top: var(--demo-banner-h) !important;
+}
+html[data-demo="true"] nav.fixed.left-0.top-0 {
+  top: var(--demo-banner-h) !important;
+  height: calc(100% - var(--demo-banner-h)) !important;
+}
+/* generic sticky top-0 push */
+html[data-demo="true"] header.sticky.top-0,
+html[data-demo="true"] div.sticky.top-0,
+html[data-demo="true"] .sticky.top-0 {
+  top: var(--demo-banner-h) !important;
+}
+/* mobile secondary sticky that sits under TopBar: top-[calc(56px+env(safe-area-inset-top,0px))] -> + banner */
+html[data-demo="true"] div.sticky.top-\[calc\(56px\+env\(safe-area-inset-top\,0px\)\)\] {
+  top: calc(var(--demo-banner-h) + 56px + env(safe-area-inset-top, 0px)) !important;
+}
+@media (min-width: 768px) {
+  html[data-demo="true"] div.sticky.top-\[calc\(56px\+env\(safe-area-inset-top\,0px\)\)\] {
+    top: var(--demo-banner-h) !important;
+  }
+}

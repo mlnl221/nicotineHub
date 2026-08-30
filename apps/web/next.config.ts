@@ -3,6 +3,11 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   ...(process.env.VERCEL ? {} : { output: "standalone" as const }),
+  env: {
+    NEXT_PUBLIC_BUILD_TAG: process.env.NEXT_PUBLIC_BUILD_TAG || process.env.BUILD_TAG || process.env.TAG || process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || "0.1.0",
+    NEXT_PUBLIC_COMMIT_SHA: process.env.NEXT_PUBLIC_COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || process.env.COMMIT_SHA || "",
+    NEXT_PUBLIC_BUILD_DATE: process.env.NEXT_PUBLIC_BUILD_DATE || process.env.BUILD_DATE || new Date().toISOString().split("T")[0],
+  },
   // Shave Docker build time: lint/typecheck done via separate `bun run typecheck` / CI, not in `next build`
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },

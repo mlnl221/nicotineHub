@@ -115,9 +115,13 @@ export function mockSearchRows(query: string, _mode?: string): import("@/lib/pro
 export function mockBrowseFolders(username: string): import("@/lib/protocol").BrowseFolder[] {
   const seed = Math.abs(hash(username.toLowerCase()));
   const rnd = seededRand(seed);
+  // include nested sub-directories to demonstrate tree handling (jazzcat has Blue Note + Live, Electronic has Acid)
   const folderNames = [
     `C:\\Users\\${username}\\Music\\Jazz`,
+    `C:\\Users\\${username}\\Music\\Jazz\\Blue Note`,
+    `C:\\Users\\${username}\\Music\\Jazz\\Live Bootlegs`,
     `C:\\Users\\${username}\\Music\\Electronic`,
+    `C:\\Users\\${username}\\Music\\Electronic\\Acid`,
     `C:\\Users\\${username}\\Music\\Hip-Hop`,
     `C:\\Users\\${username}\\Music\\Soul`,
   ];
@@ -352,6 +356,9 @@ export function mockDiagnosticsHealth(): import("@/lib/protocol").DiagnosticsHea
     listenPort: 62904,
     dataDir: "/data (demo — ephemeral)",
     tokenAuth: false,
+    version: process.env.NEXT_PUBLIC_BUILD_TAG || process.env.NEXT_PUBLIC_APP_VERSION || "0.1.0",
+    commitSha: (process.env.NEXT_PUBLIC_COMMIT_SHA || process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || "demo").slice(0, 7),
+    buildDate: new Date().toISOString().split("T")[0],
   };
 }
 
