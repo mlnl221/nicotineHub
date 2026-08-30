@@ -52,7 +52,8 @@ bun test && bun run build
 # 9. Appearance → On close Show confirmation → beforeunload prompt on refresh
 # 10. Appearance → Buddy list placement chatrooms/always → Chat shows Buddies panel (12 buddies + presence dots) in right aside
 # 11. Appearance → Reverse file paths OFF → TransferCard shows virtualPath as title, fileName as subtitle; Browse file row shows full virtualPath
-# 12. Appearance → Language de/fr/es → stored in nicotineHub.settings ui.language (cosmetic, English rendering)
+# 12. Appearance → Language de/fr/es → Sidebar/BottomNav labels switch via lib/i18n.ts t() (e.g. Search → Suche/Recherche), system fallback via navigator.language
+# 13. Searches → Filters visible by default ON → Search FilterBar expanded on load (OFF → collapsed)
 ```
 
 ## Pointers
