@@ -11,12 +11,12 @@ import { BrowseProvider, useBrowseTabs } from "@/lib/browse-tabs";
 import { BrowseTabs } from "@/components/browse/BrowseTabs";
 import { BrowseView } from "@/components/browse/BrowseView";
 
-const RECENT_BROWSE_KEY = "nicotine.recentBrowse";
+const RECENT_BROWSE_KEY = "nicotineHub.recentBrowse";
 
 function loadRecent(): string[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(RECENT_BROWSE_KEY);
+    const raw = (localStorage.getItem(RECENT_BROWSE_KEY) ?? localStorage.getItem(RECENT_BROWSE_KEY.replace("nicotineHub.", "nicotine.")));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : [];

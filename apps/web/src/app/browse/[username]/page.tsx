@@ -14,8 +14,8 @@ export default function BrowseUserRedirect() {
     if (username) {
       // Persist recent and redirect to tabbed browse with query param
       try {
-        const key = "nicotine.recentBrowse";
-        const raw = localStorage.getItem(key);
+        const key = "nicotineHub.recentBrowse";
+        const raw = (localStorage.getItem(key) ?? localStorage.getItem(key.replace ? key.replace("nicotineHub.", "nicotine.") : key));
         const list: string[] = raw ? JSON.parse(raw) : [];
         const next = [username, ...list.filter((x: string) => x.toLowerCase() !== username.toLowerCase())].slice(0, 20);
         localStorage.setItem(key, JSON.stringify(next));

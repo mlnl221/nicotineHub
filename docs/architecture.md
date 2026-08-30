@@ -92,7 +92,7 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 | `UPLOAD_LIMIT`/`DOWNLOAD_LIMIT` | `0` | KB/s (`0` = unlimited), aliases `UPLOADLIMIT`/`DOWNLOADLIMIT`; adaptive throttle + `DOWNLOAD_LIMIT` stored in `transfer:stats` 2 s |
 | `ENABLE_SERVER_PING` | `1` | `0` disables `ServerPing 32` fallback |
 | `ALLOWED_ORIGINS` | *(open)* | CSV — if set, `getCorsHeaders` (`server.ts:265`) only allows listed `Origin` (homelab lock-down) |
-| `NEXT_PUBLIC_BRIDGE_URL` | `ws://host:8787/ws` | Build-time WS override; runtime `localStorage.nicotine.bridgeUrl` wins |
+| `NEXT_PUBLIC_BRIDGE_URL` | `ws://host:8787/ws` | Build-time WS override; runtime `localStorage.nicotineHub.bridgeUrl` wins |
 
 ## Tests
 

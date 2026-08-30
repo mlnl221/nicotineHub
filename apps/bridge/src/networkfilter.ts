@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2001-2026 Nicotine+ Contributors
-// SPDX-FileCopyrightText: 2025-2026 nicotine-mobile Contributors
+// SPDX-FileCopyrightText: 2025-2026 Nicotine Hub Contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Portions based on nicotine-plus pynicotine/networkfilter.py
 
@@ -92,8 +92,7 @@ function populateIpCountryData(): void {
   if (!found) {
     try {
       const { existsSync: es } = require("node:fs");
-      const tryPaths = [
-        "/home/magnus/projects/nicotine_mobile/apps/bridge/src/data/ip_country_data.csv",
+      const tryPaths: string[] = [
       ];
       for (const p of tryPaths) if (es(p)) { found = p; break; }
     } catch {}

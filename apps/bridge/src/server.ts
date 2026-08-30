@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2001-2026 Nicotine+ Contributors
-// SPDX-FileCopyrightText: 2025-2026 nicotine-mobile Contributors
+// SPDX-FileCopyrightText: 2025-2026 Nicotine Hub Contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Inspired by nicotine-plus pynicotine/*; WebSocket bridge implementation is original but
 // behavior mirrors nicotine-plus and is licensed GPL-3.0-or-later for compliance.

@@ -2,7 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
 
-const STORAGE_KEY = "nicotine.wishlist";
+const STORAGE_KEY = "nicotineHub.wishlist";
 
 export type WishlistEntry = {
   term: string;
@@ -14,7 +14,7 @@ export type WishlistEntry = {
 function readStored(): WishlistEntry[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = (localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(STORAGE_KEY.replace("nicotineHub.", "nicotine.")));
     if (!raw) return [];
     const arr = JSON.parse(raw);
     if (!Array.isArray(arr)) return [];

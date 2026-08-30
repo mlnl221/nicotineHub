@@ -95,13 +95,13 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   }, [visibleFileCount, visibleFiles.length]);
 
   const [sortKey, setSortKey] = useState<"name" | "size" | "bitrate" | "length">(() => {
-    try { const s = JSON.parse(localStorage.getItem("nicotine.browse.sort") || "null"); return s?.key || "name"; } catch { return "name"; }
+    try { const s = JSON.parse((localStorage.getItem("nicotineHub.browse.sort") ?? localStorage.getItem("nicotine.browse.sort")) || "null"); return s?.key || "name"; } catch { return "name"; }
   });
   const [sortDir, setSortDir] = useState<"asc" | "desc">(() => {
-    try { const s = JSON.parse(localStorage.getItem("nicotine.browse.sort") || "null"); return s?.dir || "asc"; } catch { return "asc"; }
+    try { const s = JSON.parse((localStorage.getItem("nicotineHub.browse.sort") ?? localStorage.getItem("nicotine.browse.sort")) || "null"); return s?.dir || "asc"; } catch { return "asc"; }
   });
   useEffect(() => {
-    try { localStorage.setItem("nicotine.browse.sort", JSON.stringify({ key: sortKey, dir: sortDir })); } catch {}
+    try { localStorage.setItem("nicotineHub.browse.sort", JSON.stringify({ key: sortKey, dir: sortDir })); } catch {}
   }, [sortKey, sortDir]);
 
   const sortedFiles = useMemo(() => {

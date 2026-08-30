@@ -45,7 +45,7 @@ export function useNotifications() {
       }
     } catch {}
     try {
-      window.dispatchEvent(new CustomEvent("nicotine:toast", { detail: { title, body } }));
+      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title, body } }));
     } catch {}
     maybePlaySound();
   }, [settings.notifications.notification_window_title, settings.notifications.notification_tab_colors, maybePlaySound]);

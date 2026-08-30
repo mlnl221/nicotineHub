@@ -4,7 +4,7 @@ import type { MenuItem } from "@/components/ui/ContextMenu";
 
 function toast(msg: string) {
   if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent("nicotine:toast", { detail: { title: "Unavailable", body: msg } }));
+    window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Unavailable", body: msg } }));
   }
 }
 

@@ -21,8 +21,8 @@ export function ToastHost() {
       containerRef.current?.appendChild(el);
       setTimeout(() => el.remove(), 4000);
     };
-    window.addEventListener("nicotine:toast", handler as EventListener);
-    return () => window.removeEventListener("nicotine:toast", handler as EventListener);
+    window.addEventListener("nicotineHub:toast", handler as EventListener);
+    return () => window.removeEventListener("nicotineHub:toast", handler as EventListener);
   }, []);
 
   return <div ref={containerRef} className="pointer-events-none fixed bottom-20 right-4 z-50 flex flex-col items-end md:bottom-4" aria-live="polite" />;

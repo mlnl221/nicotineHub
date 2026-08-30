@@ -95,10 +95,10 @@ function DownloadsInner() {
       case 0: break;
       case 1: {
         if (t.status === "Finished" && (t as unknown as { downloadUrl?: string }).downloadUrl) window.open((t as unknown as { downloadUrl: string }).downloadUrl, "_blank");
-        else window.dispatchEvent(new CustomEvent("nicotine:toast", { detail: { title: "Open", body: "No file to open" } }));
+        else window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Open", body: "No file to open" } }));
         break;
       }
-      case 2: window.dispatchEvent(new CustomEvent("nicotine:toast", { detail: { title: "Open", body: "Browser cannot open file manager" } })); break;
+      case 2: window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Open", body: "Browser cannot open file manager" } })); break;
       case 3: searches ? searches.startSearch(t.fileName) : router.push(`/search?query=${encodeURIComponent(t.fileName)}`); break;
       case 4: isUpload ? clearTransfer(t.id, true) : pauseDownload(t.id); break;
       case 5: isUpload ? clearTransfer(t.id, true) : cancelDownload(t.id); break;

@@ -2,7 +2,7 @@
 
 > SPDX-License-Identifier: GPL-3.0-or-later
 
-This project — **nicotine-mobile / Nicotine Hub** — would not exist without the
+This project — **Nicotine Hub** — would not exist without the
 [nicotine-plus](https://github.com/nicotine-plus/nicotine-plus) community and the
 decades of Soulseek reverse-engineering that preceded it.
 
@@ -10,12 +10,12 @@ decades of Soulseek reverse-engineering that preceded it.
 
 ## 1. License
 
-**nicotine-mobile is licensed under the GNU General Public License v3.0 or later
+**Nicotine Hub is licensed under the GNU General Public License v3.0 or later
 (`GPL-3.0-or-later`).** See [`COPYING`](./COPYING) and
 [`LICENSES/GPL-3.0-or-later.txt`](./LICENSES/GPL-3.0-or-later.txt).
 
 ```
-Copyright (C) 2025-2026 nicotine-mobile Contributors
+Copyright (C) 2025-2026 Nicotine Hub Contributors
 Copyright (C) 2001-2026 Nicotine+, Nicotine and PySoulSeek Contributors
 ```
 
@@ -70,7 +70,7 @@ Repo pinned at `nicotine-plus@8d81e66` (2026-08-28). Source:
 
 Soulseek is a proprietary peer-to-peer network and server at
 `server.slsknet.org:2242` operated by Soulseek volunteers — **not affiliated**
-with nicotine-mobile or Nicotine+. Trademark “Soulseek” belongs to its owners;
+with Nicotine Hub or Nicotine+. Trademark “Soulseek” belongs to its owners;
 use here is nominative fair use (“Soulseek-compatible client for the Soulseek
 network”).
 
@@ -91,7 +91,7 @@ behavior stays compatible. Where we ported code, we kept nicotine-plus copyright
 and added our own (dual `SPDX-FileCopyrightText` headers). Where we only reused
 ideas/spec, we still credit the source.
 
-| nicotine-mobile file | nicotine-plus source(s) | Kind |
+| Nicotine Hub file | nicotine-plus source(s) | Kind |
 |---|---|---|
 | `apps/bridge/src/soulseek.ts` | `pynicotine/slskmessages.py` + `pynicotine/slskproto.py` + `doc/SLSKPROTOCOL.md` | **Full port** — codes, framing `[len][code][payload]`, packing LE, zlib caps (16M/128M), `>2GiB` sentinel, obfuscation |
 | `apps/bridge/src/session.ts` | `pynicotine/slskproto.py`, `pynicotine/transfers.py`, `pynicotine/shares.py` | **Heavily derived** — socket state machine, `PeerInit`/`PierceFireWall`, `GetPeerAddress` cache, distrib leaf |
@@ -125,7 +125,7 @@ No separate agreement is needed — GPL is the agreement.
 
 ## 6. Contact
 
-* nicotine-mobile: <https://github.com/mlnl221/nicotineHub> (issues / PRs)
+* Nicotine Hub: <https://github.com/mlnl221/nicotineHub> (issues / PRs)
 * Nicotine+: <https://github.com/nicotine-plus/nicotine-plus> — `AUTHORS.md`, `#nicotine+` IRC
 * Soulseek: <https://www.slsknet.org/>
 

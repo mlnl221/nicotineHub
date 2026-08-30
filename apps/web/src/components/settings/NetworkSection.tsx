@@ -10,7 +10,7 @@ function useBridgeListenPort(): { current: number | null; bridgeUrl: string } {
   const [current, setCurrent] = useState<number | null>(null);
   const [bridgeUrl, setBridgeUrl] = useState<string>("");
   useEffect(() => {
-    const ls = typeof window !== "undefined" ? window.localStorage.getItem("nicotine.bridgeUrl") : null;
+    const ls = typeof window !== "undefined" ? (window.localStorage.getItem("nicotineHub.bridgeUrl") ?? window.localStorage.getItem("nicotine.bridgeUrl")) : null;
     const url = ls || process.env.NEXT_PUBLIC_BRIDGE_URL || "";
     if (url) {
       try {

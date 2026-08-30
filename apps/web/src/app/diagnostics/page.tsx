@@ -99,7 +99,7 @@ export default function DiagnosticsPage() {
     const fetchLogs = async () => {
       const bridgeHttpUrl = (() => {
         try {
-          const override = localStorage.getItem("nicotine.bridgeUrl");
+          const override = (localStorage.getItem("nicotineHub.bridgeUrl") ?? localStorage.getItem("nicotine.bridgeUrl"));
           if (override) {
             const u = new URL(override);
             const scheme = u.protocol === "wss:" ? "https:" : "http:";
@@ -150,7 +150,7 @@ export default function DiagnosticsPage() {
     const fetchHealth = async () => {
       const bridgeUrl = (() => {
         try {
-          const override = localStorage.getItem("nicotine.bridgeUrl");
+          const override = (localStorage.getItem("nicotineHub.bridgeUrl") ?? localStorage.getItem("nicotine.bridgeUrl"));
           if (override) {
             try {
               const u = new URL(override);
@@ -267,7 +267,7 @@ export default function DiagnosticsPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      const v = window.localStorage.getItem("nicotine.bridgeUrl");
+      const v = (window.localStorage.getItem("nicotineHub.bridgeUrl") ?? window.localStorage.getItem("nicotine.bridgeUrl"));
       if (v) { setBridgeUrlDisplay(v.replace(/token=[^&]+/, "token=***")); return; }
     } catch {}
     if (isDemo) { setBridgeUrlDisplay("demo (offline — no bridge)"); return; }

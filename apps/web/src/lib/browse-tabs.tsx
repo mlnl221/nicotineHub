@@ -31,13 +31,13 @@ interface BrowseTabsApi {
 
 const BrowseTabsContext = createContext<BrowseTabsApi | null>(null);
 
-const STORAGE_KEY = "nicotine.browseTabs";
+const STORAGE_KEY = "nicotineHub.browseTabs";
 const MAX_TABS = 10;
 
 function loadPersisted(): { tabs: Array<{ id: string; username: string }>; activeId: string | null } | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = (localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(STORAGE_KEY.replace("nicotineHub.", "nicotine.")));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { tabs?: Array<{ id: string; username: string }>; activeId?: string | null };
     if (!parsed || !Array.isArray(parsed.tabs)) return null;

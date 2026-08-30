@@ -13,11 +13,11 @@ import {
 import { defaults, type Settings } from "@/lib/config/defaults";
 import { deepMerge } from "@/lib/config/merge";
 
-const STORAGE_KEY = "nicotine.settings";
+const STORAGE_KEY = "nicotineHub.settings";
 function readStored(): Settings {
   if (typeof window === "undefined") return defaults;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = (window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(STORAGE_KEY.replace("nicotineHub.", "nicotine.")));
     if (!raw) return defaults;
     return deepMerge(defaults, JSON.parse(raw));
   } catch {
