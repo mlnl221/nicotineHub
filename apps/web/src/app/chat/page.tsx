@@ -13,6 +13,7 @@ import { chatRoomMenu, userMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
 import { useCompletion } from "@/lib/completion";
 import { useBuddies } from "@/lib/buddies";
+import { highlightKeywords, usernameHotspotClass } from "@/lib/chatFormat";
 
 export default function ChatRoomsPage() {
   const { state } = useSession();
@@ -318,7 +319,7 @@ export default function ChatRoomsPage() {
                             </span>
                             <div className="min-w-0 flex-1">
                               <p className="font-body text-sm leading-relaxed">
-                                <span className={`font-semibold ${m.username === "system" ? "text-outline italic" : "text-on-surface"}`}>
+                                <span className={m.username === "system" ? "font-semibold text-outline italic" : usernameHotspotClass(settings.ui.usernamehotspots, settings.ui.usernamestyle)}>
                                   {m.username}
                                 </span>
                                 <span className="ml-2 font-mono text-xs text-outline">
@@ -328,7 +329,12 @@ export default function ChatRoomsPage() {
                               <p
                                 className={`mt-0.5 font-body text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${m.username === "system" ? "text-on-surface-variant italic" : "text-on-surface"}`}
                               >
-                                {isIgnored ? "[ignored]" : m.message}
+                                {isIgnored ? (
+                                  "[ignored]"
+                                ) : (() => {
+                                  const hl = highlightKeywords(m.message, settings.words.keywords, settings.words.watch_keywords);
+                                  return hl ? <span dangerouslySetInnerHTML={{ __html: hl }} /> : m.message;
+                                })()}
                               </p>
                             </div>
                           </div>
@@ -348,6 +354,7 @@ export default function ChatRoomsPage() {
                       <div className="flex items-end gap-2 rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-2 focus-within:border-primary">
                         <textarea
                           value={sayInput}
+                          spellCheck={settings.ui.spellcheck}
                           onChange={(e) => { setSayInput(e.target.value); completion.onInput(e.target.value); }}
                           onKeyDown={(e) => {
                             if (e.key === "Tab" && settings.words.tab) {

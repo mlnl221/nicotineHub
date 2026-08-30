@@ -13,6 +13,13 @@ import { useConfig } from "@/lib/config/provider";
 const PAGE_SIZE = 50;
 
 function formatBytes(n: number): string {
+  try {
+    const raw = typeof localStorage !== "undefined" ? (localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings")) : null;
+    if (raw) {
+      const parsed = JSON.parse(raw) as { ui?: { file_size_unit?: string } };
+      if (parsed?.ui?.file_size_unit === "B") return `${n.toLocaleString()} B`;
+    }
+  } catch {}
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;

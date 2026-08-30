@@ -11,6 +11,7 @@ import { usePrivateChat } from "@/lib/privateChat";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { privateChatMenu, userMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
+import { highlightKeywords, usernameHotspotClass } from "@/lib/chatFormat";
 
 function PrivateChatInner() {
   const { state } = useSession();
@@ -167,16 +168,18 @@ function PrivateChatInner() {
                           {last ? (last.isSelf ? `You: ${last.message}` : last.message) : "No messages"}
                         </p>
                       </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          closeConversation(u);
-                        }}
-                        className="ml-2 rounded-full p-1 text-outline hover:bg-surface-container-high hover:text-error"
-                        title="Close"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">close</span>
-                      </button>
+                      {settings.ui.tabclosers ?? true ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            closeConversation(u);
+                          }}
+                          className="ml-2 rounded-full p-1 text-outline hover:bg-surface-container-high hover:text-error"
+                          title="Close"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">close</span>
+                        </button>
+                      ) : null}
                     </button>
                   );
                 })
@@ -257,7 +260,14 @@ function PrivateChatInner() {
                         <div
                           className={`rounded-2xl px-4 py-3 shadow-sm max-w-full overflow-hidden min-w-0 ${m.isSelf ? "rounded-br-sm bg-primary-container/20 border border-primary/20" : "rounded-bl-sm bg-surface-container-low border border-outline-variant/20"}`}
                         >
-                          <p className="font-body text-sm leading-relaxed break-words [overflow-wrap:anywhere] whitespace-pre-wrap">{isIgnored ? "[ignored]" : m.message}</p>
+                          <p className="font-body text-sm leading-relaxed break-words [overflow-wrap:anywhere] whitespace-pre-wrap">
+                            {isIgnored ? (
+                              "[ignored]"
+                            ) : (() => {
+                              const hl = !m.isSelf ? highlightKeywords(m.message, settings.words.keywords, settings.words.watch_keywords) : null;
+                              return hl ? <span dangerouslySetInnerHTML={{ __html: hl }} /> : m.message;
+                            })()}
+                          </p>
                           <p className="mt-1 font-label text-[10px] text-outline">
                             {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </p>
@@ -281,6 +291,7 @@ function PrivateChatInner() {
                   <div className="flex items-end gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-low p-2 focus-within:border-primary">
                     <textarea
                       value={input}
+                      spellCheck={settings.ui.spellcheck}
                       onChange={(e) => { setInput(e.target.value); if (activeUser && e.target.value) sendTyping(activeUser); }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey) {

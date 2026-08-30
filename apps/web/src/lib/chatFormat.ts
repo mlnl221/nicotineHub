@@ -52,3 +52,49 @@ export function isMentioned(text: string, keywords: string[], watch: boolean, ow
   if (ownUser && lower.includes(ownUser.toLowerCase())) return true;
   return keywords.some((k) => k && lower.includes(k.toLowerCase()));
 }
+
+export function highlightKeywords(text: string, keywords: string[], watch: boolean): string | null {
+  if (!watch || !keywords.length) return null;
+  let out = text;
+  let changed = false;
+  for (const kw of keywords) {
+    if (!kw) continue;
+    try {
+      const re = new RegExp(`(${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+      if (re.test(out)) {
+        out = out.replace(re, `<mark class="bg-amber-200 dark:bg-amber-800 rounded px-0.5">$1</mark>`);
+        changed = true;
+      }
+    } catch {}
+  }
+  return changed ? out : null;
+}
+
+export function usernameHotspotClass(isHotspot: boolean, style: string): string {
+  if (!isHotspot) return "text-on-surface";
+  switch (style) {
+    case "bold": return "font-bold text-primary";
+    case "italic": return "italic text-primary";
+    case "underline": return "underline text-primary";
+    case "hyperlinks": return "underline decoration-dotted text-primary hover:text-primary-container cursor-pointer";
+    case "none": return "text-on-surface";
+    default: return "font-bold text-primary";
+  }
+}
+
+/** Get current UI settings for username/path formatting (reads localStorage sync, SSR-safe). */
+export function getUiSettings(): { usernamehotspots: boolean; usernamestyle: string; reverse: boolean; fileSizeUnit: string } {
+  try {
+    const raw = typeof localStorage !== "undefined" ? (localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings")) : null;
+    if (raw) {
+      const parsed = JSON.parse(raw) as { ui?: { usernamehotspots?: boolean; usernamestyle?: string; reverse_file_paths?: boolean; file_size_unit?: string } };
+      return {
+        usernamehotspots: parsed?.ui?.usernamehotspots ?? true,
+        usernamestyle: parsed?.ui?.usernamestyle ?? "bold",
+        reverse: parsed?.ui?.reverse_file_paths ?? true,
+        fileSizeUnit: parsed?.ui?.file_size_unit ?? "",
+      };
+    }
+  } catch {}
+  return { usernamehotspots: true, usernamestyle: "bold", reverse: true, fileSizeUnit: "" };
+}

@@ -1073,6 +1073,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             if (["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "groupdownloads", "groupuploads"].includes(key)) {
               tm?.setConfig?.({ [key]: value });
             }
+            if (["rescanonstartup", "rescan_shares_daily", "rescan_shares_hour"].includes(key)) {
+              (session as unknown as { setRescanConfig?: (o: Record<string, unknown>) => void })?.setRescanConfig?.({ [key]: value });
+              tm?.setConfig?.({ [key]: value });
+            }
             if (["reveal_buddy_shares", "reveal_trusted_shares"].includes(key)) {
               try {
                 const sdb = (session as unknown as { shareDBInstance: { getRevealFlags: ()=>{revealBuddyShares:boolean;revealTrustedShares:boolean}; setRevealFlags: (b:boolean,t:boolean)=>void } }).shareDBInstance;

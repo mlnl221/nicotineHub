@@ -1,8 +1,16 @@
 "use client";
 
 import type { Transfer } from "@/lib/protocol";
+import { humanSize as formatSize } from "@/lib/format";
 
 function humanSize(bytes: number): string {
+  try {
+    const raw = typeof localStorage !== "undefined" ? (localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings")) : null;
+    if (raw) {
+      const parsed = JSON.parse(raw) as { ui?: { file_size_unit?: string } };
+      if (parsed?.ui?.file_size_unit === "B") return `${bytes.toLocaleString()} B`;
+    }
+  } catch {}
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let v = bytes;

@@ -157,3 +157,52 @@ bun test && bun run build
 - Search: `apps/web/src/lib/search.tsx:95`, `apps/bridge/src/session.ts:191`
 - Docs: `docs/settings-mapping.md`, `docs/settings-plan.md:111` (Phase H now done)
 
+---
+
+## Update 2026-08-30 — P2 deferred → implemented (same branch, this push)
+
+This continues the same branch (`fix/settings-audit-p0p1`) with the next phase that was deferred as “Out of scope (P2)”.
+
+### What was deferred and now wired
+
+**Rescan cron (`transfers.rescanonstartup/rescan_shares_daily/_hour`):**
+- `apps/web/src/lib/config/sync.tsx:21` now syncs the three keys.
+- `apps/bridge/src/server.ts:1076` forwards to `session.setRescanConfig`.
+- `apps/bridge/src/session.ts:521` stores `_rescanOnStartup/_rescanDaily/_rescanHour`, `restartRescanTimer()` (60s tick, UTC hour match, once-per-day guard, `unref`), `cleanupServerTimers` clears it, and on `login success` `session.ts:1026` calls `restartRescanTimer()` + `if (_rescanOnStartup) rescanShares()` (nicotine `shares.py` parity).
+
+**Appearance consumers:**
+- `apps/web/src/lib/format.ts:3` `humanSize(bytes, file_size_unit?)` now reads `localStorage nicotineHub.settings.ui.file_size_unit` — `"B"` → exact `12,345 B`, else humanized `KiB/MiB` — and `formatDisplayPath` helper for `reverse_file_paths`.
+- `apps/web/src/components/browse/BrowseView.tsx:15` and `apps/web/src/components/transfers/TransferCard.tsx:5` patched to `humanSize` that checks `file_size_unit` via localStorage (so both browse total size and per-file rows + transfer cards respect Appearance → Show file sizes exactly).
+- `apps/web/src/lib/chatFormat.ts:49` added `highlightKeywords()`, `usernameHotspotClass()`, `getUiSettings()` and wired in `apps/web/src/app/chat/page.tsx:14` (room messages `usernameHotspotClass` + `<mark>` highlight) and `apps/web/src/app/private-chat/page.tsx:14` (private messages highlight + per-conversation close button respects `tabclosers`).
+- `apps/web/src/components/search/SearchBar.tsx:76` query/user/room inputs now `spellCheck={settings.ui.spellcheck}` (was hardcoded `false`).
+- `apps/web/src/app/chat/page.tsx:355` and `apps/web/src/app/private-chat/page.tsx:282` textareas `spellCheck={settings.ui.spellcheck}`.
+- `apps/web/src/components/search/SearchTabs.tsx:25`, `apps/web/src/components/browse/BrowseTabs.tsx:6`, `apps/web/src/components/profile/ProfileTabs.tsx:6` all respect `settings.ui.tabclosers` (hide close `×` when false).
+- `apps/web/src/lib/search.tsx:229`, `apps/web/src/lib/browse-tabs.tsx:212`, `apps/web/src/lib/profile-tabs.tsx:242`, `apps/web/src/lib/privateChat.tsx:178` respect `settings.ui.tab_select_previous` (previous vs next tab on close, reading `localStorage` sync).
+- `apps/web/src/components/mobile/TopBar.tsx:16` respects `settings.ui.header_bar === false` → returns `null` (desktop GTK header bar parity — PWA top bar hidden when off).
+- `apps/web/src/components/ExitDialogHandler.tsx:1` new client component reads `settings.ui.exitdialog === 1` and installs `beforeunload` prompt; mounted in `apps/web/src/app/layout.tsx:6`.
+
+**Watch-keywords inline highlight:**
+- `apps/web/src/lib/chatFormat.ts:55` `highlightKeywords` wraps each keyword case-insensitively in `<mark class="bg-amber-200…">`; `app/chat` and `private-chat` render via `dangerouslySetInnerHTML` when `watch_keywords` enabled.
+
+**Search UI flags:**
+- Already mostly wired: `group_searches`/`expand_results` → `SearchScreen.tsx:196` controls `ResultsList` grouping/expand; `filters_visible` was stored-only but now implicitly handled via filter bar default (filter bar is collapsible, not forced). Left as stored-only note — filter toggle is user gesture, not setting-driven.
+
+**Remaining stored-only (intentionally not wired this phase):**
+- `ui.language` (now English-only `UiSection.tsx:12` with `onChange={()=>{}}` + DESIGN.md note), `ui.buddylistinchatrooms` (buddy list placement `tab/chatrooms/always` — broom: Sidebar vs Chat layout would need layout refactor, kept as stored-only), `ui.reverse_file_paths` helper exists but BrowseView file rows already filename-first so flipping order has no visible delta on mobile — kept as `formatDisplayPath` stub, `header_bar` hide is wired as above.
+
+### Verification for this push
+
+```bash
+bun test && bun run build   # 98 pass, web 17 routes, bridge 0.97 MB
+# manual P2 checks
+# 1. Appearance → Show file sizes exactly ON → Browse /data file 12,345 B shown as "12,345 B" not "12.1 KiB" (both BrowseView and TransferCard)
+# 2. Appearance → Colorise usernames OFF → chat usernames render plain text-on-surface (no primary/bold)
+# 3. Chats → Highlight keywords ON + keywords "pink" → room message "pink floyd" shows amber <mark>
+# 4. Transfers → Rescan daily ON, hour 0 UTC → wait to top of hour UTC (or set hour to current UTC hour) → bridge logs "daily rescan triggered" + shares rescanned
+# 5. Appearance → Tab close buttons OFF → Search/Browse/Profile/PrivateChat tabs hide ×
+# 6. Appearance → Restore previous tab on close ON → open 3 search tabs, close middle → previous tab becomes active (OFF → next tab active)
+# 7. Chats/Appearance → Spell check OFF → chat textarea spellCheck false (browser red underline off), ON → true
+# 8. Appearance → Header bar OFF → TopBar (mobile header) hidden; ON → shown
+# 9. Appearance → On close = Show confirmation → beforeunload prompt on tab close/refresh
+```
+

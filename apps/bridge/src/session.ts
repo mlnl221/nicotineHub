@@ -518,6 +518,41 @@ export class SoulseekSession {
     }
   }
 
+  // ---- Rescan daily/hour (P2) — nicotine-plus transfers.rescanonstartup / rescan_shares_daily / rescan_shares_hour ----
+  private _rescanOnStartup = true;
+  private _rescanDaily = true;
+  private _rescanHour = 0;
+  private _rescanTimer?: ReturnType<typeof setInterval>;
+  private _lastRescanDay = "";
+  setRescanConfig(opts: Partial<{ rescanonstartup: boolean; rescan_shares_daily: boolean; rescan_shares_hour: number }>) {
+    if (opts.rescanonstartup !== undefined) this._rescanOnStartup = !!opts.rescanonstartup;
+    if (opts.rescan_shares_daily !== undefined) this._rescanDaily = !!opts.rescan_shares_daily;
+    if (opts.rescan_shares_hour !== undefined) {
+      const h = Number(opts.rescan_shares_hour);
+      if (Number.isInteger(h) && h >= 0 && h <= 23) this._rescanHour = h;
+    }
+    this.restartRescanTimer();
+    logger.info("server", "rescan config updated", { startup: this._rescanOnStartup, daily: this._rescanDaily, hour: this._rescanHour });
+  }
+  private restartRescanTimer() {
+    if (this._rescanTimer) { clearInterval(this._rescanTimer); this._rescanTimer = undefined; }
+    if (!this._rescanDaily) return;
+    // Check every 60s if hour matches and we haven't rescanned today
+    this._rescanTimer = setInterval(() => {
+      if (!this.loggedIn) return;
+      const now = new Date();
+      const hour = now.getUTCHours(); // use UTC for determinism (matches settings-plan hourLabel UTC)
+      const day = now.toISOString().slice(0, 10);
+      if (hour !== this._rescanHour) return;
+      if (this._lastRescanDay === day) return;
+      this._lastRescanDay = day;
+      logger.info("server", "daily rescan triggered", { hour, day });
+      this.rescanShares().catch((e) => logger.warn("server", "daily rescan failed", { error: (e as Error).message }));
+    }, 60_000);
+    // Don't keep process alive just for this timer
+    try { (this._rescanTimer as unknown as { unref?: () => void }).unref?.(); } catch {}
+  }
+
   private queuePendingPeerMessage(username: string, connType: string, msg: Buffer) {
     const key = username.toLowerCase();
     if (!this.pendingPeerMessages.has(key)) this.pendingPeerMessages.set(key, []);
@@ -932,6 +967,7 @@ export class SoulseekSession {
     if (this.serverPingTimer) { clearInterval(this.serverPingTimer); this.serverPingTimer = undefined; }
     if (this.wishlistTimer) { clearInterval(this.wishlistTimer); this.wishlistTimer = undefined; }
     if (this._autoawayTimer) { clearInterval(this._autoawayTimer); this._autoawayTimer = undefined; }
+    if (this._rescanTimer) { clearInterval(this._rescanTimer); this._rescanTimer = undefined; }
   }
 
   private handleServerData(chunk: ArrayBuffer | Uint8Array) {
@@ -987,7 +1023,11 @@ export class SoulseekSession {
         this._sendHaveNoParent();
         this.restartWishlistTimer();
         this.restartAutoawayTimer();
+        this.restartRescanTimer();
         this.handleAutoJoinAndWatch();
+        if (this._rescanOnStartup) {
+          this.rescanShares().catch((e) => logger.warn("server", "startup rescan failed", { error: (e as Error).message }));
+        }
         this.loginResolve?.(resp);
         this.loginResolve = undefined;
         this.loginReject = undefined;

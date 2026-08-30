@@ -229,9 +229,25 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   const closeTab = useCallback(
     (id: string) => {
       send({ type: "search:stop", searchId: id });
+      const idx = tabsRef.current.findIndex((t) => t.id === id);
       const next = tabsRef.current.filter((t) => t.id !== id);
       setTabs(next);
-      setActiveId((curr) => (curr === id ? (next[next.length - 1]?.id ?? null) : curr));
+      setActiveId((curr) => {
+        if (curr !== id) return curr;
+        if (next.length === 0) return null;
+        let preferPrev = true;
+        try {
+          const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
+          if (raw) {
+            const parsed = JSON.parse(raw) as { ui?: { tab_select_previous?: boolean } };
+            if (typeof parsed?.ui?.tab_select_previous === "boolean") preferPrev = parsed.ui.tab_select_previous;
+          }
+        } catch {}
+        if (preferPrev && idx > 0) return tabsRef.current[idx - 1]?.id ?? next[next.length - 1]?.id ?? null;
+        if (!preferPrev && idx < tabsRef.current.length - 1) return tabsRef.current[idx + 1]?.id ?? next[next.length - 1]?.id ?? null;
+        // fallback to last
+        return next[next.length - 1]?.id ?? null;
+      });
     },
     [send],
   );
