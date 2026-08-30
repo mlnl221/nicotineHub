@@ -239,7 +239,7 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
   };
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex flex-col">
       <header className="sticky top-0 z-10 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-8 py-4 md:py-6 flex flex-col gap-3 md:gap-4 border-b border-outline-variant/10">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className={`flex items-center gap-4 min-w-0 flex-1 ${profile.info && !profile.info.slotsavail ? "opacity-60" : ""}`} title={profile.info && !profile.info.slotsavail ? "Slots full" : undefined}>
@@ -343,7 +343,7 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
         ) : null}
       </header>
 
-      <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 md:space-y-8 max-w-screen-2xl mx-auto w-full">
+      <div className="flex flex-col p-4 md:p-8 space-y-6 md:space-y-8 max-w-screen-2xl mx-auto w-full">
         {error ? (
           <div className="bg-error-container/50 dark:bg-tertiary-container/20 rounded-xl p-5 flex gap-3 items-start">
             <span className="material-symbols-outlined text-error text-xl">info</span>

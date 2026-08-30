@@ -152,12 +152,20 @@
   scrollbar-width: none;
 }
 
-html, body {
-  overflow-x: hidden;
-  max-width: 100vw;
+html {
+  overflow-x: clip;
+  /* Remove max-width:100vw (includes scrollbar) — use 100% and clip instead */
+  max-width: 100%;
+  /* Ensure html can scroll on mobile Chrome */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 body {
-  overscroll-behavior-y: contain;
+  max-width: 100%;
+  overflow-x: clip;
+  /* Allow pull-to-refresh and normal scroll; inner panes use overscroll-contain */
+  overscroll-behavior-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .btn-glow {

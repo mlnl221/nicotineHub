@@ -11,7 +11,6 @@ import { StatisticsProvider } from "@/lib/statistics";
 import { ToastHost } from "@/components/ToastHost";
 import { NowPlayingSync } from "@/components/NowPlayingSync";
 import { WebVitals } from "@/components/WebVitals";
-import { Footer } from "@/components/Footer";
 import { GlobalContextMenu } from "@/components/ui/GlobalContextMenu";
 
 export const metadata: Metadata = {
@@ -68,7 +67,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="min-h-dvh max-w-[100vw] overflow-x-hidden bg-surface-container-low font-body text-on-surface antialiased selection:bg-primary/30 dark:bg-inverse-surface dark:text-inverse-on-surface">
+      <body className="min-h-dvh max-w-full overflow-x-clip bg-surface-container-low font-body text-on-surface antialiased selection:bg-primary/30 dark:bg-inverse-surface dark:text-inverse-on-surface">
         <DemoBanner />
         <ThemeProvider>
           <ConfigProvider>
@@ -79,7 +78,6 @@ export default function RootLayout({
                     <ConfigBridgeSync />
                     <NowPlayingSync />
                     {children}
-                    <Footer />
                     <ToastHost />
                     <GlobalContextMenu />
                   </TransfersProvider>

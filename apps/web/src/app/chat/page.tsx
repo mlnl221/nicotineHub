@@ -70,11 +70,11 @@ export default function ChatRoomsPage() {
   };
 
   return (
-    <div className="flex min-h-[100dvh] h-screen max-w-[100vw] overflow-x-hidden bg-surface-container-lowest font-body text-on-surface">
+    <div className="flex min-h-[100dvh] h-screen max-w-full overflow-hidden bg-surface-container-lowest font-body text-on-surface">
       <Sidebar />
       <TopBar title={activeRoom || "Chat Rooms"} subtitle={activeRoom ? `${activeUsers.length} users • ${roomList.length} public rooms` : `${joinedArray.length} joined • ${roomList.length} public`} />
-      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
-        <header className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
+      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
+        <header className="hidden md:flex sticky top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
           <div>
             <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Chat Rooms</h2>
             <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">
@@ -90,7 +90,7 @@ export default function ChatRoomsPage() {
           </div>
         </header>
 
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden min-h-0">
           {/* Left: Rooms */}
           <aside className="hidden w-80 flex-col border-r border-outline-variant/15 bg-surface md:flex">
             <div className="border-b border-outline-variant/15 p-3 space-y-3">
@@ -125,7 +125,7 @@ export default function ChatRoomsPage() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-2 space-y-4">
+            <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-2 space-y-4">
               {/* Joined */}
               {joinedArray.length > 0 ? (
                 <div>
@@ -198,7 +198,7 @@ export default function ChatRoomsPage() {
           </aside>
 
           {/* Center: Messages */}
-          <section className="flex flex-1 flex-col overflow-hidden bg-surface-container-lowest/30" onContextMenu={(e) => {
+          <section className="flex flex-1 flex-col overflow-hidden min-h-0 bg-surface-container-lowest/30" onContextMenu={(e) => {
             const t = e.target as HTMLElement;
             if (t.closest("button, input, textarea, select")) return;
             e.preventDefault();
@@ -299,9 +299,9 @@ export default function ChatRoomsPage() {
                   </div>
                 ) : null}
 
-                <div className="flex flex-1 overflow-hidden">
-                  <div className="flex flex-1 flex-col overflow-hidden">
-                    <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 max-w-full overflow-x-hidden">
+                <div className="flex flex-1 overflow-hidden min-h-0">
+                  <div className="flex flex-1 flex-col overflow-hidden min-h-0">
+                    <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-4 md:p-6 space-y-2 max-w-full overflow-x-hidden">
                       {activeMessages.length === 0 ? (
                         <div className="py-10 text-center">
                           <p className="font-body text-sm text-outline">No messages yet. Start the conversation.</p>
@@ -390,7 +390,7 @@ export default function ChatRoomsPage() {
                         Users • {activeUsers.length}
                       </h4>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                    <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-2 space-y-1">
                       {activeUsers.length === 0 ? (
                         <p className="px-3 py-2 font-body text-xs text-outline">No users (room list may be stale).</p>
                       ) : (

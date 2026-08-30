@@ -72,11 +72,11 @@ function BrowseInner() {
   const hasTabs = tabs.length > 0;
 
   return (
-    <div className="flex min-h-screen max-w-[100vw] overflow-x-hidden bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
+    <div className="flex h-[100dvh] min-h-[100dvh] max-w-full overflow-hidden bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Browse" subtitle={`Browse shared files • ${tabs.length}/10 tabs`} />
-      <main className="md:ml-72 flex min-h-screen flex-1 flex-col overflow-hidden bg-background pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
-        <header className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
+      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 bg-background pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+        <header className="hidden md:flex sticky top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
           <div>
             <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Browse Shares</h2>
             <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">{tabs.length}/10 tabs • Browse another user&apos;s shared files — {hasTabs ? `${activeTab?.username ?? tabs[0].username}` : "enter a username above"}</p>
@@ -115,11 +115,11 @@ function BrowseInner() {
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="flex flex-1 flex-col overflow-hidden min-h-0">
           {activeTab ? (
             <BrowseView key={activeTab.id} tab={activeTab} />
           ) : (
-            <div className="mx-auto w-full max-w-xl flex-1 p-4 sm:p-6 md:p-10">
+            <div className="mx-auto w-full max-w-xl flex-1 overflow-y-auto overscroll-contain min-h-0 p-4 sm:p-6 md:p-10">
               <div className="rounded-xl bg-surface-container-lowest p-8 shadow-sm ring-1 ring-outline-variant/15">
                 <p className="font-body text-sm text-on-surface-variant">No browse open. Enter a username above or pick from recent.</p>
                 <p className="mt-2 font-label text-xs text-outline">Tip: use &quot;Browse&quot; from a search result or profile to jump directly. Tabs load in background and persist.</p>

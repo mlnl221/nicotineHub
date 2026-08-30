@@ -88,7 +88,7 @@ export function BottomNav() {
         </div>
       </div>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-50 flex flex-col rounded-t-xl bg-surface-container-lowest/80 backdrop-blur-xl shadow-[0_-4px_20px_rgba(0,0,0,0.06)] border-t border-outline-variant/10 dark:bg-surface-container-low/90 md:hidden overflow-hidden max-w-[100vw]">
+      <nav className="fixed bottom-0 left-0 right-0 z-50 flex flex-col rounded-t-xl bg-surface-container-lowest/80 backdrop-blur-xl shadow-[0_-4px_20px_rgba(0,0,0,0.06)] border-t border-outline-variant/10 dark:bg-surface-container-low/90 md:hidden overflow-hidden max-w-full">
         <div className="flex items-center gap-0 px-1 sm:px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] w-full max-w-full">
           {PRIMARY.map((item) => {
             const active = mounted ? isActive(pathname, item.href) : false;
