@@ -1,10 +1,11 @@
+# syntax=docker/dockerfile:1.6
 # ---- Builder (Bun): Next.js standalone build ----
-FROM oven/bun:1.4 AS builder
+FROM oven/bun:1.4-alpine AS builder
 WORKDIR /app
 COPY package.json bun.lock ./
 COPY apps/bridge/package.json apps/bridge/package.json
 COPY apps/web/package.json apps/web/package.json
-RUN bun install --frozen-lockfile && rm -rf node_modules/@playwright node_modules/playwright* node_modules/.bun/@playwright* node_modules/.bun/playwright* 2>/dev/null || true
+RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile && rm -rf node_modules/@playwright node_modules/playwright* node_modules/.bun/@playwright* node_modules/.bun/playwright* 2>/dev/null || true
 COPY apps/web apps/web
 WORKDIR /app/apps/web
 RUN bun run build
