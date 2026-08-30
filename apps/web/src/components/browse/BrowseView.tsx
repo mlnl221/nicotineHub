@@ -397,10 +397,15 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                           <li key={file.name} onContextMenu={(e) => { e.preventDefault(); const shortName = file.name.split(/[\\\/]/).pop() || file.name; const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : `${activeFolder!.name}\\${shortName}`; setMenuAnchor({ x: e.clientX, y: e.clientY, items: browseFileMenu(username, { path: vp, filename: shortName }, false) }); }} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-container-low/60">
                             <span className="material-symbols-outlined text-outline text-[20px]">audio_file</span>
                             <div className="min-w-0 flex-1">
-                              <p className="truncate font-body text-sm font-medium text-on-surface">{shortName}</p>
+                              <p className="truncate font-body text-sm font-medium text-on-surface" title={file.name}>
+                                {settings.ui.reverse_file_paths ?? true ? shortName : file.name}
+                              </p>
                               <p className="font-label text-xs text-on-surface-variant">
                                 {formatBytes(file.size)} {file.ext ? `• ${file.ext}` : ""} {bitrate ? `• ${bitrate}kbps` : ""} {length ? `• ${Math.floor(length/60)}:${String(length%60).padStart(2,"0")}` : ""}
                               </p>
+                              {!settings.ui.reverse_file_paths && file.name !== shortName ? (
+                                <p className="truncate font-label text-[10px] text-outline" title={shortName}>{shortName}</p>
+                              ) : null}
                             </div>
                             <button onClick={() => setPropsFile({ name: file.name, size: file.size, ext: file.ext, attrs: file.attrs, folder: activeFolder.name })} className="shrink-0 rounded-full bg-surface-container-high px-3 py-2.5 min-h-9 font-label text-xs hover:bg-surface-variant" title="Properties">
                               <span className="material-symbols-outlined text-[16px]">info</span>
