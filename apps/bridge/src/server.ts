@@ -23,6 +23,7 @@ import { diagClear, diagLog, diagTail, diagSubscribe, logger, type LogLevel } fr
 import { PluginManager } from "./plugins/manager.ts";
 import { Plugin as CoreCommandsPlugin, manifest as coreCommandsManifest } from "./plugins/builtin/core_commands.ts";
 import { Plugin as SpamfilterPlugin, manifest as spamManifest } from "./plugins/builtin/spamfilter.ts";
+import { listDirectory } from "./files.ts";
 
 /* Schemas */
 
@@ -436,6 +437,41 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (!name) return new Response(JSON.stringify({ error: "install failed" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
         return new Response(JSON.stringify({ ok: true, name }), { status: 200, headers: { "content-type": "application/json", ...cors } });
       } catch (e) { return new Response(JSON.stringify({ error: (e as Error).message }), { status: 500, headers: { "content-type": "application/json", ...cors } }); }
+    }
+
+    // GET /api/files?path=/subdir — secure browsing of DATA_DIR (Docker explorer; host Explorer not needed)
+    if (url.pathname === "/api/files" && req.method === "GET") {
+      if (BRIDGE_TOKEN) {
+        const tok = extractToken(req);
+        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
+      }
+      const rawPath = url.searchParams.get("path") ?? "/";
+      // Reject overly long or null-byte paths early (defense in depth, files.ts also handles)
+      if (rawPath.length > 1024 || rawPath.includes("\0")) {
+        return new Response(JSON.stringify({ error: "invalid path" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
+      }
+      try {
+        const result = await listDirectory(rawPath);
+        // Do not expose absolute disk path outside container in production; but exposing DATA_DIR-relative is fine.
+        // Keep absolutePath for debugging only when token auth passes, otherwise strip to prevent info leak? For homelab we include sanitized version.
+        return new Response(JSON.stringify({
+          path: result.path,
+          parent: result.parent,
+          entries: result.entries,
+          // absolutePath kept internal; expose only if BRIDGE_TOKEN auth passed or not gated — still just DATA_DIR prefix
+          // To avoid leaking host mount specifics, we expose only relative path. Absolute is DATA_DIR-based anyway.
+        }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
+      } catch (e) {
+        const msg = (e as Error).message || "error";
+        const status = (e as unknown as { status?: number }).status;
+        if (msg.includes("traversal") || msg.includes("escapes")) {
+          return new Response(JSON.stringify({ error: "path traversal blocked" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
+        }
+        if (status === 404) return new Response(JSON.stringify({ error: "not found" }), { status: 404, headers: { "content-type": "application/json", ...cors } });
+        if (status === 400) return new Response(JSON.stringify({ error: msg }), { status: 400, headers: { "content-type": "application/json", ...cors } });
+        logger.warn("bridge", "api/files error", { error: msg, path: rawPath.slice(0, 200) });
+        return new Response(JSON.stringify({ error: "internal error" }), { status: 500, headers: { "content-type": "application/json", ...cors } });
+      }
     }
 
     if (url.pathname === "/ws") {
