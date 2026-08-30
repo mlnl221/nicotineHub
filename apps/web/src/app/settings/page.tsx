@@ -23,6 +23,7 @@ const BannedUsersSection = dynamic(() => import("@/components/settings/BannedUse
 const IgnoredUsersSection = dynamic(() => import("@/components/settings/IgnoredUsersSection").then((m) => m.IgnoredUsersSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
 const UrlHandlersSection = dynamic(() => import("@/components/settings/UrlHandlersSection").then((m) => m.UrlHandlersSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
 const PluginsSection = dynamic(() => import("@/components/settings/PluginsSection").then((m) => m.PluginsSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const AboutSection = dynamic(() => import("@/components/settings/AboutSection").then((m) => m.AboutSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
 
 type TabId =
   | "network"
@@ -39,7 +40,8 @@ type TabId =
   | "ignored-users"
   | "url-handlers"
   | "plugins"
-  | "notifications";
+  | "notifications"
+  | "about";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "network", label: "Network", icon: "dns" },
@@ -53,6 +55,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "now-playing", label: "Now Playing", icon: "music_note" },
   { id: "logging", label: "Logging", icon: "article" },
   { id: "banned-users", label: "Banned Users", icon: "block" },
+  { id: "about", label: "About", icon: "info" },
   { id: "ignored-users", label: "Ignored Users", icon: "person_off" },
   { id: "url-handlers", label: "URL Handlers", icon: "link" },
   { id: "plugins", label: "Plugins", icon: "extension" },
@@ -67,7 +70,7 @@ const TAB_GROUPS: TabGroup[] = [
   { label: "Transfers", tabs: ["shares", "downloads", "uploads"] },
   { label: "Search & Users", tabs: ["searches", "user-profile", "banned-users", "ignored-users"] },
   { label: "Chat & Playback", tabs: ["chats", "now-playing"] },
-  { label: "System", tabs: ["logging", "url-handlers", "plugins"] },
+  { label: "System", tabs: ["logging", "url-handlers", "plugins", "about"] },
 ];
 
 const TAB_MAP = new Map(TABS.map((t) => [t.id, t] as const));
@@ -252,6 +255,8 @@ export default function SettingsPage() {
                 <UrlHandlersSection />
               ) : tab === "plugins" ? (
                 <PluginsSection />
+              ) : tab === "about" ? (
+                <AboutSection />
               ) : (
                 <NotificationsSection />
               )}
