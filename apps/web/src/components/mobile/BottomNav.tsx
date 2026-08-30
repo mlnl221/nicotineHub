@@ -23,6 +23,7 @@ const MORE: NavItem[] = [
   { icon: "interests", label: "Interests", href: "/interests" },
   { icon: "settings", label: "Settings", href: "/settings" },
   { icon: "monitoring", label: "Diagnostics", href: "/diagnostics" },
+  { icon: "bar_chart", label: "Statistics", href: "/statistics" },
 ];
 
 function isActive(pathname: string, href: string) {
@@ -47,7 +48,7 @@ export function BottomNav() {
   useEffect(() => setMounted(true), []);
   const transferCount = mounted ? downloads.length + uploads.length : 0;
   const visibleMap = settings.ui.modes_visible || {};
-  const hrefToKey: Record<string, string> = { "/search": "search", "/downloads": "downloads", "/private-chat": "privateChat", "/browse": "browse", "/buddies": "buddies", "/uploads": "uploads", "/chat": "chat", "/profile": "profile", "/interests": "interests" };
+  const hrefToKey: Record<string, string> = { "/search": "search", "/downloads": "downloads", "/private-chat": "privateChat", "/browse": "browse", "/buddies": "buddies", "/uploads": "uploads", "/chat": "chat", "/profile": "profile", "/interests": "interests", "/diagnostics": "diagnostics", "/statistics": "statistics", "/settings": "settings" };
   const moreFiltered = mounted ? MORE.filter((i) => visibleMap[hrefToKey[i.href]] !== false) : MORE;
   const moreActive = mounted && moreFiltered.some((i) => isActive(pathname, i.href));
 
