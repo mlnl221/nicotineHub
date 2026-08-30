@@ -74,7 +74,7 @@ export function LoggingSection() {
         />
         <ToggleControl
           label="Collapse logs"
-          description="Collapse log entries in the viewer (logcollapsed)."
+          description="Legacy — logs are now flat one-line [scope] time LEVEL msg (B2 simple); toggle kept for compat but no longer groups diagnostics view."
           checked={l.logcollapsed}
           onChange={(v) => setOption("logging", "logcollapsed", v)}
         />

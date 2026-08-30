@@ -10,10 +10,10 @@ import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import type { DiagEntry, DiagLevel, DiagnosticsHealth } from "@/lib/protocol";
 import { PortChecker } from "@/components/PortChecker";
-import { StatisticsPanel } from "@/components/StatisticsPanel";
 import { useConfig } from "@/lib/config/provider";
 import { formatStrftime } from "@/lib/chatFormat";
 import { isDemo } from "@/lib/demo";
+import { useStatistics } from "@/lib/statistics";
 
 const LEVELS: DiagLevel[] = ["debug", "info", "warn", "error"];
 const LEVEL_COLOR: Record<DiagLevel, string> = {
@@ -39,6 +39,51 @@ function HealthCard({ title, icon, children }: { title: string; icon: string; ch
         <h3 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant dark:text-outline">{title}</h3>
       </div>
       <div className="space-y-1 font-body text-xs text-on-surface dark:text-on-surface">{children}</div>
+    </div>
+  );
+}
+
+function humanSize(n: number): string {
+  if (!n) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function StatisticsSummaryCard() {
+  const { total, session } = useStatistics();
+  if (!total || !session) {
+    return (
+      <div className="rounded-xl bg-surface p-4 ghost-border dark:bg-surface-container-low">
+        <div className="mb-2 flex items-center gap-2">
+          <span className="material-symbols-outlined text-[18px] text-primary dark:text-primary-fixed">bar_chart</span>
+          <h3 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant dark:text-outline">Statistics</h3>
+        </div>
+        <p className="font-body text-xs text-on-surface-variant dark:text-outline">No statistics yet — connect to the bridge to load.</p>
+        <Link href="/statistics" className="mt-3 inline-flex items-center gap-1 font-label text-xs font-semibold uppercase tracking-widest text-primary hover:underline">
+          View full statistics <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+        </Link>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-xl bg-surface p-4 ghost-border dark:bg-surface-container-low">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="material-symbols-outlined text-[18px] text-primary dark:text-primary-fixed">bar_chart</span>
+          <h3 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant dark:text-outline">Statistics</h3>
+        </div>
+        <Link href="/statistics" className="inline-flex items-center gap-1 font-label text-[11px] font-semibold uppercase tracking-widest text-primary hover:underline">
+          View all <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+        </Link>
+      </div>
+      <div className="space-y-1 font-body text-xs text-on-surface dark:text-on-surface">
+        <div>↓ {total.completed_downloads} completed <span className="text-on-surface-variant">({session.completed_downloads} session)</span> · {humanSize(total.downloaded_size)}</div>
+        <div>↑ {total.completed_uploads} completed <span className="text-on-surface-variant">({session.completed_uploads} session)</span> · {humanSize(total.uploaded_size)}</div>
+        <div className="pt-1 text-[11px] text-on-surface-variant dark:text-outline">Since {new Date(total.since_timestamp * 1000).toLocaleDateString()} · Total vs session</div>
+      </div>
     </div>
   );
 }
@@ -216,20 +261,11 @@ export default function DiagnosticsPage() {
     }
     return true;
   });
-  const isCollapsed = settings.logging.logcollapsed ?? true;
-  const grouped = isCollapsed ? (() => {
-    const m = new Map<string, DiagEntry[]>();
-    for (const e of filtered) {
-      if (!m.has(e.scope)) m.set(e.scope, []);
-      m.get(e.scope)!.push(e);
-    }
-    return Array.from(m.entries());
-  })() : null;
 
   const handleCopy = useCallback(async () => {
-    const text = filtered.map((e) => `[${e.ts}] ${e.level.toUpperCase()} [${e.scope}] ${e.msg}${e.meta ? " " + JSON.stringify(e.meta) : ""}`).join("\n");
+    const text = filtered.map((e) => `[${e.scope}] ${formatTime(e.ts, settings.logging.log_timestamp)} ${e.level.toUpperCase()} ${e.msg}${e.meta ? " " + JSON.stringify(e.meta) : ""}`).join("\n");
     try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
-  }, [filtered]);
+  }, [filtered, settings.logging.log_timestamp]);
 
   const handleClear = useCallback(() => {
     try { send({ type: "diagnostics:clear" }); } catch {}
@@ -310,7 +346,7 @@ export default function DiagnosticsPage() {
           {/* Health cards + new panels */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2">
             <PortChecker />
-            <StatisticsPanel />
+            <StatisticsSummaryCard />
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <HealthCard title="Bridge" icon="dns">
@@ -386,28 +422,11 @@ export default function DiagnosticsPage() {
             >
               {filtered.length === 0 ? (
                 <div className="py-8 text-center font-body text-xs text-on-surface-variant dark:text-outline">No logs yet — logs appear here in real time (bridge + browser). Try a search or download.</div>
-              ) : isCollapsed && grouped ? (
-                grouped.map(([scope, entries]) => (
-                  <details key={scope} open className="mb-2">
-                    <summary className="cursor-pointer font-semibold text-xs uppercase tracking-widest text-on-surface-variant">{scope} — {entries.length}</summary>
-                    <div className="mt-1 space-y-1">
-                      {entries.map((e, i) => (
-                        <div key={i} className="flex gap-2 whitespace-pre-wrap break-words">
-                          <span className="shrink-0 text-on-surface-variant dark:text-outline">{formatTime(e.ts, settings.logging.log_timestamp)}</span>
-                          <span className={`shrink-0 font-semibold uppercase ${LEVEL_COLOR[e.level]}`}>{e.level}</span>
-                          <span className="shrink-0 rounded bg-surface-container-high px-1 py-0 dark:bg-surface-variant">{e.scope}</span>
-                          <span className="text-on-surface dark:text-inverse-on-surface">{e.msg}</span>
-                          {e.meta && <span className="text-on-surface-variant dark:text-outline">{JSON.stringify(e.meta)}</span>}
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                ))
               ) : filtered.map((e, i) => (
                 <div key={i} className="flex gap-2 whitespace-pre-wrap break-words">
+                  <span className="shrink-0 text-on-surface-variant dark:text-outline">[{e.scope}]</span>
                   <span className="shrink-0 text-on-surface-variant dark:text-outline">{formatTime(e.ts, settings.logging.log_timestamp)}</span>
                   <span className={`shrink-0 font-semibold uppercase ${LEVEL_COLOR[e.level]}`}>{e.level}</span>
-                  <span className="shrink-0 rounded bg-surface-container-high px-1 py-0 dark:bg-surface-variant">{e.scope}</span>
                   <span className="text-on-surface dark:text-inverse-on-surface">{e.msg}</span>
                   {e.meta && <span className="text-on-surface-variant dark:text-outline">{JSON.stringify(e.meta)}</span>}
                 </div>
