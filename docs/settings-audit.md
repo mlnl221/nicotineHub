@@ -33,10 +33,11 @@
 - `K` — **Phase K (search)**: `searches.filters_visible` now drives FilterBar default (`SearchScreen.tsx:29` `useState(filters_visible)` + `useEffect` sync) — was previously collapsible gesture-only; `expand_results`/`group_searches` already wired to `ResultsList` grouping.
 - `L` — **Phase L (i18n)**: `ui.language` now actually switches UI (`lib/i18n.ts` `useI18n()` with 5 locales + system fallback, `Sidebar.tsx`/`BottomNav.tsx` `t()` for nav labels) — was stored cosmetic, now live (Sidebar Search/Downloads/etc translate); still English-only rendering for untranslated screens by design.
 - `M` — **Phase M (polish)**: `private-chat` hotspot now wired (`app/private-chat/page.tsx:166` conversation list `usernameHotspotClass`), `searches.filters_visible` toggle now persists (`SearchScreen.tsx:158` `setOption` on toggle), dead `getUiSettings()` removed from `lib/chatFormat.ts`.
+- `N` — **Phase N (window)**: `ui.width/height/maximized` now stored (`defaults.ts:252` 800×600, -1/-1, `true`) + Appearance → Window controls (`UiSection.tsx:121` `NumberControl` width/height + `ToggleControl` maximized) + `WindowGeometrySync.tsx` (PWA viewport resize → `ui.width/height/maximized` via 800ms debounce, `unref`, restore note) — was desktop-only `width/height/xposition/yposition/maximized` omitted as `settings-mapping.md:88` responsive, now browser-mapped; `xposition/yposition` stay -1 (centered) as PWA has no position.
 
 ## Intentionally not wired (correct, per `settings-mapping.md:310` + `DESIGN.md`)
 
-- `server.passw` plaintext (security), `server.interface` raw bind (browser only, bridge `env INTERFACE` note), tray `trayicon/startup_hidden`/window geometry `width/height/xposition/yposition/maximized`, `ui.filemanager`/`urls.protocols` shell, `afterfinish/afterfolder` shell, OS Now Playing `lastfm/librefm/listenbrainz` scrobblers (`lastfm` omitted per user request), colors/fonts `chatme/globalfont/tabmain` (Alexandria palette fixed). Verified `bun test 98 pass` + `bun run build` web 17 routes / bridge 0.97 MB.
+- `server.passw` plaintext (security), `server.interface` raw bind (browser only, bridge `env INTERFACE` note), tray `trayicon/startup_hidden`/`xposition/yposition` (desktop position, PWA centered), `ui.filemanager`/`urls.protocols` shell, `afterfinish/afterfolder` shell, OS Now Playing `lastfm/librefm/listenbrainz` scrobblers (`lastfm` omitted per user request), colors/fonts `chatme/globalfont/tabmain` (Alexandria palette fixed). Window `width/height/maximized` now wired via `WindowGeometrySync.tsx` (PWA viewport), `xposition/yposition` stay -1 as PWA has no position. Verified `bun test 98 pass` + `bun run build` web 17 routes / bridge 0.97 MB.
 
 ## Verification (manual)
 
@@ -56,6 +57,7 @@ bun test && bun run build
 # 12. Appearance → Language de/fr/es → Sidebar/BottomNav labels switch via lib/i18n.ts t() (e.g. Search → Suche/Recherche), system fallback via navigator.language
 # 13. Searches → Filters visible by default ON → Search FilterBar expanded on load (OFF → collapsed), toggle persists to settings
 # 14. Private Chat → Colorise usernames OFF → conversation list plain text-on-surface (no primary/bold) via usernameHotspotClass
+# 15. Appearance → Window maximized OFF → resize viewport → ui.width/height stored via WindowGeometrySync (800×600 default), maximized true → no size stored
 ```
 
 ## Pointers
