@@ -30,6 +30,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const [fileQuery, setFileQuery] = useState("");
   const [propsFile, setPropsFile] = useState<null | { name: string; size: number; ext: string; attrs: Array<[number, number]>; folder: string }>(null);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
 
   // auto-select first folder when folders load — respects userbrowse.expand_folders (nicotine parity)
   useEffect(() => {
@@ -52,8 +53,48 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
     return folders.filter((f) => f.name.toLowerCase().includes(q) || f.files.some((file) => file.name.toLowerCase().includes(q)));
   }, [folders, query]);
 
+  // Subdirectory tree: depth + parent collapse (minimal + optional tree)
+  const minDepth = useMemo(() => {
+    if (!filteredFolders.length) return 0;
+    return Math.min(...filteredFolders.map((f) => f.name.split("\\").length));
+  }, [filteredFolders]);
+
+  const folderMeta = useMemo(() => {
+    const map = new Map<string, { depth: number; hasChildren: boolean }>();
+    for (const f of filteredFolders) {
+      const depth = f.name.split("\\").length - minDepth;
+      const hasChildren = filteredFolders.some((o) => o.name !== f.name && o.name.startsWith(f.name + "\\"));
+      map.set(f.name, { depth, hasChildren });
+    }
+    return map;
+  }, [filteredFolders, minDepth]);
+
+  // auto-expand parents when expand_folders !== "none"
+  useEffect(() => {
+    const expand = (settings as unknown as { userbrowse?: { expand_folders?: string } }).userbrowse?.expand_folders ?? "all";
+    if (expand === "none") return;
+    if (filteredFolders.length && expandedPaths.size === 0) {
+      const parents = filteredFolders.filter((f) => folderMeta.get(f.name)?.hasChildren).map((f) => f.name);
+      if (parents.length) setExpandedPaths(new Set(parents));
+    }
+  }, [filteredFolders, folderMeta, settings]);
+
+  const visibleTreeFolders = useMemo(() => {
+    return filteredFolders.filter((f) => {
+      const depth = folderMeta.get(f.name)?.depth ?? 0;
+      if (depth === 0) return true;
+      const parts = f.name.split("\\");
+      for (let i = parts.length - 1; i > minDepth; i--) {
+        const ancestor = parts.slice(0, i).join("\\");
+        if (filteredFolders.some((x) => x.name === ancestor) && !expandedPaths.has(ancestor)) return false;
+      }
+      return true;
+    });
+  }, [filteredFolders, folderMeta, expandedPaths, minDepth]);
+
+  // Fix stale files: only use currentFiles when it matches the selected folder (prevents showing previous folder's files)
   const activeFolder = useMemo(() => {
-    if (currentFiles && currentFolder) return { name: currentFolder, files: currentFiles };
+    if (currentFiles && currentFolder && currentFolder === selectedFolder) return { name: currentFolder, files: currentFiles };
     return folders.find((f) => f.name === selectedFolder) || null;
   }, [currentFiles, currentFolder, folders, selectedFolder]);
 
@@ -69,19 +110,19 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const folderSentinel = useRef<HTMLDivElement | null>(null);
   const fileSentinel = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => { setVisibleFolderCount(PAGE_SIZE); }, [filteredFolders.length, query]);
+  useEffect(() => { setVisibleFolderCount(PAGE_SIZE); }, [visibleTreeFolders.length, filteredFolders.length, query, expandedPaths.size]);
   useEffect(() => { setVisibleFileCount(PAGE_SIZE); }, [visibleFiles.length, activeFolder?.name, fileQuery]);
 
   useEffect(() => {
-    if (visibleFolderCount >= filteredFolders.length) return;
+    if (visibleFolderCount >= visibleTreeFolders.length) return;
     const el = folderSentinel.current;
     if (!el) return;
     const io = new IntersectionObserver((entries) => {
-      if (entries[0]?.isIntersecting) setVisibleFolderCount((v) => Math.min(v + PAGE_SIZE, filteredFolders.length));
+      if (entries[0]?.isIntersecting) setVisibleFolderCount((v) => Math.min(v + PAGE_SIZE, visibleTreeFolders.length));
     }, { rootMargin: "300px" });
     io.observe(el);
     return () => io.disconnect();
-  }, [visibleFolderCount, filteredFolders.length]);
+  }, [visibleFolderCount, visibleTreeFolders.length]);
 
   useEffect(() => {
     if (visibleFileCount >= visibleFiles.length) return;
@@ -119,7 +160,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
     return arr;
   }, [visibleFiles, sortKey, sortDir]);
 
-  const pagedFolders = useMemo(() => filteredFolders.slice(0, visibleFolderCount), [filteredFolders, visibleFolderCount]);
+  const pagedFolders = useMemo(() => visibleTreeFolders.slice(0, visibleFolderCount), [visibleTreeFolders, visibleFolderCount]);
   const pagedFiles = useMemo(() => sortedFiles.slice(0, visibleFileCount), [sortedFiles, visibleFileCount]);
 
   const totalSize = folders.reduce((acc, f) => acc + f.files.reduce((a, file) => a + (file.size || 0), 0), 0);
@@ -199,36 +240,68 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
               <p className="p-4 font-body text-sm text-outline">No folders found.</p>
             ) : (
               <>
-                {pagedFolders.map((f) => (
-                  <button
-                    key={f.name}
-                    onClick={() => {
-                      setSelectedFolder(f.name);
-                      openFolder(tab.id, f.name);
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setMenuAnchor({ x: e.clientX, y: e.clientY, items: browseFolderMenu(username, f.name, false) });
-                    }}
-                    className={`flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors ${selectedFolder === f.name ? "bg-primary-fixed/20 text-primary border border-primary/10" : "hover:bg-surface-container-low text-on-surface-variant"}`}
-                  >
-                    <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>folder</span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-body text-sm font-medium">{f.name.split("\\").pop() || f.name}</p>
-                      <p className="truncate font-label text-[11px] text-on-surface-variant">{f.files.length} files</p>
+                {pagedFolders.map((f) => {
+                  const meta = folderMeta.get(f.name);
+                  const depth = meta?.depth ?? 0;
+                  const hasChildren = meta?.hasChildren ?? false;
+                  const isExpanded = expandedPaths.has(f.name);
+                  const isSelected = selectedFolder === f.name;
+                  return (
+                    <div
+                      key={f.name}
+                      className={`flex w-full items-center gap-1 rounded-lg text-left transition-colors ${isSelected ? "bg-primary-fixed/20 text-primary border border-primary/10" : "hover:bg-surface-container-low text-on-surface-variant"}`}
+                      style={{ paddingLeft: `${8 + depth * 16}px`, paddingRight: '8px', paddingTop: '6px', paddingBottom: '6px' }}
+                    >
+                      {hasChildren ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedPaths((prev) => {
+                              const n = new Set(prev);
+                              if (n.has(f.name)) n.delete(f.name);
+                              else n.add(f.name);
+                              return n;
+                            });
+                          }}
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full hover:bg-surface-container-high"
+                          aria-label={isExpanded ? "Collapse" : "Expand"}
+                        >
+                          <span className="material-symbols-outlined text-[18px]">{isExpanded ? "expand_more" : "chevron_right"}</span>
+                        </button>
+                      ) : (
+                        <span className="w-7 shrink-0" aria-hidden />
+                      )}
+                      <button
+                        onClick={() => {
+                          setSelectedFolder(f.name);
+                          openFolder(tab.id, f.name);
+                        }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setMenuAnchor({ x: e.clientX, y: e.clientY, items: browseFolderMenu(username, f.name, false) });
+                        }}
+                        className="flex flex-1 items-center gap-3 min-w-0 text-left"
+                      >
+                        <span className="material-symbols-outlined text-[20px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>{hasChildren ? (isExpanded ? "folder_open" : "folder") : "folder"}</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-body text-sm font-medium">{f.name.split("\\").pop() || f.name}</p>
+                          <p className="truncate font-label text-[11px] text-on-surface-variant">{f.files.length} files</p>
+                        </div>
+                      </button>
                     </div>
-                  </button>
-                ))}
-                {visibleFolderCount < filteredFolders.length ? (
+                  );
+                })}
+                {visibleFolderCount < visibleTreeFolders.length ? (
                   <div className="flex flex-col items-center gap-2 py-3">
-                    <span className="font-label text-xs text-outline">{visibleFolderCount} of {filteredFolders.length} folders</span>
+                    <span className="font-label text-xs text-outline">{visibleFolderCount} of {visibleTreeFolders.length} folders</span>
                     <div className="flex gap-2">
-                      <button type="button" onClick={() => setVisibleFolderCount((v) => Math.min(v + PAGE_SIZE, filteredFolders.length))} className="rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs">Load 50 more</button>
-                      <button type="button" onClick={() => setVisibleFolderCount(filteredFolders.length)} className="rounded-full bg-primary px-3 py-1.5 font-label text-xs font-bold text-on-primary">Load all</button>
+                      <button type="button" onClick={() => setVisibleFolderCount((v) => Math.min(v + PAGE_SIZE, visibleTreeFolders.length))} className="rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs">Load 50 more</button>
+                      <button type="button" onClick={() => setVisibleFolderCount(visibleTreeFolders.length)} className="rounded-full bg-primary px-3 py-1.5 font-label text-xs font-bold text-on-primary">Load all</button>
                     </div>
                   </div>
                 ) : null}
-                {visibleFolderCount < filteredFolders.length ? <div ref={folderSentinel} className="h-px" aria-hidden /> : null}
+                {visibleFolderCount < visibleTreeFolders.length ? <div ref={folderSentinel} className="h-px" aria-hidden /> : null}
               </>
             )}
           </div>
@@ -245,9 +318,12 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
               }}
               className="w-full rounded-lg bg-surface-container-low px-3 py-2.5 min-h-11 font-body text-sm"
             >
-              {filteredFolders.map((f) => (
-                <option key={f.name} value={f.name}>{f.name} ({f.files.length})</option>
-              ))}
+              {visibleTreeFolders.map((f) => {
+                const depth = folderMeta.get(f.name)?.depth ?? 0;
+                const prefix = depth > 0 ? `${"— ".repeat(depth)}` : "";
+                const short = f.name.split("\\").pop() || f.name;
+                return <option key={f.name} value={f.name}>{prefix}{short} ({f.files.length}) — {f.name}</option>;
+              })}
             </select>
           </div>
 
@@ -299,7 +375,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                   </div>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto overscroll-contain min-h-0" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
+              <div key={activeFolder.name} className="flex-1 overflow-y-auto overscroll-contain min-h-0" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
                 {visibleFiles.length === 0 ? (
                   <p className="p-6 font-body text-sm text-outline">No files match &quot;{fileQuery}&quot; in this folder.</p>
                 ) : (
