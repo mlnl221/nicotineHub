@@ -9,6 +9,7 @@ Plugins run on the **bridge** (`apps/bridge/src/plugins/`), not in the browser. 
 - `BasePlugin` (`apps/bridge/src/plugins/types.ts:14`) mirrors `pynicotine/pluginsystem.py:31` — `settings`/`metasettings`, `commands`, lifecycle, 40+ hook methods, `returncode.{break,zap,pass}`.
 - `PluginManager` (`apps/bridge/src/plugins/manager.ts:126`) mirrors `PluginHandler` — discovery (`DATA_DIR/plugins` + builtins), `enable/disable/toggle/reload`, zip install (1 GiB cap), persistence `DATA_DIR/plugins.json`, command registration, event chain with zap/break.
 - `spamfilter` (`plugins/builtin/spamfilter.ts`) is a full port of `pynicotine/plugins/spamfilter` demonstrating `returncode.zap` on `incoming_public_chat_event` / `incoming_private_chat_event`.
+- `leech_detector` (`plugins/builtin/leech_detector.ts`) is a full port of `pynicotine/plugins/leech_detector` — `num_files`/`num_folders` thresholds, `detected_leechers` list, `upload_queued_notification`/`user_stats_notification`/`upload_finished_notification` with `REQUESTING_STATS→requesting_shares→pending_leecher` state machine + buddy exempt + `open_private_chat` toggle + `%files%`/`%folders%` placeholders.
 - `core_commands` (`plugins/builtin/core_commands.ts`) provides `/help` and `/plugin <toggle|reload|info>` — minimal set. The full 30 nicotine-plus commands are not shipped because most are UI shortcuts already handled by the web (join, leave, search, etc.). The command system is generic; any plugin can add the remaining commands via `this.commands` (see `pynicotine/plugins/core_commands/__init__.py:25` for reference).
 
 ## Security — are plugins dangerous?
@@ -90,3 +91,18 @@ export class Plugin extends BasePlugin {
 ## Do we need all 30 core_commands?
 
 No. The bridge already exposes the underlying operations as typed WS messages (`search`, `chat:room join/say`, `browse`, `userinfo`, etc.). The 30 slash commands in `pynicotine/plugins/core_commands/__init__.py:25` are mostly thin wrappers (`/join`, `/leave`, `/msg`, `/search`, `/ban`, …) that make sense in a desktop text input. The web has dedicated UI for those (buttons, dialogs). Shipping only `/help` and `/plugin` is intentional — keeps parity of the *system*, not the command list. Any missing command can be added as a plugin without touching core (see `manager.ts:getCommandGroupsData` for `/help` parity).
+
+## Intentionally NOT ported — `youtube_info`
+
+`pynicotine/plugins/youtube_info/__init__.py` is **intentionally not ported** and will remain omitted:
+
+- Requires a **YouTube Data v3 API key** (`https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id=…&key=…`) with external HTTP per chat line.
+- Chat messages with `youtu.be`/`youtube.com/watch` are common; enriching them needs external `www.googleapis.com` fetch + quota + key management — not homelab-relevant.
+- Bridge has no YouTube API integration; pasting links works without enrichment.
+- If needed later, it can be added as a user plugin via the same `BasePlugin` API (`incoming_public/private_chat_event` + `fetch`) without core changes — no bridge HTTP allow-list needed beyond `BRIDGE_TOKEN` gate.
+
+Other omitted plugins (`auto_buddy_rooms`, `auto_user_browse`, `multipaste`, `now_playing_*`, `anti_shout` beyond `spamfilter`, etc.) remain optional user plugins — only `spamfilter` and `leech_detector` are shipped as builtins (homelab-relevant).
+
+## Language — English-only by design
+
+The app is **English-only**. `pynicotine/config.py:ui.language` 30+ `po/` locales (`af,ar,ca,cs,da,de,…zh_CN`) are intentionally not ported (`docs/settings-mapping.md:310`, `docs/porting-status.md`). `UiSection.tsx` shows a fixed "English — app is English-only" note instead of a locale combobox. No i18n is planned.
