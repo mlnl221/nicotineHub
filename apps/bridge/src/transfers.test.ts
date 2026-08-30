@@ -159,6 +159,10 @@ describe("transfers — upload serving (Phase 4)", () => {
   afterEach(() => { try { rmSync(tmp, { recursive: true, force: true }); } catch {} });
 
   test("handleQueueUpload enqueues Queued upload", () => {
+    const { mkdirSync: mks, writeFileSync: wfs } = require("node:fs") as typeof import("node:fs");
+    const sharedDir = join(tmp, "shared");
+    mks(sharedDir, { recursive: true });
+    wfs(join(sharedDir, "share.mp3"), Buffer.alloc(10));
     const { mgr } = makeManager(tmp);
     const t = mgr.handleQueueUpload("alice", "Music\\share.mp3");
     expect(t.status).toBe("Queued");
@@ -167,6 +171,12 @@ describe("transfers — upload serving (Phase 4)", () => {
   });
 
   test("handleQueueUpload respects queue limit Too many files", () => {
+    const { mkdirSync: mks, writeFileSync: wfs } = require("node:fs") as typeof import("node:fs");
+    const sharedDir = join(tmp, "shared");
+    mks(sharedDir, { recursive: true });
+    // pre-create 100 files so they pass file_is_shared check
+    for (let i = 0; i < 100; i++) wfs(join(sharedDir, `file${i}.mp3`), Buffer.alloc(10));
+    wfs(join(sharedDir, "overflow.mp3"), Buffer.alloc(10));
     const { mgr } = makeManager(tmp);
     // fill 100 queued uploads
     for (let i = 0; i < 100; i++) mgr.handleQueueUpload(`user${i}`, `file${i}.mp3`);
@@ -286,6 +296,10 @@ describe("transfers — file streaming (Phase 4 - download & upload)", () => {
   });
 
   test("getQueuePlace returns correct position for queued uploads", () => {
+    const { mkdirSync: mks, writeFileSync: wfs } = require("node:fs") as typeof import("node:fs");
+    const sharedDir = join(tmp, "shared");
+    mks(sharedDir, { recursive: true });
+    for (const f of ["a.mp3", "b.mp3", "c.mp3"]) wfs(join(sharedDir, f), Buffer.alloc(10));
     const { mgr } = makeManager(tmp);
     (mgr as any).transfers.clear();
     mgr.handleQueueUpload("u1", "a.mp3");

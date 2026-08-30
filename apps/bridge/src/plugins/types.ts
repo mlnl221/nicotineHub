@@ -73,6 +73,9 @@ export interface PluginCoreShim {
   sendPrivate(user: string, text: string, showUI?: boolean, switchPage?: boolean): void;
   echoPublic(room: string, text: string, messageType?: string): void;
   echoPrivate(user: string, text: string, messageType?: string): void;
+  requestUserStats?(user: string): void;
+  requestUserShares?(user: string): void;
+  isBuddy?(user: string): boolean;
 }
 
 export abstract class BasePlugin {

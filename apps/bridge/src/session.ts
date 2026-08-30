@@ -275,6 +275,8 @@ export class SoulseekSession {
   private pendingBrowseShares = new Map<string, { timer: ReturnType<typeof setTimeout> }>();
   private pendingBrowseFolder = new Map<number, { username: string; folder: string; timer: ReturnType<typeof setTimeout> }>();
   private pendingPeerMessages = new Map<string, Array<{ connType: string; msg: Buffer }>>();
+  // user status cache for offline check (P1 hardening)
+  private userStatusCache = new Map<string, { status: number; privileged: boolean; updated: number }>();
   // allowed peer responses gating (nicotine allowed_message_responses) — prevent unsolicited 448M
   private allowedPeerResponses = new Map<string, Set<number>>();
   // socket limiting
@@ -998,6 +1000,7 @@ export class SoulseekSession {
         if (status.status === 0) {
           this.userAddresses.delete(status.username);
         }
+        this.userStatusCache.set(status.username.toLowerCase(), { status: status.status, privileged: status.privileged, updated: Date.now() });
         this.emit({ type: "user-status", username: status.username, status });
       } catch {}
       return;
@@ -1068,9 +1071,13 @@ export class SoulseekSession {
         const w = parseWatchUser(payload);
         if (!w.exists) {
           this.userAddresses.delete(w.username);
-        } else if (w.username === this.username && w.avgspeed !== undefined) {
-          this.uploadSpeed = w.avgspeed;
-          this._updateMaximumDistributedChildren();
+          this.userStatusCache.set(w.username.toLowerCase(), { status: 0, privileged: false, updated: Date.now() });
+        } else {
+          if (w.status !== undefined) this.userStatusCache.set(w.username.toLowerCase(), { status: w.status, privileged: false, updated: Date.now() });
+          if (w.username === this.username && w.avgspeed !== undefined) {
+            this.uploadSpeed = w.avgspeed;
+            this._updateMaximumDistributedChildren();
+          }
         }
         this.emit({ type: "watch-user", username: w.username, watchUser: w });
       } catch {}
@@ -2102,6 +2109,8 @@ export class SoulseekSession {
   }
   watchUser(username: string) { this.serverSocket?.write(buildWatchUser(username)); this.serverSocket?.write(buildGetUserStats(username)); }
   unwatchUser(username: string) { this.serverSocket?.write(buildUnwatchUser(username)); }
+  getUserStatus(username: string): number | undefined { return this.userStatusCache.get(username.toLowerCase())?.status; }
+  getCachedUserStatus(username: string): number | undefined { return this.getUserStatus(username); }
   requestPeerAddress(username: string) { this.serverSocket?.write(buildGetPeerAddress(username)); }
   requestUserInterests(username: string) { this.serverSocket?.write(buildUserInterests(username)); }
   requestRecommendations() { this.serverSocket?.write(frameMessage(SERVER_MESSAGE_CODES.recommendations, Buffer.alloc(0))); }
