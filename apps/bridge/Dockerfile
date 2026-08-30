@@ -2,12 +2,12 @@
 FROM oven/bun:1.4 AS base
 WORKDIR /app
 
-# ---- deps: workspace-aware install ----
+# ---- deps: workspace-aware install (host dev deps kept for builder, but playwright/e2e stripped — saves ~50MB + context) ----
 FROM base AS deps
 COPY package.json bun.lock ./
 COPY apps/bridge/package.json apps/bridge/package.json
 COPY apps/web/package.json apps/web/package.json
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile && rm -rf node_modules/@playwright node_modules/playwright* node_modules/.bun/@playwright* node_modules/.bun/playwright* 2>/dev/null || true
 
 # ---- builder ----
 FROM base AS builder
