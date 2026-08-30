@@ -8,6 +8,7 @@ import { useTransfers } from "@/lib/transfers";
 import { useConfig } from "@/lib/config/provider";
 import { useSidebarCollapsed } from "@/components/SidebarContext";
 import { AboutDialog } from "@/components/AboutDialog";
+import { useI18n } from "@/lib/i18n";
 
 const NAV = [
   { icon: "downloading", label: "Downloads", href: "/downloads", key: "downloads" },
@@ -27,6 +28,7 @@ export function Sidebar() {
   const { settings } = useConfig();
   const { downloads, uploads } = useTransfers();
   const { collapsed, toggle } = useSidebarCollapsed();
+  const { t } = useI18n();
   const [mounted, setMounted] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -48,16 +50,16 @@ export function Sidebar() {
         {/* Header + collapse toggle — logo area opens About like nicotine-plus Help > About */}
         <div className={`flex items-center ${collapsed ? "justify-center" : "justify-between"} gap-2`}>
           {!collapsed ? (
-            <button type="button" onClick={() => setAboutOpen(true)} className="text-left rounded-lg -mx-1 px-1 py-1 hover:bg-surface-container-high/60 transition-colors" aria-label="About Nicotine Hub" title="About Nicotine Hub">
+            <button type="button" onClick={() => setAboutOpen(true)} className="text-left rounded-lg -mx-1 px-1 py-1 hover:bg-surface-container-high/60 transition-colors" aria-label={t("About") + " Nicotine Hub"} title="About Nicotine Hub">
               <div className="mb-1 font-headline text-lg font-black text-on-surface dark:text-inverse-primary">
                 NICOTINE HUB
               </div>
               <div className="font-label text-xs uppercase tracking-widest text-on-surface-variant dark:text-outline">
-                Secure Homelab Node
+                {t("Secure Homelab Node")}
               </div>
             </button>
           ) : (
-            <button type="button" onClick={() => setAboutOpen(true)} className="font-headline text-sm font-black text-on-surface dark:text-inverse-primary rounded-lg px-2 py-1 hover:bg-surface-container-high/60" aria-label="About Nicotine Hub" title="About Nicotine Hub">
+            <button type="button" onClick={() => setAboutOpen(true)} className="font-headline text-sm font-black text-on-surface dark:text-inverse-primary rounded-lg px-2 py-1 hover:bg-surface-container-high/60" aria-label={t("About") + " Nicotine Hub"} title="About Nicotine Hub">
               NH
             </button>
           )}
@@ -75,7 +77,7 @@ export function Sidebar() {
           type="button"
           onClick={() => setAboutOpen(true)}
           className={`mt-6 flex items-center ${collapsed ? "justify-center" : "space-x-3"} rounded-xl -mx-1 px-1 py-1 hover:bg-surface-container-high/40 transition-colors text-left w-full`}
-          aria-label="About Nicotine Hub"
+          aria-label={t("About") + " Nicotine Hub"}
           title="About Nicotine Hub"
         >
           <img
@@ -102,7 +104,7 @@ export function Sidebar() {
         title="Search Files"
       >
         <span className="material-symbols-outlined text-[18px]">search</span>
-        {!collapsed ? <span>Search</span> : null}
+        {!collapsed ? <span>{t("Search")}</span> : null}
       </Link>
 
       <ul className="mt-6 flex-1 space-y-1 overflow-y-auto overflow-x-hidden hide-scrollbar">
@@ -129,7 +131,7 @@ export function Sidebar() {
                 </span>
                 {!collapsed ? (
                   <span className="font-label text-xs uppercase tracking-widest truncate" suppressHydrationWarning>
-                    {item.label}
+                    {t(item.label)}
                     {badge}
                   </span>
                 ) : badge ? (
@@ -144,11 +146,11 @@ export function Sidebar() {
       <div className={`space-y-1 border-t border-surface-container-high/20 pt-4 ${collapsed ? "items-center" : ""}`}>
         <Link
           href="/settings"
-          title={collapsed ? "Settings" : undefined}
+          title={collapsed ? t("Settings") : undefined}
           className={`flex items-center rounded-xl px-3 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant ${collapsed ? "justify-center" : "space-x-3"}`}
         >
           <span className="material-symbols-outlined">settings</span>
-          {!collapsed ? <span className="font-label text-xs uppercase tracking-widest">Settings</span> : null}
+          {!collapsed ? <span className="font-label text-xs uppercase tracking-widest">{t("Settings")}</span> : null}
         </Link>
         {/* Hide diagnostics/statistics when collapsed to avoid busy bottom */}
         {!collapsed ? (
@@ -158,24 +160,24 @@ export function Sidebar() {
               className="flex items-center space-x-3 rounded-xl px-3 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant"
             >
               <span className="material-symbols-outlined">monitoring</span>
-              <span className="font-label text-xs uppercase tracking-widest">Diagnostics</span>
+              <span className="font-label text-xs uppercase tracking-widest">{t("Diagnostics")}</span>
             </Link>
             <Link
               href="/statistics"
               className="flex items-center space-x-3 rounded-xl px-3 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant"
             >
               <span className="material-symbols-outlined">bar_chart</span>
-              <span className="font-label text-xs uppercase tracking-widest">Statistics</span>
+              <span className="font-label text-xs uppercase tracking-widest">{t("Statistics")}</span>
             </Link>
           </>
         ) : null}
         <button
           onClick={() => logout()}
-          title={collapsed ? "Logoff" : undefined}
+          title={collapsed ? t("Logoff") : undefined}
           className={`flex w-full items-center rounded-xl px-3 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant ${collapsed ? "justify-center" : "space-x-3"}`}
         >
           <span className="material-symbols-outlined">logout</span>
-          {!collapsed ? <span className="font-label text-xs uppercase tracking-widest">Logoff</span> : null}
+          {!collapsed ? <span className="font-label text-xs uppercase tracking-widest">{t("Logoff")}</span> : null}
         </button>
         {!collapsed ? (
           <div className="pt-3 text-[10px] leading-relaxed text-on-surface-variant/60 dark:text-outline/60">
