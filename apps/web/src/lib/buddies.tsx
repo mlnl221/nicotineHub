@@ -20,13 +20,13 @@ export interface Buddy {
   lastSeen?: string;
 }
 
-const BUDDIES_KEY = "nicotine.buddies";
+const BUDDIES_KEY = "nicotineHub.buddies";
 const MAX_BUDDIES = 100;
 
 function loadBuddies(): Buddy[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(BUDDIES_KEY);
+    const raw = (localStorage.getItem(BUDDIES_KEY) ?? localStorage.getItem(BUDDIES_KEY.replace("nicotineHub.", "nicotine.")));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];

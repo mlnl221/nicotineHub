@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2001-2026 Nicotine+ Contributors
-// SPDX-FileCopyrightText: 2025-2026 nicotine-mobile Contributors
+// SPDX-FileCopyrightText: 2025-2026 Nicotine Hub Contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Portions based on nicotine-plus pynicotine/shares.py
 

@@ -65,7 +65,7 @@ bun test && bun run build
 docker compose up --build  # http://localhost:3000 (build from source)
 ```
 
-Bridge URL: `NEXT_PUBLIC_BRIDGE_URL` (build) or `localStorage.nicotine.bridgeUrl` (runtime). All env vars are documented in [`docs/architecture.md#env-full`](docs/architecture.md#env-full) — including `BRIDGE_TOKEN`, `DATA_DIR`, `LISTEN_PORT` (62904, editable in Settings → Network), `SHARED_DIRS`, `UPLOAD_LIMIT`, etc.
+Bridge URL: `NEXT_PUBLIC_BRIDGE_URL` (build) or `localStorage.nicotineHub.bridgeUrl` (runtime). All env vars are documented in [`docs/architecture.md#env-full`](docs/architecture.md#env-full) — including `BRIDGE_TOKEN`, `DATA_DIR`, `LISTEN_PORT` (62904, editable in Settings → Network), `SHARED_DIRS`, `UPLOAD_LIMIT`, etc.
 
 For prebuilt images and release workflow, see [`docs/deployment.md`](docs/deployment.md).
 
@@ -92,6 +92,6 @@ Stage `d395cc6` — almost 1:1, mobile-friendly. See **[docs/porting-status.md](
 
 ## Legal
 
-**License:** [`GPL-3.0-or-later`](./COPYING). © 2001–2026 Nicotine+, PySoulSeek; © 2025–2026 nicotine-mobile. See [`ATTRIBUTION.md`](./ATTRIBUTION.md) (upstream `8d81e66`) and [`COPYING`](COPYING).
+**License:** [`GPL-3.0-or-later`](./COPYING). © 2001–2026 Nicotine+, PySoulSeek; © 2025–2026 Nicotine Hub. See [`ATTRIBUTION.md`](./ATTRIBUTION.md) (upstream `8d81e66`) and [`COPYING`](COPYING).
 
 **Soulseek** network / `server.slsknet.org` is volunteer-operated and not affiliated with this project. By connecting you agree to the [Soulseek rules](https://www.slsknet.org/news/node/681) and [Terms](https://www.slsknet.org/news/node/682). Soulseek is unencrypted; see Security above.

@@ -185,9 +185,9 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         if (target) {
           buddies = target.split(",").map((s) => s.trim()).filter(Boolean);
         } else {
-          // load from localStorage nicotine.buddies (up to 100)
+          // load from localStorage nicotineHub.buddies (up to 100)
           try {
-            const raw = localStorage.getItem("nicotine.buddies");
+            const raw = (localStorage.getItem("nicotineHub.buddies") ?? localStorage.getItem("nicotine.buddies"));
             if (raw) {
               const arr = JSON.parse(raw) as Array<{ username?: string } | string>;
               buddies = arr.map((b) => typeof b === "string" ? b : b.username ?? "").filter(Boolean).slice(0, 20);

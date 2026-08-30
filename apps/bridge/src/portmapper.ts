@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
-// SPDX-FileCopyrightText: 2025-2026 nicotine-mobile Contributors
+// SPDX-FileCopyrightText: 2025-2026 Nicotine Hub Contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Port of pynicotine/portmapper.py (719 lines) to Bun/TS — NAT-PMP (RFC6886) + UPnP (IGDv1/v2)
 
@@ -179,7 +179,7 @@ export class UPnP extends BaseImplementation {
   static readonly MULTICAST_TTL = 2;
   static readonly MX_RESPONSE_DELAY = 1;
   static readonly HTTP_REQUEST_TIMEOUT = 5000;
-  static readonly USER_AGENT = `Bun/1.4 UPnP/2.0 nicotine-mobile/0.1`;
+  static readonly USER_AGENT = `Bun/1.4 UPnP/2.0 nicotineHub/0.1`;
 
   private service: { serviceType: string; controlUrl: string } | null = null;
 

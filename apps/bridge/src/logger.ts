@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025-2026 nicotine-mobile Contributors
+// SPDX-FileCopyrightText: 2025-2026 Nicotine Hub Contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 /**

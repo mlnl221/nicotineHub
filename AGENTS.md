@@ -26,7 +26,7 @@ bun run build                        # typecheck + prod builds (both apps)
 docker compose up --build            # full stack: localhost:3000 + localhost:8787
 ```
 
-Bridge URL override: `NEXT_PUBLIC_BRIDGE_URL` (build-time) or `localStorage.nicotine.bridgeUrl` (runtime).
+Bridge URL override: `NEXT_PUBLIC_BRIDGE_URL` (build-time) or `localStorage.nicotineHub.bridgeUrl` (runtime).
 
 ## Conventions
 

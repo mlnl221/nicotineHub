@@ -1,4 +1,5 @@
 "use client";
+import "@/lib/migration";
 
 import {
   createContext,
@@ -22,7 +23,7 @@ const ThemeContext = createContext<ThemeApi | null>(null);
 function applyTheme(next: Theme) {
   document.documentElement.classList.toggle("dark", next === "dark");
   try {
-    localStorage.setItem("nicotine.theme", next);
+    localStorage.setItem("nicotineHub.theme", next);
   } catch {}
 }
 
@@ -31,7 +32,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem("nicotine.theme") as Theme | null;
+      const stored = (localStorage.getItem("nicotineHub.theme") ?? localStorage.getItem("nicotine.theme")) as Theme | null;
       if (stored === "dark" || stored === "light") {
         setThemeState(stored);
         document.documentElement.classList.toggle("dark", stored === "dark");

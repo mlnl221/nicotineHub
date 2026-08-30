@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2001-2026 Nicotine+ Contributors
 // SPDX-FileCopyrightText: 2003-2004 Hyriand <hyriand@thegraveyard.org>
 // SPDX-FileCopyrightText: 2007-2009 daelstorm <daelstorm@gmail.com>
-// SPDX-FileCopyrightText: 2025-2026 nicotine-mobile Contributors
+// SPDX-FileCopyrightText: 2025-2026 Nicotine Hub Contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Portions based on nicotine-plus pynicotine/slskmessages.py + pynicotine/slskproto.py + doc/SLSKPROTOCOL.md
 

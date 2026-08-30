@@ -53,7 +53,7 @@ docker pull ghcr.io/mlnl221/nicotinehub-bridge:0.2.0
 
 > First publish requires making each GHCR package **Public** (GitHub → Packages → Settings → Change visibility) so `docker pull` works without `docker login ghcr.io`.
 
-All env vars for deployment are in `docs/architecture.md#env-full`: `BRIDGE_TOKEN` (`?token`/`Bearer`/`Sec-WebSocket-Protocol` → 401 on `/ws` `/files/:token` `/logs` `/diagnostics` `/plugins`), `DATA_DIR`, `SHARED_DIRS`, `UPLOAD_LIMIT`/`DOWNLOAD_LIMIT`, `ALLOWED_ORIGINS`, `NEXT_PUBLIC_BRIDGE_URL` (build-time) vs `localStorage.nicotine.bridgeUrl` (runtime).
+All env vars for deployment are in `docs/architecture.md#env-full`: `BRIDGE_TOKEN` (`?token`/`Bearer`/`Sec-WebSocket-Protocol` → 401 on `/ws` `/files/:token` `/logs` `/diagnostics` `/plugins`), `DATA_DIR`, `SHARED_DIRS`, `UPLOAD_LIMIT`/`DOWNLOAD_LIMIT`, `ALLOWED_ORIGINS`, `NEXT_PUBLIC_BRIDGE_URL` (build-time) vs `localStorage.nicotineHub.bridgeUrl` (runtime).
 
 ## Branching & promotion
 

@@ -118,7 +118,7 @@
 
 **Files:** `apps/web/src/lib/config/defaults.ts`, `components/settings/NetworkSection.tsx`, `lib/config/sync.tsx`, `apps/bridge/src/server.ts:984`, `apps/bridge/src/session.ts:419-436, 653, 2088`.
 
-**Verify:** `bun test && bun run build`; manual: add `autosearch` entry → persists to `localStorage nicotine.settings` → survives reload; `autojoin` rooms joined after login; `autoreply` sent when away.
+**Verify:** `bun test && bun run build`; manual: add `autosearch` entry → persists to `localStorage nicotineHub.settings` → survives reload; `autojoin` rooms joined after login; `autoreply` sent when away.
 
 ## Out-of-scope / intentionally omitted
 

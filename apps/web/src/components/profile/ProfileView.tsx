@@ -74,9 +74,9 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
   const [showPic, setShowPic] = useState<boolean>(() => {
     if (typeof window === "undefined") return true;
     try {
-      const v = localStorage.getItem("nicotine.showPictures");
+      const v = (localStorage.getItem("nicotineHub.showPictures") ?? localStorage.getItem("nicotine.showPictures"));
       if (v !== null) return v !== "false";
-      const cfg = localStorage.getItem("nicotine.settings");
+      const cfg = (localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings"));
       if (cfg) {
         const parsed = JSON.parse(cfg);
         if (typeof parsed?.userinfo?.picture_visible === "boolean") return parsed.userinfo.picture_visible;
@@ -113,18 +113,18 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
 
   useEffect(() => {
     try {
-      localStorage.setItem("nicotine.showPictures", String(showPic));
+      localStorage.setItem("nicotineHub.showPictures", String(showPic));
     } catch {}
   }, [showPic]);
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem("nicotine.settings");
+      const raw = (localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings"));
       if (raw) {
         const cfg = JSON.parse(raw);
         if (cfg?.userinfo?.picture_visible !== showPic) {
           cfg.userinfo = { ...(cfg.userinfo || {}), picture_visible: showPic };
-          localStorage.setItem("nicotine.settings", JSON.stringify(cfg));
+          localStorage.setItem("nicotineHub.settings", JSON.stringify(cfg));
         }
       }
     } catch {}

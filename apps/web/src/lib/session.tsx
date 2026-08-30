@@ -41,7 +41,7 @@ const SessionContext = createContext<SessionApi | null>(null);
 
 function bridgeToken(): string | null {
   if (typeof window === "undefined") return null;
-  const ls = window.localStorage.getItem("nicotine.bridgeToken");
+  const ls = (window.localStorage.getItem("nicotineHub.bridgeToken") ?? window.localStorage.getItem("nicotine.bridgeToken"));
   if (ls) return ls;
   const env = process.env.NEXT_PUBLIC_BRIDGE_TOKEN;
   if (env) return env;
@@ -50,7 +50,7 @@ function bridgeToken(): string | null {
 
 function bridgeUrl(): string {
   if (typeof window === "undefined") return "";
-  const override = window.localStorage.getItem("nicotine.bridgeUrl");
+  const override = (window.localStorage.getItem("nicotineHub.bridgeUrl") ?? window.localStorage.getItem("nicotine.bridgeUrl"));
   if (override) {
     const tok = bridgeToken();
     if (tok && !override.includes("token=")) return override.includes("?") ? `${override}&token=${encodeURIComponent(tok)}` : `${override}?token=${encodeURIComponent(tok)}`;
@@ -86,8 +86,8 @@ const RECONNECT_MAX_MS = 30_000;
 // Use sessionStorage (ephemeral) + cookie fallback (30d, SameSite Lax) —
 // localStorage intentionally not used for password (README security note).
 // For homelab convenience we auto-login if any creds are present.
-const EPHEMERAL_KEY = "nicotine.ephemeralCreds";
-const COOKIE_NAME = "nicotine_creds";
+const EPHEMERAL_KEY = "nicotineHub.ephemeralCreds";
+const COOKIE_NAME = "nicotineHub_creds";
 
 function saveCreds(req: Omit<LoginRequest, "type">) {
   try {
@@ -100,7 +100,7 @@ function saveCreds(req: Omit<LoginRequest, "type">) {
 }
 function loadCreds(): Omit<LoginRequest, "type"> | null {
   try {
-    const raw = sessionStorage.getItem(EPHEMERAL_KEY);
+    const raw = (sessionStorage.getItem(EPHEMERAL_KEY) ?? sessionStorage.getItem(EPHEMERAL_KEY.replace("nicotineHub.", "nicotine.")));
     if (raw) {
       try {
         const parsed = JSON.parse(raw) as Omit<LoginRequest, "type">;
@@ -110,7 +110,7 @@ function loadCreds(): Omit<LoginRequest, "type"> | null {
     const match = document.cookie
       .split(";")
       .map((s) => s.trim())
-      .find((s) => s.startsWith(COOKIE_NAME + "="));
+      .find((s) => s.startsWith(COOKIE_NAME + "=") || s.startsWith("nicotine_creds="));
     if (match) {
       const b64 = match.split("=").slice(1).join("=");
       try {
@@ -127,10 +127,10 @@ function loadCreds(): Omit<LoginRequest, "type"> | null {
   return null;
 }
 function clearCreds() {
-  try { sessionStorage.removeItem(EPHEMERAL_KEY); } catch {}
-  try { document.cookie = `${COOKIE_NAME}=; Path=/; Max-Age=0`; } catch {}
+  try { sessionStorage.removeItem(EPHEMERAL_KEY); sessionStorage.removeItem(EPHEMERAL_KEY.replace("nicotineHub.", "nicotine.")); } catch {}
+  try { document.cookie = `${COOKIE_NAME}=; Path=/; Max-Age=0`; document.cookie = `nicotine_creds=; Path=/; Max-Age=0`; } catch {}
   // Also clear any legacy localStorage password if ever set
-  try { localStorage.removeItem("nicotine.rememberedCreds"); } catch {}
+  try { localStorage.removeItem("nicotineHub.rememberedCreds"); localStorage.removeItem("nicotine.rememberedCreds"); } catch {}
 }
 
 export function SessionProvider({ children }: { children: ReactNode }) {

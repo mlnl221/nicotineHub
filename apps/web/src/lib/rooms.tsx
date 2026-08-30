@@ -32,9 +32,9 @@ export function useRooms() {
   const [activeRoom, setActiveRoom] = useState<string | null>(() => {
     if (typeof window !== "undefined") {
       try {
-        const saved = sessionStorage.getItem("nicotine.activeRoom");
+        const saved = (sessionStorage.getItem("nicotineHub.activeRoom") ?? sessionStorage.getItem("nicotine.activeRoom"));
         if (saved) {
-          sessionStorage.removeItem("nicotine.activeRoom");
+          sessionStorage.removeItem("nicotineHub.activeRoom");
           return saved;
         }
       } catch {}

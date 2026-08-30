@@ -56,8 +56,8 @@ function UploadsInner() {
     const action = settings.transfers.upload_doubleclick;
     switch (action) {
       case 0: break;
-      case 1: window.dispatchEvent(new CustomEvent("nicotine:toast", { detail: { title: "Open", body: "No file to open" } })); break;
-      case 2: window.dispatchEvent(new CustomEvent("nicotine:toast", { detail: { title: "Open", body: "Browser cannot open file manager" } })); break;
+      case 1: window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Open", body: "No file to open" } })); break;
+      case 2: window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Open", body: "Browser cannot open file manager" } })); break;
       case 3: searches ? searches.startSearch(t.fileName) : router.push(`/search?query=${encodeURIComponent(t.fileName)}`); break;
       case 4: clearTransfer(t.id, true); break;
       case 5: clearTransfer(t.id, true); break;

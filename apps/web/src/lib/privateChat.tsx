@@ -112,9 +112,9 @@ export function usePrivateChat() {
           next.delete(username);
           next.set(username, arr);
           try {
-            const stored = JSON.parse(localStorage.getItem("nicotine.privatechats") || "[]");
+            const stored = JSON.parse((localStorage.getItem("nicotineHub.privatechats") ?? localStorage.getItem("nicotine.privatechats")) || "[]");
             const nextOrder = [username, ...stored.filter((u: string) => u !== username)].slice(0, 50);
-            localStorage.setItem("nicotine.privatechats", JSON.stringify(nextOrder));
+            localStorage.setItem("nicotineHub.privatechats", JSON.stringify(nextOrder));
           } catch {}
           return next;
         });
@@ -141,9 +141,9 @@ export function usePrivateChat() {
       if (state.status !== "connected") {
         // store in pending localStorage and will retry on reconnect (like nicotine GetPeerAddress queue)
         try {
-          const pending = JSON.parse(localStorage.getItem("nicotine.pendingPrivate") || "[]");
+          const pending = JSON.parse((localStorage.getItem("nicotineHub.pendingPrivate") ?? localStorage.getItem("nicotine.pendingPrivate")) || "[]");
           pending.push({ username, message: out, ts: Date.now() });
-          localStorage.setItem("nicotine.pendingPrivate", JSON.stringify(pending.slice(-50)));
+          localStorage.setItem("nicotineHub.pendingPrivate", JSON.stringify(pending.slice(-50)));
         } catch {}
         return;
       }
@@ -165,8 +165,8 @@ export function usePrivateChat() {
       send({ type: "chat:private", action: "send", username, message: out });
       try {
         if (settings.privatechat.store) {
-          const stored = JSON.parse(localStorage.getItem("nicotine.privatechats") || "[]");
-          if (!stored.includes(username)) localStorage.setItem("nicotine.privatechats", JSON.stringify([...stored, username].slice(0, 50)));
+          const stored = JSON.parse((localStorage.getItem("nicotineHub.privatechats") ?? localStorage.getItem("nicotine.privatechats")) || "[]");
+          if (!stored.includes(username)) localStorage.setItem("nicotineHub.privatechats", JSON.stringify([...stored, username].slice(0, 50)));
         }
       } catch {}
     },
@@ -193,10 +193,10 @@ export function usePrivateChat() {
   useEffect(() => {
     if (state.status !== "connected") return;
     try {
-      const pending = JSON.parse(localStorage.getItem("nicotine.pendingPrivate") || "[]") as Array<{ username: string; message: string }>;
+      const pending = JSON.parse((localStorage.getItem("nicotineHub.pendingPrivate") ?? localStorage.getItem("nicotine.pendingPrivate")) || "[]") as Array<{ username: string; message: string }>;
       if (pending.length) {
         for (const p of pending) send({ type: "chat:private", action: "send", username: p.username, message: p.message });
-        localStorage.removeItem("nicotine.pendingPrivate");
+        localStorage.removeItem("nicotineHub.pendingPrivate");
       }
     } catch {}
   }, [state.status, send]);

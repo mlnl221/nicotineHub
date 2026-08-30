@@ -1,6 +1,6 @@
 # Settings Port — Mapping from Nicotine+ to Web/Mobile
 
-This document maps the Nicotine+ desktop settings system to the `nicotine_mobile` web/mobile
+This document maps the Nicotine+ desktop settings system to the `nicotineHub` web/mobile
 client. It is the authoritative reference for porting preferences. Every ported screen should
 trace back to one of the 15 preference pages below.
 

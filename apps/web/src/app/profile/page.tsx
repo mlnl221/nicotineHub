@@ -11,11 +11,11 @@ import { ProfileProvider, useProfileTabs } from "@/lib/profile-tabs";
 import { ProfileTabs } from "@/components/profile/ProfileTabs";
 import { ProfileView } from "@/components/profile/ProfileView";
 
-const RECENT_KEY = "nicotine.recentProfiles";
+const RECENT_KEY = "nicotineHub.recentProfiles";
 
 function loadRecent(): string[] {
   try {
-    const raw = localStorage.getItem(RECENT_KEY);
+    const raw = (localStorage.getItem(RECENT_KEY) ?? localStorage.getItem(RECENT_KEY.replace("nicotineHub.", "nicotine.")));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : [];
