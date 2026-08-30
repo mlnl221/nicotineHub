@@ -63,10 +63,10 @@ function PrivateChatInner() {
   const topBarSubtitle = activeUser ? "Private message" : `${users.length} conversations`;
 
   return (
-    <div className="flex min-h-[100dvh] h-screen max-w-full overflow-hidden bg-surface-container-lowest font-body text-on-surface">
+    <div className="flex min-h-[100dvh] h-screen max-w-full overflow-hidden bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title={topBarTitle} subtitle={topBarSubtitle} />
-      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
+      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 bg-surface-dim dark:bg-inverse-surface pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
         <header className="hidden md:flex sticky top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
           <div>
             <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Private Chat</h2>

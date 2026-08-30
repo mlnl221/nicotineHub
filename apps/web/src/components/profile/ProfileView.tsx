@@ -312,13 +312,13 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
           <div className="flex flex-wrap items-center gap-2 shrink-0 w-full sm:w-auto">
             <button
               onClick={() => router.push(`/browse?user=${encodeURIComponent(username)}`)}
-              className="flex-1 sm:flex-none rounded-xl bg-primary-container px-4 py-2.5 min-h-11 font-label text-xs font-semibold uppercase tracking-widest text-on-primary-container transition-colors hover:bg-primary hover:text-on-primary"
+              className="flex-1 sm:flex-none rounded-xl bg-primary px-4 py-2.5 min-h-11 font-label text-xs font-semibold uppercase tracking-widest text-on-primary transition-colors hover:bg-primary-container hover:text-on-primary-container shadow-sm"
             >
               Browse Files
             </button>
             <button
               onClick={() => router.push(`/private-chat?user=${encodeURIComponent(username)}`)}
-              className="flex-1 sm:flex-none rounded-xl bg-surface-container-low px-4 py-2.5 min-h-11 font-label text-xs font-semibold uppercase tracking-widest text-on-surface transition-colors hover:bg-surface-container-high dark:bg-surface-container-high dark:text-on-surface"
+              className="flex-1 sm:flex-none rounded-xl bg-surface-container-high px-4 py-2.5 min-h-11 font-label text-xs font-semibold uppercase tracking-widest text-primary transition-colors hover:bg-surface-container dark:bg-surface-container-high dark:text-primary dark:hover:bg-surface-variant"
             >
               Send Message
             </button>
@@ -421,26 +421,26 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
         <section className="bg-surface dark:bg-surface-container-low rounded-xl p-6 ghost-border">
           <h3 className="font-label text-sm uppercase tracking-widest text-on-surface-variant dark:text-outline mb-4">Actions</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <button onClick={toggleBuddy} className={`rounded-xl px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest ${isBuddy ? "bg-surface-container-high text-on-surface" : "bg-primary-container text-on-primary-container hover:bg-primary"}`}>
+            <button onClick={toggleBuddy} className={`rounded-xl px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest transition-colors ${isBuddy ? "bg-surface-container-high text-on-surface-variant hover:bg-surface-container dark:text-outline" : "bg-primary text-on-primary hover:bg-primary-container hover:text-on-primary-container shadow-sm"}`}>
               {isBuddy ? "Remove Buddy" : "Add Buddy"}
             </button>
             {!isOwn ? (
               <>
-                <button onClick={handleBanToggle} className={`rounded-xl px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest ${isBanned ? "bg-error-container text-on-error-container" : "bg-surface-container-low hover:bg-surface-container-high"}`}>
+                <button onClick={handleBanToggle} className={`rounded-xl px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest transition-colors ${isBanned ? "bg-error-container text-on-error-container hover:bg-error hover:text-on-error" : "bg-surface-container-high text-error hover:bg-error-container/50 dark:bg-surface-container-high dark:hover:bg-surface-variant"}`}>
                   {isBanned ? "Unban" : "Ban"}
                 </button>
-                <button onClick={handleIgnoreToggle} className={`rounded-xl px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest ${isIgnored ? "bg-surface-container-high text-outline" : "bg-surface-container-low hover:bg-surface-container-high"}`}>
+                <button onClick={handleIgnoreToggle} className={`rounded-xl px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest transition-colors ${isIgnored ? "bg-surface-container-high text-outline hover:bg-surface-container" : "bg-surface-container-high text-on-surface-variant hover:bg-surface-container dark:text-outline"}`}>
                   {isIgnored ? "Unignore" : "Ignore"}
                 </button>
-                <button onClick={() => setGiftOpen(true)} disabled={privilegesLeft !== null && privilegesLeft <= 0} className="rounded-xl bg-tertiary-container px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest text-on-tertiary-container hover:bg-tertiary disabled:opacity-50">
+                <button onClick={() => setGiftOpen(true)} disabled={privilegesLeft !== null && privilegesLeft <= 0} className="rounded-xl bg-tertiary-container px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest text-on-tertiary-container hover:bg-tertiary hover:text-on-tertiary disabled:opacity-50 shadow-sm">
                   Gift Privileges
                 </button>
               </>
             ) : (
-              <button onClick={() => router.push("/settings?tab=user-profile")} className="rounded-xl bg-surface-container-low px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest hover:bg-surface-container-high">Edit Profile</button>
+              <button onClick={() => router.push("/settings?tab=user-profile")} className="rounded-xl bg-surface-container-high px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest text-primary hover:bg-surface-container dark:text-primary dark:hover:bg-surface-variant">Edit Profile</button>
             )}
-            <button onClick={() => refresh(tab.id)} className="rounded-xl bg-surface-container-low px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest hover:bg-surface-container-high">Refresh</button>
-            <button onClick={() => router.push(`/interests`)} className="rounded-xl bg-tertiary-container px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest text-on-tertiary-container hover:bg-tertiary">Similar Users</button>
+            <button onClick={() => refresh(tab.id)} className="rounded-xl bg-surface-container-high px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant hover:bg-surface-container dark:text-outline">Refresh</button>
+            <button onClick={() => router.push(`/interests`)} className="rounded-xl bg-surface-container-high px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest text-primary hover:bg-surface-container dark:text-primary dark:hover:bg-surface-variant">Similar Users</button>
           </div>
           {giftOpen ? (
             <div className="mt-6 rounded-xl bg-surface-container-high p-4">

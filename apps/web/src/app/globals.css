@@ -178,3 +178,16 @@ body {
 .dark .ghost-border-dashed {
   border-color: rgba(67, 70, 83, 0.4);
 }
+
+/* Sidebar collapsed — web only: reduce main margin from 18rem (w-72) to 4rem (w-16) */
+:root {
+  --sidebar-width: 18rem;
+}
+.sidebar-collapsed {
+  --sidebar-width: 4rem;
+}
+@media (min-width: 768px) {
+  .sidebar-collapsed .md\:ml-72 {
+    margin-left: 4rem !important;
+  }
+}

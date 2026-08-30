@@ -140,6 +140,7 @@ export function NumberControl({
   max,
   step,
   onReset,
+  hideSlider,
 }: {
   value: number;
   onChange: (value: number) => void;
@@ -149,6 +150,7 @@ export function NumberControl({
   max?: number;
   step?: number;
   onReset?: () => void;
+  hideSlider?: boolean;
 }) {
   const clamp = (v: number) => Math.min(max ?? v, Math.max(min ?? v, v));
   return (
@@ -186,7 +188,7 @@ export function NumberControl({
           }}
           className="w-28 rounded-xl bg-surface-container-lowest px-4 py-3 font-body text-sm text-on-surface ghost-border transition-all focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
         />
-        {typeof min === "number" && typeof max === "number" ? (
+        {typeof min === "number" && typeof max === "number" && !hideSlider ? (
           <input
             type="range"
             min={min}
