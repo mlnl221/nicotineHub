@@ -8,7 +8,7 @@ COPY apps/web/package.json apps/web/package.json
 RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile && rm -rf node_modules/@playwright node_modules/playwright* node_modules/.bun/@playwright* node_modules/.bun/playwright* 2>/dev/null || true
 COPY apps/web apps/web
 WORKDIR /app/apps/web
-RUN bun run build
+RUN --mount=type=cache,target=/app/apps/web/.next/cache bun run build
 
 # ---- Runtime (Node): Next.js standalone server ----
 # The standalone output preserves the monorepo layout: the server lives at
