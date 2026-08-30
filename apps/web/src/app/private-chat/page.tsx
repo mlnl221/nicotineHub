@@ -163,7 +163,7 @@ function PrivateChatInner() {
                         {u.slice(0, 2).toUpperCase()}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate font-body text-sm font-semibold">{u}</p>
+                        <p className={`truncate font-body text-sm ${usernameHotspotClass(settings.ui.usernamehotspots, settings.ui.usernamestyle)}`}>{u}</p>
                         <p className="truncate font-body text-xs text-on-surface-variant">
                           {last ? (last.isSelf ? `You: ${last.message}` : last.message) : "No messages"}
                         </p>

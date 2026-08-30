@@ -81,20 +81,3 @@ export function usernameHotspotClass(isHotspot: boolean, style: string): string 
     default: return "font-bold text-primary";
   }
 }
-
-/** Get current UI settings for username/path formatting (reads localStorage sync, SSR-safe). */
-export function getUiSettings(): { usernamehotspots: boolean; usernamestyle: string; reverse: boolean; fileSizeUnit: string } {
-  try {
-    const raw = typeof localStorage !== "undefined" ? (localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings")) : null;
-    if (raw) {
-      const parsed = JSON.parse(raw) as { ui?: { usernamehotspots?: boolean; usernamestyle?: string; reverse_file_paths?: boolean; file_size_unit?: string } };
-      return {
-        usernamehotspots: parsed?.ui?.usernamehotspots ?? true,
-        usernamestyle: parsed?.ui?.usernamestyle ?? "bold",
-        reverse: parsed?.ui?.reverse_file_paths ?? true,
-        fileSizeUnit: parsed?.ui?.file_size_unit ?? "",
-      };
-    }
-  } catch {}
-  return { usernamehotspots: true, usernamestyle: "bold", reverse: true, fileSizeUnit: "" };
-}

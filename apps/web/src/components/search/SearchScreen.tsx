@@ -155,7 +155,11 @@ export function SearchScreen() {
       <div className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-low/95 backdrop-blur dark:bg-inverse-surface/95 border-b border-outline-variant/10">
         <SearchBar
           onSearch={startSearch}
-          onToggleFilters={() => setShowFilters((v) => !v)}
+          onToggleFilters={() => {
+            const next = !showFilters;
+            setShowFilters(next);
+            setOption("searches", "filters_visible", next);
+          }}
           activeFilterCount={activeFilterCount}
           searching={activeTab?.status === "searching"}
           onStop={() => activeId && stopSearch(activeId)}

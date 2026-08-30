@@ -32,6 +32,7 @@
 - `HEAD` — **Phase J (P2+)**: `ui.buddylistinchatrooms` buddies panel in Chat (`app/chat/page.tsx:392` `chatrooms`/`always` → 12 buddies + presence dot), `ui.reverse_file_paths` swap `TransferCard.tsx:99` fileName ↔ virtualPath + `BrowseView.tsx:392` full vs short name, `ui.language` 5 locales `UiSection.tsx:12` (en/de/fr/es/pt + system, stored cosmetic).
 - `K` — **Phase K (search)**: `searches.filters_visible` now drives FilterBar default (`SearchScreen.tsx:29` `useState(filters_visible)` + `useEffect` sync) — was previously collapsible gesture-only; `expand_results`/`group_searches` already wired to `ResultsList` grouping.
 - `L` — **Phase L (i18n)**: `ui.language` now actually switches UI (`lib/i18n.ts` `useI18n()` with 5 locales + system fallback, `Sidebar.tsx`/`BottomNav.tsx` `t()` for nav labels) — was stored cosmetic, now live (Sidebar Search/Downloads/etc translate); still English-only rendering for untranslated screens by design.
+- `M` — **Phase M (polish)**: `private-chat` hotspot now wired (`app/private-chat/page.tsx:166` conversation list `usernameHotspotClass`), `searches.filters_visible` toggle now persists (`SearchScreen.tsx:158` `setOption` on toggle), dead `getUiSettings()` removed from `lib/chatFormat.ts`.
 
 ## Intentionally not wired (correct, per `settings-mapping.md:310` + `DESIGN.md`)
 
@@ -42,7 +43,7 @@
 ```bash
 bun test && bun run build
 # 1. Appearance → Show file sizes exactly ON → Browse /data 12,345 B shows "12,345 B" not "12.1 KiB" (BrowseView + TransferCard)
-# 2. Chats → Highlight keywords ON + keywords "pink" → room "pink floyd" shows amber <mark>
+# 2. Chats → Highlight keywords ON + keywords "pink" → room "pink floyd" shows amber <mark> + private-chat conversation list hotspot style (bold/italic per usernamestyle)
 # 3. Transfers → Rescan daily ON, hour = current UTC hour → bridge logs "daily rescan triggered"
 # 4. Appearance → Tab close buttons OFF → Search/Browse/Profile/PrivateChat hide ×
 # 5. Appearance → Restore previous tab on close ON → close middle of 3 tabs → previous active
@@ -53,7 +54,8 @@ bun test && bun run build
 # 10. Appearance → Buddy list placement chatrooms/always → Chat shows Buddies panel (12 buddies + presence dots) in right aside
 # 11. Appearance → Reverse file paths OFF → TransferCard shows virtualPath as title, fileName as subtitle; Browse file row shows full virtualPath
 # 12. Appearance → Language de/fr/es → Sidebar/BottomNav labels switch via lib/i18n.ts t() (e.g. Search → Suche/Recherche), system fallback via navigator.language
-# 13. Searches → Filters visible by default ON → Search FilterBar expanded on load (OFF → collapsed)
+# 13. Searches → Filters visible by default ON → Search FilterBar expanded on load (OFF → collapsed), toggle persists to settings
+# 14. Private Chat → Colorise usernames OFF → conversation list plain text-on-surface (no primary/bold) via usernameHotspotClass
 ```
 
 ## Pointers
