@@ -19,6 +19,13 @@ compose.yaml
 *.md
 !ATTRIBUTION.md
 
+# e2e / playwright — host only, never needed in Docker (was slowing builds ~10-15s + 50MB)
+e2e/
+playwright.config.ts
+test-results/
+playwright-report/
+.github/
+
 # vcs / os
 .git/
 .gitignore
