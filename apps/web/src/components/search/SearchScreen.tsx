@@ -26,7 +26,8 @@ export function SearchScreen() {
   const { settings, setOption } = useConfig();
   const { getIgnored, markSeen } = useWishlist();
   const router = useRouter();
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(() => settings.searches.filters_visible ?? false);
+  useEffect(() => { setShowFilters(settings.searches.filters_visible ?? false); }, [settings.searches.filters_visible]);
   const [sheetRow, setSheetRow] = useState<SearchRow | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const ctxMenu = useContextMenu();
