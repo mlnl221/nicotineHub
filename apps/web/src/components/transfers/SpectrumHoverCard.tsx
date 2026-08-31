@@ -95,7 +95,7 @@ export function SpectrumHoverCard({ transferId, fileName, children }: Props) {
                   <span className="font-label text-xs font-semibold truncate" title={fileName}>
                     {fileName}
                   </span>
-                  <span className="font-label text-[10px] text-outline">Full • 2000×513 • Kaiser</span>
+                  <span className="font-label text-[10px] text-outline">Full</span>
                 </div>
                 <div className="bg-black flex items-center justify-center min-h-[180px]">
                   {imgSrc ? (
@@ -148,13 +148,13 @@ export function SpectrumHoverCard({ transferId, fileName, children }: Props) {
                     onClick={() => setActiveTab("full")}
                     className={`flex-1 py-2.5 rounded-xl font-label text-xs font-semibold ${activeTab === "full" ? "bg-primary text-on-primary shadow" : "bg-surface-container-high text-on-surface-variant"}`}
                   >
-                    Full (2000×513)
+                    Full
                   </button>
                   <button
                     onClick={() => setActiveTab("zoom")}
                     className={`flex-1 py-2.5 rounded-xl font-label text-xs font-semibold ${activeTab === "zoom" ? "bg-primary text-on-primary shadow" : "bg-surface-container-high text-on-surface-variant"}`}
                   >
-                    Zoom (500×1025) 0:02
+                    Zoom
                   </button>
                 </div>
 
