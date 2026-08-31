@@ -7,24 +7,26 @@ services:
     restart: unless-stopped
     environment:
       PORT: "8787"
-      LISTEN_PORT: "${LISTEN_PORT:-62904}"
+      LISTEN_PORT: "${LISTEN_PORT:-49127}"
       DATA_DIR: "/data"
       BRIDGE_TOKEN: "${BRIDGE_TOKEN:-}"
       # Homelab hardening: optionally restrict browser origins (e.g. ALLOWED_ORIGINS=https://hub.example.com,http://nas:3000)
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
     # Homelab: bridge stays host-exposed so browser can ws://nas:8787/ws directly.
     # LISTEN_PORT is also the host port — changing it in Settings → Network (portrange)
-    # writes DATA_DIR/listen_port and reconnects the bridge; UPnP/NAT-PMP auto-maps
-    # the new port if `server.upnp` is enabled (default true, toggle in Network). For
-    # full Docker host binding, also set LISTEN_PORT env and `docker compose up -d`
-    # (or `LISTEN_PORT=12345 docker compose up -d`). UPnP inside Docker bridge network
-    # may fail (container IP 172.x != host LAN IP) — use `network_mode: host` for
-    # auto-mapping or forward manually. For reverse-proxy only (internal):
+    # writes DATA_DIR/listen_port (+ DATA_DIR/host.env for .env sync) and hot-swaps Bun.listen
+    # + reconnects Soulseek (SetWaitPort) without WS restart; UI stays up, Save triggers fresh connect.
+    # UPnP/NAT-PMP auto-maps if `server.upnp` is enabled (default true, toggle in Network).
+    # For VPN (static forward 49127) use `network_mode: host` (see compose.override.example.yaml)
+    # to avoid Docker port remap – then no `docker compose up -d` needed. For bridge network,
+    # host mapping still static at create time: `LISTEN_PORT=49127 docker compose up -d` or watcher script.
+    # UPnP inside Docker bridge network may fail (container IP 172.x != host LAN IP) — use
+    # `network_mode: host` for auto-mapping or forward manually. For reverse-proxy only (internal):
     #   services: { bridge: { ports: !["127.0.0.1:8787:8787"] } } and set NEXT_PUBLIC_BRIDGE_URL via web env.
     ports:
       - "8787:8787"
-      - "${LISTEN_PORT:-62904}:${LISTEN_PORT:-62904}"
-      - "${LISTEN_PORT:-62904}:${LISTEN_PORT:-62904}/udp"
+      - "${LISTEN_PORT:-49127}:${LISTEN_PORT:-49127}"
+      - "${LISTEN_PORT:-49127}:${LISTEN_PORT:-49127}/udp"
     volumes:
       - bridge-data:/data
     healthcheck:

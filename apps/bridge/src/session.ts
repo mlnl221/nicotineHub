@@ -136,7 +136,7 @@ export interface SearchEndPayload { searchId: string; reason: "max_results" | "s
 export interface SearchHandlers { onResult: (p: SearchResultPayload) => void; onEnd: (p: SearchEndPayload) => void; timeoutMs?: number; }
 interface ActiveSearch extends SearchHandlers { searchId: string; timer?: ReturnType<typeof setTimeout>; users: Set<string>; count: number; maxResults: number; }
 interface PeerState { buf: Buffer; initDone: boolean; username?: string; outbound?: boolean; connType?: string; lastActive: number; isFileConn?: boolean; fileToken?: number; createdAt: number; }
-export type ServerEvent = { type: "reconnect"; attempt: number; delay: number } | { type: "reconnect-failed"; error: string };
+export type ServerEvent = { type: "reconnect"; attempt: number; delay: number } | { type: "reconnect-failed"; error: string } | { type: "reconnected"; listenPort: number };
 export interface BrowseEvent {
   type: "browse-shares" | "browse-folder" | "browse-error";
   username: string;
@@ -240,6 +240,7 @@ export class SoulseekSession {
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectAttempts = 0;
   private shouldReconnect = true;
+  private reconnectPending = false;
   private branchLevel = 0;
   private branchRoot: string | undefined;
   private parent: ParentCandidate | null = null;
@@ -433,7 +434,68 @@ export class SoulseekSession {
   private _autoreplyThrottle = new Map<string, number>(); // user -> ts for auto-reply dedup
   private _autoawayTimer?: ReturnType<typeof setInterval>;
   private _lastActivity = Date.now();
-  setNetworkInterface(iface: string) { this._interface = String(iface || ""); }
+  private resolveInterfaceToIp(iface: string): string | null {
+    const trimmed = String(iface || "").trim();
+    if (!trimmed) return null;
+    // If looks like IP, return as-is (validate)
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(trimmed)) {
+      const parts = trimmed.split(".").map(Number);
+      if (parts.every((n) => n >= 0 && n <= 255)) return trimmed;
+      return null;
+    }
+    try {
+      const { networkInterfaces } = require("node:os") as typeof import("node:os");
+      const nets = networkInterfaces();
+      const addrs = nets[trimmed];
+      if (addrs) {
+        // Prefer first IPv4 non-internal, else first IPv4
+        const ipv4 = addrs.find((a) => a.family === "IPv4" && !a.internal) ?? addrs.find((a) => a.family === "IPv4");
+        if (ipv4) return ipv4.address;
+      }
+    } catch {}
+    return null;
+  }
+  private getListenHostname(): string {
+    const ip = this.resolveInterfaceToIp(this._interface);
+    return ip || "0.0.0.0";
+  }
+  setNetworkInterface(iface: string) {
+    const norm = String(iface || "").trim();
+    if (norm === this._interface) return;
+    const old = this._interface;
+    const oldIp = this._localIpAddress;
+    this._interface = norm;
+    logger.info("server", `interface ${norm ? `${norm} → ${this.resolveInterfaceToIp(norm) || "0.0.0.0"}` : "default (0.0.0.0)"}`, { listenPort: this._listenPort, username: this.username, iface: norm || "default" });
+    if (!this.loggedIn) return; // next login will bind correct hostname
+    // Validate iface if non-empty: must resolve to IP or be IP itself
+    if (norm && !this.resolveInterfaceToIp(norm) && !/^\d{1,3}(\.\d{1,3}){3}$/.test(norm)) {
+      logger.warn("server", `interface ${norm} not found, binding 0.0.0.0`, { iface: norm });
+    }
+    const newHostname = this.getListenHostname();
+    const newIp = this.resolveInterfaceToIp(norm) || this.findLocalIpAddress();
+    this._localIpAddress = newIp;
+    this.portMapper.setPort(this._listenPort, newIp);
+    // Restart listener on new hostname
+    try { this.listener?.stop(); } catch {}
+    this.listener = undefined;
+    try {
+      this.startListener();
+    } catch (e) {
+      this._interface = old;
+      this._localIpAddress = oldIp;
+      this.portMapper.setPort(this._listenPort, oldIp);
+      try { this.startListener(); } catch {}
+      if (this._upnpEnabled) {
+        try { this.portMapper.addPortMapping(false).catch(() => {}); } catch {}
+      }
+      throw new Error(`Cannot bind to interface ${norm} (${newHostname}): ${(e as Error).message}`);
+    }
+    if (this._upnpEnabled) {
+      // Remove old mapping before adding new (handled via setPort above, but ensure)
+      this.portMapper.addPortMapping(false).catch(() => {});
+    }
+    this.reconnect("interface change");
+  }
   setAutoreply(msg: string) { this._autoreply = String(msg || ""); }
   setAutosearch(terms: string[]) { this._autosearch = (terms || []).slice().filter(Boolean); }
   setAutojoin(rooms: string[]) { this._autojoin = (rooms || []).slice().filter(Boolean); }
@@ -784,6 +846,7 @@ export class SoulseekSession {
     logger.info("server", "manual reconnect", { reason, listenPort: this._listenPort, username: this.username });
     this.shouldReconnect = true;
     this.reconnectAttempts = 0;
+    this.reconnectPending = true;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
     // Portmapper: remove before reconnect (nicotine _server_disconnect)
     try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}
@@ -944,7 +1007,7 @@ export class SoulseekSession {
         this.startIdleSweep();
         this.startServerPing();
         // Portmapper: NAT-PMP → UPnP fallback (like nicotine PortMapper LEASE_DURATION 12h, RENEWAL 2h)
-        this._localIpAddress = this.findLocalIpAddress();
+        this._localIpAddress = this.resolveInterfaceToIp(this._interface) || this.findLocalIpAddress();
         this.portMapper.setPort(this._listenPort, this._localIpAddress);
         if (this._upnpEnabled) this.portMapper.addPortMapping(false).catch(() => {});
         // Distrib bootstrap: HaveNoParent true + BranchRoot(login) + BranchLevel 0 + AcceptChildren false — mirrors _sendHaveNoParent
@@ -952,9 +1015,18 @@ export class SoulseekSession {
         this.restartWishlistTimer();
         this.restartAutoawayTimer();
         this.handleAutoJoinAndWatch();
-        this.loginResolve?.(resp);
-        this.loginResolve = undefined;
-        this.loginReject = undefined;
+        if (this.loginResolve) {
+          this.loginResolve?.(resp);
+          this.loginResolve = undefined;
+          this.loginReject = undefined;
+        } else if (this.reconnectPending) {
+          // This was a reconnect (e.g. after port change) – WS stays open, notify UI to go back to connected
+          this.reconnectPending = false;
+          logger.info("server", "reconnected after port change", { listenPort: this._listenPort });
+          this.emitServer({ type: "reconnected", listenPort: this._listenPort });
+        } else {
+          this.reconnectPending = false;
+        }
       } else {
         logger.warn("server", "login rejected", { reason: resp.rejectionReason, detail: resp.rejectionDetail?.slice(0,120) });
         this.shouldReconnect = false;
@@ -1452,8 +1524,9 @@ export class SoulseekSession {
   }
 
   private startListener() {
+    const hostname = this.getListenHostname();
     this.listener = Bun.listen({
-      port: this._listenPort, hostname: "0.0.0.0",
+      port: this._listenPort, hostname,
       socket: {
         open: () => {},
         data: (peer, chunk) => {

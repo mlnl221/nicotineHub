@@ -273,10 +273,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         case "server:reconnect": {
           // Bridge is reconnecting Soulseek TCP (e.g. after listening port change via portrange)
           // Keep UI in connecting state so user sees progress; Web WS stays open
-          const err = (data as unknown as { error?: string }).error;
-          if (err) {
-            // reconnect-failed after 15 attempts — surface but keep creds for manual retry
-            setState((s) => ({ ...s, status: "failed", error: err }));
+          const d = data as unknown as { error?: string; ok?: boolean; listenPort?: number };
+          if (d.error) {
+            // reconnect-failed after 15 attempts or listen port bind failure — surface but keep creds for manual retry
+            setState((s) => ({ ...s, status: "failed", error: d.error }));
+          } else if (d.ok) {
+            // Fresh reconnect success (e.g. after port change) – WS never dropped, go back to connected
+            setState((s) => ({ ...s, status: "connected", error: undefined }));
+            clearReconnect();
+            reconnectAttempts.current = 0;
+            shouldReconnect.current = true;
           } else if (stateRef.current.status === "connected") {
             setState((s) => ({ ...s, status: "connecting" }));
           }
