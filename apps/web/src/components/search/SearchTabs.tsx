@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfig } from "@/lib/config/provider";
 import { useSearches } from "@/lib/search";
 
 function modeBadge(mode: string, target?: string) {
@@ -20,6 +21,8 @@ function modeIcon(mode: string): string {
 
 export function SearchTabs() {
   const { tabs, activeId, setActive, closeTab, stopSearch } = useSearches();
+  const { settings } = useConfig();
+  const showClose = settings.ui.tabclosers ?? true;
 
   if (tabs.length === 0) return null;
 
@@ -46,28 +49,30 @@ export function SearchTabs() {
               <span className="truncate">{tab.query}</span>
               {tab.status === "searching" ? <span className="ml-1 animate-pulse">•</span> : null}
             </span>
-            <span
-              role="button"
-              tabIndex={0}
-              aria-label="Close search"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (tab.status === "searching") stopSearch(tab.id);
-                closeTab(tab.id);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
+            {showClose ? (
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label="Close search"
+                onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   if (tab.status === "searching") stopSearch(tab.id);
                   closeTab(tab.id);
-                }
-              }}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-on-surface-variant/70 hover:text-error hover:bg-surface-container-high -mr-1"
-            >
-              <span className="material-symbols-outlined text-[14px]">close</span>
-            </span>
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (tab.status === "searching") stopSearch(tab.id);
+                    closeTab(tab.id);
+                  }
+                }}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-on-surface-variant/70 hover:text-error hover:bg-surface-container-high -mr-1"
+              >
+                <span className="material-symbols-outlined text-[14px]">close</span>
+              </span>
+            ) : null}
           </button>
         );
       })}

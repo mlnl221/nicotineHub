@@ -62,6 +62,7 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
             <input
               list="search-history"
               value={query}
+              spellCheck={settings.ui.spellcheck}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") submit();
@@ -74,7 +75,6 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
               }
               autoCapitalize="none"
               autoCorrect="off"
-              spellCheck={false}
               className="flex-1 w-full min-w-0 bg-transparent font-body text-sm text-on-surface placeholder:text-outline focus:outline-none"
             />
             <datalist id="search-history">
@@ -168,12 +168,12 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
             <span className="material-symbols-outlined text-outline text-[18px] shrink-0">person</span>
             <input
               value={target}
+              spellCheck={settings.ui.spellcheck}
               onChange={(e) => setTarget(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
               placeholder="Username…"
               autoCapitalize="none"
               autoCorrect="off"
-              spellCheck={false}
               className="flex-1 w-full min-w-0 bg-transparent font-body text-sm text-on-surface placeholder:text-outline focus:outline-none"
             />
           </div>
@@ -184,13 +184,13 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
               <span className="material-symbols-outlined text-outline text-[18px] shrink-0">tag</span>
               <input
                 value={target}
+                spellCheck={settings.ui.spellcheck}
                 onChange={(e) => { setTarget(e.target.value); if (roomError) setRoomError(""); }}
                 onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
                 placeholder="Room name… (joined or public rooms only)"
                 list="room-autocomplete"
                 autoCapitalize="none"
                 autoCorrect="off"
-                spellCheck={false}
                 className="flex-1 w-full min-w-0 bg-transparent font-body text-sm text-on-surface placeholder:text-outline focus:outline-none"
               />
               <datalist id="room-autocomplete">

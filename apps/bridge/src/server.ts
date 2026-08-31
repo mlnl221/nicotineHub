@@ -185,7 +185,7 @@ function defaultProfile(username: string) {
   return { username, descr: "", pic: null, totalupl: 0, queuesize: 0, slotsavail: true, uploadallowed: 1 };
 }
 
-let LISTEN_PORT = Number(process.env.LISTEN_PORT || 62904);
+let LISTEN_PORT = Number(process.env.LISTEN_PORT || 49127);
 const PORT = Number(process.env.PORT || 8787);
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || "";
 const DATA_DIR = process.env.DATA_DIR || "/data";
@@ -215,6 +215,9 @@ pluginManager.registerBuiltin("leech_detector", leechManifest as unknown as Reco
 pluginManager.start().catch((e) => logger.warn("bridge", "plugin manager start failed", { error: (e as Error).message }));
 // expose for http handlers
 (globalThis as unknown as Record<string, unknown>).__pluginManager = pluginManager;
+
+// Active Soulseek sessions across all WS connections (for global port sync)
+const activeSessions = new Set<SoulseekSession>();
 
 // ── 5-minute in-memory caches (per-process, ephemeral) ──
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -358,6 +361,31 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         }), { status: 200, headers: { "content-type": "application/json", ...cors } });
       }
       return new Response("ok", { status: 200, headers: { "cache-control": "no-store", ...cors } });
+    }
+    if ((url.pathname === "/interfaces" || url.pathname === "/api/interfaces") && req.method === "GET") {
+      if (BRIDGE_TOKEN) {
+        const tok = extractToken(req);
+        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
+      }
+      try {
+        const { networkInterfaces } = await import("node:os");
+        const raw = networkInterfaces();
+        // IPv4 only (Soulseek peer listener is IPv4), human-friendly name stored; show internal with flag
+        const result = Object.entries(raw).flatMap(([name, addrs]) =>
+          (addrs ?? []).filter((a) => a.family === "IPv4").map((a) => ({
+            name,
+            address: a.address,
+            netmask: a.netmask,
+            family: a.family,
+            internal: a.internal,
+            mac: a.mac,
+            cidr: (a as unknown as { cidr?: string }).cidr ?? null,
+          }))
+        );
+        return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: (e as Error).message }), { status: 500, headers: { "content-type": "application/json", ...cors } });
+      }
     }
     if (url.pathname === "/logs" && req.method === "GET") {
       // Simple auth check via token param/header (mirror /ws)
@@ -620,7 +648,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const { username, password, host, port } = result.data;
         logger.info("auth", "login attempt", { username, host: host || "server.slsknet.org", port: port || 2242 });
         // Close previous session if any
-        ws.data.session?.close();
+        if (ws.data.session) {
+          try { activeSessions.delete(ws.data.session); } catch {}
+          ws.data.session?.close();
+        }
         const session = new SoulseekSession({
           username, password, host, port, listenPort: LISTEN_PORT, profile: defaultProfile(username), dataDir: DATA_DIR,
           onFileConnection: (token, socket) => {
@@ -741,19 +772,19 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             else if (event.type === "reconnected") pluginManager.serverConnectNotification();
             logger.info("server", "server reconnect", event as unknown as Record<string, unknown>);
             try {
-              if ((event as unknown as { type: string }).type === "reconnected") {
-                const ip = (event as unknown as { ip?: string }).ip ?? "";
-                // Tell client it's back — reuse login:result so existing handler restores connected
-                ws.send(JSON.stringify({ type: "login:result", ok: true, data: { ipAddress: ip } }));
-                ws.send(JSON.stringify({ type: "server:reconnected", ip }));
+              const { type: _t, ...rest } = event as unknown as Record<string, unknown> & { type: string };
+              if (event.type === "reconnected") {
+                ws.send(JSON.stringify({ type: "server:reconnect", ok: true, listenPort: (event as unknown as { listenPort: number }).listenPort }));
+                // Also push fresh health so UI can update without poll
+                try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: (event as unknown as { listenPort: number }).listenPort, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE } })); } catch {}
               } else {
-                const { type: _t, ...rest } = event as unknown as Record<string, unknown> & { type: string };
                 ws.send(JSON.stringify({ type: "server:reconnect", ...(rest as Record<string, unknown>), attempt: (event as unknown as { attempt?: number }).attempt, delay: (event as unknown as { delay?: number }).delay, error: (event as unknown as { error?: string }).error }));
               }
             } catch {}
           },
         });
         ws.data.session = session;
+        try { activeSessions.add(session); } catch {}
         // Ensure TransferManager can call back into session
         try { ws.data.transfers?.setSessionGetter(() => session as unknown as never); } catch {}
         try { pluginManager.setSessionGetter(() => session as unknown as ReturnType<PluginManager["setSessionGetter"]> extends never ? never : unknown as never); } catch {}
@@ -765,6 +796,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           })
           .catch((err: Error) => {
             logger.warn("auth", "login failed", { username, error: err.message });
+            try { activeSessions.delete(session); } catch {}
             ws.send(JSON.stringify({ type: "login:result", ok: false, error: err.message }));
           });
         return;
@@ -1050,8 +1082,24 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         // Bridge-relevant mappings
         try {
           if (section === "transfers") {
-            const cfg: Record<string, unknown> = { [key]: value };
-            tm?.setConfig?.(cfg);
+            // Real file sharing: web's virtualName|path lists need to become bridge ShareDB folders.
+            // Bridge scans those host paths (must be mounted into DATA_DIR / SHARED_DIRS) and rebuilds the compressed shares.
+            if (["shared", "buddyshared", "trustedshared"].includes(key) && Array.isArray(value)) {
+              try {
+                const pairs = value as [string, string][];
+                const levelMap: Record<string, string> = { shared: "public", buddyshared: "buddy", trustedshared: "trusted" };
+                const level = levelMap[key] || "public";
+                (session as unknown as { setShareRoots?: (roots: [string, string][], lvl: string) => void })?.setShareRoots?.(pairs, level);
+              } catch (e) {
+                logger.warn("bridge", `setShareRoots failed for ${key}`, { error: (e as Error).message });
+              }
+              // also persist via TransferManager for diagnostics if needed
+              tm?.setConfig?.({ [key]: value });
+              // post-rescan report will be triggered by setShareRoots
+            } else {
+              const cfg: Record<string, unknown> = { [key]: value };
+              tm?.setConfig?.(cfg);
+            }
             // Also update session network filters if relevant
             if (["banlist", "ipblocklist", "geoblock", "geoblockcc", "usecustomban", "customban", "usecustomgeoblock", "customgeoblock"].includes(key)) {
               (session as unknown as { setNetworkFilters?: (o: unknown) => void })?.setNetworkFilters?.({ [key]: value });
@@ -1063,6 +1111,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
               tm?.setConfig?.({ [key]: value });
             }
             if (["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "groupdownloads", "groupuploads"].includes(key)) {
+              tm?.setConfig?.({ [key]: value });
+            }
+            if (["rescanonstartup", "rescan_shares_daily", "rescan_shares_hour"].includes(key)) {
+              (session as unknown as { setRescanConfig?: (o: Record<string, unknown>) => void })?.setRescanConfig?.({ [key]: value });
               tm?.setConfig?.({ [key]: value });
             }
             if (["reveal_buddy_shares", "reveal_trusted_shares"].includes(key)) {
@@ -1089,24 +1141,36 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                 const prevPort = LISTEN_PORT;
                 LISTEN_PORT = newPort;
                 try { writeFileSync(join(DATA_DIR, "listen_port"), String(newPort)); } catch {}
+                // Also write host.env for Docker .env sync (bind-mount ./data:/data or named volume inspect)
+                try { writeFileSync(join(DATA_DIR, "host.env"), `LISTEN_PORT=${newPort}\n`); } catch {}
                 const sess = session as unknown as { setListenPort?: (p: number) => Promise<void>; reconnect?: (r: string) => void } | undefined;
                 if (sess?.setListenPort) {
-                  // Fire-and-forget, report via WS
+                  // Fire-and-forget, report via WS — trigger fresh Soulseek reconnect (WS stays open)
                   (sess.setListenPort(newPort) as Promise<void>).then(() => {
                     logger.info("server", "listen port updated via config", { oldPort: prevPort, newPort });
                     try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: newPort })); } catch {}
-                    // Notify web of new health
+                    // Notify all WS clients of new health (so UI Save shows success without poll)
                     try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: newPort, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE } })); } catch {}
+                    // Also update other active sessions' listenPort silently (they'll reconnect lazily)
+                    for (const s of activeSessions) {
+                      if (s !== sess) {
+                        try { (s as unknown as { _listenPort: number })._listenPort = newPort; (s as unknown as { portMapper: { setPort: (p:number,ip:string)=>void } }).portMapper?.setPort(newPort, (s as unknown as { _localIpAddress: string })._localIpAddress || "0.0.0.0"); } catch {}
+                      }
+                    }
                   }).catch((e: Error) => {
                     // Revert global on bind failure
                     LISTEN_PORT = prevPort;
                     try { writeFileSync(join(DATA_DIR, "listen_port"), String(prevPort)); } catch {}
+                    try { writeFileSync(join(DATA_DIR, "host.env"), `LISTEN_PORT=${prevPort}\n`); } catch {}
                     logger.warn("server", "listen port change failed, reverted", { newPort, error: e.message });
                     ws.send(JSON.stringify({ type: "error", error: `Cannot listen on port ${newPort}: ${e.message}` }));
+                    // Also send config:updated with old value so UI can revert pending
+                    try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: prevPort })); } catch {}
+                    try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: prevPort, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE } })); } catch {}
                   });
                   return; // avoid double config:updated below
                 } else {
-                  // No active session yet — next login will use new port
+                  // No active session yet — next login will use new port (persisted)
                   logger.info("server", "listen port updated (no active session)", { oldPort: prevPort, newPort });
                 }
               }
@@ -1119,8 +1183,22 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             (session as unknown as { setUpnpEnabled?: (b: boolean) => void })?.setUpnpEnabled?.(enabled);
             logger.info("server", `UPnP ${enabled ? "enabled" : "disabled"} via config`, { upnp: enabled });
           } else if (section === "server" && ["interface", "autoreply", "autosearch", "autojoin", "userlist", "autoaway"].includes(key)) {
-            if (key === "interface") (session as unknown as { setNetworkInterface?: (v:string)=>void })?.setNetworkInterface?.(String(value || ""));
-            else if (key === "autoreply") (session as unknown as { setAutoreply?: (v:string)=>void })?.setAutoreply?.(String(value || ""));
+            if (key === "interface") {
+              const newIface = String(value || "").trim();
+              const sess = session as unknown as { setNetworkInterface?: (v: string) => void } | undefined;
+              try {
+                sess?.setNetworkInterface?.(newIface);
+                logger.info("server", `interface set to ${newIface || "default (0.0.0.0)"}`, { iface: newIface || "default", username: (session as unknown as { username?: string })?.username });
+                // Send config updated + health so UI can reflect immediate bind change (WS stays open, Soulseek reconnects if loggedIn)
+                try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: newIface })); } catch {}
+                try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE } })); } catch {}
+              } catch (e) {
+                logger.warn("server", "interface change failed", { iface: newIface, error: (e as Error).message });
+                ws.send(JSON.stringify({ type: "error", error: `Cannot bind to interface ${newIface || "default"}: ${(e as Error).message}` }));
+                return;
+              }
+              return; // already sent config:updated, avoid duplicate below
+            } else if (key === "autoreply") (session as unknown as { setAutoreply?: (v:string)=>void })?.setAutoreply?.(String(value || ""));
             else if (key === "autosearch") (session as unknown as { setAutosearch?: (v:string[])=>void })?.setAutosearch?.(Array.isArray(value) ? value as string[] : []);
             else if (key === "autojoin") (session as unknown as { setAutojoin?: (v:string[])=>void })?.setAutojoin?.(Array.isArray(value) ? value as string[] : []);
             else if (key === "userlist") (session as unknown as { setUserlist?: (v:string[])=>void })?.setUserlist?.(Array.isArray(value) ? value as string[] : []);
@@ -1132,6 +1210,14 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           } else if (section === "logging" && ["readroomlines", "readprivatelines", "rooms_timestamp", "private_timestamp"].includes(key)) {
             // logging caps are web-only, but acknowledge
             void value;
+          } else if (section === "searches" && ["maxresults", "max_displayed_results", "search_results", "private_search_results"].includes(key)) {
+            (session as unknown as { setSearchConfig?: (o: Record<string, unknown>) => void })?.setSearchConfig?.({ [key]: value });
+          } else if (section === "plugins" && key === "enable") {
+            (pluginManager as unknown as { setGlobalEnable?: (b: boolean) => void }).setGlobalEnable?.(Boolean(value));
+            logger.info("bridge", `plugins ${Boolean(value) ? "enabled" : "disabled"} via config`, { enable: Boolean(value) });
+          } else if (section === "server" && (key === "server" || key === "auto_connect_startup")) {
+            // Stored for login defaults; web handles auto_connect_startup gate, bridge just acks.
+            logger.debug("bridge", "server config stored", { key, value: typeof value === "object" ? JSON.stringify(value).slice(0,120) : String(value).slice(0,80) });
           }
           logger.debug("bridge", "config update", { section, key });
           ws.send(JSON.stringify({ type: "config:updated", section, key }));
@@ -1336,6 +1422,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     close(ws) {
       try { (ws.data as unknown as { logUnsub?: () => void }).logUnsub?.(); } catch {}
       logger.info("bridge", "ws close");
+      if (ws.data.session) {
+        try { activeSessions.delete(ws.data.session); } catch {}
+      }
       ws.data.session?.close();
       ws.data.transfers?.close();
       ws.data = {};

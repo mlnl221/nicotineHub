@@ -136,7 +136,7 @@ export interface SearchEndPayload { searchId: string; reason: "max_results" | "s
 export interface SearchHandlers { onResult: (p: SearchResultPayload) => void; onEnd: (p: SearchEndPayload) => void; timeoutMs?: number; }
 interface ActiveSearch extends SearchHandlers { searchId: string; timer?: ReturnType<typeof setTimeout>; users: Set<string>; count: number; maxResults: number; }
 interface PeerState { buf: Buffer; initDone: boolean; username?: string; outbound?: boolean; connType?: string; lastActive: number; isFileConn?: boolean; fileToken?: number; createdAt: number; }
-export type ServerEvent = { type: "reconnect"; attempt: number; delay: number } | { type: "reconnect-failed"; error: string } | { type: "reconnected"; ip: string };
+export type ServerEvent = { type: "reconnect"; attempt: number; delay: number } | { type: "reconnect-failed"; error: string } | { type: "reconnected"; listenPort: number };
 export interface BrowseEvent {
   type: "browse-shares" | "browse-folder" | "browse-error";
   username: string;
@@ -240,6 +240,7 @@ export class SoulseekSession {
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectAttempts = 0;
   private shouldReconnect = true;
+  private reconnectPending = false;
   private branchLevel = 0;
   private branchRoot: string | undefined;
   private parent: ParentCandidate | null = null;
@@ -433,7 +434,68 @@ export class SoulseekSession {
   private _autoreplyThrottle = new Map<string, number>(); // user -> ts for auto-reply dedup
   private _autoawayTimer?: ReturnType<typeof setInterval>;
   private _lastActivity = Date.now();
-  setNetworkInterface(iface: string) { this._interface = String(iface || ""); }
+  private resolveInterfaceToIp(iface: string): string | null {
+    const trimmed = String(iface || "").trim();
+    if (!trimmed) return null;
+    // If looks like IP, return as-is (validate)
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(trimmed)) {
+      const parts = trimmed.split(".").map(Number);
+      if (parts.every((n) => n >= 0 && n <= 255)) return trimmed;
+      return null;
+    }
+    try {
+      const { networkInterfaces } = require("node:os") as typeof import("node:os");
+      const nets = networkInterfaces();
+      const addrs = nets[trimmed];
+      if (addrs) {
+        // Prefer first IPv4 non-internal, else first IPv4
+        const ipv4 = addrs.find((a) => a.family === "IPv4" && !a.internal) ?? addrs.find((a) => a.family === "IPv4");
+        if (ipv4) return ipv4.address;
+      }
+    } catch {}
+    return null;
+  }
+  private getListenHostname(): string {
+    const ip = this.resolveInterfaceToIp(this._interface);
+    return ip || "0.0.0.0";
+  }
+  setNetworkInterface(iface: string) {
+    const norm = String(iface || "").trim();
+    if (norm === this._interface) return;
+    const old = this._interface;
+    const oldIp = this._localIpAddress;
+    this._interface = norm;
+    logger.info("server", `interface ${norm ? `${norm} → ${this.resolveInterfaceToIp(norm) || "0.0.0.0"}` : "default (0.0.0.0)"}`, { listenPort: this._listenPort, username: this.username, iface: norm || "default" });
+    if (!this.loggedIn) return; // next login will bind correct hostname
+    // Validate iface if non-empty: must resolve to IP or be IP itself
+    if (norm && !this.resolveInterfaceToIp(norm) && !/^\d{1,3}(\.\d{1,3}){3}$/.test(norm)) {
+      logger.warn("server", `interface ${norm} not found, binding 0.0.0.0`, { iface: norm });
+    }
+    const newHostname = this.getListenHostname();
+    const newIp = this.resolveInterfaceToIp(norm) || this.findLocalIpAddress();
+    this._localIpAddress = newIp;
+    this.portMapper.setPort(this._listenPort, newIp);
+    // Restart listener on new hostname
+    try { this.listener?.stop(); } catch {}
+    this.listener = undefined;
+    try {
+      this.startListener();
+    } catch (e) {
+      this._interface = old;
+      this._localIpAddress = oldIp;
+      this.portMapper.setPort(this._listenPort, oldIp);
+      try { this.startListener(); } catch {}
+      if (this._upnpEnabled) {
+        try { this.portMapper.addPortMapping(false).catch(() => {}); } catch {}
+      }
+      throw new Error(`Cannot bind to interface ${norm} (${newHostname}): ${(e as Error).message}`);
+    }
+    if (this._upnpEnabled) {
+      // Remove old mapping before adding new (handled via setPort above, but ensure)
+      this.portMapper.addPortMapping(false).catch(() => {});
+    }
+    this.reconnect("interface change");
+  }
   setAutoreply(msg: string) { this._autoreply = String(msg || ""); }
   setAutosearch(terms: string[]) { this._autosearch = (terms || []).slice().filter(Boolean); }
   setAutojoin(rooms: string[]) { this._autojoin = (rooms || []).slice().filter(Boolean); }
@@ -481,6 +543,77 @@ export class SoulseekSession {
   // expose for server.ts config:update chatrooms/userbrowse (web-only but acknowledge)
   setChatroomsConfig(_opts: Record<string, unknown>) { /* web-only, noop in bridge */ }
   setUserbrowseConfig(_opts: Record<string, unknown>) { /* web-only, noop */ }
+
+  // ---- Search config (P1) — mirrors nicotine-plus searches.search_results / private_search_results ----
+  private _searchEnabled = true;
+  private _privateSearchEnabled = false;
+  private _maxResults = 300;
+  private _maxDisplayedResults = 2500;
+  setSearchConfig(opts: Partial<{ search_results: boolean; private_search_results: boolean; maxresults: number; max_displayed_results: number }>) {
+    if (opts.search_results !== undefined) this._searchEnabled = !!opts.search_results;
+    if (opts.private_search_results !== undefined) this._privateSearchEnabled = !!opts.private_search_results;
+    if (opts.maxresults !== undefined) {
+      const v = Number(opts.maxresults);
+      if (Number.isInteger(v) && v >= 1 && v <= 10000) this._maxResults = v;
+    }
+    if (opts.max_displayed_results !== undefined) {
+      const v = Number(opts.max_displayed_results);
+      if (Number.isInteger(v) && v >= 100 && v <= 25000) this._maxDisplayedResults = v;
+    }
+    logger.info("server", "search config updated", { searchEnabled: this._searchEnabled, privateSearch: this._privateSearchEnabled, maxResults: this._maxResults });
+  }
+
+  // ---- Real file sharing (P0/P1) — web sends [virtualName, path] pairs, bridge scans them ----
+  setShareRoots(pairs: [string, string][], levelStr: string) {
+    const level = levelStr === "buddy" ? PermissionLevel.BUDDY : levelStr === "trusted" ? PermissionLevel.TRUSTED : PermissionLevel.PUBLIC;
+    try {
+      // ShareDB handles scanning + persisting; it knows how to map virtualName → real path.
+      const res = (this.shareDB as unknown as { setCustomShares?: (roots: [string, string][], lvl: PermissionLevel) => ShareFolder[] }).setCustomShares?.(pairs, level);
+      // If custom path doesn't exist inside container, ShareDB will log and keep previous. Advise mount.
+      if (res) {
+        const counts = this.shareDB.getSharedCounts();
+        this.reportShares(counts.dirs, counts.files);
+        logger.info("server", "shares updated from settings", { level: levelStr, pairs: pairs.length, dirs: counts.dirs, files: counts.files });
+      }
+    } catch (e) {
+      logger.warn("server", "setShareRoots failed", { error: (e as Error).message, level: levelStr });
+    }
+  }
+
+  // ---- Rescan daily/hour (P2) — nicotine-plus transfers.rescanonstartup / rescan_shares_daily / rescan_shares_hour ----
+  private _rescanOnStartup = true;
+  private _rescanDaily = true;
+  private _rescanHour = 0;
+  private _rescanTimer?: ReturnType<typeof setInterval>;
+  private _lastRescanDay = "";
+  setRescanConfig(opts: Partial<{ rescanonstartup: boolean; rescan_shares_daily: boolean; rescan_shares_hour: number }>) {
+    if (opts.rescanonstartup !== undefined) this._rescanOnStartup = !!opts.rescanonstartup;
+    if (opts.rescan_shares_daily !== undefined) this._rescanDaily = !!opts.rescan_shares_daily;
+    if (opts.rescan_shares_hour !== undefined) {
+      const h = Number(opts.rescan_shares_hour);
+      if (Number.isInteger(h) && h >= 0 && h <= 23) this._rescanHour = h;
+    }
+    this.restartRescanTimer();
+    logger.info("server", "rescan config updated", { startup: this._rescanOnStartup, daily: this._rescanDaily, hour: this._rescanHour });
+  }
+  private restartRescanTimer() {
+    if (this._rescanTimer) { clearInterval(this._rescanTimer); this._rescanTimer = undefined; }
+    if (!this._rescanDaily) return;
+    // Check every 60s if hour matches and we haven't rescanned today
+    this._rescanTimer = setInterval(() => {
+      if (!this.loggedIn) return;
+      const now = new Date();
+      const hour = now.getUTCHours(); // use UTC for determinism (matches settings-plan hourLabel UTC)
+      const day = now.toISOString().slice(0, 10);
+      if (hour !== this._rescanHour) return;
+      if (this._lastRescanDay === day) return;
+      this._lastRescanDay = day;
+      logger.info("server", "daily rescan triggered", { hour, day });
+      this.rescanShares().catch((e) => logger.warn("server", "daily rescan failed", { error: (e as Error).message }));
+    }, 60_000);
+    // Don't keep process alive just for this timer
+    try { (this._rescanTimer as unknown as { unref?: () => void }).unref?.(); } catch {}
+  }
 
   private queuePendingPeerMessage(username: string, connType: string, msg: Buffer) {
     const key = username.toLowerCase();
@@ -784,6 +917,7 @@ export class SoulseekSession {
     logger.info("server", "manual reconnect", { reason, listenPort: this._listenPort, username: this.username });
     this.shouldReconnect = true;
     this.reconnectAttempts = 0;
+    this.reconnectPending = true;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
     // Portmapper: remove before reconnect (nicotine _server_disconnect)
     try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}
@@ -896,6 +1030,7 @@ export class SoulseekSession {
     if (this.serverPingTimer) { clearInterval(this.serverPingTimer); this.serverPingTimer = undefined; }
     if (this.wishlistTimer) { clearInterval(this.wishlistTimer); this.wishlistTimer = undefined; }
     if (this._autoawayTimer) { clearInterval(this._autoawayTimer); this._autoawayTimer = undefined; }
+    if (this._rescanTimer) { clearInterval(this._rescanTimer); this._rescanTimer = undefined; }
   }
 
   private handleServerData(chunk: ArrayBuffer | Uint8Array) {
@@ -940,29 +1075,34 @@ export class SoulseekSession {
           const { dirs, files } = this.shareDB.getSharedCounts();
           this.serverSocket?.write(buildSharedFoldersFiles(dirs, files));
         } catch {}
-        // startListener can fail if port still in TIME_WAIT from previous session — don't fail login
         try { this.startListener(); } catch (e) { logger.warn("server", "peer listener bind failed (will retry on next port change)", { error: (e as Error).message, port: this._listenPort }); }
         this.startIdleSweep();
         this.startServerPing();
         // Portmapper: NAT-PMP → UPnP fallback (like nicotine PortMapper LEASE_DURATION 12h, RENEWAL 2h)
-        this._localIpAddress = this.findLocalIpAddress();
+        this._localIpAddress = this.resolveInterfaceToIp(this._interface) || this.findLocalIpAddress();
         this.portMapper.setPort(this._listenPort, this._localIpAddress);
         if (this._upnpEnabled) this.portMapper.addPortMapping(false).catch(() => {});
         // Distrib bootstrap: HaveNoParent true + BranchRoot(login) + BranchLevel 0 + AcceptChildren false — mirrors _sendHaveNoParent
         this._sendHaveNoParent();
         this.restartWishlistTimer();
         this.restartAutoawayTimer();
+        this.restartRescanTimer();
         this.handleAutoJoinAndWatch();
-        // If this was a background reconnect (no pending login promise), notify WS so UI can return to connected
-        const wasBackgroundReconnect = !this.loginResolve;
-        if (this.loginResolve) {
-          this.loginResolve(resp);
-        } else if (wasBackgroundReconnect) {
-          // background reconnect (e.g. after port change) — tell client it's back
-          try { (this.opts as unknown as { onServerEvent?: (e: ServerEvent) => void }).onServerEvent?.({ type: "reconnected", ip: resp.ipAddress ?? "" } as ServerEvent); } catch {}
+        if (this._rescanOnStartup) {
+          this.rescanShares().catch((e) => logger.warn("server", "startup rescan failed", { error: (e as Error).message }));
         }
-        this.loginResolve = undefined;
-        this.loginReject = undefined;
+        if (this.loginResolve) {
+          this.loginResolve?.(resp);
+          this.loginResolve = undefined;
+          this.loginReject = undefined;
+        } else if (this.reconnectPending) {
+          // This was a reconnect (e.g. after port change) – WS stays open, notify UI to go back to connected
+          this.reconnectPending = false;
+          logger.info("server", "reconnected after port change", { listenPort: this._listenPort });
+          this.emitServer({ type: "reconnected", listenPort: this._listenPort });
+        } else {
+          this.reconnectPending = false;
+        }
       } else {
         logger.warn("server", "login rejected", { reason: resp.rejectionReason, detail: resp.rejectionDetail?.slice(0,120) });
         this.shouldReconnect = false;
@@ -1382,6 +1522,10 @@ export class SoulseekSession {
   private handleInboundFileSearch(payload: Buffer) {
     // Server FileSearch 26 receive: string username + uint32 token + string query (see SLSKPROTOCOL 26)
     // Some paths (legacy) may be token+query without username — handle both.
+    if (!this._searchEnabled) {
+      logger.debug("server", "FileSearch ignored — search_results disabled", {});
+      return;
+    }
     try {
       const r = new SlskReader(payload);
       let username: string | undefined;
@@ -1409,8 +1553,9 @@ export class SoulseekSession {
       if (this.shareDB.isExcluded(query)) return;
       // emit diagnostic
       this.emitTransfer({ type: "transfer-request", username, token: token!, file: query.slice(0, 120) });
-      // Build FileSearchResponse via shares and send to requester via peer P
-      const resp = this.shareDB.buildFileSearchResponse(token!, username ?? this.username, query);
+      // respect private_search_results: if disabled, don't include private (buddy/trusted) folders for non-buddies
+      // buildFileSearchResponse already gates via getFoldersForPermission, so no extra check needed beyond permission.
+      const resp = this.shareDB.buildFileSearchResponse(token!, username ?? this.username, query, true, 0, 0, this.getSharePermissionLevel(username ?? ""), this._maxResults);
       if (resp && username) {
         try { this.ensurePeerAndSend(username, "P", resp); } catch {}
       } else if (resp) {
@@ -1460,8 +1605,9 @@ export class SoulseekSession {
   }
 
   private startListener() {
+    const hostname = this.getListenHostname();
     this.listener = Bun.listen({
-      port: this._listenPort, hostname: "0.0.0.0",
+      port: this._listenPort, hostname,
       socket: {
         open: () => {},
         data: (peer, chunk) => {
@@ -1836,9 +1982,9 @@ export class SoulseekSession {
               if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
               if (status === ParentStatus.ACCEPTED) {
                 this._sendMessageToChildPeers(payload, 3);
-                if (!this.shareDB.isExcluded(ds.query)) {
-                  // local shares search — also emit for server side
-                  const resp = this.shareDB.buildFileSearchResponse(ds.token, this.username, ds.query);
+                if (this._searchEnabled && !this.shareDB.isExcluded(ds.query)) {
+                  // local shares search — also emit for server side (capped by maxResults)
+                  const resp = this.shareDB.buildFileSearchResponse(ds.token, this.username, ds.query, true, 0, 0, this.getSharePermissionLevel(ds.username), this._maxResults);
                   if (resp) {
                     // resp is peer FileSearchResponse, but for distrib we need to support search via shares? Just emit
                     this.emitTransfer({ type: "transfer-request", username: ds.username, token: ds.token, file: ds.query.slice(0,120) });
@@ -1928,10 +2074,12 @@ export class SoulseekSession {
       if (msg.code === 9) {
         // Gate on allowed token to prevent zlib bomb from unsolicited peers
         const tokenProbe = (() => { try { const b = inflateProbeToken(msg.payload); return b; } catch { return null; } })();
+        logger.debug("search", "peer FileSearchResponse received", { tokenProbe, allowed: [...this.allowedSearchTokens].slice(0,5), payloadLen: msg.payload.length });
         if (tokenProbe !== null && this.allowedSearchTokens.size > 0 && !this.allowedSearchTokens.has(tokenProbe)) {
+          logger.debug("search", "FileSearchResponse dropped — token not allowed", { tokenProbe });
           continue;
         }
-        try { const resp = parseFileSearchResponse(msg.payload); this.routeResult(resp); } catch {}
+        try { const resp = parseFileSearchResponse(msg.payload); logger.info("search", "search result", { token: resp.token, username: resp.username, results: resp.results?.length, freeSlots: resp.freeUploadSlots }); this.routeResult(resp); } catch (e) { logger.warn("search", "parseFileSearchResponse failed", { error: (e as Error).message }); }
       } else if (msg.code === PEER_MESSAGE_CODES.userInfoResponse) {
         const username = state.username ?? "";
         // gating: only accept if we requested it (mirrors nicotine allowed_message_responses)
@@ -1992,17 +2140,22 @@ export class SoulseekSession {
         if (this.shareDB.shouldThrottle(peerName2)) break;
         try { const tok = msg.payload.readUInt32LE(0); const r = new SlskReader(msg.payload); r.uint32(); const dir = r.string(); const perm = this.getSharePermissionLevel(peerName2); const resp = this.shareDB.buildFolderContentsResponse(tok, dir, perm); (peer as Socket).write(resp); } catch { try { const tok = msg.payload.readUInt32LE(0); (peer as Socket).write(emptyFolderResponse(tok)); } catch {} }
       } else if (msg.code === PEER_MESSAGE_CODES.fileSearchRequest) {
-        try {
-          // peer FileSearchRequest 8: [token][query] — respond with FileSearchResponse 9 via same peer, respecting permission
-          const r = new SlskReader(msg.payload);
-          const token = r.uint32(); const query = r.string();
-          if (!this.shareDB.isExcluded(query)) {
+        if (!this._searchEnabled) {
+          logger.debug("server", "peer FileSearchRequest ignored — search_results disabled", { username: state.username });
+        } else {
+          try {
+            // peer FileSearchRequest 8: [token][query] — respond with FileSearchResponse 9 via same peer, respecting permission
+            const r = new SlskReader(msg.payload);
+            const token = r.uint32(); const query = r.string();
+            if (!this.shareDB.isExcluded(query)) {
             const peerName = state.username || "unknown";
             const perm = this.getSharePermissionLevel(peerName);
-            const resp = this.shareDB.buildFileSearchResponse(token, this.username, query, true, 0, 0, perm);
+            // if private_search_results false, downgrade BUDDY/TRUSTED to PUBLIC for non-buddies (getSharePermissionLevel already PUBLIC for strangers)
+            const resp = this.shareDB.buildFileSearchResponse(token, this.username, query, true, 0, 0, perm, this._maxResults);
             if (resp) (peer as Socket).write(resp);
-          }
-        } catch {}
+            }
+          } catch {}
+        }
       } else if (msg.code === PEER_MESSAGE_CODES.transferRequest) {
         try { const tr = parseTransferRequest(msg.payload); this.emitTransfer({ type: "transfer-request", username: state.username, token: tr.token, file: tr.file }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.transferResponse) {

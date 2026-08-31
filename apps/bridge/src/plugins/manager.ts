@@ -490,6 +490,13 @@ export class PluginManager {
     logger.info("bridge", `unloaded plugin ${plugin.humanName}`, { name });
   }
 
+  setGlobalEnable(enable: boolean): void {
+    const data = readPluginsFile();
+    data.enable = enable;
+    writePluginsFile(data);
+    logger.info("bridge", `plugins global ${enable ? "enabled" : "disabled"} via config`, { enable });
+  }
+
   async togglePlugin(name: string): Promise<void> {
     if (this.isPluginLoaded(name)) await this.disablePlugin(name);
     else await this.enablePlugin(name);

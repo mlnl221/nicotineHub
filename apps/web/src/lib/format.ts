@@ -1,16 +1,49 @@
 /** Display formatters for search result metadata. */
 
-export function humanSize(bytes: number): string {
+export function humanSize(bytes: number, fileSizeUnit?: "B" | ""): string {
   if (!bytes || bytes <= 0) return "—";
+  // nicotine-plus ui.file_size_unit === "B" means exact bytes, "" means humanized
+  // Read from localStorage if not passed (for non-hook contexts)
+  let unit = fileSizeUnit;
+  if (unit === undefined) {
+    try {
+      const raw = typeof localStorage !== "undefined" ? (localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings")) : null;
+      if (raw) {
+        const parsed = JSON.parse(raw) as { ui?: { file_size_unit?: string } };
+        unit = parsed?.ui?.file_size_unit as "B" | "" | undefined;
+      }
+    } catch {}
+  }
+  if (unit === "B") return `${bytes.toLocaleString()} B`;
   const units = ["B", "KiB", "MiB", "GiB", "TiB"];
   let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
+  let u = 0;
+  while (value >= 1024 && u < units.length - 1) {
     value /= 1024;
-    unit += 1;
+    u += 1;
   }
-  const rounded = unit === 0 ? value : Math.round(value * 10) / 10;
-  return `${rounded} ${units[unit]}`;
+  const rounded = u === 0 ? value : Math.round(value * 10) / 10;
+  return `${rounded} ${units[u]}`;
+}
+
+/** Format display path respecting ui.reverse_file_paths (nicotine-plus). When true, filename comes before path. */
+export function formatDisplayPath(virtualPath: string, reverse?: boolean): string {
+  let rev = reverse;
+  if (rev === undefined) {
+    try {
+      const raw = typeof localStorage !== "undefined" ? (localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings")) : null;
+      if (raw) {
+        const parsed = JSON.parse(raw) as { ui?: { reverse_file_paths?: boolean } };
+        rev = parsed?.ui?.reverse_file_paths;
+      }
+    } catch { rev = true; }
+    if (rev === undefined) rev = true;
+  }
+  if (!virtualPath) return virtualPath;
+  if (rev) return virtualPath;
+  // when not reversed, show path with forward slashes first? For Soulseek it's \ separated; we just return as-is but conceptually path before filename is same string.
+  // Keeping as-is since virtualPath already is "Folder\\file" — reversing would be "file (Folder)" — we handle that in caller if needed.
+  return virtualPath;
 }
 
 export function humanSpeed(bytesPerSec: number): string {

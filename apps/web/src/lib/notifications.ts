@@ -67,8 +67,15 @@ export function useNotifications() {
         }
       }
       if (m.type === "transfer:finished") {
-        const fin = m as unknown as { fileName: string; size: number };
-        maybeNotify("Download finished", fin.fileName, settings.notifications.notification_popup_file);
+        const fin = m as unknown as { fileName: string; size: number; downloadUrl?: string };
+        // Folder vs file: heuristic — if filename contains path separator and no extension? Treat same for now; gate both toggles.
+        const isFolder = fin.fileName.includes("\\") && !fin.fileName.includes(".");
+        if (isFolder) maybeNotify("Folder download finished", fin.fileName, settings.notifications.notification_popup_folder);
+        else maybeNotify("Download finished", fin.fileName, settings.notifications.notification_popup_file);
+      }
+      if (m.type === "transfer:queue") {
+        const q = m as unknown as { id: string; place: number };
+        maybeNotify("Upload queued", `#${q.place} in queue`, settings.notifications.notification_popup_queued_upload);
       }
       if (m.type === "transfer:update") {
         // Check queued upload notification batched — simple

@@ -4,7 +4,7 @@
   "private": false,
   "license": "GPL-3.0-or-later",
   "scripts": {
-    "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --turbopack -p 3000",
+    "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --turbopack",
     "build": "next build",
     "start": "NEXT_TELEMETRY_DISABLED=1 node .next/standalone/apps/web/server.js",
     "typecheck": "tsc --noEmit"
