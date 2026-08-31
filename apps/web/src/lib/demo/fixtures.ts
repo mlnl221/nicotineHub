@@ -258,6 +258,8 @@ export function mockBuddies(): import("@/lib/buddies").Buddy[] {
   ];
 }
 
+export const DEMO_SPECTRUM_TRANSFER_ID = "KernkraftDemo::Music\\12 Kernkraft 400 (DJ Gius Video Cut).flac";
+
 export function mockDemoTransfers(): import("@/lib/protocol").Transfer[] {
   // One downloading, one uploading — both Transferring with animated progress
   const dlSize = 85_000_000; // ~85 MB
@@ -294,6 +296,21 @@ export function mockDemoTransfers(): import("@/lib/protocol").Transfer[] {
       status: "Transferring",
       queuePosition: null,
       isUpload: true,
+    },
+    {
+      // VERCEL DEMO ONLY — fake completed FLAC for spectrum demo (no real .flac in repo, only pngs in public/demo-spectra)
+      id: DEMO_SPECTRUM_TRANSFER_ID,
+      username: "KernkraftDemo",
+      virtualPath: "Music\\12 Kernkraft 400 (DJ Gius Video Cut).flac",
+      fileName: "12 Kernkraft 400 (DJ Gius Video Cut).flac",
+      size: 19630960,
+      current: 19630960,
+      speed: 0,
+      avgSpeed: 0,
+      timeLeft: null,
+      status: "Finished",
+      queuePosition: null,
+      isUpload: false,
     },
   ];
 }
