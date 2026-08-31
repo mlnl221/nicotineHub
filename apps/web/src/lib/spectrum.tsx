@@ -3,6 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSession } from "@/lib/session";
 import type { SpectrumReadyMessage, SpectrumStatusMessage, SpectrumErrorMessage } from "@/lib/protocol";
+import { isDemo } from "@/lib/demo";
+import { DEMO_SPECTRUM_TRANSFER_ID } from "@/lib/demo/fixtures";
 
 type SpectrumEntry = {
   id: string;
@@ -53,9 +55,36 @@ function buildUrl(path: string, token?: string): string {
   return `${base}${path}${t}`;
 }
 
+const DEMO_FULL_URL = "/demo-spectra/kernkraft400-full.png";
+const DEMO_ZOOM_URL = "/demo-spectra/kernkraft400-zoom.png";
+const DEMO_ETAG = '"demo-kernkraft400"';
+
+function getDemoEntry(): SpectrumEntry {
+  return {
+    id: DEMO_SPECTRUM_TRANSFER_ID,
+    token: 99999,
+    etag: DEMO_ETAG,
+    hash: "demo",
+    fullUrl: DEMO_FULL_URL,
+    zoomUrl: DEMO_ZOOM_URL,
+    status: "done",
+    fromCache: true,
+    // For demo we can use direct URLs as blob URLs too (no fetch needed)
+    fullBlobUrl: DEMO_FULL_URL,
+    zoomBlobUrl: DEMO_ZOOM_URL,
+  };
+}
+
 export function SpectrumProvider({ children }: { children: ReactNode }) {
   const { send, subscribe } = useSession();
-  const [entries, setEntries] = useState<Map<string, SpectrumEntry>>(new Map());
+  const [entries, setEntries] = useState<Map<string, SpectrumEntry>>(() => {
+    if (isDemo) {
+      const m = new Map<string, SpectrumEntry>();
+      m.set(DEMO_SPECTRUM_TRANSFER_ID, getDemoEntry());
+      return m;
+    }
+    return new Map();
+  });
   const blobUrls = useRef<Map<string, { full?: string; zoom?: string }>>(new Map());
 
   const fetchAndCache = useCallback(async (id: string, token: number, etag: string, urls: { full: string; zoom: string }) => {
@@ -145,6 +174,16 @@ export function SpectrumProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const requestSpectrum = useCallback((id: string) => {
+    if (isDemo && id === DEMO_SPECTRUM_TRANSFER_ID) {
+      // Demo: already have spectrum, just ensure it's done
+      setEntries((prev) => {
+        if (prev.has(id) && prev.get(id)?.status === "done") return prev;
+        const next = new Map(prev);
+        next.set(id, getDemoEntry());
+        return next;
+      });
+      return;
+    }
     setEntries((prev) => {
       const next = new Map(prev);
       const cur = next.get(id) ?? { id, status: "idle" as const };
