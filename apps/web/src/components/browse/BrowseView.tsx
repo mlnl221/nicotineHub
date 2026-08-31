@@ -223,7 +223,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden min-h-0">
+      <div className="flex flex-1 overflow-hidden min-h-0" style={isDemo ? ({ marginTop: "var(--demo-banner-h)" } as React.CSSProperties) : undefined}>
         {/* Folder list */}
         <aside className="hidden w-80 flex-shrink-0 flex-col border-r border-surface-container-highest/30 bg-surface-container-lowest md:flex min-h-0">
           <div className="border-b border-surface-container-highest/20 p-3">

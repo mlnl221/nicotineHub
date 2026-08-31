@@ -39,9 +39,9 @@ export default function FilesPage() {
               <div className="flex gap-2">
                 <span className="material-symbols-outlined text-amber-700 dark:text-amber-300">info</span>
                 <div>
-                  <div className="font-label text-sm font-semibold text-amber-900 dark:text-amber-200">Demo mode</div>
+                  <div className="font-label text-sm font-semibold text-amber-900 dark:text-amber-200">Demo preview</div>
                   <div className="mt-1 font-body text-xs leading-relaxed text-amber-800 dark:text-amber-200/80">
-                    This Explorer talks to the bridge&apos;s <span className="font-mono">/api/files</span> (reads <span className="font-mono">/data</span>). On Vercel there is no bridge volume, so listing will show &quot;Cannot reach bridge&quot;. On Docker it lists your mounted <span className="font-mono">/data</span> (or bind mount like <span className="font-mono">/home/user/m/data:/data</span>). No host path is exposed — container only sees <span className="font-mono">/data</span>.
+                    Showing fake <span className="font-mono">/data</span> on Vercel (4 folders + 2 files at root, nested Music/Jazz/Blue Note etc). Click folders to navigate — all mocked, no bridge. On Docker you see your real mounted <span className="font-mono">/data</span> (e.g. <span className="font-mono">/home/user/m/data:/data</span>).
                   </div>
                 </div>
               </div>

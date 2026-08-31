@@ -12,6 +12,7 @@ import { ContextMenu } from "@/components/ui/ContextMenu";
 import { privateChatMenu, userMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
 import { highlightKeywords, usernameHotspotClass } from "@/lib/chatFormat";
+import { isDemo } from "@/lib/demo";
 
 function PrivateChatInner() {
   const { state } = useSession();
@@ -97,7 +98,7 @@ function PrivateChatInner() {
           </div>
         </header>
 
-        <div className="flex flex-1 overflow-hidden min-h-0">
+        <div className="flex flex-1 overflow-hidden min-h-0" style={isDemo ? ({ marginTop: "var(--demo-banner-h)" } as React.CSSProperties) : undefined}>
           {/* Left: Active Conversations */}
           <aside className="hidden w-80 flex-col border-r border-outline-variant/15 bg-surface md:flex">
             <div className="border-b border-outline-variant/15 p-3 space-y-3">
