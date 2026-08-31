@@ -143,7 +143,7 @@ export function NetworkSection() {
     const p = Math.max(1024, Math.min(65535, Number(pendingPort) || DEFAULT_LISTEN_PORT));
     setPendingPort(p);
     setSaveError(null);
-    // Persist locally (so reload keeps 49127) – triggers ConfigBridgeSync but we also send explicitly for instant feedback
+    // Persist locally (so reload keeps 60754) – triggers ConfigBridgeSync but we also send explicitly for instant feedback
     setOption("server", "portrange", [p, p] as unknown as never);
     if (!isConnected) {
       setSaveStatus("success");

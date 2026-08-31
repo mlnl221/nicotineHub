@@ -10,6 +10,7 @@ import { test, expect } from "@playwright/test";
 
 async function mockBridge(page, opts: { withTransfers?: boolean } = {}) {
   await page.addInitScript(({ withTransfers }) => {
+    const OriginalWS = window.WebSocket;
     const transfers = withTransfers
       ? [
           {
@@ -99,7 +100,12 @@ async function mockBridge(page, opts: { withTransfers?: boolean } = {}) {
         if (event.type === "close") this.onclose?.(event as CloseEvent);
         return true;
       }
-      constructor(url: string) {
+      constructor(url: string, protocols?: string | string[]) {
+        // Don't mock HMR websocket — let Next.js HMR use real WebSocket
+        if (url.includes("webpack-hmr") || url.includes("_next")) {
+          const real = new (OriginalWS as any)(url, protocols as any);
+          return real as any;
+        }
         this.url = url;
         (window as any).__mockWS = this;
         // open immediately so SessionProvider's ws.onopen fires before React mount completes
@@ -110,33 +116,36 @@ async function mockBridge(page, opts: { withTransfers?: boolean } = {}) {
           const w = window as any;
           const isLoggedIn = w.__mockLoggedIn || sessionStorage.getItem("__mockLoggedIn") === "1";
           if (isLoggedIn) {
+            const sendMockTransfers = () => {
+              let transfersToSend = w.__mockTransfers || [];
+              try { const s = sessionStorage.getItem("__mockTransfers"); if (s) transfersToSend = JSON.parse(s); } catch {}
+              for (const t of transfersToSend) {
+                this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "transfer:update", transfer: t }) }));
+              }
+              this.dispatchEvent(
+                new MessageEvent("message", {
+                  data: JSON.stringify({
+                    type: "transfer:stats",
+                    downloadSpeed: 20700000,
+                    uploadSpeed: 4100000,
+                    activeDownloads: 2,
+                    activeUploads: 1,
+                    queuedDownloads: 0,
+                    queuedUploads: 1,
+                  }),
+                }),
+              );
+            };
             setTimeout(() => {
               this.dispatchEvent(
                 new MessageEvent("message", {
                   data: JSON.stringify({ type: "login:result", ok: true, data: { success: true, banner: "hi", ipAddress: "1.2.3.4", checksum: "x", isSupporter: false } }),
                 }),
               );
-              setTimeout(() => {
-                let transfers = w.__mockTransfers || [];
-                try { const s = sessionStorage.getItem("__mockTransfers"); if (s) transfers = JSON.parse(s); } catch {}
-                for (const t of transfers) {
-                  this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "transfer:update", transfer: t }) }));
-                }
-                this.dispatchEvent(
-                  new MessageEvent("message", {
-                    data: JSON.stringify({
-                      type: "transfer:stats",
-                      downloadSpeed: 20700000,
-                      uploadSpeed: 4100000,
-                      activeDownloads: 2,
-                      activeUploads: 1,
-                      queuedDownloads: 0,
-                      queuedUploads: 1,
-                    }),
-                  }),
-                );
-              }, 30);
-            }, 10);
+              // Delay longer for dev HMR + React mount (was 30ms, now 150ms + retry at 600ms)
+              setTimeout(sendMockTransfers, 150);
+              setTimeout(sendMockTransfers, 600);
+            }, 50);
           }
         });
       }
@@ -150,15 +159,15 @@ async function mockBridge(page, opts: { withTransfers?: boolean } = {}) {
         if (parsed.type === "login") {
           w2.__mockLoggedIn = true;
           try { sessionStorage.setItem("__mockLoggedIn", "1"); } catch {}
-          // respond to login immediately
+          // respond to login — delay longer for dev mount
           setTimeout(() => {
             this.dispatchEvent(
               new MessageEvent("message", {
                 data: JSON.stringify({ type: "login:result", ok: true, data: { success: true, banner: "hi", ipAddress: "1.2.3.4", checksum: "x", isSupporter: false } }),
               }),
             );
-            // push transfers + stats right after login
-            setTimeout(() => {
+            // push transfers + stats right after login (150ms + retry 600ms for HMR)
+            const sendInitial = () => {
               for (const t of transfers) {
                 this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "transfer:update", transfer: t }) }));
               }
@@ -175,8 +184,10 @@ async function mockBridge(page, opts: { withTransfers?: boolean } = {}) {
                   }),
                 }),
               );
-            }, 30);
-          }, 10);
+            };
+            setTimeout(sendInitial, 150);
+            setTimeout(sendInitial, 600);
+          }, 50);
           return;
         }
         if (parsed.type === "download:control") {
@@ -231,8 +242,8 @@ async function mockBridge(page, opts: { withTransfers?: boolean } = {}) {
 
 async function login(page) {
   await page.goto("/");
-  await page.getByLabel(/Username/i).fill("tester");
-  await page.getByPlaceholder("••••••••").fill("secret123");
+  await page.getByRole("textbox", { name: "Username" }).fill("tester");
+  await page.getByRole("textbox", { name: "Password" }).fill("secret123");
   await page.getByRole("button", { name: /Log in/i }).click();
   // after mock login, we land on /search via router.replace
   await expect(page).toHaveURL(/\/search/);
@@ -251,7 +262,7 @@ test.describe("Transfers pages", () => {
 
     // header — Downloads page shows "Downloads" (separate from Uploads)
     await expect(page.getByRole("heading", { name: "Downloads" }).first()).toBeVisible();
-    await expect(page.getByText(/active/i).first()).toBeVisible();
+    await expect(page.getByText(/Monitoring \d+ connections/)).toBeVisible();
     await expect(page.getByTestId("download-speed")).toBeVisible();
     await expect(page.getByTestId("upload-speed")).toBeVisible();
 

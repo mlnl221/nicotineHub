@@ -389,7 +389,7 @@ export function mockDiagnosticsHealth(): import("@/lib/protocol").DiagnosticsHea
     ts: new Date().toISOString(),
     uptime: 3600 * 3 + 42, // 3h +42s
     port: 8787,
-    listenPort: 62904,
+    listenPort: 60754,
     dataDir: "/data (demo — ephemeral)",
     tokenAuth: false,
     version: process.env.NEXT_PUBLIC_BUILD_TAG || process.env.NEXT_PUBLIC_APP_VERSION || "0.1.0",

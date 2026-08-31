@@ -10,7 +10,7 @@ docker compose up --build  # http://localhost:3000 + ws://localhost:8787/ws
 
 `compose.yaml` builds both services from the monorepo root:
 
-- `bridge` — `apps/bridge/Dockerfile` → `PORT=8787`, `LISTEN_PORT=49127`, `DATA_DIR=/data`, volume `bridge-data:/data`, **`network_mode: host`** (default)
+- `bridge` — `apps/bridge/Dockerfile` → `PORT=8787`, `LISTEN_PORT=60754`, `DATA_DIR=/data`, volume `bridge-data:/data`, **`network_mode: host`** (default)
 - `web` — `apps/web/Dockerfile` → `PORT=3000`
 
 **Network mode — host (default) vs bridge vs Gluetun**
@@ -27,10 +27,10 @@ cp compose.gluetun.yaml compose.override.yaml && docker compose up -d
 
 No second Docker build is needed — same image, only compose network differs. See [`compose.gluetun.yaml`](../compose.gluetun.yaml) for a full `gluetun` service template. Details in [Gluetun](#gluetun) below.
 
-Port-forwarding is parameterized: `${LISTEN_PORT:-49127}:${LISTEN_PORT:-49127}` (TCP+UDP) when in bridge mode; in host mode the port is host-direct. To use a different peer port, set `LISTEN_PORT` (see `docs/architecture.md#env-full` for `DATA_DIR/listen_port` persistence):
+Port-forwarding is parameterized: `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` (TCP+UDP) when in bridge mode; in host mode the port is host-direct. To use a different peer port, set `LISTEN_PORT` (see `docs/architecture.md#env-full` for `DATA_DIR/listen_port` persistence):
 
 ```bash
-LISTEN_PORT=62905 docker compose up -d
+LISTEN_PORT=60755 docker compose up -d
 ```
 
 ## GHCR — prebuilt images (no build required)
@@ -97,7 +97,7 @@ gh workflow run promote.yml                      # or wait for Monday schedule
 
 > Tags `v*.*.*` should be cut from `main` after promotion (e.g. `git tag v0.2.0 && git push origin v0.2.0`).
 
-See `AGENTS.md#git-worktrees` for per-worktree port isolation (`3000/8787/62904` → `3001/8788/62905` …) and `compose.override.yaml` usage for local port overrides.
+See `AGENTS.md#git-worktrees` for per-worktree port isolation (`3000/8787/60754` → `3001/8788/60755` …) and `compose.override.yaml` usage for local port overrides.
 
 ## Gluetun
 

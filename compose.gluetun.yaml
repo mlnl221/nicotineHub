@@ -27,8 +27,8 @@ services:
     ports:
       - "8787:8787"       # bridge WS
       - "3000:3000"       # web (optional if web also via gluetun; else expose web directly)
-      - "${LISTEN_PORT:-49127}:${LISTEN_PORT:-49127}"       # Soulseek TCP
-      - "${LISTEN_PORT:-49127}:${LISTEN_PORT:-49127}/udp"   # Soulseek UDP
+      - "${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}"       # Soulseek TCP
+      - "${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}/udp"   # Soulseek UDP
     environment:
       # === VPN SETUP — pick your provider, see https://github.com/qdm12/gluetun/wiki ===
       # VPN_SERVICE_PROVIDER: mullvad
@@ -39,7 +39,7 @@ services:
       # === PORT FORWARDING — if your VPN forwards a static port (Mullvad/Proton), set it here ===
       # VPN_PORT_FORWARDING: "on"
       # VPN_PORT_FORWARDING_PROVIDER: mullvad  # or protonvpn
-      # FIREWALL_VPN_INPUT_PORTS: "${LISTEN_PORT:-49127}"  # allow forwarded port through gluetun firewall
+      # FIREWALL_VPN_INPUT_PORTS: "${LISTEN_PORT:-60754}"  # allow forwarded port through gluetun firewall
       TZ: "${TZ:-UTC}"
     volumes:
       - gluetun-data:/gluetun
@@ -53,7 +53,7 @@ services:
     # When using service:gluetun, `ports` are defined on gluetun, not here.
     # Do NOT set `network_mode: host` here — it would conflict.
     environment:
-      LISTEN_PORT: "${LISTEN_PORT:-49127}"
+      LISTEN_PORT: "${LISTEN_PORT:-60754}"
       PORT: "8787"
     # healthcheck still hits localhost:8787 via gluetun network namespace
     healthcheck:
