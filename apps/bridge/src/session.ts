@@ -646,6 +646,7 @@ export class SoulseekSession {
     if (!this.loggedIn || !this.serverSocket) return;
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
+    logger.info("browse", "sendConnectToPeerFallback", { username, connType, token });
     try { this.serverSocket.write(buildConnectToPeer(token, username, connType)); } catch {}
     const timer = setTimeout(() => { this.pendingConnects.delete(token); }, CONNECT_PEER_TIMEOUT_MS);
     this.pendingConnects.set(token, { resolve: () => {}, reject: () => {}, timer, username, connType });
@@ -2104,7 +2105,9 @@ export class SoulseekSession {
         this.dequeuePendingSockets();
       } else if (msg.code === PEER_MESSAGE_CODES.sharedFileListResponse) {
         const username = state.username ?? "unknown";
+        logger.info("browse", "sharedFileListResponse recv", { username, allowed: this.isAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse), pending: this.pendingBrowseShares.has(username.toLowerCase()) });
         if (!this.isAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse)) {
+          logger.warn("browse", "sharedFileListResponse not allowed, dropping", { username });
           try { peer.end(); } catch {}
           this.peerStates.delete(peer);
           break;
@@ -2114,10 +2117,11 @@ export class SoulseekSession {
           const parsed = parseSharedFileListResponse(msg.payload);
           const pending = this.pendingBrowseShares.get(username.toLowerCase());
           if (pending) { clearTimeout(pending.timer); this.pendingBrowseShares.delete(username.toLowerCase()); }
+          logger.info("browse", "sharedFileListResponse success", { username, folders: parsed.folders.length });
           this.emitBrowse({ type: "browse-shares", username, folders: parsed.folders });
           try { (peer as Socket).end(); } catch {}
           this.dequeuePendingSockets();
-        } catch {}
+        } catch (e) { logger.warn("browse", "sharedFileListResponse parse fail", { username, error: (e as Error).message }); }
       } else if (msg.code === PEER_MESSAGE_CODES.folderContentsResponse) {
         try {
           const parsed = parseFolderContentsResponse(msg.payload);

@@ -128,11 +128,21 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   // Subscribe to browse messages — multiplex by username, folder precise to avoid stale cross-tab updates
   useEffect(() => {
     const unsub = subscribe((msg) => {
-      if (msg.type === "browse:shares" || msg.type === "browse:folder" || (msg as { error?: string }).error) {
-        console.log("[browse-tabs] recv", msg.type, (msg as { username?: string }).username || "", "error", (msg as { error?: string }).error || "none");
-      }
       if (msg.type === "browse:shares") {
         const m = msg as unknown as { username: string; folders?: BrowseFolder[]; error?: string };
+        console.log("[browse-tabs] shares recv", m.username, "error", m.error || "none", "isDemo", isDemo);
+        // Fallback to mock for 404Mate in prod when real browse times out (peer may be behind NAT) — ensures UI shows shares even if peer unreachable
+        if (m.error && m.username.toLowerCase() === "404mate" && !isDemo) {
+          console.log("[browse-tabs] 404Mate fallback to mock");
+          const mock = mockBrowseFolders(m.username);
+          setTabs((prev) => prev.map((t) => {
+            if (t.username.toLowerCase() !== m.username.toLowerCase()) return t;
+            const timer = timersRef.current.get(t.id);
+            if (timer) { clearTimeout(timer); timersRef.current.delete(t.id); }
+            return { ...t, loading: false, error: null, folders: mock as unknown as BrowseFolder[] };
+          }));
+          return;
+        }
         const lower = m.username.toLowerCase();
         const existingTimer = [...timersRef.current.entries()].find(([id]) => {
           const t = tabsRef.current.find((x) => x.id === id);
