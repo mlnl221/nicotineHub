@@ -30,13 +30,14 @@ Reference: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plu
 - Filters (live, nicotine parity, `docs/settings-mapping.md` defilter): `filterin/filterout` regex on path+username, `filtersize` (`< <= == != >= >`, bare `= → ==`, `k/m/g` binary, `MiB`/`B` decimal, `>10.5m <1g`), `filterbr` kbps, `filterlength` sec or `HH:MM:SS` (`>6:00 <12:00`), `filtertype` `flac wav` / `!mp3` / generic `audio/image/video/document/text/archive/executable`, `filtercc` `US !DE` / `,`/`;`/`-` split, `filterslot` (free slot only), `filterpublic` (hide private). Live on keystroke, clear/restore toggle, history 50.
 - Connect-back: direct `PeerInit 1` (`string user`+`string type P`+`uint32 0`, framing `[len][u8 code][payload]`) vs indirect `ConnectToPeer 18` relay + `PierceFireWall 0` (`uint32 token`). `P`/`S` framing `[len][uint32 code][payload]`, `D`/`PeerInit` `[len][uint8 code][payload]`.
 
-## Transfers (F)
+## Transfers (F) + Spectrum
 
 - `ConnectToPeer 18` / `CantConnectToPeer 1001` — direct + indirect `PierceFireWall 0` race 45s (30s indirect + 15s grace, `GetPeerAddress 3` cache 30m single-flight)
 - `QueueUpload 43` → `TransferRequest 40` (`direction 1` upload) → `FileTransferInit` (4B token) + `FileOffset` (8B LE) → raw bytes
 - `PlaceInQueueRequest 51` → `PlaceInQueueResponse 44` (real place via `TransferManager.getQueuePlace`), `UploadDenied 50`/`UploadFailed 46`
 - Incomplete: `DATA_DIR/incomplete/INCOMPLETE<md5(username+path)>` + resume offset, `SendUploadSpeed 121` on finish, limiter `UPLOAD_LIMIT`/`DOWNLOAD_LIMIT` (KB/s, adaptive `max(4096,sent*1.25/dt)` + pause/resume throttle, env aliases `UPLOADLIMIT`/`DOWNLOADLIMIT`)
 - Persistence: `DATA_DIR/downloads.json` (atomic tmp→rename) + `transfers.json` compat, `Finished` served via `GET /files/:token` (`Content-Disposition`)
+- **Spectrum** (port of [`smoked-salmon`](https://github.com/smokin-salmon/smoked-salmon) `src/salmon/uploader/spectrals.py`, Apache-2.0 — `sox` + `oxipng`, no `spek`): on `spectrum:request {id}` for a Finished audio transfer the bridge resolves `DATA_DIR/downloads/<file>` via `TransferManager.getFilePathForToken`, stats `mtime`/`size`, probes `duration` via `music-metadata`, then `sox --multi-threaded <in> --buffer 128000 -n remix 1 spectrogram -x 2000 -y 513 -z 120 -w Kaiser -o Full.png remix 1 spectrogram -x 500 -y 1025 -z 120 -w Kaiser -S <zoomStart> -d 0:02 -o Zoom.png` where `zoomStart = duration>5 ? floor(duration/2) : 0`. Both PNGs are `oxipng -o 2 --strip all` compressed (best-effort) and stored as `/tmp/hub-spectrum/<token>-<hash>-Full.png` + `-Zoom.png` (`hash = sha256(token:mtime:size)[0..16]`, `ETag = "hash"`). `/tmp` is ephemeral — wiped on `docker restart`. Bridge caps at 2 concurrent `sox` (queue), 90 s timeout, LRU prune >100 files. Served via `GET /spectrum/:token/full|zoom` (image/png, `private, max-age=3600`, `ETag`, `If-None-Match` → 304) and `GET /api/spectrum/:token` (JSON). See `docs/spectrum.md`.
 
 ## Browse / Shares
 
@@ -59,6 +60,7 @@ search:stop / search:page / browse:page (5-min `searchCache`/`browseCache`, `bri
 browse {type:"browse", action:"shares"|"folder", username,folder?,token?} → {type:"browse:shares"|"browse:folder"}
 chat:room {action:"join"|"leave"|"say"|"ticker"|"setTicker"|...} + chat:private {action:"send"|"ack"} → {type:"chat:event"|"room:event"}
 download:request {username,virtualPath,size,fileName?} + download:control/upload:control {id,action} → {type:"transfer:update/stats/queue/finished"}
+spectrum:request {id} + spectrum:status {id} → {type:"spectrum:status"/"spectrum:ready" {id, token, etag, hash, urls:{full,zoom}}} + GET /spectrum/:token/full|zoom (image/png, ETag, /tmp ephemeral) + /api/spectrum/:token (JSON)
 userinfo {action:"watch"|"unwatch"|"get"|"peerAddress"|"recommendations"|...} → {type:"userinfo:event"}
 plugin:list / toggle / reload / uninstall / install{fileName,data} / installUrl{url} + plugin:settings / resetSettings → {type:"plugin:list"|"plugin:installed"|"plugin:toggled"|...} (bridge `PluginManager`)
  config:update {section,key,value} / wishlist:update {terms} + statistics:request / reset + ping→pong
@@ -75,8 +77,9 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 - `session.ts` — server socket + `Bun.listen` (`P` vs `F` demux via `pendingFileTokens` + heuristic), peer states (`buf/initDone/isFileConn/fileToken`), idle sweep (2s init, 10s ghost, 60s max), `GetPeerAddress` cache 30m single-flight, search/browses, distributed leaf bootstrap (`HaveNoParent 71`, `PossibleParents 102` 10 dials, `BranchLevel/Root`), `PortMapper` (`portmapper.ts` NAT-PMP → UPnP) on login/disconnect/port change
 - `shares.ts` — `ShareDB` (`DATA_DIR/shares.json`, in-memory folders, search, `buildSharedFileListResponse 5`/`FolderContents 36/37` zlib lvl4, `shouldThrottle` 400 ms)
 - `transfers.ts` — `TransferManager` (Map `id→Transfer`, queued/active, 2s `transfer:stats`, 300s `PlaceInQueue` poll, `INCOMPLETE<md5>` + atomic `downloads.json` + `GET /files/:token`)
+- `spectrum.ts` — `SpectrumManager` (sox spectrogram `2000×513` Full + `500×1025` Zoom, Kaiser `-z 120`, `remix 1`, `oxipng -o 2`, ported from `smoked-salmon` `uploader/spectrals.py`, `/tmp/hub-spectrum` ephemeral, 2-concurrent queue, `sha256(token:mtime:size)` etag)
 - `portmapper.ts` — `NATPMP` (RFC6886 UDP 5351 → gateway from `/proc/net/route`+`netstat`/`ip route` fallback, lease 43200 s / renewal 7200 s, 2 attempts 250 ms doubling, TCP only) + `UPnP` (SSDP multicast 239.255.255.250:1900 5 targets, device desc fetch with controlURL validation vs python ElementTree, SOAP AddPortMapping/DeletePortMapping with 725 permanent lease fallback) + `PortMapper` orchestrator (NAT-PMP fallback UPnP, `setPort`/`add`/`remove` like `pynicotine/portmapper.py:PortMapper`, `status`{active,port,ip,error,lastSuccessAt} for diagnostics)
-- `server.ts` — `Bun.serve` (`/ws` zod, `/health`→`listenPort`, `/logs`, `/diagnostics`, `/files/:token` sanitized `Content-Disposition`, `/plugins` + `/plugins/install`) + token via `?token`/`Authorization`/`Sec-WebSocket-Protocol` + CORS/CSP (`getCorsHeaders`, `SECURITY_HEADERS`) + 1 MB WS guard + 5-min `searchCache`/`browseCache`
+- `server.ts` — `Bun.serve` (`/ws` zod, `/health`→`listenPort`, `/logs`, `/diagnostics`, `/files/:token` sanitized `Content-Disposition`, `/spectrum/:token/full|zoom` + `/api/spectrum/:token`, `/plugins` + `/plugins/install`) + token via `?token`/`Authorization`/`Sec-WebSocket-Protocol` + CORS/CSP (`getCorsHeaders`, `SECURITY_HEADERS`) + 1 MB WS guard + 5-min `searchCache`/`browseCache`
 - `plugins/manager.ts` (+ `builtin/core_commands`, `builtin/spamfilter`) — `PluginManager` (`plugins.json` `installed/enabled`, `PLUGININFO/metasettings`, `returncode.zap/break/pass`, 32 `core_commands` cmds) — WS `plugin:list/toggle/reload/uninstall/install{fileName,data}` + `installUrl` (GitHub-only, 20 MB zip / 1 GiB unzip + path-traversal guard)
 
 ## Env (full)
@@ -100,3 +103,4 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 - `soulseek.test.ts` — login 72B hex, 54/56/110 empty, 1001, 121, caps, UserSearch 42 / RoomSearch 120 / Wishlist 103 framing, 51 vs 44 distinction
 - `portmapper.test.ts` — NATPMP/UPnP constants, missing port/ip, controlURL relative/absolute/base validation, gateway detection, PortMapper setPort/hasPort/status/error/renewal timer
 - `transfers.test.ts` — queue/place, `Getting status` token register, `File not shared`, streaming (download + resume + upload shared)
+- `spectrum.test.ts` — `calculateZoomStartpoint`, `getSpectrumHash`, `getSpectrumPaths` (`/tmp/hub-spectrum`), + `sox` integration (1 s sine → Full+Zoom) when `sox` present
