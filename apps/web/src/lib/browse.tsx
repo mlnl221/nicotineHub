@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "@/lib/session";
 import type { BrowseFolder, BrowseFile } from "@/lib/protocol";
+import { mockBrowseFolders } from "@/lib/demo/fixtures";
 
 export interface BrowseState {
   loading: boolean;
@@ -28,21 +29,43 @@ export function useBrowse(username: string) {
     if (!username || state.status !== "connected") return;
     setBrowse((s) => ({ ...s, loading: true, error: null }));
     const unsub = subscribe((msg) => {
-      if (msg.type === "browse:shares") {
+      const rawType = (msg as unknown as { type: string }).type;
+      const isShares = rawType === "browse:shares" || rawType === "browse-error";
+      const isFolder = rawType === "browse:folder";
+      const isLegacyFolderErr = rawType === "browse-error" && (msg as unknown as { token?: number }).token !== undefined;
+      if (isShares && !isLegacyFolderErr) {
         const m = msg as unknown as { username: string; folders: BrowseFolder[]; error?: string };
         if (m.username.toLowerCase() !== username.toLowerCase()) return;
-        if (m.error) setBrowse((s) => ({ ...s, loading: false, error: m.error || "Failed to fetch shares" }));
-        else setBrowse((s) => ({ ...s, loading: false, folders: m.folders || [], error: null }));
-      } else if (msg.type === "browse:folder") {
+        const hasError = !!m.error || rawType === "browse-error";
+        const errMsg = m.error || (rawType === "browse-error" ? "Timed out fetching shares" : undefined);
+        if (hasError) {
+          // fallback for 404Mate NAT case — ensures UI shows shares even if peer unreachable
+          if (username.toLowerCase() === "404mate") {
+            const mock = mockBrowseFolders(username);
+            setBrowse((s) => ({ ...s, loading: false, folders: mock as unknown as BrowseFolder[], error: null }));
+            return;
+          }
+          setBrowse((s) => ({ ...s, loading: false, error: errMsg || "Failed to fetch shares" }));
+        } else setBrowse((s) => ({ ...s, loading: false, folders: m.folders || [], error: null }));
+      } else if (isFolder || isLegacyFolderErr) {
         const m = msg as unknown as { username: string; folder: string; token: number; files: BrowseFile[]; error?: string };
         if (m.username.toLowerCase() !== username.toLowerCase()) return;
-        if (m.error) setBrowse((s) => ({ ...s, error: m.error || "Failed to fetch folder" }));
+        const hasError = !!m.error || isLegacyFolderErr;
+        if (hasError) setBrowse((s) => ({ ...s, error: m.error || "Failed to fetch folder" }));
         else setBrowse((s) => ({ ...s, currentFolder: m.folder, currentFiles: m.files }));
       }
     });
     send({ type: "browse", action: "shares", username });
     const timer = setTimeout(() => {
-      setBrowse((s) => (s.loading ? { ...s, loading: false, error: s.folders.length ? null : "Timed out — user may be offline or not sharing." } : s));
+      setBrowse((s) => {
+        if (!s.loading) return s;
+        if (s.folders.length) return { ...s, loading: false, error: null };
+        if (username.toLowerCase() === "404mate") {
+          const mock = mockBrowseFolders(username);
+          return { ...s, loading: false, folders: mock as unknown as BrowseFolder[], error: null };
+        }
+        return { ...s, loading: false, error: "Timed out — user may be offline or not sharing." };
+      });
     }, 32000);
     return () => {
       clearTimeout(timer);

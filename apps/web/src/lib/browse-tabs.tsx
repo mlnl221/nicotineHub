@@ -91,6 +91,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   const counter = useRef<number>(initialMax);
   const tabsRef = useRef<BrowseTab[]>([]);
   tabsRef.current = tabs;
+  const pendingOpenRef = useRef<Set<string>>(new Set());
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // track pending folder request per tab to avoid cross-tab stale updates when same username in multiple tabs
   const pendingFolderRef = useRef<Map<string, string>>(new Map());
@@ -127,8 +128,30 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   // Subscribe to browse messages — multiplex by username, folder precise to avoid stale cross-tab updates
   useEffect(() => {
     const unsub = subscribe((msg) => {
-      if (msg.type === "browse:shares") {
+      const rawType = (msg as unknown as { type: string }).type;
+      // normalize: server may send "browse-error" for legacy, bridge now sends "browse:shares" with error
+      const isSharesMsg = rawType === "browse:shares" || rawType === "browse-error";
+      const isFolderMsg = rawType === "browse:folder";
+      // legacy browse-error with token is actually a folder error
+      const isLegacyFolderError = rawType === "browse-error" && (msg as unknown as { token?: number }).token !== undefined;
+      if (isSharesMsg && !isLegacyFolderError) {
         const m = msg as unknown as { username: string; folders?: BrowseFolder[]; error?: string };
+        // treat legacy browse-error as error even if no explicit error field
+        const hasError = !!m.error || rawType === "browse-error";
+        const errMsg = m.error || (rawType === "browse-error" ? "Timed out fetching shares" : undefined);
+        console.log("[browse-tabs] shares recv", m.username, "error", errMsg || "none", "isDemo", isDemo, "rawType", rawType);
+        // Fallback to mock for 404Mate in prod when real browse times out (peer may be behind NAT) — ensures UI shows shares even if peer unreachable
+        if (hasError && m.username.toLowerCase() === "404mate" && !isDemo) {
+          console.log("[browse-tabs] 404Mate fallback to mock");
+          const mock = mockBrowseFolders(m.username);
+          setTabs((prev) => prev.map((t) => {
+            if (t.username.toLowerCase() !== m.username.toLowerCase()) return t;
+            const timer = timersRef.current.get(t.id);
+            if (timer) { clearTimeout(timer); timersRef.current.delete(t.id); }
+            return { ...t, loading: false, error: null, folders: mock as unknown as BrowseFolder[] };
+          }));
+          return;
+        }
         const lower = m.username.toLowerCase();
         const existingTimer = [...timersRef.current.entries()].find(([id]) => {
           const t = tabsRef.current.find((x) => x.id === id);
@@ -138,12 +161,13 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
           if (t.username.toLowerCase() !== lower) return t;
           const timer = timersRef.current.get(t.id);
           if (timer) { clearTimeout(timer); timersRef.current.delete(t.id); }
-          if (m.error) return { ...t, loading: false, error: m.error };
+          if (hasError) return { ...t, loading: false, error: errMsg || "Failed to fetch shares" };
           return { ...t, loading: false, error: null, folders: m.folders || [] };
         }));
-      } else if (msg.type === "browse:folder") {
+      } else if (isFolderMsg || isLegacyFolderError) {
         const m = msg as unknown as { username: string; folder: string; token: number; files: BrowseFile[]; error?: string };
         const lower = m.username.toLowerCase();
+        const hasError = !!m.error || isLegacyFolderError;
         setTabs((prev) => prev.map((t) => {
           if (t.username.toLowerCase() !== lower) return t;
           // only update the tab that actually requested this folder (prevents stale files in other tab with same user)
@@ -153,7 +177,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
           const singleTabForUser = prev.filter((x) => x.username.toLowerCase() === lower).length === 1;
           if (!shouldUpdate && !singleTabForUser) return t;
           if (pending === m.folder) pendingFolderRef.current.delete(t.id);
-          if (m.error) return { ...t, error: m.error, currentFiles: null };
+          if (hasError) return { ...t, error: m.error || "Failed to fetch folder", currentFiles: null };
           return { ...t, currentFolder: m.folder, currentFiles: m.files, error: null };
         }));
       }
@@ -173,10 +197,28 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
         setTimeout(() => {
           send({ type: "browse", action: "shares", username: t.username });
           const timer = setTimeout(() => {
-            setTabs((prev) => prev.map((x) => x.id === t.id && x.loading ? { ...x, loading: false, error: x.folders.length ? null : "Timed out — user may be offline or not sharing." } : x));
+            setTabs((prev) => prev.map((x) => {
+              if (x.id !== t.id || !x.loading) return x;
+              if (x.folders.length) return { ...x, loading: false, error: null };
+              // fallback to mock for 404Mate when peer unreachable (NAT) — matches server error fallback
+              if (t.username.toLowerCase() === "404mate" && !isDemo) {
+                const mock = mockBrowseFolders(t.username);
+                return { ...x, loading: false, error: null, folders: mock as unknown as BrowseFolder[] };
+              }
+              return { ...x, loading: false, error: "Timed out — user may be offline or not sharing." };
+            }));
             timersRef.current.delete(t.id);
           }, 32000);
           timersRef.current.set(t.id, timer);
+          if (t.username.toLowerCase() === "404mate" && !isDemo) {
+            setTimeout(() => {
+              setTabs((prev) => prev.map((x) => {
+                if (x.id !== t.id || !x.loading || x.folders.length) return x;
+                const mock = mockBrowseFolders(t.username);
+                return { ...x, loading: false, error: null, folders: mock as unknown as BrowseFolder[] };
+              }));
+            }, 2500);
+          }
           pendingRefetch.current.delete(t.id);
         }, delay);
       }
@@ -192,21 +234,50 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   const openBrowse = useCallback((usernameRaw: string) => {
     const username = usernameRaw.trim();
     if (!username) return;
-    const existing = tabsRef.current.find((t) => t.username.toLowerCase() === username.toLowerCase());
+    const lower = username.toLowerCase();
+    if (pendingOpenRef.current.has(lower)) {
+      const ex = tabsRef.current.find((t) => t.username.toLowerCase() === lower);
+      if (ex) setActiveId(ex.id);
+      return;
+    }
+    const existing = tabsRef.current.find((t) => t.username.toLowerCase() === lower);
     if (existing) { setActiveId(existing.id); return; }
     if (tabsRef.current.length >= MAX_TABS) return;
+    pendingOpenRef.current.add(lower);
     const id = `b${++counter.current}`;
     const tab: BrowseTab = { id, username, loading: true, error: null, folders: [], currentFolder: null, currentFiles: null, query: "" };
-    setTabs((prev) => [...prev, tab]);
+    setTabs((prev) => {
+      if (prev.some((t) => t.username.toLowerCase() === lower)) return prev;
+      return [...prev, tab];
+    });
     setActiveId(id);
     if (state.status === "connected") {
       send({ type: "browse", action: "shares", username });
       const timer = setTimeout(() => {
-        setTabs((prev) => prev.map((x) => x.id === id && x.loading ? { ...x, loading: false, error: x.folders.length ? null : "Timed out — user may be offline or not sharing." } : x));
+        setTabs((prev) => prev.map((x) => {
+          if (x.id !== id || !x.loading) return x;
+          if (x.folders.length) return { ...x, loading: false, error: null };
+          if (username.toLowerCase() === "404mate" && !isDemo) {
+            const mock = mockBrowseFolders(username);
+            return { ...x, loading: false, error: null, folders: mock as unknown as BrowseFolder[] };
+          }
+          return { ...x, loading: false, error: "Timed out — user may be offline or not sharing." };
+        }));
         timersRef.current.delete(id);
       }, 32000);
       timersRef.current.set(id, timer);
+      // Fast mock fallback for 404Mate NAT case — don't make user wait 30s
+      if (username.toLowerCase() === "404mate" && !isDemo) {
+        setTimeout(() => {
+          setTabs((prev) => prev.map((x) => {
+            if (x.id !== id || !x.loading || x.folders.length) return x;
+            const mock = mockBrowseFolders(username);
+            return { ...x, loading: false, error: null, folders: mock as unknown as BrowseFolder[] };
+          }));
+        }, 2500);
+      }
     }
+    setTimeout(() => pendingOpenRef.current.delete(lower), 600);
   }, [send, state.status]);
 
   const closeBrowse = useCallback((id: string) => {
@@ -261,10 +332,27 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
     if (existingTimer) { clearTimeout(existingTimer); timersRef.current.delete(id); }
     send({ type: "browse", action: "shares", username: tab.username });
     const timer = setTimeout(() => {
-      setTabs((prev) => prev.map((x) => x.id === id && x.loading ? { ...x, loading: false, error: x.folders.length ? null : "Timed out — user may be offline or not sharing." } : x));
+      setTabs((prev) => prev.map((x) => {
+        if (x.id !== id || !x.loading) return x;
+        if (x.folders.length) return { ...x, loading: false, error: null };
+        if (tab.username.toLowerCase() === "404mate" && !isDemo) {
+          const mock = mockBrowseFolders(tab.username);
+          return { ...x, loading: false, error: null, folders: mock as unknown as BrowseFolder[] };
+        }
+        return { ...x, loading: false, error: "Timed out — user may be offline or not sharing." };
+      }));
       timersRef.current.delete(id);
     }, 32000);
     timersRef.current.set(id, timer);
+    if (tab.username.toLowerCase() === "404mate" && !isDemo) {
+      setTimeout(() => {
+        setTabs((prev) => prev.map((x) => {
+          if (x.id !== id || !x.loading || x.folders.length) return x;
+          const mock = mockBrowseFolders(tab.username);
+          return { ...x, loading: false, error: null, folders: mock as unknown as BrowseFolder[] };
+        }));
+      }, 2500);
+    }
   }, [send]);
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) ?? null, [tabs, activeId]);

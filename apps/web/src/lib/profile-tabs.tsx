@@ -93,6 +93,8 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const counter = useRef<number>(initialMax);
   const tabsRef = useRef<ProfileTab[]>([]);
   tabsRef.current = tabs;
+  // Guard against rapid double-open of same username (e.g., ?user effect firing twice)
+  const pendingOpenRef = useRef<Set<string>>(new Set());
 
   useEffect(() => { persist(tabs, activeId); }, [tabs, activeId]);
 
@@ -145,7 +147,12 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       }
       if (msg.type === "user-info-failed") {
         const lower = msg.username.toLowerCase();
-        setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, loading: false, error: "Could not load this user's profile." } : t));
+        setTabs((prev) => prev.map((t) => {
+          if (t.username.toLowerCase() !== lower) return t;
+          const hasAnyData = !!(t.profile.info || t.profile.stats || t.profile.interests || t.profile.watchUser?.exists || t.profile.status || t.profile.country);
+          if (hasAnyData) return { ...t, loading: false, error: null };
+          return { ...t, loading: false, error: "Could not load this user's profile." };
+        }));
         return;
       }
       if (msg.type !== "userinfo:event") return;
@@ -158,13 +165,13 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       const lower = uname.toLowerCase();
       switch (ev.type) {
         case "user-status":
-          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, status: ev.status }, loading: false } : t));
+          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, status: ev.status }, loading: false, error: null } : t));
           break;
         case "user-stats":
-          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, stats: ev.stats }, loading: false } : t));
+          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, stats: ev.stats }, loading: false, error: null } : t));
           break;
         case "user-interests":
-          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, interests: ev.interests } } : t));
+          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, interests: ev.interests }, loading: false, error: null } : t));
           break;
         case "watch-user":
           setTabs((prev) => prev.map((t) => {
@@ -173,14 +180,19 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
             if (ev.watchUser?.exists && ev.watchUser.status !== undefined) {
               np.status = { username: t.username, status: ev.watchUser.status, privileged: t.profile.status?.privileged || false };
             }
-            return { ...t, profile: np, loading: false };
+            return { ...t, profile: np, loading: false, error: null };
           }));
           break;
         case "user-info-response":
-          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, info: ev.info }, loading: false } : t));
+          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, info: ev.info }, loading: false, error: null } : t));
           break;
         case "user-info-failed":
-          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, error: "Could not load this user's profile.", loading: false } : t));
+          setTabs((prev) => prev.map((t) => {
+            if (t.username.toLowerCase() !== lower) return t;
+            const hasAnyData = !!(t.profile.info || t.profile.stats || t.profile.interests || t.profile.watchUser?.exists || t.profile.status || t.profile.country);
+            if (hasAnyData) return { ...t, loading: false, error: null };
+            return { ...t, error: "Could not load this user's profile.", loading: false };
+          }));
           break;
         default:
           break;
@@ -203,7 +215,12 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
           send({ type: "userinfo", action: "get", username: t.username });
           // also trigger a timeout that will clear loading if no response
           setTimeout(() => {
-            setTabs((prev) => prev.map((x) => x.id === t.id && x.loading ? { ...x, loading: false, error: x.error || null } : x));
+            setTabs((prev) => prev.map((x) => {
+              if (x.id !== t.id || !x.loading) return x;
+              const hasAnyData = !!(x.profile.info || x.profile.stats || x.profile.interests || x.profile.watchUser?.exists || x.profile.status || x.profile.country);
+              if (hasAnyData) return { ...x, loading: false, error: null };
+              return { ...x, loading: false, error: x.error || "Could not load this user's profile." };
+            }));
           }, 25000);
           pendingRefetch.current.delete(t.id);
         }, delay);
@@ -214,19 +231,36 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const openProfile = useCallback((usernameRaw: string) => {
     const username = usernameRaw.trim();
     if (!username) return;
-    const existing = tabsRef.current.find((t) => t.username.toLowerCase() === username.toLowerCase());
+    const lower = username.toLowerCase();
+    // Prevent duplicate tab creation when effect fires twice quickly (e.g., ?user handling)
+    if (pendingOpenRef.current.has(lower)) {
+      const ex = tabsRef.current.find((t) => t.username.toLowerCase() === lower);
+      if (ex) setActiveId(ex.id);
+      return;
+    }
+    const existing = tabsRef.current.find((t) => t.username.toLowerCase() === lower);
     if (existing) { setActiveId(existing.id); return; }
     if (tabsRef.current.length >= MAX_TABS) return;
+    pendingOpenRef.current.add(lower);
     const id = `p${++counter.current}`;
     const tab: ProfileTab = { id, username, profile: { username }, loading: true, error: null };
-    setTabs((prev) => [...prev, tab]);
+    setTabs((prev) => {
+      // Re-check inside functional update in case another call slipped between tabsRef check and setTabs
+      if (prev.some((t) => t.username.toLowerCase() === lower)) return prev;
+      return [...prev, tab];
+    });
     setActiveId(id);
     if (state.status === "connected") {
       send({ type: "userinfo", action: "watch", username });
       send({ type: "userinfo", action: "interests", username });
       send({ type: "userinfo", action: "get", username });
       setTimeout(() => {
-        setTabs((prev) => prev.map((x) => x.id === id && x.loading ? { ...x, loading: false } : x));
+        setTabs((prev) => prev.map((x) => {
+          if (x.id !== id || !x.loading) return x;
+          const hasAnyData = !!(x.profile.info || x.profile.stats || x.profile.interests || x.profile.watchUser?.exists || x.profile.status || x.profile.country);
+          if (hasAnyData) return { ...x, loading: false, error: null };
+          return { ...x, loading: false, error: x.error || "Could not load this user's profile." };
+        }));
       }, 25000);
     }
     // also save recent
@@ -234,9 +268,11 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       const key = "nicotineHub.recentProfiles";
       const raw = (localStorage.getItem(key) ?? localStorage.getItem(key.replace ? key.replace("nicotineHub.", "nicotine.") : key));
       const list: string[] = raw ? JSON.parse(raw) : [];
-      const next = [username, ...list.filter((x: string) => x.toLowerCase() !== username.toLowerCase())].slice(0, 20);
+      const next = [username, ...list.filter((x: string) => x.toLowerCase() !== lower)].slice(0, 20);
       localStorage.setItem(key, JSON.stringify(next));
     } catch {}
+    // Clear guard after a short delay so same user can be re-opened after close
+    setTimeout(() => pendingOpenRef.current.delete(lower), 600);
   }, [send, state.status]);
 
   const closeProfile = useCallback((id: string) => {

@@ -15,6 +15,7 @@ export function LoginForm() {
   const [showPass, setShowPass] = useState(false);
   const [host, setHost] = useState(settings.server.server.host);
   const [port, setPort] = useState(String(settings.server.server.port));
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Keep host/port in sync when Settings → Network changes them (settings-audit P0)
   useEffect(() => {
@@ -22,7 +23,8 @@ export function LoginForm() {
     setPort(String(settings.server.server.port));
   }, [settings.server.server.host, settings.server.server.port]);
 
-  const busy = state.status === "connecting";
+  // Only show spinner when user explicitly clicked Log in (not during auto-reconnects)
+  const busy = isSubmitting && state.status === "connecting";
   const succeeded = state.status === "connected";
 
   const canSubmit = useMemo(
@@ -30,12 +32,18 @@ export function LoginForm() {
     [username, password, busy, succeeded],
   );
 
+  // Clear submitting flag when login finishes (success or failure) or resets to idle
+  useEffect(() => {
+    if (state.status !== "connecting") setIsSubmitting(false);
+  }, [state.status]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
     const hostValue = host.trim() || DEFAULT_SERVER_HOST;
     const portValue = Number(port) || DEFAULT_SERVER_PORT;
     setOption("server", "server", { host: hostValue, port: portValue });
+    setIsSubmitting(true);
     // Settings → Network host/port is authoritative: always send it (nicotine-plus server tuple parity).
     // Keep showServer toggle for UI disclosure, but login always respects Settings.
     login({

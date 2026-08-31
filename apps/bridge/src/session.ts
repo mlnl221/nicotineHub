@@ -646,6 +646,7 @@ export class SoulseekSession {
     if (!this.loggedIn || !this.serverSocket) return;
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
+    logger.info("browse", "sendConnectToPeerFallback", { username, connType, token });
     try { this.serverSocket.write(buildConnectToPeer(token, username, connType)); } catch {}
     const timer = setTimeout(() => { this.pendingConnects.delete(token); }, CONNECT_PEER_TIMEOUT_MS);
     this.pendingConnects.set(token, { resolve: () => {}, reject: () => {}, timer, username, connType });
@@ -2104,7 +2105,9 @@ export class SoulseekSession {
         this.dequeuePendingSockets();
       } else if (msg.code === PEER_MESSAGE_CODES.sharedFileListResponse) {
         const username = state.username ?? "unknown";
+        logger.info("browse", "sharedFileListResponse recv", { username, allowed: this.isAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse), pending: this.pendingBrowseShares.has(username.toLowerCase()) });
         if (!this.isAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse)) {
+          logger.warn("browse", "sharedFileListResponse not allowed, dropping", { username });
           try { peer.end(); } catch {}
           this.peerStates.delete(peer);
           break;
@@ -2114,10 +2117,11 @@ export class SoulseekSession {
           const parsed = parseSharedFileListResponse(msg.payload);
           const pending = this.pendingBrowseShares.get(username.toLowerCase());
           if (pending) { clearTimeout(pending.timer); this.pendingBrowseShares.delete(username.toLowerCase()); }
+          logger.info("browse", "sharedFileListResponse success", { username, folders: parsed.folders.length });
           this.emitBrowse({ type: "browse-shares", username, folders: parsed.folders });
           try { (peer as Socket).end(); } catch {}
           this.dequeuePendingSockets();
-        } catch {}
+        } catch (e) { logger.warn("browse", "sharedFileListResponse parse fail", { username, error: (e as Error).message }); }
       } else if (msg.code === PEER_MESSAGE_CODES.folderContentsResponse) {
         try {
           const parsed = parseFolderContentsResponse(msg.payload);
@@ -2313,9 +2317,13 @@ export class SoulseekSession {
 
   // File ops via peer
   requestSharedFileList(username: string) {
+    logger.info("browse", "requestSharedFileList", { username, pending: this.pendingBrowseShares.has(username.toLowerCase()) });
     // timeout 20s indirect + 10s grace = 30s (nicotine INDIRECT_REQUEST_TIMEOUT 20s + local 10s)
     const key = username.toLowerCase();
+    const existing = this.pendingBrowseShares.get(key);
+    if (existing) { clearTimeout(existing.timer); }
     const timer = setTimeout(() => {
+      logger.warn("browse", "browse timeout", { username });
       this.pendingBrowseShares.delete(key);
       this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);
       this.emitBrowse({ type: "browse-error", username, error: "Timed out fetching shares" });
@@ -2341,6 +2349,9 @@ export class SoulseekSession {
   }
 
   private ensurePeerAndSend(username: string, connType: string, msg: Buffer) {
+    const hasPending = this.peerAddressRequests.has(username);
+    const cachedCheck = this.userAddresses.get(username);
+    logger.info("browse", "ensurePeerAndSend", { username, connType, hasCached: !!cachedCheck, hasPending, pendingSize: this.pendingBrowseShares.size });
     if (!this.loggedIn) return;
     // Queue for indirect fallback (peer connects to us via PierceFirewall)
     this.queuePendingPeerMessage(username, connType, msg);
@@ -2364,7 +2375,11 @@ export class SoulseekSession {
     this.serverSocket?.write(buildGetPeerAddress(username));
   }
   private connectToPeerViaAddress(username: string, addr: PeerAddress, connType: string, msg: Buffer) {
-    if (addr.port === 0 || addr.ip === "0.0.0.0") return;
+    logger.info("browse", "connectToPeerViaAddress", { username, ip: addr.ip, port: addr.port, connType });
+    if (addr.port === 0 || addr.ip === "0.0.0.0") {
+      logger.warn("browse", "peer address invalid, aborting direct", { username, ip: addr.ip, port: addr.port });
+      return;
+    }
     if (!this.canOpenSocket()) {
       this.enqueueOrRun(() => this.connectToPeerViaAddress(username, addr, connType, msg));
       return;
@@ -2373,6 +2388,7 @@ export class SoulseekSession {
       hostname: addr.ip, port: addr.port,
       socket: {
         open: (sock) => {
+          logger.info("browse", "direct peer open", { username, ip: addr.ip, port: addr.port, connType });
           this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, lastActive: Date.now(), createdAt: Date.now() });
           (sock as Socket).write(buildPeerInit(this.username, connType));
           // queue msg via state — will be sent after initDone in processPeer
@@ -2380,10 +2396,10 @@ export class SoulseekSession {
           if (st) (st as unknown as { pendingMsg?: Buffer }).pendingMsg = msg;
         },
         data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
-        error: () => { this.dequeuePendingSockets(); },
-        close: (sock) => { this.peerStates.delete(sock as Socket); this.dequeuePendingSockets(); },
+        error: (_sock, err) => { logger.warn("browse", "direct peer error", { username, ip: addr.ip, port: addr.port, error: (err as Error)?.message || String(err) }); this.dequeuePendingSockets(); },
+        close: (sock) => { logger.info("browse", "direct peer close", { username, ip: addr.ip, port: addr.port }); this.peerStates.delete(sock as Socket); this.dequeuePendingSockets(); },
       },
-    }).catch(() => { this.dequeuePendingSockets(); });
+    }).catch((e) => { logger.warn("browse", "direct peer connect failed", { username, ip: addr.ip, port: addr.port, error: (e as Error).message }); this.dequeuePendingSockets(); });
   }
 
   requestUserInfo(username: string): Promise<UserInfoResponseMessage> {
