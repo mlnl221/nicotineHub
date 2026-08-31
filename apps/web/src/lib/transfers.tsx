@@ -35,6 +35,21 @@ const STORAGE_KEY = "nicotineHub.transfers.mock";
 
 function loadInitial(): Transfer[] {
   if (typeof window === "undefined") return [];
+  // In prod (non-demo) never hydrate demo mock transfers — they are vercel-demo only
+  if (!isDemo) {
+    try {
+      const raw = (window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(STORAGE_KEY.replace("nicotineHub.", "nicotine.")));
+      if (raw && (raw.includes("jazzcat::") || raw.includes("vinyl_hunter::") || raw.includes("Summer Rain") || raw.includes("Midnight Groove"))) {
+        window.localStorage.removeItem(STORAGE_KEY);
+        window.localStorage.removeItem(STORAGE_KEY.replace("nicotineHub.", "nicotine."));
+      }
+      window.localStorage.removeItem("nicotineHub.demoSeeded");
+      window.localStorage.removeItem("nicotine.demoSeeded");
+      window.sessionStorage.removeItem("__demoTransfersSeeded");
+      window.sessionStorage.removeItem("__mockTransfers");
+    } catch {}
+    return [];
+  }
   try {
     const raw = (window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(STORAGE_KEY.replace("nicotineHub.", "nicotine.")));
     if (!raw) return [];
@@ -60,6 +75,16 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
     setTransfers(loaded);
     hydrated.current = true;
   }, []);
+
+  // Prod safeguard: if not in demo, immediately purge any demo transfers that may have leaked (HMR / stale storage)
+  useEffect(() => {
+    if (isDemo) return;
+    if (!hydrated.current) return;
+    const demoIds = new Set(mockDemoTransfers().map((t) => t.id));
+    if (transfers.some((t) => demoIds.has(t.id))) {
+      setTransfers((prev) => prev.filter((t) => !demoIds.has(t.id)));
+    }
+  }, [transfers]);
 
   // Persist mock transfers for demo refresh (skip initial write)
   // In demo we throttle writes to avoid churn from animation (updates every ~900ms)
