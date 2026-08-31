@@ -139,6 +139,12 @@ export function NetworkSection() {
   }, [subscribe, saveStatus, pendingPort, bridgePort, listenPort, setBridgePort, setBridgeUpnp, bridgeUpnp]);
   const dirty = pendingPort !== listenPort;
   const isSaving = saveStatus === "saving" || state.status === "connecting";
+  // Auto-sync Settings to bridge when they diverge (Docker was started with LISTEN_PORT=60754 but Settings still 49127)
+  useEffect(() => {
+    if (bridgePort && bridgePort !== listenPort && !dirty && saveStatus === "idle") {
+      setOption("server", "portrange", [bridgePort, bridgePort] as unknown as never);
+    }
+  }, [bridgePort, listenPort, dirty, saveStatus, setOption]);
   const handleSave = () => {
     const p = Math.max(1024, Math.min(65535, Number(pendingPort) || DEFAULT_LISTEN_PORT));
     setPendingPort(p);
