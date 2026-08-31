@@ -218,3 +218,12 @@ html[data-demo="true"] div.sticky.top-\[calc\(56px\+env\(safe-area-inset-top\,0p
     top: var(--demo-banner-h) !important;
   }
 }
+/* Demo mode — offset main's top padding on mobile to account for banner + TopBar */
+@media (max-width: 767px) {
+  html[data-demo="true"] main.pt-\[calc\(56px\+env\(safe-area-inset-top\,0px\)\)\] {
+    padding-top: calc(var(--demo-banner-h) + 56px + env(safe-area-inset-top, 0px)) !important;
+  }
+  html[data-demo="true"] main.pt-\[calc\(60px\+env\(safe-area-inset-top\,0px\)\)\] {
+    padding-top: calc(var(--demo-banner-h) + 60px + env(safe-area-inset-top, 0px)) !important;
+  }
+}
