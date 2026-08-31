@@ -344,19 +344,31 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
       </header>
 
       <div className="flex flex-col p-4 md:p-8 space-y-6 md:space-y-8 max-w-screen-2xl mx-auto w-full">
-        {error ? (
-          <div className="bg-error-container/50 dark:bg-tertiary-container/20 rounded-xl p-5 flex gap-3 items-start">
-            <span className="material-symbols-outlined text-error text-xl">info</span>
-            <div className="flex-1">
-              <p className="font-body text-sm text-on-error-container dark:text-tertiary-fixed">
-                {error} The user may be offline or unreachable.
-              </p>
-              <button onClick={() => refresh(tab.id)} className="mt-3 inline-flex items-center gap-1 rounded-full bg-surface-container-lowest px-3 py-1.5 font-label text-xs hover:bg-surface-container-high">
-                <span className="material-symbols-outlined text-[16px]">refresh</span> Retry
-              </button>
+        {(() => {
+          const hasAnyData = !!(
+            profile.info?.descr ||
+            profile.info?.pic ||
+            profile.stats ||
+            profile.interests ||
+            profile.watchUser?.exists ||
+            profile.status ||
+            country
+          );
+          if (!error || hasAnyData) return null;
+          return (
+            <div className="bg-error-container/50 dark:bg-tertiary-container/20 rounded-xl p-5 flex gap-3 items-start">
+              <span className="material-symbols-outlined text-error text-xl">info</span>
+              <div className="flex-1">
+                <p className="font-body text-sm text-on-error-container dark:text-tertiary-fixed">
+                  {error} The user may be offline or unreachable.
+                </p>
+                <button onClick={() => refresh(tab.id)} className="mt-3 inline-flex items-center gap-1 rounded-full bg-surface-container-lowest px-3 py-1.5 font-label text-xs hover:bg-surface-container-high">
+                  <span className="material-symbols-outlined text-[16px]">refresh</span> Retry
+                </button>
+              </div>
             </div>
-          </div>
-        ) : null}
+          );
+        })()}
 
         {loading && !error ? (
           <div className="flex flex-col gap-4">

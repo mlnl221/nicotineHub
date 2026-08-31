@@ -147,7 +147,12 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       }
       if (msg.type === "user-info-failed") {
         const lower = msg.username.toLowerCase();
-        setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, loading: false, error: "Could not load this user's profile." } : t));
+        setTabs((prev) => prev.map((t) => {
+          if (t.username.toLowerCase() !== lower) return t;
+          const hasAnyData = !!(t.profile.info || t.profile.stats || t.profile.interests || t.profile.watchUser?.exists || t.profile.status || t.profile.country);
+          if (hasAnyData) return { ...t, loading: false, error: null };
+          return { ...t, loading: false, error: "Could not load this user's profile." };
+        }));
         return;
       }
       if (msg.type !== "userinfo:event") return;
@@ -160,13 +165,13 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       const lower = uname.toLowerCase();
       switch (ev.type) {
         case "user-status":
-          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, status: ev.status }, loading: false } : t));
+          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, status: ev.status }, loading: false, error: null } : t));
           break;
         case "user-stats":
-          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, stats: ev.stats }, loading: false } : t));
+          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, stats: ev.stats }, loading: false, error: null } : t));
           break;
         case "user-interests":
-          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, interests: ev.interests } } : t));
+          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, interests: ev.interests }, loading: false, error: null } : t));
           break;
         case "watch-user":
           setTabs((prev) => prev.map((t) => {
@@ -175,14 +180,19 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
             if (ev.watchUser?.exists && ev.watchUser.status !== undefined) {
               np.status = { username: t.username, status: ev.watchUser.status, privileged: t.profile.status?.privileged || false };
             }
-            return { ...t, profile: np, loading: false };
+            return { ...t, profile: np, loading: false, error: null };
           }));
           break;
         case "user-info-response":
-          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, info: ev.info }, loading: false } : t));
+          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, profile: { ...t.profile, info: ev.info }, loading: false, error: null } : t));
           break;
         case "user-info-failed":
-          setTabs((prev) => prev.map((t) => t.username.toLowerCase() === lower ? { ...t, error: "Could not load this user's profile.", loading: false } : t));
+          setTabs((prev) => prev.map((t) => {
+            if (t.username.toLowerCase() !== lower) return t;
+            const hasAnyData = !!(t.profile.info || t.profile.stats || t.profile.interests || t.profile.watchUser?.exists || t.profile.status || t.profile.country);
+            if (hasAnyData) return { ...t, loading: false, error: null };
+            return { ...t, error: "Could not load this user's profile.", loading: false };
+          }));
           break;
         default:
           break;
@@ -205,7 +215,12 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
           send({ type: "userinfo", action: "get", username: t.username });
           // also trigger a timeout that will clear loading if no response
           setTimeout(() => {
-            setTabs((prev) => prev.map((x) => x.id === t.id && x.loading ? { ...x, loading: false, error: x.error || null } : x));
+            setTabs((prev) => prev.map((x) => {
+              if (x.id !== t.id || !x.loading) return x;
+              const hasAnyData = !!(x.profile.info || x.profile.stats || x.profile.interests || x.profile.watchUser?.exists || x.profile.status || x.profile.country);
+              if (hasAnyData) return { ...x, loading: false, error: null };
+              return { ...x, loading: false, error: x.error || "Could not load this user's profile." };
+            }));
           }, 25000);
           pendingRefetch.current.delete(t.id);
         }, delay);
@@ -240,7 +255,12 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       send({ type: "userinfo", action: "interests", username });
       send({ type: "userinfo", action: "get", username });
       setTimeout(() => {
-        setTabs((prev) => prev.map((x) => x.id === id && x.loading ? { ...x, loading: false } : x));
+        setTabs((prev) => prev.map((x) => {
+          if (x.id !== id || !x.loading) return x;
+          const hasAnyData = !!(x.profile.info || x.profile.stats || x.profile.interests || x.profile.watchUser?.exists || x.profile.status || x.profile.country);
+          if (hasAnyData) return { ...x, loading: false, error: null };
+          return { ...x, loading: false, error: x.error || "Could not load this user's profile." };
+        }));
       }, 25000);
     }
     // also save recent
