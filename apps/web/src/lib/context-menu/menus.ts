@@ -115,7 +115,7 @@ export function searchTabMenu(tab: { query: string; id: string }, actions: { onC
   ];
 }
 
-export function transferMenu(t: { user: string; fileName: string; path?: string; virtualPath?: string }, isUpload: boolean, acts: { onResume?: () => void; onPause?: () => void; onRemove: () => void; onRetry?: () => void; onClear?: () => void }): MenuItem[] {
+export function transferMenu(t: { user: string; fileName: string; path?: string; virtualPath?: string }, isUpload: boolean, acts: { onResume?: () => void; onPause?: () => void; onRemove: () => void; onRetry?: () => void; onClear?: () => void; onAnalyzeSpectrum?: () => void; hasSpectrum?: boolean }): MenuItem[] {
   const display = t.fileName;
   return [
     { id: "hdr", label: "1 File Selected", icon: "description", disabled: true },
@@ -126,6 +126,8 @@ export function transferMenu(t: { user: string; fileName: string; path?: string;
     ]),
     { id: "props", label: "File Properties", icon: "info", action: () => toast(display) },
     { id: "sep2", label: "---", icon: "" },
+    ...(acts.onAnalyzeSpectrum ? [{ id: "analyze", label: acts.hasSpectrum ? "View Spectrum" : "Analyze Spectrum", icon: "graphic_eq", action: acts.onAnalyzeSpectrum } as MenuItem] : []),
+    ...(acts.onAnalyzeSpectrum ? [{ id: "sep-analyze", label: "---", icon: "" } as MenuItem] : []),
     { id: "resume", label: isUpload ? "Retry" : "Resume", icon: "play_arrow", action: acts.onResume ?? acts.onRetry ?? (() => toast("Resume unavailable")) },
     { id: "pause", label: isUpload ? "Abort" : "Pause", icon: "pause", action: acts.onPause ?? acts.onRemove },
     { id: "remove", label: "Remove", icon: "delete", danger: true, action: acts.onRemove },

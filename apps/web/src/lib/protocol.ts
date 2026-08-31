@@ -700,6 +700,27 @@ export interface PluginOutputMessage {
   text: string;
 }
 
+export interface SpectrumStatusMessage {
+  type: "spectrum:status";
+  id: string;
+  phase: "queued" | "generating" | "compressing" | "done" | "missing";
+  progress: number;
+}
+export interface SpectrumReadyMessage {
+  type: "spectrum:ready";
+  id: string;
+  token: number;
+  etag: string;
+  hash: string;
+  urls: { full: string; zoom: string };
+  fromCache: boolean;
+}
+export interface SpectrumErrorMessage {
+  type: "spectrum:error";
+  id: string;
+  error: string;
+}
+
 export type BridgeOutboundMessage =
   | LoginStartMessage
   | LoginResultSuccess
@@ -734,7 +755,19 @@ export type BridgeOutboundMessage =
   | PluginReloadedMessage
   | PluginUninstalledMessage
   | PluginOutputMessage
+  | SpectrumStatusMessage
+  | SpectrumReadyMessage
+  | SpectrumErrorMessage
   | PongMessage;
+
+export interface SpectrumRequest {
+  type: "spectrum:request";
+  id: string;
+}
+export interface SpectrumStatusRequest {
+  type: "spectrum:status";
+  id: string;
+}
 
 export type BridgeInboundMessage =
   | LoginRequest
@@ -766,4 +799,6 @@ export type BridgeInboundMessage =
   | PluginInstallRequest
   | PluginInstallUrlRequest
   | PluginInstallGithubTsRequest
+  | SpectrumRequest
+  | SpectrumStatusRequest
   | PingRequest;

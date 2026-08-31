@@ -37,7 +37,7 @@ The browser can't open raw TCP sockets, so the bridge translates JSON over WebSo
 ## Features
 
 - **Search** — global, user, room, wishlist & buddies; tabs + live filters (size/bitrate/length/type/slot/country)
-- **Transfers** — queue, resume (`INCOMPLETE<md5>`), `GET /files/:token`, throttled streaming
+- **Transfers** — queue, resume (`INCOMPLETE<md5>`), `GET /files/:token`, throttled streaming + **Analyze Spectrum** (FLAC `sox` Full 2000×513 + Zoom 500×1025, `oxipng`, `/tmp` cache)
 - **Browse** — shares & folders via peers
 - **Chat** — rooms + private, tickers, owned/member lists
 - **Social** — buddies, interests/recommendations/similar users

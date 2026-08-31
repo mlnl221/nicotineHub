@@ -58,11 +58,12 @@ search {type:"search", searchId, query} | {type:"search:user", username,query} |
 search:stop / search:page / browse:page (5-min `searchCache`/`browseCache`, `bridgeCaches` 5m LRU 100)
 browse {type:"browse", action:"shares"|"folder", username,folder?,token?} → {type:"browse:shares"|"browse:folder"}
 chat:room {action:"join"|"leave"|"say"|"ticker"|"setTicker"|...} + chat:private {action:"send"|"ack"} → {type:"chat:event"|"room:event"}
-download:request {username,virtualPath,size,fileName?} + download:control/upload:control {id,action} → {type:"transfer:update/stats/queue/finished"}
-userinfo {action:"watch"|"unwatch"|"get"|"peerAddress"|"recommendations"|...} → {type:"userinfo:event"}
-plugin:list / toggle / reload / uninstall / install{fileName,data} / installUrl{url} + plugin:settings / resetSettings → {type:"plugin:list"|"plugin:installed"|"plugin:toggled"|...} (bridge `PluginManager`)
- config:update {section,key,value} / wishlist:update {terms} + statistics:request / reset + ping→pong
- diagnostics + /health?json: {ok, ts, uptime, port, listenPort, dataDir, tokenAuth, upnp:{enabled, active, port, ip, error, lastSuccessAt}} (gated via `BRIDGE_TOKEN` if set) + /api/upnp/status + /interfaces
+ download:request {username,virtualPath,size,fileName?} + download:control/upload:control {id,action} → {type:"transfer:update/stats/queue/finished"}
+ spectrum:request {id} + spectrum:status {id} → {type:"spectrum:status"/"spectrum:ready" {id, token, etag, urls:{full,zoom}}} + GET /spectrum/:token/full|zoom (image/png, ETag, /tmp ephemeral) + /api/spectrum/:token (JSON)
+ userinfo {action:"watch"|"unwatch"|"get"|"peerAddress"|"recommendations"|...} → {type:"userinfo:event"}
+ plugin:list / toggle / reload / uninstall / install{fileName,data} / installUrl{url} + plugin:settings / resetSettings → {type:"plugin:list"|"plugin:installed"|"plugin:toggled"|...} (bridge `PluginManager`)
+  config:update {section,key,value} / wishlist:update {terms} + statistics:request / reset + ping→pong
+  diagnostics + /health?json: {ok, ts, uptime, port, listenPort, dataDir, tokenAuth, upnp:{enabled, active, port, ip, error, lastSuccessAt}} (gated via `BRIDGE_TOKEN` if set) + /api/upnp/status + /interfaces
  ```
 
 ## Distributed (leaf-only, `stage` `d395cc6`+)
@@ -75,8 +76,9 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 - `session.ts` — server socket + `Bun.listen` (`P` vs `F` demux via `pendingFileTokens` + heuristic), peer states (`buf/initDone/isFileConn/fileToken`), idle sweep (2s init, 10s ghost, 60s max), `GetPeerAddress` cache 30m single-flight, search/browses, distributed leaf bootstrap (`HaveNoParent 71`, `PossibleParents 102` 10 dials, `BranchLevel/Root`), `PortMapper` (`portmapper.ts` NAT-PMP → UPnP) on login/disconnect/port change
 - `shares.ts` — `ShareDB` (`DATA_DIR/shares.json`, in-memory folders, search, `buildSharedFileListResponse 5`/`FolderContents 36/37` zlib lvl4, `shouldThrottle` 400 ms)
 - `transfers.ts` — `TransferManager` (Map `id→Transfer`, queued/active, 2s `transfer:stats`, 300s `PlaceInQueue` poll, `INCOMPLETE<md5>` + atomic `downloads.json` + `GET /files/:token`)
+- `spectrum.ts` — `SpectrumManager` (sox spectrogram `2000×513` Full + `500×1025` Zoom, Kaiser `-z 120`, `remix 1`, `oxipng -o 2`, ported from `smoked-salmon` `uploader/spectrals.py`, `/tmp/hub-spectrum` ephemeral, 2-concurrent queue, `sha256(token:mtime:size)` etag)
 - `portmapper.ts` — `NATPMP` (RFC6886 UDP 5351 → gateway from `/proc/net/route`+`netstat`/`ip route` fallback, lease 43200 s / renewal 7200 s, 2 attempts 250 ms doubling, TCP only) + `UPnP` (SSDP multicast 239.255.255.250:1900 5 targets, device desc fetch with controlURL validation vs python ElementTree, SOAP AddPortMapping/DeletePortMapping with 725 permanent lease fallback) + `PortMapper` orchestrator (NAT-PMP fallback UPnP, `setPort`/`add`/`remove` like `pynicotine/portmapper.py:PortMapper`, `status`{active,port,ip,error,lastSuccessAt} for diagnostics)
-- `server.ts` — `Bun.serve` (`/ws` zod, `/health`→`listenPort`, `/logs`, `/diagnostics`, `/files/:token` sanitized `Content-Disposition`, `/plugins` + `/plugins/install`) + token via `?token`/`Authorization`/`Sec-WebSocket-Protocol` + CORS/CSP (`getCorsHeaders`, `SECURITY_HEADERS`) + 1 MB WS guard + 5-min `searchCache`/`browseCache`
+- `server.ts` — `Bun.serve` (`/ws` zod, `/health`→`listenPort`, `/logs`, `/diagnostics`, `/files/:token` sanitized `Content-Disposition`, `/spectrum/:token/full|zoom` + `/api/spectrum/:token`, `/plugins` + `/plugins/install`) + token via `?token`/`Authorization`/`Sec-WebSocket-Protocol` + CORS/CSP (`getCorsHeaders`, `SECURITY_HEADERS`) + 1 MB WS guard + 5-min `searchCache`/`browseCache`
 - `plugins/manager.ts` (+ `builtin/core_commands`, `builtin/spamfilter`) — `PluginManager` (`plugins.json` `installed/enabled`, `PLUGININFO/metasettings`, `returncode.zap/break/pass`, 32 `core_commands` cmds) — WS `plugin:list/toggle/reload/uninstall/install{fileName,data}` + `installUrl` (GitHub-only, 20 MB zip / 1 GiB unzip + path-traversal guard)
 
 ## Env (full)
