@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useConfig } from "@/lib/config/provider";
 import { defaults, DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, DEFAULT_LISTEN_PORT } from "@/lib/config/defaults";
-import { SectionCard, TextFieldControl, ToggleControl, NumberControl } from "@/components/settings/controls";
+import { SectionCard, TextFieldControl, ToggleControl, NumberControl, SelectControl } from "@/components/settings/controls";
 import { useSession } from "@/lib/session";
 
 function useBridgeListenPort(): { current: number | null; bridgeUrl: string; setCurrent: (n: number | null) => void } {
@@ -42,11 +42,40 @@ function useBridgeListenPort(): { current: number | null; bridgeUrl: string; set
   return { current, bridgeUrl, setCurrent };
 }
 
+type IfaceEntry = { name: string; address: string; netmask: string; family: string; internal: boolean; mac: string; cidr: string | null };
+
+function useInterfaces(): { ifaces: IfaceEntry[]; loading: boolean; error: string | null; refresh: () => void } {
+  const [ifaces, setIfaces] = useState<IfaceEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const fetchIfaces = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // Prefer bridge via /api/interfaces (proxies to bridge, sees tun0 with host network)
+      const r = await fetch("/api/interfaces", { cache: "no-store" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      if (Array.isArray(j)) {
+        const filtered = (j as IfaceEntry[]).filter((a) => a.family === "IPv4");
+        setIfaces(filtered);
+      } else if (j && typeof j === "object" && "error" in j) throw new Error((j as { error: string }).error);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { fetchIfaces(); }, []);
+  return { ifaces, loading, error, refresh: fetchIfaces };
+}
+
 export function NetworkSection() {
   const { settings, setOption } = useConfig();
   const server = settings.server;
   const { state, subscribe, send } = useSession();
   const { current: bridgePort, setCurrent: setBridgePort } = useBridgeListenPort();
+  const { ifaces, loading: ifaceLoading, error: ifaceError, refresh: refreshIfaces } = useInterfaces();
   // Normalize portrange: nicotine-plus stores [port, port]; UI edits first element
   const listenPort = Array.isArray(server.portrange) ? server.portrange[0] : (server as unknown as { portrange?: number }).portrange ?? DEFAULT_LISTEN_PORT;
   const isConnected = state.status === "connected";
@@ -224,14 +253,79 @@ export function NetworkSection() {
           checked={server.upnp ?? true}
           onChange={(v) => setOption("server", "upnp", v)}
         />
-        <TextFieldControl
-          label="Network interface"
-          description="Local interface to bind (browser-stored only; bridge uses env INTERFACE if set, like nicotine-plus server.interface)."
-          value={server.interface ?? ""}
-          placeholder="e.g. 192.168.1.10 or eth0 — empty = default"
-          onChange={(v) => setOption("server", "interface", v)}
-          onReset={() => setOption("server", "interface", "")}
-        />
+        {/* Network interface – server-side list via /api/interfaces (bridge sees tun0 with host network) – stores interface NAME human-friendly, immediate apply */}
+        {(() => {
+          // Use top-level hook values (ifaces, ifaceLoading, ifaceError, refreshIfaces) – no hook call inside render
+          const loading = ifaceLoading;
+          const refresh = refreshIfaces;
+          // Deduplicate by name (store name, bridge resolves name → IP)
+          const byName = new Map<string, IfaceEntry>();
+          for (const i of ifaces) if (!byName.has(i.name)) byName.set(i.name, i);
+          const ifaceList = Array.from(byName.values()).sort((a, b) => {
+            // Sort: non-internal first, VPN (tun/wg) first
+            if (a.internal !== b.internal) return a.internal ? 1 : -1;
+            const av = a.name.startsWith("tun") || a.name.startsWith("wg") ? 0 : 1;
+            const bv = b.name.startsWith("tun") || b.name.startsWith("wg") ? 0 : 1;
+            if (av !== bv) return av - bv;
+            return a.name.localeCompare(b.name);
+          });
+          const currentIface = server.interface ?? "";
+          const options = [
+            { value: "", label: "Default (0.0.0.0 – all interfaces)" },
+            ...ifaceList.map((i) => ({
+              value: i.name,
+              label: `${i.name} — ${i.address}${i.internal ? " (internal)" : ""}${i.name.startsWith("tun") || i.name.startsWith("wg") ? " (VPN)" : ""}`,
+            })),
+          ];
+          // If stored name not in list (e.g. stale or typed IP), keep it as option so it doesn't disappear
+          if (currentIface && !options.some((o) => o.value === currentIface)) {
+            options.push({ value: currentIface, label: `${currentIface} (custom)` });
+          }
+          return (
+            <>
+              <SelectControl
+                label="Network interface"
+                description={
+                  loading
+                    ? "Loading interfaces from bridge…"
+                    : ifaceError
+                      ? `Could not list interfaces: ${ifaceError} – bridge must be reachable (host network shows tun0).`
+                      : `Bind Soulseek peer listener to this interface's IP (name stored, bridge resolves name → IP at apply). Server-side only – browser cannot see eth0/tun0, so list comes from bridge via /api/interfaces. Default 0.0.0.0 listens all. For VPN (tun0 10.8.0.6) use network_mode: host so bridge sees host tun0. Change applies immediately (reconnect, WS stays open).`
+                }
+                value={currentIface}
+                options={options}
+                onChange={(v) => {
+                  setOption("server", "interface", v);
+                  // immediate – ConfigBridgeSync will push, but send now for instant bind
+                  try { send({ type: "config:update", section: "server", key: "interface", value: v } as unknown as never); } catch {}
+                }}
+              />
+              <div className="flex items-center gap-3 pb-2">
+                <button
+                  type="button"
+                  onClick={refresh}
+                  disabled={loading}
+                  className="rounded-xl bg-surface-container-high px-4 py-2 font-label text-xs uppercase tracking-widest text-on-surface-variant hover:bg-surface-container-highest disabled:opacity-50"
+                >
+                  {loading ? "Refreshing…" : "Refresh interfaces"}
+                </button>
+                {ifaceError ? <span className="font-body text-xs text-error">{ifaceError}</span> : null}
+                {!loading && ifaceList.length === 0 && !ifaceError ? (
+                  <span className="font-body text-xs text-on-surface-variant">No interfaces returned – bridge may be down or Docker bridge network (no host tun0). Switch to host network.</span>
+                ) : null}
+              </div>
+              {bridgePort ? (
+                <div className="rounded-xl bg-surface-container-low px-4 py-3 font-body text-xs text-on-surface-variant dark:bg-surface-container-high/40">
+                  Current bind: <span className="font-mono font-medium text-on-surface">{currentIface || "0.0.0.0 (all)"}</span>
+                  {currentIface && byName.get(currentIface) ? (
+                    <span> → <span className="font-mono">{byName.get(currentIface)!.address}</span></span>
+                  ) : null}
+                  . Peer listener <span className="font-mono">{bridgePort}</span> will bind to this IP (or <span className="font-mono">0.0.0.0</span> if empty). VPN example: <span className="font-mono">tun0 10.8.0.6</span>.
+                </div>
+              ) : null}
+            </>
+          );
+        })()}
         <NumberControl
           label="Idle minutes before away"
           description={`Automatically mark you away after ${defaults.server.autoaway} minutes of inactivity.`}

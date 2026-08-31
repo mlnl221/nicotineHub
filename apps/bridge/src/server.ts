@@ -362,6 +362,31 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       }
       return new Response("ok", { status: 200, headers: { "cache-control": "no-store", ...cors } });
     }
+    if ((url.pathname === "/interfaces" || url.pathname === "/api/interfaces") && req.method === "GET") {
+      if (BRIDGE_TOKEN) {
+        const tok = extractToken(req);
+        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
+      }
+      try {
+        const { networkInterfaces } = await import("node:os");
+        const raw = networkInterfaces();
+        // IPv4 only (Soulseek peer listener is IPv4), human-friendly name stored; show internal with flag
+        const result = Object.entries(raw).flatMap(([name, addrs]) =>
+          (addrs ?? []).filter((a) => a.family === "IPv4").map((a) => ({
+            name,
+            address: a.address,
+            netmask: a.netmask,
+            family: a.family,
+            internal: a.internal,
+            mac: a.mac,
+            cidr: (a as unknown as { cidr?: string }).cidr ?? null,
+          }))
+        );
+        return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: (e as Error).message }), { status: 500, headers: { "content-type": "application/json", ...cors } });
+      }
+    }
     if (url.pathname === "/logs" && req.method === "GET") {
       // Simple auth check via token param/header (mirror /ws)
       if (BRIDGE_TOKEN) {
@@ -1138,8 +1163,22 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             (session as unknown as { setUpnpEnabled?: (b: boolean) => void })?.setUpnpEnabled?.(enabled);
             logger.info("server", `UPnP ${enabled ? "enabled" : "disabled"} via config`, { upnp: enabled });
           } else if (section === "server" && ["interface", "autoreply", "autosearch", "autojoin", "userlist", "autoaway"].includes(key)) {
-            if (key === "interface") (session as unknown as { setNetworkInterface?: (v:string)=>void })?.setNetworkInterface?.(String(value || ""));
-            else if (key === "autoreply") (session as unknown as { setAutoreply?: (v:string)=>void })?.setAutoreply?.(String(value || ""));
+            if (key === "interface") {
+              const newIface = String(value || "").trim();
+              const sess = session as unknown as { setNetworkInterface?: (v: string) => void } | undefined;
+              try {
+                sess?.setNetworkInterface?.(newIface);
+                logger.info("server", `interface set to ${newIface || "default (0.0.0.0)"}`, { iface: newIface || "default", username: (session as unknown as { username?: string })?.username });
+                // Send config updated + health so UI can reflect immediate bind change (WS stays open, Soulseek reconnects if loggedIn)
+                try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: newIface })); } catch {}
+                try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE } })); } catch {}
+              } catch (e) {
+                logger.warn("server", "interface change failed", { iface: newIface, error: (e as Error).message });
+                ws.send(JSON.stringify({ type: "error", error: `Cannot bind to interface ${newIface || "default"}: ${(e as Error).message}` }));
+                return;
+              }
+              return; // already sent config:updated, avoid duplicate below
+            } else if (key === "autoreply") (session as unknown as { setAutoreply?: (v:string)=>void })?.setAutoreply?.(String(value || ""));
             else if (key === "autosearch") (session as unknown as { setAutosearch?: (v:string[])=>void })?.setAutosearch?.(Array.isArray(value) ? value as string[] : []);
             else if (key === "autojoin") (session as unknown as { setAutojoin?: (v:string[])=>void })?.setAutojoin?.(Array.isArray(value) ? value as string[] : []);
             else if (key === "userlist") (session as unknown as { setUserlist?: (v:string[])=>void })?.setUserlist?.(Array.isArray(value) ? value as string[] : []);
