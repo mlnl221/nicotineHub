@@ -44,8 +44,7 @@ if (listenPortArg === null && !process.env.LISTEN_PORT) {
     const def = listenPort;
     let answer = "";
     try {
-      // Bun provides global prompt (sync) — fallback to empty if not available
-      const maybePrompt = (globalThis as unknown as { prompt?: (m: string) => string | null }).prompt;
+      const maybePrompt = globalThis.prompt;
       if (typeof maybePrompt === "function") answer = (maybePrompt(`Listening port (VPN port) [${def}]: `) ?? "").trim();
       else answer = "";
     } catch {
