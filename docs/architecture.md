@@ -30,13 +30,14 @@ Reference: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plu
 - Filters (live, nicotine parity, `docs/settings-mapping.md` defilter): `filterin/filterout` regex on path+username, `filtersize` (`< <= == != >= >`, bare `= → ==`, `k/m/g` binary, `MiB`/`B` decimal, `>10.5m <1g`), `filterbr` kbps, `filterlength` sec or `HH:MM:SS` (`>6:00 <12:00`), `filtertype` `flac wav` / `!mp3` / generic `audio/image/video/document/text/archive/executable`, `filtercc` `US !DE` / `,`/`;`/`-` split, `filterslot` (free slot only), `filterpublic` (hide private). Live on keystroke, clear/restore toggle, history 50.
 - Connect-back: direct `PeerInit 1` (`string user`+`string type P`+`uint32 0`, framing `[len][u8 code][payload]`) vs indirect `ConnectToPeer 18` relay + `PierceFireWall 0` (`uint32 token`). `P`/`S` framing `[len][uint32 code][payload]`, `D`/`PeerInit` `[len][uint8 code][payload]`.
 
-## Transfers (F)
+## Transfers (F) + Spectrum
 
 - `ConnectToPeer 18` / `CantConnectToPeer 1001` — direct + indirect `PierceFireWall 0` race 45s (30s indirect + 15s grace, `GetPeerAddress 3` cache 30m single-flight)
 - `QueueUpload 43` → `TransferRequest 40` (`direction 1` upload) → `FileTransferInit` (4B token) + `FileOffset` (8B LE) → raw bytes
 - `PlaceInQueueRequest 51` → `PlaceInQueueResponse 44` (real place via `TransferManager.getQueuePlace`), `UploadDenied 50`/`UploadFailed 46`
 - Incomplete: `DATA_DIR/incomplete/INCOMPLETE<md5(username+path)>` + resume offset, `SendUploadSpeed 121` on finish, limiter `UPLOAD_LIMIT`/`DOWNLOAD_LIMIT` (KB/s, adaptive `max(4096,sent*1.25/dt)` + pause/resume throttle, env aliases `UPLOADLIMIT`/`DOWNLOADLIMIT`)
 - Persistence: `DATA_DIR/downloads.json` (atomic tmp→rename) + `transfers.json` compat, `Finished` served via `GET /files/:token` (`Content-Disposition`)
+- **Spectrum** (port of [`smoked-salmon`](https://github.com/smokin-salmon/smoked-salmon) `src/salmon/uploader/spectrals.py`, Apache-2.0 — `sox` + `oxipng`, no `spek`): on `spectrum:request {id}` for a Finished audio transfer the bridge resolves `DATA_DIR/downloads/<file>` via `TransferManager.getFilePathForToken`, stats `mtime`/`size`, probes `duration` via `music-metadata`, then `sox --multi-threaded <in> --buffer 128000 -n remix 1 spectrogram -x 2000 -y 513 -z 120 -w Kaiser -o Full.png remix 1 spectrogram -x 500 -y 1025 -z 120 -w Kaiser -S <zoomStart> -d 0:02 -o Zoom.png` where `zoomStart = duration>5 ? floor(duration/2) : 0`. Both PNGs are `oxipng -o 2 --strip all` compressed (best-effort) and stored as `/tmp/hub-spectrum/<token>-<hash>-Full.png` + `-Zoom.png` (`hash = sha256(token:mtime:size)[0..16]`, `ETag = "hash"`). `/tmp` is ephemeral — wiped on `docker restart`. Bridge caps at 2 concurrent `sox` (queue), 90 s timeout, LRU prune >100 files. Served via `GET /spectrum/:token/full|zoom` (image/png, `private, max-age=3600`, `ETag`, `If-None-Match` → 304) and `GET /api/spectrum/:token` (JSON). See `docs/spectrum.md`.
 
 ## Browse / Shares
 
@@ -58,12 +59,12 @@ search {type:"search", searchId, query} | {type:"search:user", username,query} |
 search:stop / search:page / browse:page (5-min `searchCache`/`browseCache`, `bridgeCaches` 5m LRU 100)
 browse {type:"browse", action:"shares"|"folder", username,folder?,token?} → {type:"browse:shares"|"browse:folder"}
 chat:room {action:"join"|"leave"|"say"|"ticker"|"setTicker"|...} + chat:private {action:"send"|"ack"} → {type:"chat:event"|"room:event"}
- download:request {username,virtualPath,size,fileName?} + download:control/upload:control {id,action} → {type:"transfer:update/stats/queue/finished"}
- spectrum:request {id} + spectrum:status {id} → {type:"spectrum:status"/"spectrum:ready" {id, token, etag, urls:{full,zoom}}} + GET /spectrum/:token/full|zoom (image/png, ETag, /tmp ephemeral) + /api/spectrum/:token (JSON)
- userinfo {action:"watch"|"unwatch"|"get"|"peerAddress"|"recommendations"|...} → {type:"userinfo:event"}
- plugin:list / toggle / reload / uninstall / install{fileName,data} / installUrl{url} + plugin:settings / resetSettings → {type:"plugin:list"|"plugin:installed"|"plugin:toggled"|...} (bridge `PluginManager`)
-  config:update {section,key,value} / wishlist:update {terms} + statistics:request / reset + ping→pong
-  diagnostics + /health?json: {ok, ts, uptime, port, listenPort, dataDir, tokenAuth, upnp:{enabled, active, port, ip, error, lastSuccessAt}} (gated via `BRIDGE_TOKEN` if set) + /api/upnp/status + /interfaces
+download:request {username,virtualPath,size,fileName?} + download:control/upload:control {id,action} → {type:"transfer:update/stats/queue/finished"}
+spectrum:request {id} + spectrum:status {id} → {type:"spectrum:status"/"spectrum:ready" {id, token, etag, hash, urls:{full,zoom}}} + GET /spectrum/:token/full|zoom (image/png, ETag, /tmp ephemeral) + /api/spectrum/:token (JSON)
+userinfo {action:"watch"|"unwatch"|"get"|"peerAddress"|"recommendations"|...} → {type:"userinfo:event"}
+plugin:list / toggle / reload / uninstall / install{fileName,data} / installUrl{url} + plugin:settings / resetSettings → {type:"plugin:list"|"plugin:installed"|"plugin:toggled"|...} (bridge `PluginManager`)
+ config:update {section,key,value} / wishlist:update {terms} + statistics:request / reset + ping→pong
+ diagnostics + /health?json: {ok, ts, uptime, port, listenPort, dataDir, tokenAuth, upnp:{enabled, active, port, ip, error, lastSuccessAt}} (gated via `BRIDGE_TOKEN` if set) + /api/upnp/status + /interfaces
  ```
 
 ## Distributed (leaf-only, `stage` `d395cc6`+)
@@ -102,3 +103,4 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 - `soulseek.test.ts` — login 72B hex, 54/56/110 empty, 1001, 121, caps, UserSearch 42 / RoomSearch 120 / Wishlist 103 framing, 51 vs 44 distinction
 - `portmapper.test.ts` — NATPMP/UPnP constants, missing port/ip, controlURL relative/absolute/base validation, gateway detection, PortMapper setPort/hasPort/status/error/renewal timer
 - `transfers.test.ts` — queue/place, `Getting status` token register, `File not shared`, streaming (download + resume + upload shared)
+- `spectrum.test.ts` — `calculateZoomStartpoint`, `getSpectrumHash`, `getSpectrumPaths` (`/tmp/hub-spectrum`), + `sox` integration (1 s sine → Full+Zoom) when `sox` present
