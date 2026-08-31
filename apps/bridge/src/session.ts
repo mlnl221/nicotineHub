@@ -2001,10 +2001,12 @@ export class SoulseekSession {
       if (msg.code === 9) {
         // Gate on allowed token to prevent zlib bomb from unsolicited peers
         const tokenProbe = (() => { try { const b = inflateProbeToken(msg.payload); return b; } catch { return null; } })();
+        logger.debug("search", "peer FileSearchResponse received", { tokenProbe, allowed: [...this.allowedSearchTokens].slice(0,5), payloadLen: msg.payload.length });
         if (tokenProbe !== null && this.allowedSearchTokens.size > 0 && !this.allowedSearchTokens.has(tokenProbe)) {
+          logger.debug("search", "FileSearchResponse dropped — token not allowed", { tokenProbe });
           continue;
         }
-        try { const resp = parseFileSearchResponse(msg.payload); this.routeResult(resp); } catch {}
+        try { const resp = parseFileSearchResponse(msg.payload); logger.info("search", "search result", { token: resp.token, username: resp.username, results: resp.results?.length, freeSlots: resp.freeUploadSlots }); this.routeResult(resp); } catch (e) { logger.warn("search", "parseFileSearchResponse failed", { error: (e as Error).message }); }
       } else if (msg.code === PEER_MESSAGE_CODES.userInfoResponse) {
         const username = state.username ?? "";
         // gating: only accept if we requested it (mirrors nicotine allowed_message_responses)

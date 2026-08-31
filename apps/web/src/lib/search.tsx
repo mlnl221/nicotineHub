@@ -95,6 +95,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsub = subscribe((msg) => {
       if (msg.type === "search:result") {
+        console.log("[search] result", (msg as { searchId: string }).searchId, (msg as { rows: unknown[] }).rows?.length, "cap", settings.searches.max_displayed_results);
         const searchId = (msg as { searchId: string }).searchId;
         let rows = (msg as { rows: SearchRow[] }).rows || [];
         // Respect searches.max_displayed_results (nicotine-plus parity) — cap before append
