@@ -61,9 +61,9 @@ chat:room {action:"join"|"leave"|"say"|"ticker"|"setTicker"|...} + chat:private 
 download:request {username,virtualPath,size,fileName?} + download:control/upload:control {id,action} → {type:"transfer:update/stats/queue/finished"}
 userinfo {action:"watch"|"unwatch"|"get"|"peerAddress"|"recommendations"|...} → {type:"userinfo:event"}
 plugin:list / toggle / reload / uninstall / install{fileName,data} / installUrl{url} + plugin:settings / resetSettings → {type:"plugin:list"|"plugin:installed"|"plugin:toggled"|...} (bridge `PluginManager`)
-config:update {section,key,value} / wishlist:update {terms} + statistics:request / reset + ping→pong
-diagnostics + /health?json: {ok, ts, uptime, port, listenPort, dataDir, tokenAuth} (gated via `BRIDGE_TOKEN` if set)
-```
+ config:update {section,key,value} / wishlist:update {terms} + statistics:request / reset + ping→pong
+ diagnostics + /health?json: {ok, ts, uptime, port, listenPort, dataDir, tokenAuth, upnp:{enabled, active, port, ip, error, lastSuccessAt}} (gated via `BRIDGE_TOKEN` if set) + /api/upnp/status + /interfaces
+ ```
 
 ## Distributed (leaf-only, `stage` `d395cc6`+)
 
@@ -75,7 +75,7 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 - `session.ts` — server socket + `Bun.listen` (`P` vs `F` demux via `pendingFileTokens` + heuristic), peer states (`buf/initDone/isFileConn/fileToken`), idle sweep (2s init, 10s ghost, 60s max), `GetPeerAddress` cache 30m single-flight, search/browses, distributed leaf bootstrap (`HaveNoParent 71`, `PossibleParents 102` 10 dials, `BranchLevel/Root`), `PortMapper` (`portmapper.ts` NAT-PMP → UPnP) on login/disconnect/port change
 - `shares.ts` — `ShareDB` (`DATA_DIR/shares.json`, in-memory folders, search, `buildSharedFileListResponse 5`/`FolderContents 36/37` zlib lvl4, `shouldThrottle` 400 ms)
 - `transfers.ts` — `TransferManager` (Map `id→Transfer`, queued/active, 2s `transfer:stats`, 300s `PlaceInQueue` poll, `INCOMPLETE<md5>` + atomic `downloads.json` + `GET /files/:token`)
-- `portmapper.ts` — `NATPMP` (RFC6886 UDP 5351 → gateway from `/proc/net/route`, lease 43200 s / renewal 7200 s, NAT-PMP AddPortMapping) + `UPnP` (SSDP multicast 239.255.255.250:1900, device desc fetch, SOAP AddPortMapping/DeletePortMapping) + `PortMapper` orchestrator (NAT-PMP fallback UPnP, `setPort`/`add`/`remove` like `pynicotine/portmapper.py:PortMapper`)
+- `portmapper.ts` — `NATPMP` (RFC6886 UDP 5351 → gateway from `/proc/net/route`+`netstat`/`ip route` fallback, lease 43200 s / renewal 7200 s, 2 attempts 250 ms doubling, TCP only) + `UPnP` (SSDP multicast 239.255.255.250:1900 5 targets, device desc fetch with controlURL validation vs python ElementTree, SOAP AddPortMapping/DeletePortMapping with 725 permanent lease fallback) + `PortMapper` orchestrator (NAT-PMP fallback UPnP, `setPort`/`add`/`remove` like `pynicotine/portmapper.py:PortMapper`, `status`{active,port,ip,error,lastSuccessAt} for diagnostics)
 - `server.ts` — `Bun.serve` (`/ws` zod, `/health`→`listenPort`, `/logs`, `/diagnostics`, `/files/:token` sanitized `Content-Disposition`, `/plugins` + `/plugins/install`) + token via `?token`/`Authorization`/`Sec-WebSocket-Protocol` + CORS/CSP (`getCorsHeaders`, `SECURITY_HEADERS`) + 1 MB WS guard + 5-min `searchCache`/`browseCache`
 - `plugins/manager.ts` (+ `builtin/core_commands`, `builtin/spamfilter`) — `PluginManager` (`plugins.json` `installed/enabled`, `PLUGININFO/metasettings`, `returncode.zap/break/pass`, 32 `core_commands` cmds) — WS `plugin:list/toggle/reload/uninstall/install{fileName,data}` + `installUrl` (GitHub-only, 20 MB zip / 1 GiB unzip + path-traversal guard)
 
@@ -84,7 +84,8 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 | Env | Default | Notes |
 |-----|---------|-------|
 | `PORT` | `8787` | WS port (`apps/bridge/src/server.ts:186`) |
-| `LISTEN_PORT` | `62904` | Peer listener — **default since `d395cc6`** (was `2234` in early docs; `DEFAULT_LISTEN_PORT` `apps/web/src/lib/config/defaults.ts:194`). Editable via `server.portrange` in Settings → Network (`NetworkSection.tsx:82`), persists to `DATA_DIR/listen_port` (env `LISTEN_PORT` wins on boot), triggers `SetWaitPort 2` + `PortMapper.setPort` + reconnect. Compose maps `${LISTEN_PORT:-62904}:${LISTEN_PORT:-62904}` TCP+UDP (branch from `LISTEN_PORT` env or `listen_port` file). |
+| `LISTEN_PORT` | `49127` | Peer listener — **default 49127** (VPN-forwarded, was `62904` in early docs; `DEFAULT_LISTEN_PORT` `apps/web/src/lib/config/defaults.ts:210`). Editable via `server.portrange` in Settings → Network (`NetworkSection.tsx:82`), persists to `DATA_DIR/listen_port` (env `LISTEN_PORT` wins on boot), triggers `SetWaitPort 2` + `PortMapper.setPort` + reconnect. Compose maps `${LISTEN_PORT:-49127}:${LISTEN_PORT:-49127}` TCP+UDP (branch from `LISTEN_PORT` env or `listen_port` file). |
+| `UPNP_ENABLED` | `1` | `0` disables UPnP/NAT-PMP at boot (overridden by `DATA_DIR/upnp_enabled` persisted from Settings → Network toggle `server.upnp`, default true, `portmapper.ts` NAT-PMP fallback UPnP lease 43200 renew 7200). |
 | `DATA_DIR` | `/data` | Volume (`/data` in compose, `/tmp` fallback in tests) |
 | `BRIDGE_TOKEN` | *(open)* | `?token` / `Bearer` / `Sec-WebSocket-Protocol` → 401 on `/ws`, `/files/:token`, `/logs`, `/diagnostics`, `/plugins/*` |
 | `SHARED_DIRS` | `/data/shared` | `:` list auto-scanned via `ShareDB.scanFsShares` + `music-metadata` attrs `0/1/4/5` |
@@ -97,4 +98,5 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 ## Tests
 
 - `soulseek.test.ts` — login 72B hex, 54/56/110 empty, 1001, 121, caps, UserSearch 42 / RoomSearch 120 / Wishlist 103 framing, 51 vs 44 distinction
+- `portmapper.test.ts` — NATPMP/UPnP constants, missing port/ip, controlURL relative/absolute/base validation, gateway detection, PortMapper setPort/hasPort/status/error/renewal timer
 - `transfers.test.ts` — queue/place, `Getting status` token register, `File not shared`, streaming (download + resume + upload shared)

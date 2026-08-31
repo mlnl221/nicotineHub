@@ -6,9 +6,11 @@ import { defaults, DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, DEFAULT_LISTEN_PORT
 import { SectionCard, TextFieldControl, ToggleControl, NumberControl, SelectControl } from "@/components/settings/controls";
 import { useSession } from "@/lib/session";
 
-function useBridgeListenPort(): { current: number | null; bridgeUrl: string; setCurrent: (n: number | null) => void } {
+type UpnpStatus = { enabled: boolean; active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; hasPort: boolean } | null;
+function useBridgeListenPort(): { current: number | null; bridgeUrl: string; setCurrent: (n: number | null) => void; upnp: UpnpStatus; setUpnp: (s: UpnpStatus) => void } {
   const [current, setCurrent] = useState<number | null>(null);
   const [bridgeUrl, setBridgeUrl] = useState<string>("");
+  const [upnp, setUpnp] = useState<UpnpStatus>(null);
   useEffect(() => {
     const ls = typeof window !== "undefined" ? (window.localStorage.getItem("nicotineHub.bridgeUrl") ?? window.localStorage.getItem("nicotine.bridgeUrl")) : null;
     const url = ls || process.env.NEXT_PUBLIC_BRIDGE_URL || "";
@@ -31,15 +33,16 @@ function useBridgeListenPort(): { current: number | null; bridgeUrl: string; set
       try {
         const r = await fetch(`${base}/health?json=1`, { cache: "no-store" });
         if (!r.ok) return;
-        const j = await r.json() as { listenPort?: number };
+        const j = await r.json() as { listenPort?: number; upnp?: UpnpStatus };
         if (typeof j.listenPort === "number") setCurrent(j.listenPort);
+        if (j.upnp) setUpnp(j.upnp);
       } catch {}
     };
     fetchPort();
     const id = setInterval(fetchPort, 15000);
     return () => clearInterval(id);
   }, []);
-  return { current, bridgeUrl, setCurrent };
+  return { current, bridgeUrl, setCurrent, upnp, setUpnp };
 }
 
 type IfaceEntry = { name: string; address: string; netmask: string; family: string; internal: boolean; mac: string; cidr: string | null };
@@ -74,7 +77,7 @@ export function NetworkSection() {
   const { settings, setOption } = useConfig();
   const server = settings.server;
   const { state, subscribe, send } = useSession();
-  const { current: bridgePort, setCurrent: setBridgePort } = useBridgeListenPort();
+  const { current: bridgePort, setCurrent: setBridgePort, upnp: bridgeUpnp, setUpnp: setBridgeUpnp } = useBridgeListenPort();
   const { ifaces, loading: ifaceLoading, error: ifaceError, refresh: refreshIfaces } = useInterfaces();
   // Normalize portrange: nicotine-plus stores [port, port]; UI edits first element
   const listenPort = Array.isArray(server.portrange) ? server.portrange[0] : (server as unknown as { portrange?: number }).portrange ?? DEFAULT_LISTEN_PORT;
@@ -93,7 +96,7 @@ export function NetworkSection() {
     const unsub = subscribe((msg) => {
       const t = (msg as { type: string }).type;
       if (t === "diagnostics:health") {
-        const h = (msg as unknown as { health: { listenPort?: number } }).health;
+        const h = (msg as unknown as { health: { listenPort?: number; upnp?: typeof bridgeUpnp } }).health;
         if (typeof h.listenPort === "number") {
           setBridgePort(h.listenPort);
           if (saveStatus === "saving" && h.listenPort === pendingPort) {
@@ -102,6 +105,7 @@ export function NetworkSection() {
             setTimeout(() => setSaveStatus("idle"), 3000);
           }
         }
+        if (h.upnp) setBridgeUpnp(h.upnp);
       } else if (t === "server:reconnect") {
         const d = msg as unknown as { error?: string; ok?: boolean; listenPort?: number };
         if (d.ok && typeof d.listenPort === "number") {
@@ -132,7 +136,7 @@ export function NetworkSection() {
       }
     });
     return unsub;
-  }, [subscribe, saveStatus, pendingPort, bridgePort, listenPort, setBridgePort]);
+  }, [subscribe, saveStatus, pendingPort, bridgePort, listenPort, setBridgePort, setBridgeUpnp, bridgeUpnp]);
   const dirty = pendingPort !== listenPort;
   const isSaving = saveStatus === "saving" || state.status === "connecting";
   const handleSave = () => {
@@ -253,6 +257,22 @@ export function NetworkSection() {
           checked={server.upnp ?? true}
           onChange={(v) => setOption("server", "upnp", v)}
         />
+        {bridgeUpnp ? (
+          <div className={`rounded-xl px-4 py-3 font-body text-xs ${bridgeUpnp.active ? "bg-green-500/10 text-green-700 dark:text-green-300" : bridgeUpnp.error ? "bg-error-container text-on-error-container" : bridgeUpnp.enabled ? "bg-amber-500/10 text-amber-700 dark:text-amber-300" : "bg-surface-container-high text-on-surface-variant dark:bg-surface-container-highest/40"}`}>
+            {bridgeUpnp.enabled ? (
+              bridgeUpnp.active ? (
+                <span>✓ Mapped via <span className="font-mono font-medium">{bridgeUpnp.active}</span> — external <span className="font-mono">{bridgeUpnp.port}</span> → <span className="font-mono">{bridgeUpnp.ip}:{bridgeUpnp.port}</span> (TCP, lease 12 h, renew 2 h)</span>
+              ) : bridgeUpnp.error ? (
+                <span>UPnP failed: <span className="font-mono">{bridgeUpnp.error.slice(0, 120)}</span> — router may not support UPnP/NAT-PMP, or container is on Docker bridge (172.x). Use <span className="font-mono">network_mode: host</span> so bridge sees host LAN IP.</span>
+              ) : (
+                <span>UPnP enabled — discovering router (SSDP multicast 239.255.255.250:1900) … will fallback NAT-PMP → UPnP.</span>
+              )
+            ) : (
+              <span>UPnP disabled — port {bridgePort ?? pendingPort} must be forwarded manually (TCP) for incoming searches & transfers.</span>
+            )}
+            {bridgeUpnp.lastSuccessAt ? <span className="block pt-1 text-[11px] opacity-70">Last success: {new Date(bridgeUpnp.lastSuccessAt).toLocaleString()}</span> : null}
+          </div>
+        ) : null}
         {/* Network interface – server-side list via /api/interfaces (bridge sees tun0 with host network) – stores interface NAME human-friendly, immediate apply */}
         {(() => {
           // Use top-level hook values (ifaces, ifaceLoading, ifaceError, refreshIfaces) – no hook call inside render
