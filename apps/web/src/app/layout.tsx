@@ -13,6 +13,8 @@ import { NowPlayingSync } from "@/components/NowPlayingSync";
 import { WebVitals } from "@/components/WebVitals";
 import { GlobalContextMenu } from "@/components/ui/GlobalContextMenu";
 import { SidebarProvider } from "@/components/SidebarContext";
+import { ExitDialogHandler } from "@/components/ExitDialogHandler";
+import { WindowGeometrySync } from "@/components/WindowGeometrySync";
 
 export const metadata: Metadata = {
   title: "Nicotine Hub",
@@ -79,9 +81,11 @@ export default function RootLayout({
               <WishlistProvider>
                 <StatisticsProvider>
                   <TransfersProvider>
-                    <ConfigBridgeSync />
-                    <NowPlayingSync />
-                    {children}
+                     <ConfigBridgeSync />
+                     <ExitDialogHandler />
+                     <WindowGeometrySync />
+                     <NowPlayingSync />
+                     {children}
                     <ToastHost />
                     <GlobalContextMenu />
                   </TransfersProvider>

@@ -176,12 +176,28 @@ export function usePrivateChat() {
   const users = Array.from(conversations.keys());
 
   const closeConversation = (username: string) => {
+    const usersList = Array.from(conversations.keys());
+    const idx = usersList.indexOf(username);
     setConversations((prev) => {
       const next = new Map(prev);
       next.delete(username);
       return next;
     });
-    if (activeUser === username) setActiveUser(null);
+    if (activeUser === username) {
+      const nextUsers = usersList.filter((u) => u !== username);
+      if (nextUsers.length === 0) { setActiveUser(null); return; }
+      let preferPrev = true;
+      try {
+        const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
+        if (raw) {
+          const parsed = JSON.parse(raw) as { ui?: { tab_select_previous?: boolean } };
+          if (typeof parsed?.ui?.tab_select_previous === "boolean") preferPrev = parsed.ui.tab_select_previous;
+        }
+      } catch {}
+      if (preferPrev && idx > 0) setActiveUser(usersList[idx - 1] ?? nextUsers[nextUsers.length - 1] ?? null);
+      else if (!preferPrev && idx < usersList.length - 1) setActiveUser(usersList[idx + 1] ?? nextUsers[nextUsers.length - 1] ?? null);
+      else setActiveUser(nextUsers[nextUsers.length - 1] ?? null);
+    }
   };
 
   const closeAll = () => {

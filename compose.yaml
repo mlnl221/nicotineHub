@@ -10,6 +10,11 @@ services:
       LISTEN_PORT: "${LISTEN_PORT:-49127}"
       DATA_DIR: "/data"
       BRIDGE_TOKEN: "${BRIDGE_TOKEN:-}"
+      # Shares: Settings → Shares sends virtualName|hostPath pairs to the bridge via WS config:update.
+      # Host paths must be mounted into the container to be scannable (e.g. /home/user/Music:/data/Music:ro).
+      # You can also set SHARED_DIRS=/data/Music:/data/shared to auto-scan on startup.
+      SHARED_DIRS: "${SHARED_DIRS:-}"
+      SHARES_DIR: "${SHARES_DIR:-}"
       # Homelab hardening: optionally restrict browser origins (e.g. ALLOWED_ORIGINS=https://hub.example.com,http://nas:3000)
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
     # Homelab: bridge stays host-exposed so browser can ws://nas:8787/ws directly.
@@ -29,6 +34,9 @@ services:
       - "${LISTEN_PORT:-49127}:${LISTEN_PORT:-49127}/udp"
     volumes:
       - bridge-data:/data
+      # Example host mounts for real file sharing (uncomment and adjust):
+      # - /home/user/Music:/data/Music:ro
+      # - /home/user/Downloads:/data/downloads:ro
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://localhost:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s

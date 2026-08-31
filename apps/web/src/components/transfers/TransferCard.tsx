@@ -1,8 +1,17 @@
 "use client";
 
 import type { Transfer } from "@/lib/protocol";
+import { humanSize as formatSize } from "@/lib/format";
+import { useConfig } from "@/lib/config/provider";
 
 function humanSize(bytes: number): string {
+  try {
+    const raw = typeof localStorage !== "undefined" ? (localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings")) : null;
+    if (raw) {
+      const parsed = JSON.parse(raw) as { ui?: { file_size_unit?: string } };
+      if (parsed?.ui?.file_size_unit === "B") return `${bytes.toLocaleString()} B`;
+    }
+  } catch {}
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let v = bytes;
@@ -45,6 +54,8 @@ export function TransferCard({
   onRetry?: () => void;
   onClear?: () => void;
 }) {
+  const { settings } = useConfig();
+  const reverse = settings.ui.reverse_file_paths ?? true;
   const pct = transfer.size > 0 ? Math.min(100, Math.round((transfer.current / transfer.size) * 100)) : 0;
   const isQueued = transfer.status === "Queued";
   const isPaused = transfer.status === "Paused";
@@ -89,16 +100,16 @@ export function TransferCard({
     >
       <div className="flex justify-between items-start gap-3">
         <div className="min-w-0 flex-1">
-          <h4 className="font-body font-semibold text-sm truncate pr-2" title={transfer.fileName}>
-            {transfer.fileName}
+          <h4 className="font-body font-semibold text-sm truncate pr-2" title={reverse ? transfer.fileName : transfer.virtualPath}>
+            {reverse ? transfer.fileName : transfer.virtualPath}
           </h4>
           <p className="font-label text-xs text-on-surface-variant dark:text-outline mt-1 truncate">
             {transfer.isUpload ? "To: " : "Peer: "}
             {transfer.username} • {humanSize(transfer.size)}
             {isQueued && transfer.queuePosition ? ` • Queue ${transfer.queuePosition}` : ""}
           </p>
-          <p className="font-label text-[11px] text-outline mt-0.5 truncate hidden md:block" title={transfer.virtualPath}>
-            {transfer.virtualPath}
+          <p className="font-label text-[11px] text-outline mt-0.5 truncate hidden md:block" title={reverse ? transfer.virtualPath : transfer.fileName}>
+            {reverse ? transfer.virtualPath : transfer.fileName}
           </p>
         </div>
         <div className="text-right shrink-0">

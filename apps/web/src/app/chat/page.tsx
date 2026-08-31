@@ -13,6 +13,7 @@ import { chatRoomMenu, userMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
 import { useCompletion } from "@/lib/completion";
 import { useBuddies } from "@/lib/buddies";
+import { highlightKeywords, usernameHotspotClass } from "@/lib/chatFormat";
 
 export default function ChatRoomsPage() {
   const { state } = useSession();
@@ -318,7 +319,7 @@ export default function ChatRoomsPage() {
                             </span>
                             <div className="min-w-0 flex-1">
                               <p className="font-body text-sm leading-relaxed">
-                                <span className={`font-semibold ${m.username === "system" ? "text-outline italic" : "text-on-surface"}`}>
+                                <span className={m.username === "system" ? "font-semibold text-outline italic" : usernameHotspotClass(settings.ui.usernamehotspots, settings.ui.usernamestyle)}>
                                   {m.username}
                                 </span>
                                 <span className="ml-2 font-mono text-xs text-outline">
@@ -328,7 +329,12 @@ export default function ChatRoomsPage() {
                               <p
                                 className={`mt-0.5 font-body text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${m.username === "system" ? "text-on-surface-variant italic" : "text-on-surface"}`}
                               >
-                                {isIgnored ? "[ignored]" : m.message}
+                                {isIgnored ? (
+                                  "[ignored]"
+                                ) : (() => {
+                                  const hl = highlightKeywords(m.message, settings.words.keywords, settings.words.watch_keywords);
+                                  return hl ? <span dangerouslySetInnerHTML={{ __html: hl }} /> : m.message;
+                                })()}
                               </p>
                             </div>
                           </div>
@@ -348,6 +354,7 @@ export default function ChatRoomsPage() {
                       <div className="flex items-end gap-2 rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-2 focus-within:border-primary">
                         <textarea
                           value={sayInput}
+                          spellCheck={settings.ui.spellcheck}
                           onChange={(e) => { setSayInput(e.target.value); completion.onInput(e.target.value); }}
                           onKeyDown={(e) => {
                             if (e.key === "Tab" && settings.words.tab) {
@@ -382,41 +389,60 @@ export default function ChatRoomsPage() {
                     </div>
                   </div>
 
-                  {/* Right: user list desktop — respects chatrooms.user_list_visible */}
-                  {showUserList ? (
+                   {/* Right: user list desktop — respects chatrooms.user_list_visible + buddylistinchatrooms */}
+                  {showUserList || settings.ui.buddylistinchatrooms === "always" || settings.ui.buddylistinchatrooms === "chatrooms" ? (
                   <aside className="hidden w-56 flex-col border-l border-outline-variant/15 bg-surface-container-lowest md:flex">
-                    <div className="border-b border-outline-variant/15 px-4 py-3">
-                      <h4 className="font-label text-xs uppercase tracking-widest text-on-surface-variant">
-                        Users • {activeUsers.length}
-                      </h4>
-                    </div>
-                    <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-2 space-y-1">
-                      {activeUsers.length === 0 ? (
-                        <p className="px-3 py-2 font-body text-xs text-outline">No users (room list may be stale).</p>
-                      ) : (
-                        activeUsers.map((u) => {
-                          const isIgnored = settings.server.ignorelist.includes(u) || !!settings.server.ipignorelist[u];
-                          const isOperator = (joinedRooms.get(activeRoom!)?.operators || []).includes(u);
-                          const isOwner = joinedRooms.get(activeRoom!)?.owner === u;
-                          return (
-                          <button
-                            key={u}
-                            onClick={() => router.push(`/profile/${encodeURIComponent(u)}`)}
-                            onContextMenu={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setMenuAnchor({ x: e.clientX, y: e.clientY, items: userMenu(u, "chatrooms") });
-                            }}
-                            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-surface-container-low ${isIgnored ? "opacity-40" : ""} ${isOwner ? "font-bold underline decoration-primary" : isOperator ? "font-semibold" : ""}`}
-                          >
-                            <span className={`flex h-6 w-6 items-center justify-center rounded text-[10px] font-bold ${isOwner ? "bg-primary text-on-primary" : "bg-surface-container-high"}`}>
-                              {u.slice(0, 2).toUpperCase()}
-                            </span>
-                            <span className="truncate font-body text-xs font-medium">{u}{isOwner ? " ★" : isOperator ? " ◆" : ""}</span>
-                          </button>
-                        );})
-                      )}
-                    </div>
+                    {showUserList ? (
+                      <>
+                        <div className="border-b border-outline-variant/15 px-4 py-3">
+                          <h4 className="font-label text-xs uppercase tracking-widest text-on-surface-variant">
+                            Users • {activeUsers.length}
+                          </h4>
+                        </div>
+                        <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-2 space-y-1">
+                          {activeUsers.length === 0 ? (
+                            <p className="px-3 py-2 font-body text-xs text-outline">No users (room list may be stale).</p>
+                          ) : (
+                            activeUsers.map((u) => {
+                              const isIgnored = settings.server.ignorelist.includes(u) || !!settings.server.ipignorelist[u];
+                              const isOperator = (joinedRooms.get(activeRoom!)?.operators || []).includes(u);
+                              const isOwner = joinedRooms.get(activeRoom!)?.owner === u;
+                              return (
+                              <button
+                                key={u}
+                                onClick={() => router.push(`/profile/${encodeURIComponent(u)}`)}
+                                onContextMenu={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setMenuAnchor({ x: e.clientX, y: e.clientY, items: userMenu(u, "chatrooms") });
+                                }}
+                                className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-surface-container-low ${isIgnored ? "opacity-40" : ""} ${isOwner ? "font-bold underline decoration-primary" : isOperator ? "font-semibold" : ""}`}
+                              >
+                                <span className={`flex h-6 w-6 items-center justify-center rounded text-[10px] font-bold ${isOwner ? "bg-primary text-on-primary" : "bg-surface-container-high"}`}>
+                                  {u.slice(0, 2).toUpperCase()}
+                                </span>
+                                <span className="truncate font-body text-xs font-medium">{u}{isOwner ? " ★" : isOperator ? " ◆" : ""}</span>
+                              </button>
+                            );})
+                          )}
+                        </div>
+                      </>
+                    ) : null}
+                    {(settings.ui.buddylistinchatrooms === "chatrooms" || settings.ui.buddylistinchatrooms === "always") && buddies.length > 0 ? (
+                      <div className={`${showUserList ? "border-t" : ""} border-outline-variant/15 px-2 py-2`}>
+                        <h4 className="px-2 py-1 font-label text-[10px] uppercase tracking-widest text-on-surface-variant">Buddies • {buddies.length}</h4>
+                        <div className="space-y-1 max-h-40 overflow-y-auto">
+                          {buddies.slice(0, 12).map((b) => (
+                            <button key={b.username} onClick={() => router.push(`/profile/${encodeURIComponent(b.username)}`)} className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left hover:bg-surface-container-low">
+                              <span className="flex h-5 w-5 items-center justify-center rounded bg-tertiary-container text-[9px] font-bold text-on-tertiary-container">{b.username.slice(0,2).toUpperCase()}</span>
+                              <span className="truncate font-body text-xs">{b.username}</span>
+                              <span className={`ml-auto h-2 w-2 rounded-full ${b.status === 2 ? "bg-green-500" : b.status === 1 ? "bg-amber-500" : "bg-outline-variant"}`} title={b.status === 2 ? "Online" : b.status === 1 ? "Away" : "Offline"} />
+                            </button>
+                          ))}
+                        </div>
+                        {buddies.length > 12 ? <p className="px-2 pt-1 font-label text-[10px] text-outline">+{buddies.length - 12} more in Buddies tab</p> : null}
+                      </div>
+                    ) : null}
                   </aside>
                   ) : null}
                 </div>

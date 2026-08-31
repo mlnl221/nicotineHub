@@ -26,7 +26,8 @@ export function SearchScreen() {
   const { settings, setOption } = useConfig();
   const { getIgnored, markSeen } = useWishlist();
   const router = useRouter();
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(() => settings.searches.filters_visible ?? false);
+  useEffect(() => { setShowFilters(settings.searches.filters_visible ?? false); }, [settings.searches.filters_visible]);
   const [sheetRow, setSheetRow] = useState<SearchRow | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const ctxMenu = useContextMenu();
@@ -154,7 +155,11 @@ export function SearchScreen() {
       <div className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-low/95 backdrop-blur dark:bg-inverse-surface/95 border-b border-outline-variant/10">
         <SearchBar
           onSearch={startSearch}
-          onToggleFilters={() => setShowFilters((v) => !v)}
+          onToggleFilters={() => {
+            const next = !showFilters;
+            setShowFilters(next);
+            setOption("searches", "filters_visible", next);
+          }}
           activeFilterCount={activeFilterCount}
           searching={activeTab?.status === "searching"}
           onStop={() => activeId && stopSearch(activeId)}

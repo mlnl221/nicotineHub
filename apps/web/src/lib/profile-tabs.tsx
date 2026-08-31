@@ -244,9 +244,24 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     if (tab && state.status === "connected") {
       try { send({ type: "userinfo", action: "unwatch", username: tab.username }); } catch {}
     }
+    const idx = tabsRef.current.findIndex((t) => t.id === id);
     const next = tabsRef.current.filter((t) => t.id !== id);
     setTabs(next);
-    setActiveId((cur) => cur === id ? (next[next.length - 1]?.id ?? null) : cur);
+    setActiveId((cur) => {
+      if (cur !== id) return cur;
+      if (next.length === 0) return null;
+      let preferPrev = true;
+      try {
+        const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
+        if (raw) {
+          const parsed = JSON.parse(raw) as { ui?: { tab_select_previous?: boolean } };
+          if (typeof parsed?.ui?.tab_select_previous === "boolean") preferPrev = parsed.ui.tab_select_previous;
+        }
+      } catch {}
+      if (preferPrev && idx > 0) return tabsRef.current[idx - 1]?.id ?? next[next.length - 1]?.id ?? null;
+      if (!preferPrev && idx < tabsRef.current.length - 1) return tabsRef.current[idx + 1]?.id ?? next[next.length - 1]?.id ?? null;
+      return next[next.length - 1]?.id ?? null;
+    });
   }, [send, state.status]);
 
   const setActive = useCallback((id: string) => setActiveId(id), []);

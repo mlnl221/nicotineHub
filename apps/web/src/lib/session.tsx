@@ -366,10 +366,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     (req: Omit<LoginRequest, "type">) => {
+      // Merge Settings host/port if caller didn't provide them (Settings → Network is authoritative)
+      let mergedReq = req;
+      if (!isDemo && !req.host && !req.port) {
+        try {
+          const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
+          if (raw) {
+            const parsed = JSON.parse(raw) as { server?: { server?: { host?: string; port?: number } } };
+            const h = parsed?.server?.server?.host;
+            const p = parsed?.server?.server?.port;
+            if (h || p) mergedReq = { ...req, host: h || req.host, port: p || req.port };
+          }
+        } catch {}
+      }
       // Persist creds for homelab auto-login (sessionStorage + cookie)
       // Do this before demo check so demo also gets ephemeral creds? No — demo creds are fake, don't persist real pass
-      if (!isDemo && req.username && req.password) {
-        saveCreds(req);
+      if (!isDemo && mergedReq.username && mergedReq.password) {
+        saveCreds(mergedReq);
       }
       // Demo: accept any username/password, no bridge
       if (isDemo) {
@@ -399,18 +412,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      lastLogin.current = req;
+      lastLogin.current = mergedReq;
       shouldReconnect.current = true;
       reconnectAttempts.current = 0;
       clearReconnect();
-      connectSocket(req);
+      connectSocket(mergedReq);
     },
     [connectSocket, clearReconnect],
   );
 
   // Homelab auto-login: if any creds are present (sessionStorage or cookie), auto-login on mount/reload
   // This handles port-change reconnect that restarts bridge/Docker and page reload, without requiring
-  // user to re-enter password. For homelab convenience we auto-login if any creds are present.
+  // user to re-enter password. For homelab convenience we auto-login if any creds are present,
+  // unless server.auto_connect_startup is explicitly false (nicotine-plus parity).
   useEffect(() => {
     if (isDemo) return;
     if (autoLoginAttempted.current) return;
@@ -419,6 +433,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (stateRef.current.status !== "idle") return;
       try {
         if (sessionStorage.getItem("__mockLoggedIn")) return;
+      } catch {}
+      // Respect server.auto_connect_startup=false (settings-audit P0)
+      try {
+        const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
+        if (raw) {
+          const parsed = JSON.parse(raw) as { server?: { auto_connect_startup?: boolean } };
+          if (parsed?.server?.auto_connect_startup === false) return;
+        }
       } catch {}
       const creds = loadCreds();
       if (creds?.username && creds?.password) {

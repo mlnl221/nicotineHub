@@ -58,6 +58,11 @@ export interface Settings {
     exitdialog: number;
     modes_visible: Record<string, boolean>;
     modes_order: string[];
+    width: number;
+    height: number;
+    xposition: number;
+    yposition: number;
+    maximized: boolean;
   };
   notifications: {
     notification_window_title: boolean;
@@ -248,6 +253,11 @@ export const defaults: Settings = {
       profile: true,
     },
     modes_order: ["search", "browse", "downloads", "uploads", "chat", "privateChat", "buddies", "interests", "profile"],
+    width: 800,
+    height: 600,
+    xposition: -1,
+    yposition: -1,
+    maximized: true,
   },
   notifications: {
     notification_window_title: true,

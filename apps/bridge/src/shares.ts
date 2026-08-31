@@ -277,6 +277,93 @@ export class ShareDB {
     return { dirs: folders.length, files };
   }
 
+  /**
+   * Real file sharing — web sends [virtualName,path] pairs.
+   * Scan each real path (must be mounted into container, e.g. -v ~/Music:/data/shares/Music)
+   * and map to the requested virtualName. Persists and invalidates watchers.
+   */
+  setCustomShares(roots: [string, string][], level: PermissionLevel = PermissionLevel.PUBLIC): ShareFolder[] {
+    const prevByName = new Map<string, ShareFile>();
+    for (const fo of this.folders) for (const f of fo.files) prevByName.set(f.name, f);
+    const folders: ShareFolder[] = [];
+    // Keep other levels untouched; rebuild that level from scratch
+    const keep = (lvl: PermissionLevel) => (lvl === level ? [] : this.getFolders(lvl));
+    const beforePublic = level === PermissionLevel.PUBLIC ? [] : [...this.publicFolders];
+    const beforeBuddy = level === PermissionLevel.BUDDY ? [] : [...this.buddyFolders];
+    const beforeTrusted = level === PermissionLevel.TRUSTED ? [] : [...this.trustedFolders];
+    // Scan each requested root
+    for (const [virtualRaw, realRaw] of roots) {
+      const vName = (virtualRaw || "").trim().replace(/[/\\]+/g, "_").replace(/^[" ]+|[" ]+$/g, "") || "Shared";
+      const rPath = (realRaw || "").trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
+      if (!vName || !rPath) continue;
+      if (!existsSync(rPath)) {
+        // Path not mounted — keep placeholder so UI shows, but no files. Persist virtual→real mapping anyway.
+        this.virtual2real.set(vName, rPath);
+        this.real2virtual.set(rPath, vName);
+        // create empty folder entry so peer sees virtual name even if host path missing (nicotine parity: empty dirs still reported)
+        const existsVirtual = folders.find((f) => f.name === vName);
+        if (!existsVirtual) folders.push({ name: vName, files: [] });
+        continue;
+      }
+      try {
+        const stats = statSync(rPath);
+        if (stats.isFile()) {
+          // single file share
+          const ext = extname(rPath).slice(1).toLowerCase();
+          const fileName = `${vName}\\${basename(rPath)}`;
+          const prev = prevByName.get(fileName);
+          const mtime = stats.mtimeMs;
+          const prevMtime = this.fileMtimes.get(rPath);
+          if (prev && prevMtime === mtime) {
+            folders.push({ name: vName, files: [{ ...prev, size: stats.size }] });
+          } else {
+            this.fileMtimes.set(rPath, mtime);
+            // attrs async not needed sync — use empty
+            folders.push({ name: vName, files: [{ name: fileName, size: stats.size, ext, attrs: [] }] });
+          }
+          this.virtual2real.set(vName, rPath);
+          this.real2virtual.set(rPath, vName);
+          this.virtual2real.set(fileName, rPath);
+          this.real2virtual.set(rPath, fileName);
+        } else if (stats.isDirectory()) {
+          this.walkDir(rPath, vName, folders, prevByName);
+        }
+      } catch {}
+    }
+    // Merge untouched levels back into their arrays
+    if (level === PermissionLevel.PUBLIC) this.publicFolders = folders;
+    else if (level === PermissionLevel.BUDDY) this.buddyFolders = folders;
+    else if (level === PermissionLevel.TRUSTED) this.trustedFolders = folders;
+    // Rebuild combined + persist
+    this.rebuildCombined();
+    // Re-add untouched levels' folders (rebuildCombined already merged all three, so we need to ensure we didn't lose them: we kept before* but set above only one level — need to restore others)
+    // Actually public/buddy/trusted already set above; rebuildCombined merges all three, so fine.
+    this.persist();
+    // Re-establish watchers for new dirs
+    try {
+      for (const w of this.watchers) try { (w as unknown as { close: () => void }).close(); } catch {}
+      this.watchers = [];
+      const dirs = this.resolveSharedDirs();
+      // also watch custom roots
+      for (const [, r] of roots) if (existsSync(r)) dirs.push(r);
+      for (const d of dirs) {
+        if (!existsSync(d)) continue;
+        try {
+          const { watch } = require("node:fs") as typeof import("node:fs");
+          const w = watch(d, { recursive: true } as unknown as { recursive: boolean }, () => {
+            const now = Date.now();
+            const last = (this as unknown as { _watchDebounce?: number })._watchDebounce || 0;
+            if (now - last < 2000) return;
+            (this as unknown as { _watchDebounce: number })._watchDebounce = now;
+            this.rescanAsync().catch(() => {});
+          });
+          this.watchers.push(w as unknown as ReturnType<typeof import("node:fs").watch>);
+        } catch {}
+      }
+    } catch {}
+    return folders;
+  }
+
   /** Flood protection: 0.4s per user — mirrors nicotine shares.py:_requested_share_times */
   shouldThrottle(username: string): boolean {
     const now = Date.now();
@@ -574,8 +661,8 @@ export class ShareDB {
     return frameMessage(PEER_MESSAGE_CODES.folderContentsResponse, compressed);
   }
 
-  /** Build FileSearchResponse 9 for inbound FileSearch queries (if someone searches us) — respects permission */
-  buildFileSearchResponse(token: number, username: string, query: string, freeSlots = true, speed = 0, inQueue = 0, permission: PermissionLevel = PermissionLevel.PUBLIC): Buffer | null {
+  /** Build FileSearchResponse 9 for inbound FileSearch queries (if someone searches us) — respects permission + maxresults cap (nicotine-plus searches.maxresults 300) */
+  buildFileSearchResponse(token: number, username: string, query: string, freeSlots = true, speed = 0, inQueue = 0, permission: PermissionLevel = PermissionLevel.PUBLIC, maxResults?: number): Buffer | null {
     if (this.isExcluded(query)) return null;
     // Filter search results by permission level's folders only
     const folders = this.getFoldersForPermission(permission);
@@ -587,8 +674,9 @@ export class ShareDB {
         if (tokens.every(t => f.name.toLowerCase().includes(t))) filtered.push(f);
       }
     }
-    const results = filtered.sort((a,b)=> a.name.localeCompare(b.name));
+    let results = filtered.sort((a,b)=> a.name.localeCompare(b.name));
     if (!results.length) return null;
+    if (typeof maxResults === "number" && maxResults > 0 && results.length > maxResults) results = results.slice(0, maxResults);
     // Build result payload similar to parseFileSearchResponse expectation: zlib compressed
     const parts: Buffer[] = [];
     parts.push(packString(username));
