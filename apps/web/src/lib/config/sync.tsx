@@ -51,7 +51,10 @@ export function ConfigBridgeSync() {
         ignorelist: settings.server.ignorelist,
         ipblocklist: settings.server.ipblocklist,
         ipignorelist: settings.server.ipignorelist,
-        portrange: settings.server.portrange,
+        // portrange is NOT bulk-synced here — it triggers a server reconnect and
+        // would flip-flop if every fresh browser (default 62904) pushed to a
+        // bridge already on 49127. NetworkSection.tsx sends it explicitly only
+        // when the user edits the field.
         upnp: settings.server.upnp,
         interface: settings.server.interface,
         autoreply: settings.server.autoreply,

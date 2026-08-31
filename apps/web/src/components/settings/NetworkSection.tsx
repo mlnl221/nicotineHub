@@ -45,7 +45,7 @@ function useBridgeListenPort(): { current: number | null; bridgeUrl: string } {
 export function NetworkSection() {
   const { settings, setOption } = useConfig();
   const server = settings.server;
-  const { state } = useSession();
+  const { state, send } = useSession();
   const { current: bridgePort } = useBridgeListenPort();
   // Normalize portrange: nicotine-plus stores [port, port]; UI edits first element
   const listenPort = Array.isArray(server.portrange) ? server.portrange[0] : (server as unknown as { portrange?: number }).portrange ?? DEFAULT_LISTEN_PORT;
@@ -96,8 +96,13 @@ export function NetworkSection() {
           onChange={(v) => {
             const p = Math.max(1024, Math.min(65535, Number(v) || DEFAULT_LISTEN_PORT));
             setOption("server", "portrange", [p, p] as unknown as never);
+            // Explicitly push to bridge (ConfigBridgeSync no longer bulk-syncs portrange to avoid flip-flop)
+            try { send({ type: "config:update", section: "server", key: "portrange", value: [p, p] } as unknown as never); } catch {}
           }}
-          onReset={() => setOption("server", "portrange", [DEFAULT_LISTEN_PORT, DEFAULT_LISTEN_PORT] as unknown as never)}
+          onReset={() => {
+            setOption("server", "portrange", [DEFAULT_LISTEN_PORT, DEFAULT_LISTEN_PORT] as unknown as never);
+            try { send({ type: "config:update", section: "server", key: "portrange", value: [DEFAULT_LISTEN_PORT, DEFAULT_LISTEN_PORT] } as unknown as never); } catch {}
+          }}
         />
         {bridgePort ? (
           <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs text-on-surface-variant dark:bg-surface-container-highest/40">

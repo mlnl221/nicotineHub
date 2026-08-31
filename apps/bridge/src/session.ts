@@ -136,7 +136,7 @@ export interface SearchEndPayload { searchId: string; reason: "max_results" | "s
 export interface SearchHandlers { onResult: (p: SearchResultPayload) => void; onEnd: (p: SearchEndPayload) => void; timeoutMs?: number; }
 interface ActiveSearch extends SearchHandlers { searchId: string; timer?: ReturnType<typeof setTimeout>; users: Set<string>; count: number; maxResults: number; }
 interface PeerState { buf: Buffer; initDone: boolean; username?: string; outbound?: boolean; connType?: string; lastActive: number; isFileConn?: boolean; fileToken?: number; createdAt: number; }
-export type ServerEvent = { type: "reconnect"; attempt: number; delay: number } | { type: "reconnect-failed"; error: string };
+export type ServerEvent = { type: "reconnect"; attempt: number; delay: number } | { type: "reconnect-failed"; error: string } | { type: "reconnected"; ip: string };
 export interface BrowseEvent {
   type: "browse-shares" | "browse-folder" | "browse-error";
   username: string;
@@ -940,7 +940,8 @@ export class SoulseekSession {
           const { dirs, files } = this.shareDB.getSharedCounts();
           this.serverSocket?.write(buildSharedFoldersFiles(dirs, files));
         } catch {}
-        this.startListener();
+        // startListener can fail if port still in TIME_WAIT from previous session — don't fail login
+        try { this.startListener(); } catch (e) { logger.warn("server", "peer listener bind failed (will retry on next port change)", { error: (e as Error).message, port: this._listenPort }); }
         this.startIdleSweep();
         this.startServerPing();
         // Portmapper: NAT-PMP → UPnP fallback (like nicotine PortMapper LEASE_DURATION 12h, RENEWAL 2h)
@@ -952,7 +953,14 @@ export class SoulseekSession {
         this.restartWishlistTimer();
         this.restartAutoawayTimer();
         this.handleAutoJoinAndWatch();
-        this.loginResolve?.(resp);
+        // If this was a background reconnect (no pending login promise), notify WS so UI can return to connected
+        const wasBackgroundReconnect = !this.loginResolve;
+        if (this.loginResolve) {
+          this.loginResolve(resp);
+        } else if (wasBackgroundReconnect) {
+          // background reconnect (e.g. after port change) — tell client it's back
+          try { (this.opts as unknown as { onServerEvent?: (e: ServerEvent) => void }).onServerEvent?.({ type: "reconnected", ip: resp.ipAddress ?? "" } as ServerEvent); } catch {}
+        }
         this.loginResolve = undefined;
         this.loginReject = undefined;
       } else {

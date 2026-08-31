@@ -738,10 +738,18 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           onServerEvent: (event) => {
             if (event.type === "reconnect") pluginManager.serverConnectNotification();
             else if (event.type === "reconnect-failed") pluginManager.serverDisconnectNotification(false);
+            else if (event.type === "reconnected") pluginManager.serverConnectNotification();
             logger.info("server", "server reconnect", event as unknown as Record<string, unknown>);
             try {
-              const { type: _t, ...rest } = event as unknown as Record<string, unknown> & { type: string };
-              ws.send(JSON.stringify({ type: "server:reconnect", ...(rest as Record<string, unknown>), attempt: (event as unknown as { attempt?: number }).attempt, delay: (event as unknown as { delay?: number }).delay, error: (event as unknown as { error?: string }).error }));
+              if ((event as unknown as { type: string }).type === "reconnected") {
+                const ip = (event as unknown as { ip?: string }).ip ?? "";
+                // Tell client it's back — reuse login:result so existing handler restores connected
+                ws.send(JSON.stringify({ type: "login:result", ok: true, data: { ipAddress: ip } }));
+                ws.send(JSON.stringify({ type: "server:reconnected", ip }));
+              } else {
+                const { type: _t, ...rest } = event as unknown as Record<string, unknown> & { type: string };
+                ws.send(JSON.stringify({ type: "server:reconnect", ...(rest as Record<string, unknown>), attempt: (event as unknown as { attempt?: number }).attempt, delay: (event as unknown as { delay?: number }).delay, error: (event as unknown as { error?: string }).error }));
+              }
             } catch {}
           },
         });

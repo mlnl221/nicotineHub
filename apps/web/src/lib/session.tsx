@@ -128,7 +128,16 @@ function loadCreds(): Omit<LoginRequest, "type"> | null {
 }
 function clearCreds() {
   try { sessionStorage.removeItem(EPHEMERAL_KEY); sessionStorage.removeItem(EPHEMERAL_KEY.replace("nicotineHub.", "nicotine.")); } catch {}
-  try { document.cookie = `${COOKIE_NAME}=; Path=/; Max-Age=0`; document.cookie = `nicotine_creds=; Path=/; Max-Age=0`; } catch {}
+  try {
+    // Mirror saveCreds attributes (Path + SameSite + Secure) so deletion matches the
+    // stored cookie on all browsers. Safari in particular requires SameSite/Secure to
+    // match for removal. Use both Max-Age=0 and Expires for compatibility.
+    const baseAttrs = "Path=/; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    document.cookie = `${COOKIE_NAME}=; ${baseAttrs}`;
+    document.cookie = `${COOKIE_NAME}=; ${baseAttrs}; Secure`;
+    document.cookie = `nicotine_creds=; ${baseAttrs}`;
+    document.cookie = `nicotine_creds=; ${baseAttrs}; Secure`;
+  } catch {}
   // Also clear any legacy localStorage password if ever set
   try { localStorage.removeItem("nicotineHub.rememberedCreds"); localStorage.removeItem("nicotine.rememberedCreds"); } catch {}
 }
@@ -280,6 +289,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           } else if (stateRef.current.status === "connected") {
             setState((s) => ({ ...s, status: "connecting" }));
           }
+          break;
+        }
+        case "server:reconnected": {
+          // Background reconnect succeeded (e.g. after port change) — restore connected without user re-login
+          setState((s) => ({ ...s, status: "connected", user: s.user ?? loginReq.username, error: undefined }));
+          clearReconnect();
+          reconnectAttempts.current = 0;
+          shouldReconnect.current = true;
           break;
         }
         case "error":
