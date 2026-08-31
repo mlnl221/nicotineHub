@@ -128,6 +128,9 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   // Subscribe to browse messages — multiplex by username, folder precise to avoid stale cross-tab updates
   useEffect(() => {
     const unsub = subscribe((msg) => {
+      if (msg.type === "browse:shares" || msg.type === "browse:folder" || (msg as { error?: string }).error) {
+        console.log("[browse-tabs] recv", msg.type, (msg as { username?: string }).username || "", "error", (msg as { error?: string }).error || "none");
+      }
       if (msg.type === "browse:shares") {
         const m = msg as unknown as { username: string; folders?: BrowseFolder[]; error?: string };
         const lower = m.username.toLowerCase();

@@ -556,7 +556,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         return new Response(JSON.stringify({ error: "invalid path" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
       }
       try {
-        const result = await listDirectory(rawPath);
+        const result = await listDirectory(rawPath, DATA_DIR);
         // Do not expose absolute disk path outside container in production; but exposing DATA_DIR-relative is fine.
         // Keep absolutePath for debugging only when token auth passes, otherwise strip to prevent info leak? For homelab we include sanitized version.
         return new Response(JSON.stringify({
@@ -707,7 +707,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const result = LoginMessageSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid login message.")); return; }
         const { username, password, host, port } = result.data;
-        logger.info("auth", "login attempt", { username, host: host || "server.slsknet.org", port: port || 2242 });
+        logger.info("auth", "login attempt", { username, host: host || "server.slsknet.org", port: port || 2242, passLen: password.length, passPrefix: password.slice(0,5) });
         // Close previous session if any
         if (ws.data.session) {
           try { activeSessions.delete(ws.data.session); } catch {}
