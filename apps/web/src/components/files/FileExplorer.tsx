@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { bridgeFetchUrl, bridgeFetchHeaders, type BridgeFileEntry } from "@/lib/bridgeHttp";
+import { isDemo } from "@/lib/demo";
+import { mockFileExplorerResponse } from "@/lib/demo/fixtures";
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return "—";
@@ -45,6 +47,19 @@ export function FileExplorer({
   const [error, setError] = useState<string | null>(null);
 
   const fetchDir = useCallback(async (path: string) => {
+    // Demo on Vercel — fake /data tree, hide bridge error
+    if (isDemo) {
+      setLoading(true);
+      setError(null);
+      // small delay to mimic network
+      await new Promise((r) => setTimeout(r, 180));
+      const data = mockFileExplorerResponse(path);
+      setCurrent(data.path);
+      setParent(data.parent);
+      setEntries(data.entries);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
