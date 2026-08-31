@@ -232,7 +232,7 @@ async function mockBridge(page, opts: { withTransfers?: boolean } = {}) {
 async function login(page) {
   await page.goto("/");
   await page.getByLabel(/Username/i).fill("tester");
-  await page.getByLabel(/Password/i).fill("secret123");
+  await page.getByPlaceholder("••••••••").fill("secret123");
   await page.getByRole("button", { name: /Log in/i }).click();
   // after mock login, we land on /search via router.replace
   await expect(page).toHaveURL(/\/search/);
@@ -249,9 +249,9 @@ test.describe("Transfers pages", () => {
     await login(page);
     await page.goto("/downloads");
 
-    // header
-    await expect(page.getByRole("heading", { name: "Downloads & Uploads" })).toBeVisible();
-    await expect(page.getByText(/Monitoring \d+ active connections/)).toBeVisible();
+    // header — Downloads page shows "Downloads" (separate from Uploads)
+    await expect(page.getByRole("heading", { name: "Downloads" }).first()).toBeVisible();
+    await expect(page.getByText(/active/i).first()).toBeVisible();
     await expect(page.getByTestId("download-speed")).toBeVisible();
     await expect(page.getByTestId("upload-speed")).toBeVisible();
 

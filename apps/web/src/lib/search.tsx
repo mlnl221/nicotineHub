@@ -193,7 +193,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         if (target) {
           buddies = target.split(",").map((s) => s.trim()).filter(Boolean);
         } else {
-          // load from localStorage nicotineHub.buddies (up to 100)
+          // load from localStorage nicotineHub.buddies (up to 100) — nicotine-plus _send_buddies_search_request loops buddies
           try {
             const raw = (localStorage.getItem("nicotineHub.buddies") ?? localStorage.getItem("nicotine.buddies"));
             if (raw) {
@@ -203,9 +203,8 @@ export function SearchProvider({ children }: { children: ReactNode }) {
           } catch {}
         }
         if (buddies.length) {
-          for (const buddy of buddies) {
-            send({ type: "search:user", searchId: id, username: buddy, query } as unknown as never);
-          }
+          // Single token for all buddies (nicotine-plus parity: UserSearch per buddy with same token)
+          send({ type: "search:buddies", searchId: id, usernames: buddies, query } as unknown as never);
         } else {
           // no buddies: fallback to global with flash via tab label
           send({ type: "search", searchId: id, query });

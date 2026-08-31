@@ -25,6 +25,7 @@ import { Plugin as CoreCommandsPlugin, manifest as coreCommandsManifest } from "
 import { Plugin as SpamfilterPlugin, manifest as spamManifest } from "./plugins/builtin/spamfilter.ts";
 import { Plugin as LeechDetectorPlugin, manifest as leechManifest } from "./plugins/builtin/leech_detector.ts";
 import { listDirectory } from "./files.ts";
+import { portChecker } from "./portchecker.ts";
 
 /* Schemas */
 
@@ -56,6 +57,12 @@ const SearchRoomSchema = z.object({
 const SearchWishlistSchema = z.object({
   type: z.literal("search:wishlist"),
   searchId: z.string().min(1).max(64),
+  query: z.string().min(1).max(255),
+});
+const SearchBuddiesSchema = z.object({
+  type: z.literal("search:buddies"),
+  searchId: z.string().min(1).max(64),
+  usernames: z.array(z.string().min(1).max(64)).min(1).max(100),
   query: z.string().min(1).max(255),
 });
 const StopMessageSchema = z.object({
@@ -430,6 +437,26 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       }
       const st = getGlobalPortMapperStatus();
       return new Response(JSON.stringify({ ...st, listenPort: LISTEN_PORT, ts: new Date().toISOString() }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
+    }
+    // Port checker — external host (mirrors pynicotine/portchecker.py, slsknet.org)
+    if ((url.pathname === "/portchecker" || url.pathname === "/api/portchecker") && req.method === "GET") {
+      // No auth required for homelab LAN check; if BRIDGE_TOKEN set, still allow but gate via same as health json if needed.
+      // We keep it open for diagnostics (like /health plain) but include token check for detailed gate if BRIDGE_TOKEN enforced.
+      const portParam = Number(url.searchParams.get("port") || LISTEN_PORT);
+      const port = Number.isInteger(portParam) && portParam >= 1 && portParam <= 65535 ? portParam : LISTEN_PORT;
+      try {
+        const result = await portChecker.checkStatus(port);
+        const upnp = getGlobalPortMapperStatus();
+        return new Response(JSON.stringify({ ...result, upnp, listenPort: port, ts: new Date().toISOString() }), {
+          status: 200,
+          headers: { "content-type": "application/json", "cache-control": "no-store", ...cors },
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ port, open: null, error: (e as Error).message, ts: new Date().toISOString() }), {
+          status: 200,
+          headers: { "content-type": "application/json", "cache-control": "no-store", ...cors },
+        });
+      }
     }
     if ((url.pathname === "/interfaces" || url.pathname === "/api/interfaces") && req.method === "GET") {
       if (BRIDGE_TOKEN) {
@@ -958,27 +985,15 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const out = pluginManager.outgoingGlobalSearchEvent(query);
         if (out === null) return;
         const finalQuery = (out?.[0] as string) ?? query;
-        // 5m memory cache: serve instantly if hit
-        const cKey = cacheKeySearch(finalQuery, "global", "");
-        const hit = getCachedSearch(cKey);
-        if (hit && hit.rows.length) {
-          logger.info("search", "cache hit", { searchId, query: finalQuery.slice(0,80), rows: hit.rows.length });
-          ws.send(JSON.stringify({ type: "search:start", searchId, token: 0 }));
-          ws.send(JSON.stringify({ type: "search:result", searchId, token: 0, rows: hit.rows, cached: true }));
-          ws.send(JSON.stringify({ type: "search:end", searchId, reason: "max_results" }));
-          return;
-        }
+        // Search cache disabled — always hit network for fresh results (see fix/port-search-browse)
         logger.info("search", "search request", { searchId, query: finalQuery.slice(0,80) });
-        const accRows: unknown[] = [];
         const token = session.search(finalQuery, searchId, {
           onResult: (p) => {
             logger.debug("search", "search result", { searchId, rows: p.rows?.length });
-            for (const r of p.rows) accRows.push(r);
             ws.send(JSON.stringify({ type: "search:result", ...p }));
           },
           onEnd: (p) => {
             logger.info("search", "search end", { searchId, reason: p.reason });
-            if (accRows.length) setCachedSearch(cKey, accRows, accRows.length);
             ws.send(JSON.stringify({ type: "search:end", ...p }));
           },
         });
@@ -1027,6 +1042,23 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const token = session.wishlistSearch(finalQuery, searchId, {
           onResult: (p) => ws.send(JSON.stringify({ type: "search:result", ...p })),
           onEnd: (p) => ws.send(JSON.stringify({ type: "search:end", ...p })),
+        });
+        ws.send(JSON.stringify({ type: "search:start", searchId, token }));
+        return;
+      }
+      if (data.type === "search:buddies") {
+        const result = SearchBuddiesSchema.safeParse(parsed);
+        if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid search:buddies message.")); return; }
+        const session = requireLogin(); if (!session) return;
+        const { searchId, usernames, query } = result.data;
+        // filter to plugin buddy search event (same as nicotine-plus)
+        const out = pluginManager.outgoingUserSearchEvent(usernames, query);
+        if (out === null) return;
+        const finalUsernames = (out?.[0] as string[]) ?? usernames;
+        const finalQuery = (out?.[1] as string) ?? query;
+        const token = (session as unknown as { searchBuddies: (u:string[], q:string, id:string, h: unknown)=>number }).searchBuddies(finalUsernames, finalQuery, searchId, {
+          onResult: (p: unknown) => ws.send(JSON.stringify({ type: "search:result", ...(p as object) })),
+          onEnd: (p: unknown) => ws.send(JSON.stringify({ type: "search:end", ...(p as object) })),
         });
         ws.send(JSON.stringify({ type: "search:start", searchId, token }));
         return;

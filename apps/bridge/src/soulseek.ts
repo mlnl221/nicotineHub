@@ -533,7 +533,7 @@ export interface FileSearchResult { token: number; username: string; freeUploadS
 const MAX_SEARCH_DECOMPRESSED = 128 * 1024 * 1024; // 128 MiB guard
 const MAX_SEARCH_COMPRESSED = 16 * 1024 * 1024;
 
-function inflateWithCap(payload: Buffer, max = MAX_SEARCH_DECOMPRESSED): Buffer {
+export function inflateWithCap(payload: Buffer, max = MAX_SEARCH_DECOMPRESSED): Buffer {
   if (payload.length > MAX_SEARCH_COMPRESSED) throw new Error("Search response too large");
   let buf: Buffer;
   try {

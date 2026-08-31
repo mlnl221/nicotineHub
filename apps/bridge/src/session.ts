@@ -124,6 +124,7 @@ import {
   type UserStatsMessage,
   type UserStatusMessage,
   type UserInfoResponseMessage,
+  inflateWithCap,
 } from "./soulseek.ts";
 
 export interface SearchRow {
@@ -2230,7 +2231,7 @@ export class SoulseekSession {
     // Excluded phrases filter (case-insensitive)
     const qLower = query.toLowerCase();
     for (const phrase of this.excludedPhrases) { if (qLower.includes(phrase)) { handlers.onEnd({ searchId, reason: "error" }); return 0; } }
-    const token = this.tokenCounter++;
+    const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
     const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
@@ -2249,7 +2250,8 @@ export class SoulseekSession {
   }
   searchUser(username: string, query: string, searchId: string, handlers: SearchHandlers): number {
     if (!this.loggedIn || !this.serverSocket) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
-    const token = this.tokenCounter++;
+    const token = this.tokenCounter++ >>> 0;
+    if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
     const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
     search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
@@ -2257,9 +2259,26 @@ export class SoulseekSession {
     this.serverSocket.write(buildUserSearch(username, token, query));
     return token;
   }
+
+  /** Buddies search — mirrors pynicotine _send_buddies_search_request: single token, loop UserSearch per buddy */
+  searchBuddies(usernames: string[], query: string, searchId: string, handlers: SearchHandlers): number {
+    if (!this.loggedIn || !this.serverSocket) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    if (!usernames.length) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    const token = this.tokenCounter++ >>> 0;
+    if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
+    this.allowedSearchTokens.add(token);
+    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
+    search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
+    this.searches.set(token, search); this.searchIds.set(searchId, token);
+    for (const username of usernames) {
+      try { this.serverSocket.write(buildUserSearch(username, token, query)); } catch {}
+    }
+    return token;
+  }
   searchRoom(room: string, query: string, searchId: string, handlers: SearchHandlers): number {
     if (!this.loggedIn || !this.serverSocket) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
-    const token = this.tokenCounter++;
+    const token = this.tokenCounter++ >>> 0;
+    if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
     const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
     search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
@@ -2269,7 +2288,8 @@ export class SoulseekSession {
   }
   wishlistSearch(query: string, searchId: string, handlers: SearchHandlers): number {
     if (!this.loggedIn || !this.serverSocket) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
-    const token = this.tokenCounter++;
+    const token = this.tokenCounter++ >>> 0;
+    if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
     const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
     search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
@@ -2407,58 +2427,59 @@ export class SoulseekSession {
       if (this.userInfoRequests.has(username)) { reject(new Error("Already requesting this user.")); return; }
       this.userInfoRequests.set(username, resolve);
       this.addAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
-      const cached = this.userAddresses.get(username);
+      // Timeout for overall userInfo fetch (includes indirect relay)
+      const overallTimer = setTimeout(() => {
+        if (this.userInfoRequests.has(username)) {
+          this.userInfoRequests.delete(username);
+          this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
+          this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username });
+          reject(new Error("Peer address request timed out."));
+        }
+      }, PEER_ADDRESS_TIMEOUT_MS + 10000); // 30s total (20s indirect + 10s grace)
+      const cleanup = () => clearTimeout(overallTimer);
+      // Override resolver to cleanup timer
+      const origResolve = resolve;
+      const wrappedResolve = (info: UserInfoResponseMessage) => { cleanup(); origResolve(info); };
+      this.userInfoRequests.set(username, wrappedResolve);
+      const wrappedReject = (e: Error) => { cleanup(); this.userInfoRequests.delete(username); this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse); this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username }); reject(e); };
+
+      // Use same dual-path as browse: queue UserInfoRequest + indirect ConnectToPeer + direct
+      // This ensures firewalled users can pierce to us (critical for profiles)
+      this.queuePendingPeerMessage(username, "P", buildUserInfoRequest());
+      this.sendConnectToPeerFallback(username, "P");
+
       const doConnect = (addr: PeerAddress) => {
         if (addr.port === 0 || addr.ip === "0.0.0.0") {
-          this.userInfoRequests.delete(username); this.peerAddressRequests.delete(username);
-          this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
-          this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username });
-          reject(new Error("User offline or port unknown."));
+          // Don't fail immediately — wait for indirect pierce (fallback already sent)
+          // Only fail if no fallback pending and timeout will fire
+          logger.debug("browse", "peer address 0.0.0.0 for userInfo, waiting for pierce", { username });
           return;
         }
-        // enforce MAX_SOCKETS
-        if (!this.canOpenSocket()) {
-          this.enqueueOrRun(() => doConnect(addr));
-          return;
-        }
-        Bun.connect({
-          hostname: addr.ip, port: addr.port,
-          socket: {
-            open: (sock) => {
-              this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType: "P", lastActive: Date.now(), createdAt: Date.now() });
-              (sock as Socket).write(buildPeerInit(this.username, "P"));
-            },
-            data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
-            error: () => {
-              this.userInfoRequests.delete(username); this.peerAddressRequests.delete(username);
-              this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
-              this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username });
-              this.dequeuePendingSockets();
-              reject(new Error("Peer connection failed."));
-            },
-            close: (sock) => { this.peerStates.delete(sock as Socket); this.dequeuePendingSockets(); },
-          },
-        }).catch(() => {
-          this.userInfoRequests.delete(username); this.peerAddressRequests.delete(username);
-          this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
-          this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username });
-          this.dequeuePendingSockets();
-          reject(new Error("Unable to reach peer."));
-        });
+        this.connectToPeerViaAddress(username, addr, "P", buildUserInfoRequest());
       };
-      if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) { doConnect(cached.addr); return; }
-      const existing = this.peerAddressRequests.get(username);
-      if (existing) {
-        existing.cbs.push((addr) => { this.userAddresses.set(username, { addr, updated: Date.now() }); doConnect(addr); });
-        return;
+      const cached = this.userAddresses.get(username);
+      if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) { doConnect(cached.addr); }
+      else {
+        const existing = this.peerAddressRequests.get(username);
+        if (existing) {
+          existing.cbs.push((addr) => { this.userAddresses.set(username, { addr, updated: Date.now() }); doConnect(addr); });
+        } else {
+          const timer = setTimeout(() => {
+            this.peerAddressRequests.delete(username);
+            // don't reject yet — indirect may still succeed, let overallTimer handle
+            logger.debug("browse", "GetPeerAddress timeout for userInfo, waiting for pierce fallback", { username });
+          }, PEER_ADDRESS_TIMEOUT_MS);
+          this.peerAddressRequests.set(username, {
+            cbs: [(addr) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); doConnect(addr); }],
+            timer,
+            createdAt: Date.now(),
+          });
+          this.serverSocket?.write(buildGetPeerAddress(username));
+        }
       }
-      const timer = setTimeout(() => {
-        this.peerAddressRequests.delete(username); this.userInfoRequests.delete(username);
-        this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username });
-        reject(new Error("Peer address request timed out."));
-      }, PEER_ADDRESS_TIMEOUT_MS);
-      this.peerAddressRequests.set(username, { cbs: [(addr) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); doConnect(addr); }], timer, createdAt: Date.now() });
-      this.serverSocket?.write(buildGetPeerAddress(username));
+      // Also wire reject on overall timeout already; keep peerAddressRequests cleanup via overallTimer
+      void wrappedReject;
+      return;
     });
   }
 
@@ -2509,7 +2530,7 @@ function buildItemSim(item: string): Buffer {
 }
 function inflateProbeToken(payload: Buffer): number | null {
   try {
-    const buf: Buffer = inflateSync(payload);
+    const buf: Buffer = inflateWithCap(payload);
     if (buf.length < 8) return null;
     const unameLen = buf.readUInt32LE(0);
     if (4 + unameLen + 4 > buf.length) return null;
