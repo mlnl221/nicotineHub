@@ -2320,6 +2320,8 @@ export class SoulseekSession {
     logger.info("browse", "requestSharedFileList", { username, pending: this.pendingBrowseShares.has(username.toLowerCase()) });
     // timeout 20s indirect + 10s grace = 30s (nicotine INDIRECT_REQUEST_TIMEOUT 20s + local 10s)
     const key = username.toLowerCase();
+    const existing = this.pendingBrowseShares.get(key);
+    if (existing) { clearTimeout(existing.timer); }
     const timer = setTimeout(() => {
       logger.warn("browse", "browse timeout", { username });
       this.pendingBrowseShares.delete(key);
@@ -2386,6 +2388,7 @@ export class SoulseekSession {
       hostname: addr.ip, port: addr.port,
       socket: {
         open: (sock) => {
+          logger.info("browse", "direct peer open", { username, ip: addr.ip, port: addr.port, connType });
           this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, lastActive: Date.now(), createdAt: Date.now() });
           (sock as Socket).write(buildPeerInit(this.username, connType));
           // queue msg via state — will be sent after initDone in processPeer
@@ -2393,10 +2396,10 @@ export class SoulseekSession {
           if (st) (st as unknown as { pendingMsg?: Buffer }).pendingMsg = msg;
         },
         data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
-        error: () => { this.dequeuePendingSockets(); },
-        close: (sock) => { this.peerStates.delete(sock as Socket); this.dequeuePendingSockets(); },
+        error: (_sock, err) => { logger.warn("browse", "direct peer error", { username, ip: addr.ip, port: addr.port, error: (err as Error)?.message || String(err) }); this.dequeuePendingSockets(); },
+        close: (sock) => { logger.info("browse", "direct peer close", { username, ip: addr.ip, port: addr.port }); this.peerStates.delete(sock as Socket); this.dequeuePendingSockets(); },
       },
-    }).catch(() => { this.dequeuePendingSockets(); });
+    }).catch((e) => { logger.warn("browse", "direct peer connect failed", { username, ip: addr.ip, port: addr.port, error: (e as Error).message }); this.dequeuePendingSockets(); });
   }
 
   requestUserInfo(username: string): Promise<UserInfoResponseMessage> {

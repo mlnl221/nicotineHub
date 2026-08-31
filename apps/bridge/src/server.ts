@@ -783,7 +783,15 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                 (ws.data as unknown as Record<string, unknown>)._browseUser = event.username;
               }
               else if (event.type === "browse-folder") ws.send(JSON.stringify({ type: "browse:folder", username: event.username, folder: event.folder, token: event.token, files: event.files }));
-              else if (event.type === "browse-error") ws.send(JSON.stringify({ type: event.type === "browse-error" && (event as { token?: number }).token !== undefined ? "browse:folder" : "browse:shares", username: event.username, error: event.error, ...(event as { folder?: string; token?: number }) }));
+              else if (event.type === "browse-error") {
+                const isFolder = (event as { token?: number }).token !== undefined;
+                ws.send(JSON.stringify({
+                  type: isFolder ? "browse:folder" : "browse:shares",
+                  username: event.username,
+                  error: event.error,
+                  ...(isFolder ? { token: (event as { token: number }).token, folder: (event as { folder: string }).folder } : {}),
+                }));
+              }
             } catch {}
           },
           onWishlistEvent: (event) => {
