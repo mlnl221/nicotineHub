@@ -1075,7 +1075,7 @@ export class SoulseekSession {
           const { dirs, files } = this.shareDB.getSharedCounts();
           this.serverSocket?.write(buildSharedFoldersFiles(dirs, files));
         } catch {}
-        this.startListener();
+        try { this.startListener(); } catch (e) { logger.warn("server", "peer listener bind failed (will retry on next port change)", { error: (e as Error).message, port: this._listenPort }); }
         this.startIdleSweep();
         this.startServerPing();
         // Portmapper: NAT-PMP → UPnP fallback (like nicotine PortMapper LEASE_DURATION 12h, RENEWAL 2h)
