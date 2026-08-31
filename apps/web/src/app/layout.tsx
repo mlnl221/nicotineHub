@@ -12,6 +12,9 @@ import { ToastHost } from "@/components/ToastHost";
 import { NowPlayingSync } from "@/components/NowPlayingSync";
 import { WebVitals } from "@/components/WebVitals";
 import { GlobalContextMenu } from "@/components/ui/GlobalContextMenu";
+import { SidebarProvider } from "@/components/SidebarContext";
+import { ExitDialogHandler } from "@/components/ExitDialogHandler";
+import { WindowGeometrySync } from "@/components/WindowGeometrySync";
 
 export const metadata: Metadata = {
   title: "Nicotine Hub",
@@ -44,11 +47,13 @@ export const viewport: Viewport = {
   themeColor: "#faf9fa",
 };
 
+const isDemoBuild = process.env.NEXT_PUBLIC_DEMO === "true";
+
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning data-demo={isDemoBuild ? "true" : undefined} style={isDemoBuild ? ({ ["--demo-banner-h" as string]: "32px" } as React.CSSProperties) : undefined}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -69,15 +74,18 @@ export default function RootLayout({
       </head>
       <body className="min-h-dvh max-w-full overflow-x-clip bg-surface-container-low font-body text-on-surface antialiased selection:bg-primary/30 dark:bg-inverse-surface dark:text-inverse-on-surface">
         <DemoBanner />
+        <SidebarProvider>
         <ThemeProvider>
           <ConfigProvider>
             <SessionProvider>
               <WishlistProvider>
                 <StatisticsProvider>
                   <TransfersProvider>
-                    <ConfigBridgeSync />
-                    <NowPlayingSync />
-                    {children}
+                     <ConfigBridgeSync />
+                     <ExitDialogHandler />
+                     <WindowGeometrySync />
+                     <NowPlayingSync />
+                     {children}
                     <ToastHost />
                     <GlobalContextMenu />
                   </TransfersProvider>
@@ -86,6 +94,7 @@ export default function RootLayout({
             </SessionProvider>
           </ConfigProvider>
         </ThemeProvider>
+        </SidebarProvider>
         <WebVitals />
       </body>
     </html>

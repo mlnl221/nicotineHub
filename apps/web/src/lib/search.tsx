@@ -95,8 +95,11 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsub = subscribe((msg) => {
       if (msg.type === "search:result") {
+        console.log("[search] result", (msg as { searchId: string }).searchId, (msg as { rows: unknown[] }).rows?.length, "cap", settings.searches.max_displayed_results);
         const searchId = (msg as { searchId: string }).searchId;
-        const rows = (msg as { rows: SearchRow[] }).rows || [];
+        let rows = (msg as { rows: SearchRow[] }).rows || [];
+        // Respect searches.max_displayed_results (nicotine-plus parity) — cap before append
+        const cap = settings.searches.max_displayed_results ?? 2500;
         // Eager country fetch: trigger GetPeerAddress for responders to populate SearchRow.country via bridge cache + future peer-address country (porting-status country eager parity)
         if (rows.length) {
           const uniq = Array.from(new Set(rows.map((r) => r.user).filter(Boolean))).slice(0, 20);
@@ -110,13 +113,18 @@ export function SearchProvider({ children }: { children: ReactNode }) {
           if (isWishlist && !exists) {
             // Auto-create wishlist tab on interval hit (needs UI tab for wishlist:*)
             const term = searchId.split(":")[1] || searchId;
-            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [...rows], total: rows.length, filters: emptyFilters() };
+            const capped = cap > 0 ? rows.slice(0, cap) : rows;
+            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [...capped], total: capped.length, filters: emptyFilters() };
             setActiveId(searchId);
             return [...prev, wlTab];
           }
-          return prev.map((t) =>
-            t.id === searchId ? { ...t, rows: [...t.rows, ...rows], total: t.total + rows.length } : t,
-          );
+          return prev.map((t) => {
+            if (t.id !== searchId) return t;
+            const remaining = cap > 0 ? Math.max(0, cap - t.rows.length) : rows.length;
+            if (remaining <= 0) return t;
+            const slice = rows.slice(0, remaining);
+            return { ...t, rows: [...t.rows, ...slice], total: t.total + slice.length };
+          });
         });
       } else if (msg.type === "search:end") {
         const searchId = (msg as { searchId: string }).searchId;
@@ -140,7 +148,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       }
     });
     return unsub;
-  }, [subscribe, send]);
+  }, [subscribe, send, settings.searches.max_displayed_results]);
 
   const startSearch = useCallback(
     (query: string, opts?: { mode?: SearchMode; target?: string }) => {
@@ -222,9 +230,25 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   const closeTab = useCallback(
     (id: string) => {
       send({ type: "search:stop", searchId: id });
+      const idx = tabsRef.current.findIndex((t) => t.id === id);
       const next = tabsRef.current.filter((t) => t.id !== id);
       setTabs(next);
-      setActiveId((curr) => (curr === id ? (next[next.length - 1]?.id ?? null) : curr));
+      setActiveId((curr) => {
+        if (curr !== id) return curr;
+        if (next.length === 0) return null;
+        let preferPrev = true;
+        try {
+          const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
+          if (raw) {
+            const parsed = JSON.parse(raw) as { ui?: { tab_select_previous?: boolean } };
+            if (typeof parsed?.ui?.tab_select_previous === "boolean") preferPrev = parsed.ui.tab_select_previous;
+          }
+        } catch {}
+        if (preferPrev && idx > 0) return tabsRef.current[idx - 1]?.id ?? next[next.length - 1]?.id ?? null;
+        if (!preferPrev && idx < tabsRef.current.length - 1) return tabsRef.current[idx + 1]?.id ?? next[next.length - 1]?.id ?? null;
+        // fallback to last
+        return next[next.length - 1]?.id ?? null;
+      });
     },
     [send],
   );

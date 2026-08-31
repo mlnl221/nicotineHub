@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
@@ -41,21 +41,25 @@ function BrowseInner() {
   useEffect(() => { setRecent(loadRecent()); }, [tabs.length]);
 
   // Handle ?user= deep link (from profile Browse Files or direct link)
+  const handledRef = useRef<string | null>(null);
   useEffect(() => {
     const q = searchParams.get("user") || searchParams.get("username");
-    if (q) {
-      const u = decodeURIComponent(q);
-      if (u) {
-        saveRecent(u);
-        openBrowse(u);
-        // clean URL without reload
-        const url = new URL(window.location.href);
-        url.searchParams.delete("user");
-        url.searchParams.delete("username");
-        window.history.replaceState(null, "", url.toString());
-      }
-    }
-  }, [searchParams, openBrowse]);
+    if (!q) { handledRef.current = null; return; }
+    let u = "";
+    try { u = decodeURIComponent(q); } catch { u = q; }
+    if (!u) return;
+    const lower = u.toLowerCase();
+    if (handledRef.current === lower) return;
+    handledRef.current = lower;
+    saveRecent(u);
+    openBrowse(u);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("user");
+    url.searchParams.delete("username");
+    const clean = url.pathname + (url.search ? url.search : "") + url.hash;
+    try { router.replace(clean); } catch { window.history.replaceState(null, "", url.toString()); }
+    setTimeout(() => { if (handledRef.current === lower) handledRef.current = null; }, 800);
+  }, [searchParams, openBrowse, router]);
 
   const go = () => {
     const u = username.trim();
@@ -75,7 +79,7 @@ function BrowseInner() {
     <div className="flex h-[100dvh] min-h-[100dvh] max-w-full overflow-hidden bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Browse" subtitle={`Browse shared files • ${tabs.length}/10 tabs`} />
-      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 bg-background pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 bg-surface-dim dark:bg-inverse-surface pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <header className="hidden md:flex sticky top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
           <div>
             <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Browse Shares</h2>
@@ -157,7 +161,8 @@ function BrowseInner() {
 export default function BrowseSharesPage() {
   const { state } = useSession();
   const router = useRouter();
-  useEffect(() => { if (state.status !== "connected") router.replace("/"); }, [state.status, router]);
+  useEffect(() => { if (state.status === "failed") router.replace("/"); }, [state.status, router]);
+  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
   if (state.status !== "connected") return null;
   return (
     <BrowseProvider>

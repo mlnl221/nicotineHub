@@ -128,7 +128,16 @@ function loadCreds(): Omit<LoginRequest, "type"> | null {
 }
 function clearCreds() {
   try { sessionStorage.removeItem(EPHEMERAL_KEY); sessionStorage.removeItem(EPHEMERAL_KEY.replace("nicotineHub.", "nicotine.")); } catch {}
-  try { document.cookie = `${COOKIE_NAME}=; Path=/; Max-Age=0`; document.cookie = `nicotine_creds=; Path=/; Max-Age=0`; } catch {}
+  try {
+    // Mirror saveCreds attributes (Path + SameSite + Secure) so deletion matches the
+    // stored cookie on all browsers. Safari in particular requires SameSite/Secure to
+    // match for removal. Use both Max-Age=0 and Expires for compatibility.
+    const baseAttrs = "Path=/; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    document.cookie = `${COOKIE_NAME}=; ${baseAttrs}`;
+    document.cookie = `${COOKIE_NAME}=; ${baseAttrs}; Secure`;
+    document.cookie = `nicotine_creds=; ${baseAttrs}`;
+    document.cookie = `nicotine_creds=; ${baseAttrs}; Secure`;
+  } catch {}
   // Also clear any legacy localStorage password if ever set
   try { localStorage.removeItem("nicotineHub.rememberedCreds"); localStorage.removeItem("nicotine.rememberedCreds"); } catch {}
 }
@@ -273,13 +282,27 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         case "server:reconnect": {
           // Bridge is reconnecting Soulseek TCP (e.g. after listening port change via portrange)
           // Keep UI in connecting state so user sees progress; Web WS stays open
-          const err = (data as unknown as { error?: string }).error;
-          if (err) {
-            // reconnect-failed after 15 attempts — surface but keep creds for manual retry
-            setState((s) => ({ ...s, status: "failed", error: err }));
+          const d = data as unknown as { error?: string; ok?: boolean; listenPort?: number };
+          if (d.error) {
+            // reconnect-failed after 15 attempts or listen port bind failure — surface but keep creds for manual retry
+            setState((s) => ({ ...s, status: "failed", error: d.error }));
+          } else if (d.ok) {
+            // Fresh reconnect success (e.g. after port change) – WS never dropped, go back to connected
+            setState((s) => ({ ...s, status: "connected", error: undefined }));
+            clearReconnect();
+            reconnectAttempts.current = 0;
+            shouldReconnect.current = true;
           } else if (stateRef.current.status === "connected") {
             setState((s) => ({ ...s, status: "connecting" }));
           }
+          break;
+        }
+        case "server:reconnected": {
+          // Background reconnect succeeded (e.g. after port change) — restore connected without user re-login
+          setState((s) => ({ ...s, status: "connected", user: s.user ?? loginReq.username, error: undefined }));
+          clearReconnect();
+          reconnectAttempts.current = 0;
+          shouldReconnect.current = true;
           break;
         }
         case "error":
@@ -360,10 +383,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     (req: Omit<LoginRequest, "type">) => {
+      // Merge Settings host/port if caller didn't provide them (Settings → Network is authoritative)
+      let mergedReq = req;
+      if (!isDemo && !req.host && !req.port) {
+        try {
+          const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
+          if (raw) {
+            const parsed = JSON.parse(raw) as { server?: { server?: { host?: string; port?: number } } };
+            const h = parsed?.server?.server?.host;
+            const p = parsed?.server?.server?.port;
+            if (h || p) mergedReq = { ...req, host: h || req.host, port: p || req.port };
+          }
+        } catch {}
+      }
       // Persist creds for homelab auto-login (sessionStorage + cookie)
       // Do this before demo check so demo also gets ephemeral creds? No — demo creds are fake, don't persist real pass
-      if (!isDemo && req.username && req.password) {
-        saveCreds(req);
+      if (!isDemo && mergedReq.username && mergedReq.password) {
+        saveCreds(mergedReq);
       }
       // Demo: accept any username/password, no bridge
       if (isDemo) {
@@ -393,18 +429,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      lastLogin.current = req;
+      lastLogin.current = mergedReq;
       shouldReconnect.current = true;
       reconnectAttempts.current = 0;
       clearReconnect();
-      connectSocket(req);
+      connectSocket(mergedReq);
     },
     [connectSocket, clearReconnect],
   );
 
   // Homelab auto-login: if any creds are present (sessionStorage or cookie), auto-login on mount/reload
   // This handles port-change reconnect that restarts bridge/Docker and page reload, without requiring
-  // user to re-enter password. For homelab convenience we auto-login if any creds are present.
+  // user to re-enter password. For homelab convenience we auto-login if any creds are present,
+  // unless server.auto_connect_startup is explicitly false (nicotine-plus parity).
   useEffect(() => {
     if (isDemo) return;
     if (autoLoginAttempted.current) return;
@@ -413,6 +450,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (stateRef.current.status !== "idle") return;
       try {
         if (sessionStorage.getItem("__mockLoggedIn")) return;
+      } catch {}
+      // Respect server.auto_connect_startup=false (settings-audit P0)
+      try {
+        const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
+        if (raw) {
+          const parsed = JSON.parse(raw) as { server?: { auto_connect_startup?: boolean } };
+          if (parsed?.server?.auto_connect_startup === false) return;
+        }
       } catch {}
       const creds = loadCreds();
       if (creds?.username && creds?.password) {

@@ -5,7 +5,8 @@
 
 /**
  * Plugin types — mirrors pynicotine/pluginsystem.py BasePlugin surface.
- * TS-only, no Python compat.
+ * TS/JS-only — Python (.py) and any non-TS/JS language is explicitly forbidden.
+ * See apps/bridge/src/plugins/manager.ts: TS/JS-only enforcement (allowed .ts/.mts/.js/.mjs + .json/.md).
  */
 
 export const returncode = {
@@ -72,6 +73,9 @@ export interface PluginCoreShim {
   sendPrivate(user: string, text: string, showUI?: boolean, switchPage?: boolean): void;
   echoPublic(room: string, text: string, messageType?: string): void;
   echoPrivate(user: string, text: string, messageType?: string): void;
+  requestUserStats?(user: string): void;
+  requestUserShares?(user: string): void;
+  isBuddy?(user: string): boolean;
 }
 
 export abstract class BasePlugin {

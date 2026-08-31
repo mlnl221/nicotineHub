@@ -52,3 +52,32 @@ export function isMentioned(text: string, keywords: string[], watch: boolean, ow
   if (ownUser && lower.includes(ownUser.toLowerCase())) return true;
   return keywords.some((k) => k && lower.includes(k.toLowerCase()));
 }
+
+export function highlightKeywords(text: string, keywords: string[], watch: boolean): string | null {
+  if (!watch || !keywords.length) return null;
+  let out = text;
+  let changed = false;
+  for (const kw of keywords) {
+    if (!kw) continue;
+    try {
+      const re = new RegExp(`(${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+      if (re.test(out)) {
+        out = out.replace(re, `<mark class="bg-amber-200 dark:bg-amber-800 rounded px-0.5">$1</mark>`);
+        changed = true;
+      }
+    } catch {}
+  }
+  return changed ? out : null;
+}
+
+export function usernameHotspotClass(isHotspot: boolean, style: string): string {
+  if (!isHotspot) return "text-on-surface";
+  switch (style) {
+    case "bold": return "font-bold text-primary";
+    case "italic": return "italic text-primary";
+    case "underline": return "underline text-primary";
+    case "hyperlinks": return "underline decoration-dotted text-primary hover:text-primary-container cursor-pointer";
+    case "none": return "text-on-surface";
+    default: return "font-bold text-primary";
+  }
+}

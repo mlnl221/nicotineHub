@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
@@ -32,19 +32,24 @@ function TabbedProfileInner() {
 
   useEffect(() => { setRecent(loadRecent()); }, [tabs.length]);
 
+  const handledRef = useRef<string | null>(null);
   useEffect(() => {
     const q = searchParams.get("user") || searchParams.get("username");
-    if (q) {
-      const u = decodeURIComponent(q);
-      if (u) {
-        openProfile(u);
-        const url = new URL(window.location.href);
-        url.searchParams.delete("user");
-        url.searchParams.delete("username");
-        window.history.replaceState(null, "", url.toString());
-      }
-    }
-  }, [searchParams, openProfile]);
+    if (!q) { handledRef.current = null; return; }
+    let u = "";
+    try { u = decodeURIComponent(q); } catch { u = q; }
+    if (!u) return;
+    const lower = u.toLowerCase();
+    if (handledRef.current === lower) return;
+    handledRef.current = lower;
+    openProfile(u);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("user");
+    url.searchParams.delete("username");
+    const clean = url.pathname + (url.search ? url.search : "") + url.hash;
+    try { router.replace(clean); } catch { window.history.replaceState(null, "", url.toString()); }
+    setTimeout(() => { if (handledRef.current === lower) handledRef.current = null; }, 800);
+  }, [searchParams, openProfile, router]);
 
   const go = () => {
     const u = username.trim();
@@ -142,7 +147,8 @@ function TabbedProfileInner() {
 export default function ProfileLookup() {
   const { state } = useSession();
   const router = useRouter();
-  useEffect(() => { if (state.status !== "connected") router.replace("/"); }, [state.status, router]);
+  useEffect(() => { if (state.status === "failed") router.replace("/"); }, [state.status, router]);
+  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
   if (state.status !== "connected") return null;
   return (
     <ProfileProvider>

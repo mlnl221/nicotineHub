@@ -11,6 +11,7 @@ import { usePrivateChat } from "@/lib/privateChat";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { privateChatMenu, userMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
+import { highlightKeywords, usernameHotspotClass } from "@/lib/chatFormat";
 
 function PrivateChatInner() {
   const { state } = useSession();
@@ -26,7 +27,7 @@ function PrivateChatInner() {
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
 
   useEffect(() => {
-    if (state.status !== "connected") router.replace("/");
+    if (state.status === "failed") router.replace("/");
   }, [state.status, router]);
 
   useEffect(() => {
@@ -41,6 +42,7 @@ function PrivateChatInner() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [conversations, activeUser]);
 
+  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
   if (state.status !== "connected") return null;
 
   const activeMessages = activeUser ? conversations.get(activeUser) || [] : [];
@@ -63,10 +65,10 @@ function PrivateChatInner() {
   const topBarSubtitle = activeUser ? "Private message" : `${users.length} conversations`;
 
   return (
-    <div className="flex min-h-[100dvh] h-screen max-w-full overflow-hidden bg-surface-container-lowest font-body text-on-surface">
+    <div className="flex min-h-[100dvh] h-screen max-w-full overflow-hidden bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title={topBarTitle} subtitle={topBarSubtitle} />
-      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
+      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 bg-surface-dim dark:bg-inverse-surface pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
         <header className="hidden md:flex sticky top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
           <div>
             <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Private Chat</h2>
@@ -148,36 +150,41 @@ function PrivateChatInner() {
                   const last = msgs[msgs.length - 1];
                   const isActive = activeUser === u;
                   return (
-                    <button
+                    <div
                       key={u}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setActiveUser(u)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActiveUser(u); } }}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         setMenuAnchor({ x: e.clientX, y: e.clientY, items: userMenu(u, "privatechat") });
                       }}
-                      className={`flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors ${isActive ? "bg-primary-fixed/20 text-primary border border-primary/20" : "hover:bg-surface-container-low"}`}
+                      className={`flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors cursor-pointer ${isActive ? "bg-primary-fixed/20 text-primary border border-primary/20" : "hover:bg-surface-container-low"}`}
                     >
                       <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-container-high text-sm font-bold">
                         {u.slice(0, 2).toUpperCase()}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate font-body text-sm font-semibold">{u}</p>
+                        <p className={`truncate font-body text-sm ${usernameHotspotClass(settings.ui.usernamehotspots, settings.ui.usernamestyle)}`}>{u}</p>
                         <p className="truncate font-body text-xs text-on-surface-variant">
                           {last ? (last.isSelf ? `You: ${last.message}` : last.message) : "No messages"}
                         </p>
                       </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          closeConversation(u);
-                        }}
-                        className="ml-2 rounded-full p-1 text-outline hover:bg-surface-container-high hover:text-error"
-                        title="Close"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">close</span>
-                      </button>
-                    </button>
+                      {settings.ui.tabclosers ?? true ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            closeConversation(u);
+                          }}
+                          className="ml-2 rounded-full p-1 text-outline hover:bg-surface-container-high hover:text-error"
+                          title="Close"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">close</span>
+                        </button>
+                      ) : null}
+                    </div>
                   );
                 })
               )}
@@ -257,7 +264,14 @@ function PrivateChatInner() {
                         <div
                           className={`rounded-2xl px-4 py-3 shadow-sm max-w-full overflow-hidden min-w-0 ${m.isSelf ? "rounded-br-sm bg-primary-container/20 border border-primary/20" : "rounded-bl-sm bg-surface-container-low border border-outline-variant/20"}`}
                         >
-                          <p className="font-body text-sm leading-relaxed break-words [overflow-wrap:anywhere] whitespace-pre-wrap">{isIgnored ? "[ignored]" : m.message}</p>
+                          <p className="font-body text-sm leading-relaxed break-words [overflow-wrap:anywhere] whitespace-pre-wrap">
+                            {isIgnored ? (
+                              "[ignored]"
+                            ) : (() => {
+                              const hl = !m.isSelf ? highlightKeywords(m.message, settings.words.keywords, settings.words.watch_keywords) : null;
+                              return hl ? <span dangerouslySetInnerHTML={{ __html: hl }} /> : m.message;
+                            })()}
+                          </p>
                           <p className="mt-1 font-label text-[10px] text-outline">
                             {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </p>
@@ -281,6 +295,7 @@ function PrivateChatInner() {
                   <div className="flex items-end gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-low p-2 focus-within:border-primary">
                     <textarea
                       value={input}
+                      spellCheck={settings.ui.spellcheck}
                       onChange={(e) => { setInput(e.target.value); if (activeUser && e.target.value) sendTyping(activeUser); }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey) {

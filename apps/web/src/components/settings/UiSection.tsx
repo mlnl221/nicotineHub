@@ -7,6 +7,7 @@ import {
   ToggleControl,
   SelectControl,
   RadioGroupControl,
+  NumberControl,
 } from "@/components/settings/controls";
 
 const LANGUAGES = [
@@ -15,7 +16,8 @@ const LANGUAGES = [
   { value: "de", label: "Deutsch" },
   { value: "fr", label: "Français" },
   { value: "es", label: "Español" },
-];
+  { value: "pt", label: "Português" },
+] as const;
 
 export function UiSection() {
   const { settings, setOption } = useConfig();
@@ -39,10 +41,10 @@ export function UiSection() {
       />
       <SelectControl
         label="Language"
-        description="Interface language (currently cosmetic)."
+        description="Interface language — currently cosmetic, stored locally (English-only by design, see docs/DESIGN.md)."
         value={ui.language}
         onChange={(v) => setOption("ui", "language", v)}
-        options={LANGUAGES}
+        options={[...LANGUAGES]}
       />
       <ToggleControl
         label="Colorise usernames"
@@ -139,6 +141,14 @@ export function UiSection() {
           })}
         </div>
       </div>
+      <SectionCard title="Window" description="PWA window geometry — browser mapping for desktop width/height/maximized (stored locally, applied via viewport).">
+        <NumberControl label="Width" description="Initial window width (desktop parity, PWA uses viewport width)." value={ui.width ?? 800} min={320} max={3840} step={10} onChange={(v) => setOption("ui", "width", v)} />
+        <NumberControl label="Height" value={ui.height ?? 600} min={320} max={2160} step={10} onChange={(v) => setOption("ui", "height", v)} />
+        <ToggleControl label="Maximized" description="Start maximized (PWA standalone uses full viewport; stored for parity)." checked={ui.maximized ?? true} onChange={(v) => setOption("ui", "maximized", v)} />
+        <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs leading-relaxed text-on-surface-variant dark:bg-surface-container-highest/40">
+          Browser stores width/height/maximized locally and restores on next load (responsive web uses viewport, not fixed window). Position x/y are desktop-only and kept as -1 (centered).
+        </div>
+      </SectionCard>
     </SectionCard>
   );
 }

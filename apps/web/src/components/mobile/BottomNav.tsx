@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useTransfers } from "@/lib/transfers";
 import { useConfig } from "@/lib/config/provider";
+import { useI18n } from "@/lib/i18n";
 
 type NavItem = { icon: string; label: string; href: string };
 
@@ -23,6 +24,7 @@ const MORE: NavItem[] = [
   { icon: "interests", label: "Interests", href: "/interests" },
   { icon: "settings", label: "Settings", href: "/settings" },
   { icon: "monitoring", label: "Diagnostics", href: "/diagnostics" },
+  { icon: "bar_chart", label: "Statistics", href: "/statistics" },
 ];
 
 function isActive(pathname: string, href: string) {
@@ -43,11 +45,12 @@ export function BottomNav() {
   const [moreOpen, setMoreOpen] = useState(false);
   const { downloads, uploads } = useTransfers();
   const { settings } = useConfig();
+  const { t } = useI18n();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const transferCount = mounted ? downloads.length + uploads.length : 0;
   const visibleMap = settings.ui.modes_visible || {};
-  const hrefToKey: Record<string, string> = { "/search": "search", "/downloads": "downloads", "/private-chat": "privateChat", "/browse": "browse", "/buddies": "buddies", "/uploads": "uploads", "/chat": "chat", "/profile": "profile", "/interests": "interests" };
+  const hrefToKey: Record<string, string> = { "/search": "search", "/downloads": "downloads", "/private-chat": "privateChat", "/browse": "browse", "/buddies": "buddies", "/uploads": "uploads", "/chat": "chat", "/profile": "profile", "/interests": "interests", "/diagnostics": "diagnostics", "/statistics": "statistics", "/settings": "settings" };
   const moreFiltered = mounted ? MORE.filter((i) => visibleMap[hrefToKey[i.href]] !== false) : MORE;
   const moreActive = mounted && moreFiltered.some((i) => isActive(pathname, i.href));
 
@@ -80,7 +83,7 @@ export function BottomNav() {
                   <span className="material-symbols-outlined text-[22px]" style={active ? ({ fontVariationSettings: "'FILL' 1" } as React.CSSProperties) : undefined}>
                     {item.icon}
                   </span>
-                  <span className="font-label text-[10px] uppercase tracking-widest leading-tight">{item.label}</span>
+                  <span className="font-label text-[10px] uppercase tracking-widest leading-tight">{t(item.label)}</span>
                 </Link>
               );
             })}
@@ -107,7 +110,7 @@ export function BottomNav() {
                 <span className="material-symbols-outlined text-[22px] leading-none shrink-0" style={active ? ({ fontVariationSettings: "'FILL' 1" } as React.CSSProperties) : undefined}>
                   {item.icon}
                 </span>
-                <span className={`font-label text-[9px] uppercase tracking-widest mt-0.5 leading-none truncate w-full ${active ? "font-bold" : ""}`}>{item.label}</span>
+                <span className={`font-label text-[9px] uppercase tracking-widest mt-0.5 leading-none truncate w-full ${active ? "font-bold" : ""}`}>{t(item.label)}</span>
                 {showBadge && (
                   <span className="absolute -top-0.5 right-1 min-w-[16px] h-4 rounded-full bg-tertiary px-1 text-[10px] leading-4 text-center text-on-tertiary font-bold">
                     {transferCount > 99 ? "99+" : transferCount}

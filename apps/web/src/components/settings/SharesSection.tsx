@@ -1,10 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
 import type { SharedFolder } from "@/lib/config/defaults";
 import { SectionCard, ToggleControl, SelectControl, TextFieldControl } from "@/components/settings/controls";
+
+const FileExplorer = dynamic(() => import("@/components/files/FileExplorer").then((m) => m.FileExplorer), {
+  ssr: false,
+  loading: () => <div className="h-64 animate-pulse rounded-xl bg-surface-container-high" />,
+});
 
 // Deterministic hour label — fixed locale + UTC so SSR == client. Previous used
 // `toLocaleTimeString(undefined, {hour:"numeric"})` which is locale/timezone non-deterministic → hydration mismatch.
@@ -78,6 +84,17 @@ export function SharesSection() {
   const [dialogPerm, setDialogPerm] = useState<Permission>("public");
   const [dialogError, setDialogError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [browseOpen, setBrowseOpen] = useState(false);
+
+  function dataPathFromExplorer(relative: string): string {
+    if (!relative || relative === "/") return "/data";
+    return "/data" + relative;
+  }
+  function basenameOfExplorerPath(p: string): string {
+    if (!p || p === "/") return "Shared";
+    const parts = p.split("/").filter(Boolean);
+    return parts[parts.length - 1] || "Shared";
+  }
 
   const allShares: Array<{ virtualName: string; folderPath: string; permission: Permission }> = [
     ...t.shared.map(([v, p]) => ({ virtualName: v, folderPath: p, permission: "public" as const })),
@@ -289,33 +306,80 @@ export function SharesSection() {
     <div className="flex flex-col gap-6">
       <SectionCard
         title="Shared folders"
-        description="Folders you share on the Soulseek network. In the browser, folder access requires the File System Access API (user gesture) and no background serving yet — paths are stored locally as virtual-name → path pairs."
+        description="Folders you share on the Soulseek network. Docker: browse container /data (and its subdirectories) to add any nested folder. Browser pickers are a fallback."
       >
-        <div className="py-4">
+        <div className="py-4 space-y-3">
           <div className="rounded-xl bg-amber-50 px-4 py-3 font-body text-xs leading-relaxed text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-            Browser limitation: sharing a local folder is gated by the browser. Use the + button to add a folder via the OS directory picker (File System Access API where available). Your entries are stored locally; P2P serving will use the bridge peer listener when configured.
+            <span className="font-semibold">Docker:</span> use <span className="font-mono">Browse /data</span> below to see the container&apos;s <span className="font-mono">/data</span> volume (or bind mount like <span className="font-mono">/home/user/m/data:/data</span>) and add any subdirectory as a share. This is the browser equivalent of <span className="font-mono">explorer /data</span> (container has no display server). For local device folders, use <span className="font-mono">Add folder</span> (File System Access API where available).
+          </div>
+          <div className="rounded-xl bg-surface-container-high px-3 py-2 dark:bg-surface-variant/30">
+            <div className="font-body text-[11px] leading-relaxed text-on-surface-variant dark:text-outline">
+              <span className="font-semibold">Security:</span> <span className="font-mono">/data</span> browsing is sandboxed to <span className="font-mono">DATA_DIR</span> (traversal & symlink-escapes blocked). If <span className="font-mono">BRIDGE_TOKEN</span> is set, <span className="font-mono">/api/files</span> requires <span className="font-mono">?token</span> or <span className="font-mono">Authorization: Bearer</span> — same gate as <span className="font-mono">/ws</span>/<span className="font-mono">/logs</span>. More secure than open CORS.
+            </div>
           </div>
         </div>
 
-        {/* Plus button header — nicotine-plus parity: FolderChooser Add */}
-        <div className="flex items-center justify-between gap-3 py-3">
+        {/* Plus button header — nicotine-plus parity: FolderChooser Add + Docker Browse */}
+        <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="font-label text-sm font-medium text-on-surface dark:text-inverse-on-surface">Configured shares</div>
             <div className="mt-0.5 font-body text-xs text-on-surface-variant dark:text-outline" suppressHydrationWarning>
               {mounted ? `${totalCount} folder(s)` : `0 folder(s)`} · Public {mounted ? t.shared.length : 0} · Buddies {mounted ? t.buddyshared.length : 0} · Trusted {mounted ? t.trustedshared.length : 0}
             </div>
           </div>
-          <button
-            type="button"
-            aria-label="Add shared folder"
-            onClick={handlePlusClick}
-            className="inline-flex h-11 min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-primary px-4 font-label text-xs font-semibold uppercase tracking-widest text-on-primary shadow-sm transition-colors hover:bg-primary/90 active:scale-95"
-          >
-            <span className="material-symbols-outlined text-[18px]">create_new_folder</span>
-            <span className="hidden sm:inline">Add folder</span>
-            <span className="sm:hidden">Add</span>
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              aria-label="Browse container /data"
+              onClick={() => setBrowseOpen(true)}
+              className="inline-flex h-11 min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-primary px-4 font-label text-xs font-semibold uppercase tracking-widest text-on-primary shadow-sm transition-colors hover:bg-primary/90 active:scale-95"
+            >
+              <span className="material-symbols-outlined text-[18px]">folder_open</span>
+              <span className="hidden sm:inline">Browse /data</span>
+              <span className="sm:hidden">Browse</span>
+            </button>
+            <button
+              type="button"
+              aria-label="Add shared folder"
+              onClick={handlePlusClick}
+              className="inline-flex h-11 min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-surface-container-high px-4 font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant shadow-sm transition-colors hover:bg-surface-container-highest active:scale-95 dark:bg-surface-variant dark:text-outline"
+            >
+              <span className="material-symbols-outlined text-[18px]">create_new_folder</span>
+              <span className="hidden sm:inline">Add folder</span>
+              <span className="sm:hidden">Add</span>
+            </button>
+          </div>
         </div>
+
+        {/* Browse modal */}
+        {browseOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => setBrowseOpen(false)}>
+            <div className="max-h-[90dvh] w-full max-w-3xl overflow-hidden rounded-2xl bg-surface-container-lowest shadow-xl dark:bg-surface-container-high" onClick={(e) => e.stopPropagation()}>
+              <FileExplorer
+                initialPath="/"
+                showFiles
+                selectable="directories"
+                confirmLabel="Add this folder"
+                title="Browse container /data"
+                onSelect={(relativePath) => {
+                  const abs = dataPathFromExplorer(relativePath);
+                  const base = basenameOfExplorerPath(relativePath);
+                  setBrowseOpen(false);
+                  setDialogVirtual(base);
+                  setDialogPath(abs);
+                  setDialogPerm("public");
+                  setDialogError(null);
+                  setAddOpen(true);
+                }}
+                onClose={() => setBrowseOpen(false)}
+              />
+              <div className="flex justify-end gap-2 border-t border-outline-variant/15 bg-surface-container-low px-4 py-3 dark:bg-surface-variant/20">
+                <a href="/files" className="font-label text-xs text-primary hover:underline">Open standalone Explorer</a>
+                <button type="button" onClick={() => setBrowseOpen(false)} className="rounded-xl px-4 py-2 font-label text-sm text-on-surface-variant">Close</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Hidden fallback file input for webkitdirectory */}
         <input

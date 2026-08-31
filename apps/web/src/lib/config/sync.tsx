@@ -18,7 +18,13 @@ export function ConfigBridgeSync() {
     // Build a key for diffing — only sync when changed
     const relevant = {
       transfers: {
+        shared: settings.transfers.shared,
+        buddyshared: settings.transfers.buddyshared,
+        trustedshared: settings.transfers.trustedshared,
         share_filters: settings.transfers.share_filters,
+        rescanonstartup: settings.transfers.rescanonstartup,
+        rescan_shares_daily: settings.transfers.rescan_shares_daily,
+        rescan_shares_hour: settings.transfers.rescan_shares_hour,
         uploadslots: settings.transfers.uploadslots,
         useupslots: settings.transfers.useupslots,
         uploadlimit: settings.transfers.uploadlimit,
@@ -51,7 +57,8 @@ export function ConfigBridgeSync() {
         ignorelist: settings.server.ignorelist,
         ipblocklist: settings.server.ipblocklist,
         ipignorelist: settings.server.ipignorelist,
-        portrange: settings.server.portrange,
+        // portrange is save-gated in NetworkSection (explicit Save → config:update + hot-swap, WS stays open)
+        // to avoid auto-reconnect on every keystroke; do not auto-sync here
         upnp: settings.server.upnp,
         interface: settings.server.interface,
         autoreply: settings.server.autoreply,
@@ -60,12 +67,23 @@ export function ConfigBridgeSync() {
         userlist: settings.server.userlist,
         autoaway: settings.server.autoaway,
         private_chatrooms: settings.server.private_chatrooms,
+        server: settings.server.server,
+        auto_connect_startup: settings.server.auto_connect_startup,
       },
       chatrooms: {
         user_list_visible: (settings as unknown as { chatrooms?: { user_list_visible?: boolean } }).chatrooms?.user_list_visible ?? true,
       },
       userbrowse: {
         expand_folders: (settings as unknown as { userbrowse?: { expand_folders?: string } }).userbrowse?.expand_folders ?? "all",
+      },
+      searches: {
+        maxresults: settings.searches.maxresults,
+        max_displayed_results: settings.searches.max_displayed_results,
+        search_results: settings.searches.search_results,
+        private_search_results: settings.searches.private_search_results,
+      },
+      plugins: {
+        enable: settings.plugins.enable,
       },
     };
     const key = JSON.stringify(relevant);
@@ -79,8 +97,18 @@ export function ConfigBridgeSync() {
     for (const [k, v] of Object.entries(relevant.server)) {
       send({ type: "config:update", section: "server", key: k, value: v } as unknown as never);
     }
-    // ShareDB filters
-    send({ type: "config:update", section: "transfers", key: "share_filters", value: settings.transfers.share_filters } as unknown as never);
+    for (const [k, v] of Object.entries(relevant.chatrooms)) {
+      send({ type: "config:update", section: "chatrooms", key: k, value: v } as unknown as never);
+    }
+    for (const [k, v] of Object.entries(relevant.userbrowse)) {
+      send({ type: "config:update", section: "userbrowse", key: k, value: v } as unknown as never);
+    }
+    for (const [k, v] of Object.entries(relevant.searches)) {
+      send({ type: "config:update", section: "searches", key: k, value: v } as unknown as never);
+    }
+    for (const [k, v] of Object.entries(relevant.plugins)) {
+      send({ type: "config:update", section: "plugins", key: k, value: v } as unknown as never);
+    }
   }, [settings, state.status, send]);
 
   return null;

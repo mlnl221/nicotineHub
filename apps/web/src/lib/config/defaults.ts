@@ -58,6 +58,11 @@ export interface Settings {
     exitdialog: number;
     modes_visible: Record<string, boolean>;
     modes_order: string[];
+    width: number;
+    height: number;
+    xposition: number;
+    yposition: number;
+    maximized: boolean;
   };
   notifications: {
     notification_window_title: boolean;
@@ -201,8 +206,8 @@ export interface Settings {
 export const DEFAULT_SERVER_HOST = "server.slsknet.org";
 export const DEFAULT_SERVER_PORT = 2242;
 
-// Mirrors pynicotine/config.py defaults (browser-relevant subset)
-export const DEFAULT_LISTEN_PORT = 62904;
+// Mirrors pynicotine/config.py defaults (browser-relevant subset) — 49127 is VPN-forwarded default (was 62904)
+export const DEFAULT_LISTEN_PORT = 49127;
 
 export const defaults: Settings = {
   server: {
@@ -248,6 +253,11 @@ export const defaults: Settings = {
       profile: true,
     },
     modes_order: ["search", "browse", "downloads", "uploads", "chat", "privateChat", "buddies", "interests", "profile"],
+    width: 800,
+    height: 600,
+    xposition: -1,
+    yposition: -1,
+    maximized: true,
   },
   notifications: {
     notification_window_title: true,

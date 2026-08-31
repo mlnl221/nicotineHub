@@ -8,7 +8,7 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "concurrently -n bridge,web -c blue,green \"bun run --cwd apps/bridge dev\" \"bun run --cwd apps/web dev\"",
+    "dev": "bun run scripts/dev.mjs",
     "dev:bridge": "bun run --cwd apps/bridge dev",
     "dev:web": "bun run --cwd apps/web dev",
     "build": "bun run --cwd apps/bridge build && bun run --cwd apps/web build",

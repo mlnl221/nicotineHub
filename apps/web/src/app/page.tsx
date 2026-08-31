@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { LoginForm } from "@/components/LoginForm";
+import { isDemo } from "@/lib/demo";
 
 export default function Home() {
   const { state } = useSession();
@@ -16,7 +17,7 @@ export default function Home() {
   if (state.status === "connected") return null;
 
   return (
-    <div className="relative flex min-h-dvh items-center justify-center overflow-x-hidden bg-surface font-body text-on-surface dark:bg-inverse-surface dark:text-inverse-on-surface px-6 py-12">
+    <div suppressHydrationWarning className="relative flex min-h-dvh items-center justify-center overflow-x-hidden bg-surface font-body text-on-surface dark:bg-inverse-surface dark:text-inverse-on-surface px-6 py-12">
       {/* Ambient background */}
       <div
         className="pointer-events-none absolute inset-0 opacity-40 dark:opacity-20"
@@ -29,17 +30,18 @@ export default function Home() {
 
       <main className="relative z-10 flex w-full max-w-md flex-col items-center">
         {/* Logo and header */}
-        <div className="mb-8 flex w-full flex-col items-center text-center">
+        <div suppressHydrationWarning className="mb-8 flex w-full flex-col items-center text-center">
           <img
             src="/logo.png"
             alt="Nicotine Hub"
             width={220}
             height={120}
             className="mb-4 h-auto w-[220px] max-w-[70vw] object-contain drop-shadow-[0_4px_24px_rgba(9,76,178,0.12)]"
+            suppressHydrationWarning
           />
           <h1 className="sr-only">Nicotine Hub</h1>
           <p className="font-body text-sm text-on-surface-variant dark:text-outline-variant">
-            Enter any username and password to try the demo.
+            {isDemo ? "Enter any username and password to try the demo." : "Enter any username and password to sign in."}
           </p>
         </div>
 

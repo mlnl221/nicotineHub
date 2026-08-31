@@ -16,9 +16,12 @@ type TopBarProps = {
 export function TopBar({ title = "Nicotine Hub", subtitle, showBack, backHref }: TopBarProps) {
   const { state } = useSession();
   const { theme, toggle } = useTheme();
-  const { setOption } = useConfig();
+  const { settings, setOption } = useConfig();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  // ui.header_bar false = hide mobile header bar (GTK parity)
+  if (settings.ui.header_bar === false) return null;
 
   const handleToggle = () => {
     const next = theme === "dark" ? "light" : "dark";

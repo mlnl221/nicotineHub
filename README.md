@@ -73,7 +73,7 @@ For prebuilt images and release workflow, see [`docs/deployment.md`](docs/deploy
 
 ## Porting status
 
-Stage `d395cc6` — almost 1:1, mobile-friendly. See **[docs/porting-status.md](docs/porting-status.md)** for the full domain-by-domain matrix, **[docs/settings-mapping.md](docs/settings-mapping.md)** for the settings map, and **`docs/settings-plan.md`** for done vs next (Phases A–G done, H: Network extras).
+Stage `d395cc6`+ — almost 1:1, mobile-friendly. See **[docs/porting-status.md](docs/porting-status.md)** for the full domain-by-domain matrix, **[docs/settings-mapping.md](docs/settings-mapping.md)** for the settings map, and **`docs/settings-plan.md`** for done vs next (Phases A–H done, `leech_detector` ported; `youtube_info` + fonts/colors/lastfm intentionally omitted, English-only).
 
 ---
 

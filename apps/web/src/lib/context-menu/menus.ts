@@ -17,10 +17,26 @@ function copy(text: string, ok = "Copied") {
 function navigate(path: string) {
   if (typeof window === "undefined") return;
   try {
-    // Use history.pushState + popstate to avoid full reload which loses in-memory WebSocket session.
-    // Next.js App Router handles popstate; fallback to href if that fails.
-    window.history.pushState(null, "", path);
-    window.dispatchEvent(new PopStateEvent("popstate"));
+    // Use an anchor click for soft navigation so Next.js App Router handles it
+    // without a full reload (which would lose the in-memory WebSocket session).
+    // history.pushState + popstate alone does not trigger App Router navigation
+    // in Next 15 (it updates URL but does not render the new route).
+    const a = document.createElement("a");
+    a.href = path;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      try { a.remove(); } catch {}
+    }, 100);
+    // Fallback to hard navigation if soft navigation didn't change URL at all
+    const before = window.location.href;
+    setTimeout(() => {
+      if (window.location.href === before) {
+        window.location.href = path;
+      }
+    }, 300);
+    return;
   } catch {
     window.location.href = path;
   }
@@ -56,7 +72,7 @@ export function userMenu(username: string, tabName: string, opts?: { onBrowse?: 
   return items;
 }
 
-export function searchResultMenu(row: { user: string; path: string; filename: string; folder: string }, opts: { onDownload: () => void }) : MenuItem[] {
+export function searchResultMenu(row: { user: string; path: string; filename: string; folder: string }, opts: { onDownload: () => void; onProps?: () => void }) : MenuItem[] {
   const fileUrl = `slsk://${encodeURIComponent(row.user)}/${row.path.replace(/\\/g, "/")}`;
   const folderPath = row.path.replace(/[^\\]*$/, "").replace(/\\$/, "");
   const folderUrl = `slsk://${encodeURIComponent(row.user)}/${folderPath.replace(/\\/g, "/")}`;
@@ -67,7 +83,7 @@ export function searchResultMenu(row: { user: string; path: string; filename: st
     { id: "download-to", label: "Download File To…", icon: "download", action: () => toast("Download To — folder picker unavailable") },
     { id: "download-folder", label: "Download Folder…", icon: "folder", action: () => toast("Download folder — use Download File") },
     { id: "sep2", label: "---", icon: "" },
-    { id: "props", label: "File Properties", icon: "info", action: () => toast(`${row.filename} • ${row.path}`) },
+    { id: "props", label: "File Properties", icon: "info", action: opts.onProps ?? (() => toast(`${row.filename} • ${row.path}`)) },
     { id: "sep3", label: "---", icon: "" },
     { id: "view-profile", label: "View User Profile", icon: "account_circle", action: () => navigate(`/profile/${encodeURIComponent(row.user)}`) },
     { id: "browse-folder", label: "Browse Folder", icon: "folder_managed", action: () => navigate(`/browse/${encodeURIComponent(row.user)}`) },

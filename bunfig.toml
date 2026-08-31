@@ -1,0 +1,5 @@
+[test]
+# Exclude Playwright e2e specs from bun test (they run via `npx playwright test`)
+# Root `package.json:test` already runs `bun run --cwd apps/bridge test`, but
+# direct `bun test` from root would otherwise discover e2e/transfers.spec.ts
+pathIgnorePatterns = ["e2e/**"]

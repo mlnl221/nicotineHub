@@ -1,29 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import dynamic from "next/dynamic";
 import { useConfig } from "@/lib/config/provider";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
+import { SectionLoader, TabSwitchLoader } from "@/components/PageLoader";
 
-const NetworkSection = dynamic(() => import("@/components/settings/NetworkSection").then((m) => m.NetworkSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
-const UiSection = dynamic(() => import("@/components/settings/UiSection").then((m) => m.UiSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
-const SearchesSection = dynamic(() => import("@/components/settings/SearchesSection").then((m) => m.SearchesSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
-const NotificationsSection = dynamic(() => import("@/components/settings/NotificationsSection").then((m) => m.NotificationsSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
-const SharesSection = dynamic(() => import("@/components/settings/SharesSection").then((m) => m.SharesSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
-const DownloadsSection = dynamic(() => import("@/components/settings/DownloadsSection").then((m) => m.DownloadsSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
-const UploadsSection = dynamic(() => import("@/components/settings/UploadsSection").then((m) => m.UploadsSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
-const UserProfileSection = dynamic(() => import("@/components/settings/UserProfileSection").then((m) => m.UserProfileSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
-const ChatsSection = dynamic(() => import("@/components/settings/ChatsSection").then((m) => m.ChatsSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
-const NowPlayingSection = dynamic(() => import("@/components/settings/NowPlayingSection").then((m) => m.NowPlayingSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
-const LoggingSection = dynamic(() => import("@/components/settings/LoggingSection").then((m) => m.LoggingSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
-const BannedUsersSection = dynamic(() => import("@/components/settings/BannedUsersSection").then((m) => m.BannedUsersSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
-const IgnoredUsersSection = dynamic(() => import("@/components/settings/IgnoredUsersSection").then((m) => m.IgnoredUsersSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
-const UrlHandlersSection = dynamic(() => import("@/components/settings/UrlHandlersSection").then((m) => m.UrlHandlersSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
-const PluginsSection = dynamic(() => import("@/components/settings/PluginsSection").then((m) => m.PluginsSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
-const AboutSection = dynamic(() => import("@/components/settings/AboutSection").then((m) => m.AboutSection), { loading: () => <div className="h-24 animate-pulse rounded-xl bg-surface-container-high" /> });
+const NetworkSection = dynamic(() => import("@/components/settings/NetworkSection").then((m) => m.NetworkSection), { loading: () => <SectionLoader /> });
+const UiSection = dynamic(() => import("@/components/settings/UiSection").then((m) => m.UiSection), { loading: () => <SectionLoader /> });
+const SearchesSection = dynamic(() => import("@/components/settings/SearchesSection").then((m) => m.SearchesSection), { loading: () => <SectionLoader /> });
+const NotificationsSection = dynamic(() => import("@/components/settings/NotificationsSection").then((m) => m.NotificationsSection), { loading: () => <SectionLoader /> });
+const SharesSection = dynamic(() => import("@/components/settings/SharesSection").then((m) => m.SharesSection), { loading: () => <SectionLoader /> });
+const DownloadsSection = dynamic(() => import("@/components/settings/DownloadsSection").then((m) => m.DownloadsSection), { loading: () => <SectionLoader /> });
+const UploadsSection = dynamic(() => import("@/components/settings/UploadsSection").then((m) => m.UploadsSection), { loading: () => <SectionLoader /> });
+const UserProfileSection = dynamic(() => import("@/components/settings/UserProfileSection").then((m) => m.UserProfileSection), { loading: () => <SectionLoader /> });
+const ChatsSection = dynamic(() => import("@/components/settings/ChatsSection").then((m) => m.ChatsSection), { loading: () => <SectionLoader /> });
+const NowPlayingSection = dynamic(() => import("@/components/settings/NowPlayingSection").then((m) => m.NowPlayingSection), { loading: () => <SectionLoader /> });
+const LoggingSection = dynamic(() => import("@/components/settings/LoggingSection").then((m) => m.LoggingSection), { loading: () => <SectionLoader /> });
+const BannedUsersSection = dynamic(() => import("@/components/settings/BannedUsersSection").then((m) => m.BannedUsersSection), { loading: () => <SectionLoader /> });
+const IgnoredUsersSection = dynamic(() => import("@/components/settings/IgnoredUsersSection").then((m) => m.IgnoredUsersSection), { loading: () => <SectionLoader /> });
+const UrlHandlersSection = dynamic(() => import("@/components/settings/UrlHandlersSection").then((m) => m.UrlHandlersSection), { loading: () => <SectionLoader /> });
+const PluginsSection = dynamic(() => import("@/components/settings/PluginsSection").then((m) => m.PluginsSection), { loading: () => <SectionLoader /> });
+const AboutSection = dynamic(() => import("@/components/settings/AboutSection").then((m) => m.AboutSection), { loading: () => <SectionLoader /> });
 
 type TabId =
   | "network"
@@ -80,7 +81,13 @@ export default function SettingsPage() {
   const { resetAll } = useConfig();
   const [tab, setTab] = useState<TabId>("network");
   const [mounted, setMounted] = useState(false);
+  const [isPending, startTransition] = useTransition();
   useEffect(() => setMounted(true), []);
+
+  const handleTabChange = (next: TabId) => {
+    if (next === tab) return;
+    startTransition(() => setTab(next));
+  };
 
   // Deep-link via ?tab= / #tab — sync to URL and survive reload (settings-plan.md Phase B)
   useEffect(() => {
@@ -153,7 +160,7 @@ export default function SettingsPage() {
               <select
                 id="settings-tab-select"
                 value={tab}
-                onChange={(e) => setTab(e.target.value as TabId)}
+                onChange={(e) => handleTabChange(e.target.value as TabId)}
                 className="w-full appearance-none rounded-2xl bg-surface-container-lowest py-3 pl-10 pr-10 font-label text-sm font-medium text-on-surface ghost-border transition-colors focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:bg-surface-container-high dark:text-inverse-on-surface"
               >
                 {TAB_GROUPS.map((group) => (
@@ -194,13 +201,13 @@ export default function SettingsPage() {
                           const t = TAB_MAP.get(id);
                           if (!t) return null;
                           const active = tab === t.id;
-                          return (
+                            return (
                             <button
                               key={t.id}
                               id={`tab-${t.id}`}
                               role="tab"
                               aria-selected={active}
-                              onClick={() => setTab(t.id)}
+                              onClick={() => handleTabChange(t.id)}
                               className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left font-label text-sm transition-all ${
                                 active
                                   ? "bg-primary text-on-primary shadow-sm"
@@ -227,39 +234,44 @@ export default function SettingsPage() {
 
             {/* Content */}
             <div className="min-w-0 flex-1">
-              {tab === "network" ? (
-                <NetworkSection />
-              ) : tab === "appearance" ? (
-                <UiSection />
-              ) : tab === "shares" ? (
-                <SharesSection />
-              ) : tab === "downloads" ? (
-                <DownloadsSection />
-              ) : tab === "uploads" ? (
-                <UploadsSection />
-              ) : tab === "searches" ? (
-                <SearchesSection />
-              ) : tab === "user-profile" ? (
-                <UserProfileSection />
-              ) : tab === "chats" ? (
-                <ChatsSection />
-              ) : tab === "now-playing" ? (
-                <NowPlayingSection />
-              ) : tab === "logging" ? (
-                <LoggingSection />
-              ) : tab === "banned-users" ? (
-                <BannedUsersSection />
-              ) : tab === "ignored-users" ? (
-                <IgnoredUsersSection />
-              ) : tab === "url-handlers" ? (
-                <UrlHandlersSection />
-              ) : tab === "plugins" ? (
-                <PluginsSection />
-              ) : tab === "about" ? (
-                <AboutSection />
-              ) : (
-                <NotificationsSection />
-              )}
+              {isPending ? (
+                <TabSwitchLoader />
+              ) : null}
+              <div className={isPending ? "opacity-60 pointer-events-none transition-opacity duration-150" : "opacity-100 transition-opacity duration-150"}>
+                {tab === "network" ? (
+                  <NetworkSection />
+                ) : tab === "appearance" ? (
+                  <UiSection />
+                ) : tab === "shares" ? (
+                  <SharesSection />
+                ) : tab === "downloads" ? (
+                  <DownloadsSection />
+                ) : tab === "uploads" ? (
+                  <UploadsSection />
+                ) : tab === "searches" ? (
+                  <SearchesSection />
+                ) : tab === "user-profile" ? (
+                  <UserProfileSection />
+                ) : tab === "chats" ? (
+                  <ChatsSection />
+                ) : tab === "now-playing" ? (
+                  <NowPlayingSection />
+                ) : tab === "logging" ? (
+                  <LoggingSection />
+                ) : tab === "banned-users" ? (
+                  <BannedUsersSection />
+                ) : tab === "ignored-users" ? (
+                  <IgnoredUsersSection />
+                ) : tab === "url-handlers" ? (
+                  <UrlHandlersSection />
+                ) : tab === "plugins" ? (
+                  <PluginsSection />
+                ) : tab === "about" ? (
+                  <AboutSection />
+                ) : (
+                  <NotificationsSection />
+                )}
+              </div>
             </div>
           </div>
         </div>

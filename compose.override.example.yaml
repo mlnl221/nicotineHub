@@ -1,0 +1,19 @@
+# Example override for VPN-forwarded port (no Docker port remap needed).
+# With VPN (e.g. Mullvad/Proton forward 49127) use host network so bridge's
+# Bun.listen 49127 is directly host-reachable. Then Settings → Network Save
+# hot-swaps without `docker compose up -d` and WS stays open.
+#
+# Usage:
+#   cp compose.override.example.yaml compose.override.yaml
+#   # edit LISTEN_PORT if your VPN uses a different forward
+#   docker compose up -d
+#
+# For bridge network (default) keep ports mapping and run the watcher:
+#   ./scripts/sync-listen-port.sh  # watches DATA_DIR/listen_port → .env → up -d
+services:
+  bridge:
+    network_mode: host
+    # ports: not needed in host mode – bridge binds directly to host 49127
+    environment:
+      LISTEN_PORT: "${LISTEN_PORT:-49127}"
+      PORT: "8787"

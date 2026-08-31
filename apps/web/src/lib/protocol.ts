@@ -542,6 +542,11 @@ export interface ServerReconnectFailedMessage {
   type: "server:reconnect";
   error: string;
 }
+export interface ServerReconnectedMessage {
+  type: "server:reconnect";
+  ok: true;
+  listenPort: number;
+}
 
 /* ------------------------------------------------------------------ *
  * Heartbeat (bridge <-> web keepalive, 25s)
@@ -579,6 +584,9 @@ export interface DiagnosticsHealth {
   listenPort: number;
   dataDir: string;
   tokenAuth: boolean;
+  version?: string;
+  commitSha?: string;
+  buildDate?: string;
 }
 
 export interface DiagnosticsInitMessage {
@@ -658,6 +666,10 @@ export interface PluginInstallUrlRequest {
   type: "plugin:installUrl";
   url: string;
 }
+export interface PluginInstallGithubTsRequest {
+  type: "plugin:installGithubTs";
+  url: string;
+}
 
 export interface PluginListMessage {
   type: "plugin:list";
@@ -711,6 +723,7 @@ export type BridgeOutboundMessage =
   | BrowseFolderMessage
   | ServerReconnectMessage
   | ServerReconnectFailedMessage
+  | ServerReconnectedMessage
   | DiagnosticsInitMessage
   | DiagnosticsLogMessage
   | DiagnosticsHealthMessage
@@ -752,4 +765,5 @@ export type BridgeInboundMessage =
   | PluginResetSettingsRequest
   | PluginInstallRequest
   | PluginInstallUrlRequest
+  | PluginInstallGithubTsRequest
   | PingRequest;
