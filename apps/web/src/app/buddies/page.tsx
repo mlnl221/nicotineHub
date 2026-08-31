@@ -20,9 +20,10 @@ export default function BuddiesPage() {
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; username: string } | null>(null);
 
   useEffect(() => {
-    if (state.status !== "connected") router.replace("/");
+    if (state.status === "failed") router.replace("/");
   }, [state.status, router]);
 
+  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
   if (state.status !== "connected") return null;
 
   const handleAdd = () => {
