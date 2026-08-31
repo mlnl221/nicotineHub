@@ -91,6 +91,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   const counter = useRef<number>(initialMax);
   const tabsRef = useRef<BrowseTab[]>([]);
   tabsRef.current = tabs;
+  const pendingOpenRef = useRef<Set<string>>(new Set());
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // track pending folder request per tab to avoid cross-tab stale updates when same username in multiple tabs
   const pendingFolderRef = useRef<Map<string, string>>(new Map());
@@ -192,12 +193,22 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   const openBrowse = useCallback((usernameRaw: string) => {
     const username = usernameRaw.trim();
     if (!username) return;
-    const existing = tabsRef.current.find((t) => t.username.toLowerCase() === username.toLowerCase());
+    const lower = username.toLowerCase();
+    if (pendingOpenRef.current.has(lower)) {
+      const ex = tabsRef.current.find((t) => t.username.toLowerCase() === lower);
+      if (ex) setActiveId(ex.id);
+      return;
+    }
+    const existing = tabsRef.current.find((t) => t.username.toLowerCase() === lower);
     if (existing) { setActiveId(existing.id); return; }
     if (tabsRef.current.length >= MAX_TABS) return;
+    pendingOpenRef.current.add(lower);
     const id = `b${++counter.current}`;
     const tab: BrowseTab = { id, username, loading: true, error: null, folders: [], currentFolder: null, currentFiles: null, query: "" };
-    setTabs((prev) => [...prev, tab]);
+    setTabs((prev) => {
+      if (prev.some((t) => t.username.toLowerCase() === lower)) return prev;
+      return [...prev, tab];
+    });
     setActiveId(id);
     if (state.status === "connected") {
       send({ type: "browse", action: "shares", username });
@@ -207,6 +218,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
       }, 32000);
       timersRef.current.set(id, timer);
     }
+    setTimeout(() => pendingOpenRef.current.delete(lower), 600);
   }, [send, state.status]);
 
   const closeBrowse = useCallback((id: string) => {

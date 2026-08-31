@@ -93,6 +93,8 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const counter = useRef<number>(initialMax);
   const tabsRef = useRef<ProfileTab[]>([]);
   tabsRef.current = tabs;
+  // Guard against rapid double-open of same username (e.g., ?user effect firing twice)
+  const pendingOpenRef = useRef<Set<string>>(new Set());
 
   useEffect(() => { persist(tabs, activeId); }, [tabs, activeId]);
 
@@ -214,12 +216,24 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const openProfile = useCallback((usernameRaw: string) => {
     const username = usernameRaw.trim();
     if (!username) return;
-    const existing = tabsRef.current.find((t) => t.username.toLowerCase() === username.toLowerCase());
+    const lower = username.toLowerCase();
+    // Prevent duplicate tab creation when effect fires twice quickly (e.g., ?user handling)
+    if (pendingOpenRef.current.has(lower)) {
+      const ex = tabsRef.current.find((t) => t.username.toLowerCase() === lower);
+      if (ex) setActiveId(ex.id);
+      return;
+    }
+    const existing = tabsRef.current.find((t) => t.username.toLowerCase() === lower);
     if (existing) { setActiveId(existing.id); return; }
     if (tabsRef.current.length >= MAX_TABS) return;
+    pendingOpenRef.current.add(lower);
     const id = `p${++counter.current}`;
     const tab: ProfileTab = { id, username, profile: { username }, loading: true, error: null };
-    setTabs((prev) => [...prev, tab]);
+    setTabs((prev) => {
+      // Re-check inside functional update in case another call slipped between tabsRef check and setTabs
+      if (prev.some((t) => t.username.toLowerCase() === lower)) return prev;
+      return [...prev, tab];
+    });
     setActiveId(id);
     if (state.status === "connected") {
       send({ type: "userinfo", action: "watch", username });
@@ -234,9 +248,11 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       const key = "nicotineHub.recentProfiles";
       const raw = (localStorage.getItem(key) ?? localStorage.getItem(key.replace ? key.replace("nicotineHub.", "nicotine.") : key));
       const list: string[] = raw ? JSON.parse(raw) : [];
-      const next = [username, ...list.filter((x: string) => x.toLowerCase() !== username.toLowerCase())].slice(0, 20);
+      const next = [username, ...list.filter((x: string) => x.toLowerCase() !== lower)].slice(0, 20);
       localStorage.setItem(key, JSON.stringify(next));
     } catch {}
+    // Clear guard after a short delay so same user can be re-opened after close
+    setTimeout(() => pendingOpenRef.current.delete(lower), 600);
   }, [send, state.status]);
 
   const closeProfile = useCallback((id: string) => {

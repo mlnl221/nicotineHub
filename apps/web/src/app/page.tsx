@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { LoginForm } from "@/components/LoginForm";
+import { isDemo } from "@/lib/demo";
 
 export default function Home() {
   const { state } = useSession();
@@ -40,7 +41,7 @@ export default function Home() {
           />
           <h1 className="sr-only">Nicotine Hub</h1>
           <p className="font-body text-sm text-on-surface-variant dark:text-outline-variant">
-            Enter any username and password to try the demo.
+            {isDemo ? "Enter any username and password to try the demo." : "Enter any username and password to sign in."}
           </p>
         </div>
 
