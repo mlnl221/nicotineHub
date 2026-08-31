@@ -203,10 +203,10 @@ html[data-demo="true"] nav.fixed.left-0.top-0 {
   top: var(--demo-banner-h) !important;
   height: calc(100% - var(--demo-banner-h)) !important;
 }
-/* generic sticky top-0 push */
-html[data-demo="true"] header.sticky.top-0,
-html[data-demo="true"] div.sticky.top-0,
-html[data-demo="true"] .sticky.top-0 {
+/* generic sticky top-0 push — exclude the banner itself so it stays at true top:0 */
+html[data-demo="true"] header.sticky.top-0:not([data-demo-banner]),
+html[data-demo="true"] div.sticky.top-0:not([data-demo-banner]),
+html[data-demo="true"] .sticky.top-0:not([data-demo-banner]) {
   top: var(--demo-banner-h) !important;
 }
 /* mobile secondary sticky that sits under TopBar: top-[calc(56px+env(safe-area-inset-top,0px))] -> + banner */
