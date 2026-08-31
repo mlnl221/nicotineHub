@@ -10,6 +10,7 @@ export default function ProfileRedirect() {
   const { state } = useSession();
   const router = useRouter();
   useEffect(() => {
+    if (state.status === "idle" || state.status === "connecting") return;
     if (state.status !== "connected") { router.replace("/"); return; }
     if (username) {
       try {
@@ -24,5 +25,6 @@ export default function ProfileRedirect() {
       router.replace("/profile");
     }
   }, [username, state.status, router]);
+  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
   return null;
 }

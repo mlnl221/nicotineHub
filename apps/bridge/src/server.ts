@@ -188,7 +188,7 @@ function defaultProfile(username: string) {
 let LISTEN_PORT = Number(process.env.LISTEN_PORT || 49127);
 const PORT = Number(process.env.PORT || 8787);
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || "";
-const DATA_DIR = process.env.DATA_DIR || "/data";
+let DATA_DIR = process.env.DATA_DIR || "/data";
 const APP_VERSION = process.env.APP_VERSION || process.env.BUILD_TAG || process.env.TAG || "0.1.0";
 const COMMIT_SHA = (process.env.COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 7);
 const BUILD_DATE = process.env.BUILD_DATE || process.env.NEXT_PUBLIC_BUILD_DATE || "";
@@ -248,11 +248,27 @@ function setCachedSearch(key: string, rows: unknown[], total: number) {
 export const bridgeCaches = { searchCache, browseCache, userInfoCache, getCachedSearch, setCachedSearch };
 // ─────────────────────────────────────────────────────────
 
-// Ensure data volume exists (dev fallback to /tmp if /data not writable)
+// Ensure data volume exists (dev/sandbox fallback when /data not writable)
 try {
   mkdirSync(DATA_DIR, { recursive: true });
 } catch {
-  // fallback checked in TransferManager
+  // fallback checked in TransferManager, but also try writable dirs for plugins/persist
+  const { tmpdir } = require("node:os") as typeof import("node:os");
+  const fallbacks = ["./data", join(tmpdir(), "nicotine-hub")];
+  for (const cand of fallbacks) {
+    try {
+      mkdirSync(cand, { recursive: true });
+      // verify writable
+      const testFile = join(cand, ".writetest");
+      writeFileSync(testFile, "ok");
+      rmSync(testFile);
+      if (DATA_DIR === "/data") {
+        console.warn(`[bridge] DATA_DIR /data not writable, falling back to ${cand}`);
+        DATA_DIR = cand;
+      }
+      break;
+    } catch {}
+  }
 }
 
 function errorMessage(error: string): string { return JSON.stringify({ type: "error", error }); }

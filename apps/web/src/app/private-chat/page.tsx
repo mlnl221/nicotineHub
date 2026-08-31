@@ -27,7 +27,7 @@ function PrivateChatInner() {
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
 
   useEffect(() => {
-    if (state.status !== "connected") router.replace("/");
+    if (state.status === "failed") router.replace("/");
   }, [state.status, router]);
 
   useEffect(() => {
@@ -42,6 +42,7 @@ function PrivateChatInner() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [conversations, activeUser]);
 
+  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
   if (state.status !== "connected") return null;
 
   const activeMessages = activeUser ? conversations.get(activeUser) || [] : [];
@@ -149,15 +150,18 @@ function PrivateChatInner() {
                   const last = msgs[msgs.length - 1];
                   const isActive = activeUser === u;
                   return (
-                    <button
+                    <div
                       key={u}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setActiveUser(u)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActiveUser(u); } }}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         setMenuAnchor({ x: e.clientX, y: e.clientY, items: userMenu(u, "privatechat") });
                       }}
-                      className={`flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors ${isActive ? "bg-primary-fixed/20 text-primary border border-primary/20" : "hover:bg-surface-container-low"}`}
+                      className={`flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors cursor-pointer ${isActive ? "bg-primary-fixed/20 text-primary border border-primary/20" : "hover:bg-surface-container-low"}`}
                     >
                       <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-container-high text-sm font-bold">
                         {u.slice(0, 2).toUpperCase()}
@@ -180,7 +184,7 @@ function PrivateChatInner() {
                           <span className="material-symbols-outlined text-[16px]">close</span>
                         </button>
                       ) : null}
-                    </button>
+                    </div>
                   );
                 })
               )}

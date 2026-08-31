@@ -222,28 +222,60 @@ export function SearchScreen() {
       ) : null}
 
       {activeTab ? (
-        <div
-          onContextMenu={(e) => {
-            const rowEl = (e.target as HTMLElement).closest("[data-row-user]") as HTMLElement | null;
-            if (rowEl?.dataset.rowUser) {
-              e.preventDefault();
-              const user = rowEl.dataset.rowUser;
-              const path = rowEl.dataset.rowPath || "";
-              // resolve full row from visibleRows to get mocked attributes/size
-              const full = visibleRows.find((r) => r.user === user && r.path === path) || null;
-              if (full) setMenuRow(full);
-              else {
-                const filename = rowEl.dataset.rowFilename || "";
-                const folder = rowEl.dataset.rowFolder || "";
-                const size = Number(rowEl.dataset.rowSize || "0");
-                setMenuRow({ user, path, filename, folder, size, fileType: "", slotFree: false, speed: 0, inQueue: 0, quality: 0, length: 0, private: false, attributes: {} });
+        visibleRows.length === 0 && activeTab.status === "ended" ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 py-16 text-center">
+            <span className="material-symbols-outlined text-4xl text-outline">search_off</span>
+            <p className="font-body text-sm font-semibold text-on-surface">
+              {activeTab.reason === "timeout" && activeTab.total === 0
+                ? "No results — check your listening port"
+                : activeTab.reason === "max_results"
+                  ? "Search limit reached — no matching results"
+                  : "No results"}
+            </p>
+            <p className="max-w-md font-body text-xs leading-relaxed text-on-surface-variant">
+              {activeTab.reason === "timeout" && activeTab.total === 0 ? (
+                <>
+                  Soulseek returns results peer-to-peer to your listening port (currently <code className="rounded bg-surface-container-high px-1 py-0.5 font-mono text-[11px]">49127</code>). If this port isn&apos;t forwarded through your VPN/router and into WSL, searches will time out with 0 results.
+                  <br />
+                  Check <a href="/settings?tab=network#network" className="text-primary underline">Settings → Network</a> and your ProtonVPN/Windows portproxy.
+                </>
+              ) : activeTab.total === 0 ? (
+                "Try a different query or widen your filters. Results are live — some queries return nothing if peers are offline."
+              ) : (
+                "All results are filtered out. Try clearing filters."
+              )}
+            </p>
+            {activeTab.reason === "timeout" && activeTab.total === 0 ? (
+              <div className="mt-2 rounded-lg bg-error-container/20 px-3 py-2 font-label text-[11px] text-on-error-container">
+                Search ended: timeout (no peer could connect back). This is expected if 49127 isn&apos;t reachable.
+              </div>
+            ) : null}
+            <button onClick={() => startSearch(activeTab.query, { mode: activeTab.mode, target: activeTab.target })} className="mt-2 rounded-full bg-primary px-4 py-2 font-label text-xs font-semibold text-on-primary">Search again</button>
+          </div>
+        ) : (
+          <div
+            onContextMenu={(e) => {
+              const rowEl = (e.target as HTMLElement).closest("[data-row-user]") as HTMLElement | null;
+              if (rowEl?.dataset.rowUser) {
+                e.preventDefault();
+                const user = rowEl.dataset.rowUser;
+                const path = rowEl.dataset.rowPath || "";
+                // resolve full row from visibleRows to get mocked attributes/size
+                const full = visibleRows.find((r) => r.user === user && r.path === path) || null;
+                if (full) setMenuRow(full);
+                else {
+                  const filename = rowEl.dataset.rowFilename || "";
+                  const folder = rowEl.dataset.rowFolder || "";
+                  const size = Number(rowEl.dataset.rowSize || "0");
+                  setMenuRow({ user, path, filename, folder, size, fileType: "", slotFree: false, speed: 0, inQueue: 0, quality: 0, length: 0, private: false, attributes: {} });
+                }
+                ctxMenu.open(e);
               }
-              ctxMenu.open(e);
-            }
-          }}
-        >
-          <ResultsList rows={visibleRows} onRowTap={setSheetRow} grouping={settings.searches.group_searches} expand={settings.searches.expand_results} />
-        </div>
+            }}
+          >
+            <ResultsList rows={visibleRows} onRowTap={setSheetRow} grouping={settings.searches.group_searches} expand={settings.searches.expand_results} />
+          </div>
+        )
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4 py-8">
           <div className="flex flex-col items-center gap-3 text-center">

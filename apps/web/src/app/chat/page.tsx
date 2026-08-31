@@ -29,9 +29,10 @@ export default function ChatRoomsPage() {
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
 
   useEffect(() => {
-    if (state.status !== "connected") router.replace("/");
+    if (state.status === "failed") router.replace("/");
   }, [state.status, router]);
 
+  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
   if (state.status !== "connected") return null;
 
   const activeMessages = activeRoom ? messages.get(activeRoom) || [] : [];
