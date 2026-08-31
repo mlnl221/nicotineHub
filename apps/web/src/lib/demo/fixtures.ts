@@ -116,21 +116,40 @@ export function mockBrowseFolders(username: string): import("@/lib/protocol").Br
   const seed = Math.abs(hash(username.toLowerCase()));
   const rnd = seededRand(seed);
   // include nested sub-directories to demonstrate tree handling (jazzcat has Blue Note + Live, Electronic has Acid)
+  // Added Live Bootlegs/2023 as requested — 2023 contains the bootleg files
   const folderNames = [
     `C:\\Users\\${username}\\Music\\Jazz`,
     `C:\\Users\\${username}\\Music\\Jazz\\Blue Note`,
     `C:\\Users\\${username}\\Music\\Jazz\\Live Bootlegs`,
+    `C:\\Users\\${username}\\Music\\Jazz\\Live Bootlegs\\2023`,
     `C:\\Users\\${username}\\Music\\Electronic`,
     `C:\\Users\\${username}\\Music\\Electronic\\Acid`,
     `C:\\Users\\${username}\\Music\\Hip-Hop`,
     `C:\\Users\\${username}\\Music\\Soul`,
   ];
   return folderNames.map((name) => {
-    const fileCount = 6 + Math.floor(rnd() * 8);
+    const isLiveBootlegs = name.endsWith("\\Live Bootlegs");
+    const is2023 = name.endsWith("\\Live Bootlegs\\2023");
+    // Live Bootlegs parent is a container — keep minimal, files live in 2023
+    const fileCount = isLiveBootlegs ? 0 : is2023 ? 6 + Math.floor(rnd() * 4) : 6 + Math.floor(rnd() * 8);
     const files: import("@/lib/protocol").BrowseFile[] = [];
     for (let i = 0; i < fileCount; i++) {
-      const title = SAMPLE_TITLES[Math.floor(rnd() * SAMPLE_TITLES.length)];
-      const ext = FILE_TYPES[Math.floor(rnd() * FILE_TYPES.length)];
+      let title: string;
+      let ext: string;
+      if (is2023) {
+        // 2023 bootleg-specific titles
+        const bootlegTitles = [
+          `2023-05-15 - Live at Blue Note - Set ${i + 1}`,
+          `2023-08-22 - Village Vanguard Night ${i + 1}`,
+          `2023-11-03 - Jazz Festival Bootleg ${i + 1}`,
+          `2023-03-10 - Late Night Session ${i + 1}`,
+        ];
+        title = bootlegTitles[i % bootlegTitles.length];
+        ext = rnd() > 0.3 ? "flac" : "mp3";
+      } else {
+        title = SAMPLE_TITLES[Math.floor(rnd() * SAMPLE_TITLES.length)];
+        ext = FILE_TYPES[Math.floor(rnd() * FILE_TYPES.length)];
+      }
       const fileName = `${title}.${ext}`;
       const fullPath = `${name}\\${fileName}`;
       const size = Math.floor(3_000_000 + rnd() * 120_000_000);
