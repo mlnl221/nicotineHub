@@ -206,6 +206,39 @@ try {
   }
 } catch {}
 
+// Global UPnP toggle — mirrors nicotine config server.upnp (default true)
+// Persisted to DATA_DIR/upnp_enabled so bridge remembers user's choice across restarts even without WS.
+let GLOBAL_UPNP_ENABLED = true;
+try {
+  const _upnpPath = join(DATA_DIR, "upnp_enabled");
+  if (existsSync(_upnpPath)) {
+    const _raw = readFileSync(_upnpPath, "utf8").trim().toLowerCase();
+    if (_raw === "0" || _raw === "false" || _raw === "off") GLOBAL_UPNP_ENABLED = false;
+    else if (_raw === "1" || _raw === "true" || _raw === "on") GLOBAL_UPNP_ENABLED = true;
+  } else if (process.env.UPNP_ENABLED != null) {
+    const v = String(process.env.UPNP_ENABLED).trim().toLowerCase();
+    if (v === "0" || v === "false" || v === "off") GLOBAL_UPNP_ENABLED = false;
+  }
+} catch {}
+
+// Helper to collect current PortMapper status from active sessions (or global defaults)
+function getGlobalPortMapperStatus(): { enabled: boolean; active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; hasPort: boolean } {
+  let best: { enabled: boolean; active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; hasPort: boolean } | null = null;
+  for (const s of activeSessions) {
+    try {
+      const st = (s as unknown as { getPortMapperStatus?: () => { active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; hasPort: boolean }; _upnpEnabled?: boolean }).getPortMapperStatus?.();
+      if (st) {
+        best = { enabled: (s as unknown as { _upnpEnabled?: boolean })._upnpEnabled ?? GLOBAL_UPNP_ENABLED, active: st.active, port: st.port, ip: st.ip, error: st.error, lastSuccessAt: st.lastSuccessAt, hasPort: st.hasPort };
+        if (st.active) break; // prefer active mapping
+      }
+    } catch {}
+  }
+  if (!best) {
+    return { enabled: GLOBAL_UPNP_ENABLED, active: null, port: LISTEN_PORT, ip: null, error: null, lastSuccessAt: null, hasPort: true };
+  }
+  return best;
+}
+
 // Global plugin manager (shared across WS, but per-WS session getter is swapped)
 const pluginManager = new PluginManager({ dataDir: DATA_DIR });
 pluginManager.registerBuiltin("core_commands", coreCommandsManifest as unknown as Record<string, unknown>, () => new CoreCommandsPlugin());
@@ -363,6 +396,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             }), { status: 200, headers: { "content-type": "application/json", ...cors } });
           }
         }
+        const upnpStatus = getGlobalPortMapperStatus();
         return new Response(JSON.stringify({
           ok: true,
           ts: new Date().toISOString(),
@@ -374,9 +408,19 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           version: APP_VERSION,
           commitSha: COMMIT_SHA,
           buildDate: BUILD_DATE,
+          upnp: upnpStatus,
         }), { status: 200, headers: { "content-type": "application/json", ...cors } });
       }
       return new Response("ok", { status: 200, headers: { "cache-control": "no-store", ...cors } });
+    }
+    // UPnP status endpoint (detailed, auth-gated like health json)
+    if ((url.pathname === "/upnp/status" || url.pathname === "/api/upnp/status") && req.method === "GET") {
+      if (BRIDGE_TOKEN) {
+        const tok = extractToken(req);
+        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
+      }
+      const st = getGlobalPortMapperStatus();
+      return new Response(JSON.stringify({ ...st, listenPort: LISTEN_PORT, ts: new Date().toISOString() }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
     }
     if ((url.pathname === "/interfaces" || url.pathname === "/api/interfaces") && req.method === "GET") {
       if (BRIDGE_TOKEN) {
@@ -426,8 +470,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       const level = (url.searchParams.get("level") as LogLevel) || "debug";
       let entries = diagTail(2000, level as LogLevel);
       entries = entries.slice(-tail);
+      const _upnpDiag = getGlobalPortMapperStatus();
       return new Response(JSON.stringify({
-        health: { ok: true, ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE },
+        health: { ok: true, ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: _upnpDiag },
         logs: entries,
       }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
     }
@@ -647,7 +692,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       } catch {}
       // Send initial diagnostics health
       try {
-        ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE } }));
+        ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: getGlobalPortMapperStatus() } }));
       } catch {}
     },
     async message(ws, raw) {
@@ -792,13 +837,15 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
               if (event.type === "reconnected") {
                 ws.send(JSON.stringify({ type: "server:reconnect", ok: true, listenPort: (event as unknown as { listenPort: number }).listenPort }));
                 // Also push fresh health so UI can update without poll
-                try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: (event as unknown as { listenPort: number }).listenPort, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE } })); } catch {}
+                try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: (event as unknown as { listenPort: number }).listenPort, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: getGlobalPortMapperStatus() } })); } catch {}
               } else {
                 ws.send(JSON.stringify({ type: "server:reconnect", ...(rest as Record<string, unknown>), attempt: (event as unknown as { attempt?: number }).attempt, delay: (event as unknown as { delay?: number }).delay, error: (event as unknown as { error?: string }).error }));
               }
             } catch {}
           },
         });
+        // Apply global UPnP setting before login (so portmapper uses correct flag on connect)
+        try { (session as unknown as { setUpnpEnabled?: (b:boolean)=>void }).setUpnpEnabled?.(GLOBAL_UPNP_ENABLED); } catch {}
         ws.data.session = session;
         try { activeSessions.add(session); } catch {}
         // Ensure TransferManager can call back into session
@@ -1166,7 +1213,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                     logger.info("server", "listen port updated via config", { oldPort: prevPort, newPort });
                     try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: newPort })); } catch {}
                     // Notify all WS clients of new health (so UI Save shows success without poll)
-                    try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: newPort, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE } })); } catch {}
+                    try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: newPort, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: getGlobalPortMapperStatus() } })); } catch {}
                     // Also update other active sessions' listenPort silently (they'll reconnect lazily)
                     for (const s of activeSessions) {
                       if (s !== sess) {
@@ -1182,7 +1229,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                     ws.send(JSON.stringify({ type: "error", error: `Cannot listen on port ${newPort}: ${e.message}` }));
                     // Also send config:updated with old value so UI can revert pending
                     try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: prevPort })); } catch {}
-                    try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: prevPort, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE } })); } catch {}
+                    try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: prevPort, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: getGlobalPortMapperStatus() } })); } catch {}
                   });
                   return; // avoid double config:updated below
                 } else {
@@ -1196,8 +1243,16 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             }
           } else if (section === "server" && key === "upnp") {
             const enabled = Boolean(value);
+            GLOBAL_UPNP_ENABLED = enabled;
+            try { writeFileSync(join(DATA_DIR, "upnp_enabled"), enabled ? "1" : "0"); } catch {}
+            // Apply to current session and all active sessions
             (session as unknown as { setUpnpEnabled?: (b: boolean) => void })?.setUpnpEnabled?.(enabled);
+            for (const s of activeSessions) {
+              if (s !== session) try { (s as unknown as { setUpnpEnabled?: (b:boolean)=>void }).setUpnpEnabled?.(enabled); } catch {}
+            }
             logger.info("server", `UPnP ${enabled ? "enabled" : "disabled"} via config`, { upnp: enabled });
+            // push fresh health with upnp status so UI reflects immediately
+            try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: getGlobalPortMapperStatus() } })); } catch {}
           } else if (section === "server" && ["interface", "autoreply", "autosearch", "autojoin", "userlist", "autoaway"].includes(key)) {
             if (key === "interface") {
               const newIface = String(value || "").trim();
@@ -1207,7 +1262,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                 logger.info("server", `interface set to ${newIface || "default (0.0.0.0)"}`, { iface: newIface || "default", username: (session as unknown as { username?: string })?.username });
                 // Send config updated + health so UI can reflect immediate bind change (WS stays open, Soulseek reconnects if loggedIn)
                 try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: newIface })); } catch {}
-                try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE } })); } catch {}
+                try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: getGlobalPortMapperStatus() } })); } catch {}
               } catch (e) {
                 logger.warn("server", "interface change failed", { iface: newIface, error: (e as Error).message });
                 ws.send(JSON.stringify({ type: "error", error: `Cannot bind to interface ${newIface || "default"}: ${(e as Error).message}` }));

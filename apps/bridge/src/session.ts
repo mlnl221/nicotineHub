@@ -359,6 +359,11 @@ export class SoulseekSession {
     }
   }
 
+  getPortMapperStatus(): { enabled: boolean; active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; lastAttemptAt: number | null; hasPort: boolean } {
+    const base = this.portMapper.status;
+    return { enabled: this._upnpEnabled, ...base };
+  }
+
   // Called after successful login + listener bind (nicotine-portmapper parity)
   private handlePortMapperOnConnect(): void {
     if (!this._upnpEnabled) return;
