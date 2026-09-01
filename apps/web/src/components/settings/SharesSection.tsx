@@ -6,6 +6,7 @@ import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
 import type { SharedFolder } from "@/lib/config/defaults";
 import { SectionCard, ToggleControl, SelectControl, TextFieldControl } from "@/components/settings/controls";
+import { useSession } from "@/lib/session";
 
 const FileExplorer = dynamic(() => import("@/components/files/FileExplorer").then((m) => m.FileExplorer), {
   ssr: false,
@@ -72,9 +73,30 @@ const PERM_TO_KEY: Record<Permission, "shared" | "buddyshared" | "trustedshared"
 export function SharesSection() {
   const { settings, setOption } = useConfig();
   const t = settings.transfers;
+  const { send, subscribe, state } = useSession();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [rescanning, setRescanning] = useState(false);
+  const [lastCounts, setLastCounts] = useState<{ dirs: number; files: number } | null>(null);
+  const [rescanError, setRescanError] = useState<string | null>(null);
+  const [lastRescanAt, setLastRescanAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    return subscribe((msg) => {
+      if ((msg as { type: string }).type === "shares:rescanned") {
+        const m = msg as unknown as { counts?: { dirs: number; files: number } };
+        setRescanning(false);
+        if (m.counts) setLastCounts(m.counts);
+        setLastRescanAt(Date.now());
+        setRescanError(null);
+      } else if ((msg as { type: string }).type === "error" && rescanning) {
+        const m = msg as unknown as { error?: string };
+        setRescanning(false);
+        setRescanError(m.error || "Rescan failed");
+      }
+    });
+  }, [subscribe, rescanning]);
 
   // Dialog state
   const [addOpen, setAddOpen] = useState(false);
@@ -625,7 +647,43 @@ export function SharesSection() {
         />
       </SectionCard>
 
-      <SectionCard title="Rescan">
+      <SectionCard title="Rescan" description="Re-scan all shared folders now — including /data mounts you just added.">
+        <div className="flex flex-col gap-3 border-b border-outline-variant/10 pb-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="font-body text-xs leading-relaxed text-on-surface-variant dark:text-outline">
+                {rescanning ? "Scanning shares…" : lastCounts ? `${lastCounts.dirs} dirs · ${lastCounts.files} files` : state.status !== "connected" ? "Connect to bridge to rescan" : "Re-scan watched folders on the bridge (picks up new files)."}
+              </div>
+              {lastRescanAt && !rescanning && (
+                <div className="font-body text-[11px] text-on-surface-variant/70 dark:text-outline/70">
+                  Last rescan: {new Date(lastRescanAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })} ·{" "}
+                  {lastCounts ? `${lastCounts.files} files` : "done"}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              aria-label="Rescan shares"
+              onClick={() => {
+                if (rescanning || state.status !== "connected") return;
+                setRescanning(true);
+                setRescanError(null);
+                send({ type: "shares:rescan" });
+                // ponytail: single-promise rescan, no progress stream — add shares:scan:progress if scans >5s become common
+                setTimeout(() => setRescanning((v) => (v ? false : v)), 30_000);
+              }}
+              disabled={rescanning || state.status !== "connected"}
+              className="inline-flex h-11 min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-5 font-label text-xs font-semibold uppercase tracking-widest text-on-primary shadow-sm transition-colors hover:bg-primary/90 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
+            >
+              <span className={`material-symbols-outlined text-[18px] ${rescanning ? "animate-spin" : ""}`}>{rescanning ? "progress_activity" : "refresh"}</span>
+              {rescanning ? "Rescanning…" : "Rescan shares"}
+            </button>
+          </div>
+          {rescanError && <div className="rounded-xl bg-error-container px-3 py-2 font-body text-xs text-on-error-container">{rescanError}</div>}
+          {state.status !== "connected" && (
+            <div className="font-body text-[11px] text-on-surface-variant dark:text-outline">Bridge not connected — button enables after login.</div>
+          )}
+        </div>
         <ToggleControl
           label="Rescan on startup"
           description="Request a share rescan when the app starts (bridge handles it)."

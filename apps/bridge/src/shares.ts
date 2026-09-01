@@ -63,6 +63,7 @@ export class ShareDB {
   private revealBuddyShares = false;
   private revealTrustedShares = false;
   private wordIndex = new Map<string, Set<ShareFile>>(); // word -> files containing word (lower, punctuation-split)
+  private customRootsByLevel = new Map<PermissionLevel, [string, string][]>();
 
   constructor(opts?: { dataDir?: string; shareFilters?: string[] }) {
     this.dataDir = opts?.dataDir || defaultDataDir();
@@ -108,6 +109,23 @@ export class ShareDB {
     } catch {}
   }
 
+  private loadCustomRoots(raw: Record<string, unknown>) {
+    const cr = raw.customRoots as Record<string, [string, string][]> | undefined;
+    if (cr && typeof cr === "object") {
+      for (const [k, v] of Object.entries(cr)) {
+        const lvl = k === "buddy" ? PermissionLevel.BUDDY : k === "trusted" ? PermissionLevel.TRUSTED : PermissionLevel.PUBLIC;
+        if (Array.isArray(v)) this.customRootsByLevel.set(lvl, v.filter((x) => Array.isArray(x) && x.length === 2) as [string, string][]);
+      }
+    }
+    const legacy = raw.customRootsByLevel as unknown;
+    if (Array.isArray(legacy)) {
+      for (const [k, v] of legacy as [string, [string, string][]][]) {
+        const lvl = k === "buddy" ? PermissionLevel.BUDDY : k === "trusted" ? PermissionLevel.TRUSTED : PermissionLevel.PUBLIC;
+        if (Array.isArray(v)) this.customRootsByLevel.set(lvl, v);
+      }
+    }
+  }
+
   private load() {
     const p = sharesPath();
     if (!existsSync(p)) {
@@ -126,10 +144,14 @@ export class ShareDB {
             if (typeof raw.revealBuddyShares === "boolean") this.revealBuddyShares = raw.revealBuddyShares;
             if (typeof raw.revealTrustedShares === "boolean") this.revealTrustedShares = raw.revealTrustedShares;
             if (Array.isArray(raw.shareFilters)) { this.shareFilters = raw.shareFilters; this.compileShareFilters(); }
+            this.loadCustomRoots(raw);
           } else if (Array.isArray(raw.publicFolders)) {
             this.publicFolders = raw.publicFolders;
             this.buddyFolders = raw.buddyFolders || [];
             this.trustedFolders = raw.trustedFolders || [];
+            this.loadCustomRoots(raw);
+          } else {
+            this.loadCustomRoots(raw);
           }
         } catch {}
       }
@@ -146,12 +168,14 @@ export class ShareDB {
         if (typeof raw.revealBuddyShares === "boolean") this.revealBuddyShares = raw.revealBuddyShares;
         if (typeof raw.revealTrustedShares === "boolean") this.revealTrustedShares = raw.revealTrustedShares;
         if (Array.isArray(raw.shareFilters)) { this.shareFilters = raw.shareFilters; this.compileShareFilters(); }
+        this.loadCustomRoots(raw);
       }
       else if (Array.isArray(raw)) this.folders = raw;
       else {
         if (Array.isArray(raw.publicFolders)) this.publicFolders = raw.publicFolders;
         if (Array.isArray(raw.buddyFolders)) this.buddyFolders = raw.buddyFolders;
         if (Array.isArray(raw.trustedFolders)) this.trustedFolders = raw.trustedFolders;
+        this.loadCustomRoots(raw);
       }
     } catch {}
   }
@@ -168,11 +192,17 @@ export class ShareDB {
     // For persisted loads, we lack real paths — virtual2real will be rebuilt on next scanFsShares (which walks FS and knows realPath).
   }
 
+  private serializeCustomRoots(): Record<string, [string, string][]> {
+    const out: Record<string, [string, string][]> = {};
+    for (const [lvl, roots] of this.customRootsByLevel) out[lvl] = roots.slice();
+    return out;
+  }
+
   persist() {
     try {
       const p = sharesPath();
       mkdirSync(join(p, ".."), { recursive: true });
-      const payload = { folders: this.folders, publicFolders: this.publicFolders, buddyFolders: this.buddyFolders, trustedFolders: this.trustedFolders, shareFilters: this.shareFilters, revealBuddyShares: this.revealBuddyShares, revealTrustedShares: this.revealTrustedShares };
+      const payload = { folders: this.folders, publicFolders: this.publicFolders, buddyFolders: this.buddyFolders, trustedFolders: this.trustedFolders, shareFilters: this.shareFilters, revealBuddyShares: this.revealBuddyShares, revealTrustedShares: this.revealTrustedShares, customRoots: this.serializeCustomRoots() };
       writeFileSync(p, JSON.stringify(payload, null, 2));
       // also mirror to DATA_DIR/shares.json
       const alt = join(this.dataDir, "shares.json");
@@ -293,6 +323,8 @@ export class ShareDB {
    * and map to the requested virtualName. Persists and invalidates watchers.
    */
   setCustomShares(roots: [string, string][], level: PermissionLevel = PermissionLevel.PUBLIC): ShareFolder[] {
+    // Persist canonical roots for rescan (covers "just-added" shares after restart)
+    this.customRootsByLevel.set(level, roots.slice());
     const prevByName = new Map<string, ShareFile>();
     for (const fo of this.folders) for (const f of fo.files) prevByName.set(f.name, f);
     const folders: ShareFolder[] = [];
@@ -563,23 +595,157 @@ export class ShareDB {
     }
   }
 
+  private async scanCustomRootsAsync(roots: [string, string][]): Promise<ShareFolder[]> {
+    const prevByName = new Map<string, ShareFile>();
+    for (const fo of this.folders) for (const f of fo.files) prevByName.set(f.name, f);
+    const folders: ShareFolder[] = [];
+    for (const [virtualRaw, realRaw] of roots) {
+      const vName = (virtualRaw || "").trim().replace(/[/\\]+/g, "_").replace(/^[" ]+|[" ]+$/g, "") || "Shared";
+      const rPath = (realRaw || "").trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
+      if (!vName || !rPath) continue;
+      if (!existsSync(rPath)) {
+        this.virtual2real.set(vName, rPath);
+        this.real2virtual.set(rPath, vName);
+        if (!folders.find((f) => f.name === vName)) folders.push({ name: vName, files: [] });
+        continue;
+      }
+      try {
+        const stats = statSync(rPath);
+        if (stats.isFile()) {
+          const ext = extname(rPath).slice(1).toLowerCase();
+          const fileName = `${vName}\\${basename(rPath)}`;
+          const prev = prevByName.get(fileName);
+          const mtime = stats.mtimeMs;
+          const prevMtime = this.fileMtimes.get(rPath);
+          if (prev && prevMtime === mtime) {
+            folders.push({ name: vName, files: [{ ...prev, size: stats.size }] });
+          } else {
+            this.fileMtimes.set(rPath, mtime);
+            const attrs = await this.buildAttrsAsync(rPath, ext);
+            folders.push({ name: vName, files: [{ name: fileName, size: stats.size, ext, attrs }] });
+          }
+          this.virtual2real.set(vName, rPath);
+          this.real2virtual.set(rPath, vName);
+          this.virtual2real.set(fileName, rPath);
+          this.real2virtual.set(rPath, fileName);
+        } else if (stats.isDirectory()) {
+          await this.walkDirAsync(rPath, vName, folders);
+        }
+      } catch {}
+    }
+    return folders;
+  }
+
+  private scanCustomRoots(roots: [string, string][]): ShareFolder[] {
+    const prevByName = new Map<string, ShareFile>();
+    for (const fo of this.folders) for (const f of fo.files) prevByName.set(f.name, f);
+    const folders: ShareFolder[] = [];
+    for (const [virtualRaw, realRaw] of roots) {
+      const vName = (virtualRaw || "").trim().replace(/[/\\]+/g, "_").replace(/^[" ]+|[" ]+$/g, "") || "Shared";
+      const rPath = (realRaw || "").trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
+      if (!vName || !rPath) continue;
+      if (!existsSync(rPath)) {
+        this.virtual2real.set(vName, rPath);
+        this.real2virtual.set(rPath, vName);
+        if (!folders.find((f) => f.name === vName)) folders.push({ name: vName, files: [] });
+        continue;
+      }
+      try {
+        const stats = statSync(rPath);
+        if (stats.isFile()) {
+          const ext = extname(rPath).slice(1).toLowerCase();
+          const fileName = `${vName}\\${basename(rPath)}`;
+          const prev = prevByName.get(fileName);
+          const mtime = stats.mtimeMs;
+          const prevMtime = this.fileMtimes.get(rPath);
+          if (prev && prevMtime === mtime) {
+            folders.push({ name: vName, files: [{ ...prev, size: stats.size }] });
+          } else {
+            this.fileMtimes.set(rPath, mtime);
+            const attrs = this.buildAttrs(rPath, ext, stats.size);
+            folders.push({ name: vName, files: [{ name: fileName, size: stats.size, ext, attrs }] });
+          }
+          this.virtual2real.set(vName, rPath);
+          this.real2virtual.set(rPath, vName);
+          this.virtual2real.set(fileName, rPath);
+          this.real2virtual.set(rPath, fileName);
+        } else if (stats.isDirectory()) {
+          this.walkDir(rPath, vName, folders, prevByName);
+        }
+      } catch {}
+    }
+    return folders;
+  }
+
   async rescanAsync(): Promise<ShareFolder[]> {
+    // ponytail: full rescan covers custom mounts + SHARED_DIRS, not just SHARED_DIRS
+    if (this.customRootsByLevel.size > 0) {
+      let touched = false;
+      const levels: PermissionLevel[] = [PermissionLevel.PUBLIC, PermissionLevel.BUDDY, PermissionLevel.TRUSTED];
+      for (const lvl of levels) {
+        const roots = this.customRootsByLevel.get(lvl);
+        if (!roots) continue;
+        const rescanned = await this.scanCustomRootsAsync(roots);
+        if (lvl === PermissionLevel.PUBLIC) this.publicFolders = rescanned;
+        else if (lvl === PermissionLevel.BUDDY) this.buddyFolders = rescanned;
+        else this.trustedFolders = rescanned;
+        touched = true;
+      }
+      // If public had no custom roots, still scan SHARED_DIRS fallback
+      const publicRoots = this.customRootsByLevel.get(PermissionLevel.PUBLIC);
+      if (!publicRoots || publicRoots.length === 0) {
+        const scanned = await this.scanFsSharesAsync();
+        if (scanned.length > 0) { this.publicFolders = scanned; touched = true; }
+      }
+      if (touched) { this.rebuildCombined(); this.persist(); }
+      return this.folders;
+    }
+    // Legacy: no customRoots yet — be careful not to wipe custom shares that haven't been re-synced after upgrade.
+    // If public folders look custom (virtual names not matching SHARED_DIRS basenames), skip destructive overwrite.
     const scanned = await this.scanFsSharesAsync();
     if (scanned.length > 0) {
-      this.publicFolders = scanned;
-      this.rebuildCombined();
-      this.persist();
+      if (this.publicFolders.length === 0) {
+        this.publicFolders = scanned; this.rebuildCombined(); this.persist();
+      } else {
+        const sharedBases = new Set(this.resolveSharedDirs().map((d) => basename(d)));
+        const looksLikeShared = this.publicFolders.every((f) => sharedBases.has(f.name));
+        if (looksLikeShared) { this.publicFolders = scanned; this.rebuildCombined(); this.persist(); }
+      }
     }
     return this.folders;
   }
 
   /** Rescan and persist — called on startup or via WS rescan request */
   rescan(): ShareFolder[] {
+    if (this.customRootsByLevel.size > 0) {
+      let touched = false;
+      const levels: PermissionLevel[] = [PermissionLevel.PUBLIC, PermissionLevel.BUDDY, PermissionLevel.TRUSTED];
+      for (const lvl of levels) {
+        const roots = this.customRootsByLevel.get(lvl);
+        if (!roots) continue;
+        const rescanned = this.scanCustomRoots(roots);
+        if (lvl === PermissionLevel.PUBLIC) this.publicFolders = rescanned;
+        else if (lvl === PermissionLevel.BUDDY) this.buddyFolders = rescanned;
+        else this.trustedFolders = rescanned;
+        touched = true;
+      }
+      const publicRoots = this.customRootsByLevel.get(PermissionLevel.PUBLIC);
+      if (!publicRoots || publicRoots.length === 0) {
+        const scanned = this.scanFsShares();
+        if (scanned.length > 0) { this.publicFolders = scanned; touched = true; }
+      }
+      if (touched) { this.rebuildCombined(); this.persist(); }
+      return this.folders;
+    }
     const scanned = this.scanFsShares();
     if (scanned.length > 0) {
-      this.publicFolders = scanned;
-      this.rebuildCombined();
-      this.persist();
+      if (this.publicFolders.length === 0) {
+        this.publicFolders = scanned; this.rebuildCombined(); this.persist();
+      } else {
+        const sharedBases = new Set(this.resolveSharedDirs().map((d) => basename(d)));
+        const looksLikeShared = this.publicFolders.every((f) => sharedBases.has(f.name));
+        if (looksLikeShared) { this.publicFolders = scanned; this.rebuildCombined(); this.persist(); }
+      }
     }
     return this.folders;
   }
