@@ -274,7 +274,7 @@ export const defaults: Settings = {
   },
   searches: {
     maxresults: 300,
-    max_displayed_results: 2500,
+    max_displayed_results: 400,
     min_search_chars: 3,
     enablefilters: false,
     defilter: {
