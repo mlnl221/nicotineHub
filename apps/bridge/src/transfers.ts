@@ -208,8 +208,9 @@ export class TransferManager {
       this.loadFromDisk();
     } catch {}
 
-    // Keep demo uploads for UI unless real transfers exist
-    if (this.transfers.size === 0) this.seedDemoUploads();
+    // Keep demo uploads for UI unless real transfers exist — only when explicitly enabled to avoid masking empty state in docker prod
+    // Use bracket access to avoid bun build inlining; SEED_DEMO_UPLOADS=1 enables for manual dev testing
+    if (this.transfers.size === 0 && (process.env as Record<string, string | undefined>)["SEED_DEMO_UPLOADS"] === "1") this.seedDemoUploads();
 
     this.statsTimer = setInterval(() => this.emitStats(), 2000);
     // Poll PlaceInQueue every 300 s

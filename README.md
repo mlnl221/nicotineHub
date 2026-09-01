@@ -60,7 +60,7 @@ Images are `oxipng -o 2 --strip all` compressed and stored **only in `/tmp/hub-s
 ```
 apps/bridge  — Bun bridge  (WebSocket `/ws` + `/health` + `/files/:token` + `/spectrum/:token` + volume `DATA_DIR`, ephemeral `/tmp/hub-spectrum`)
 apps/web     — Next.js 15 PWA
-compose.yaml — web:3000 + bridge:8787/62904 → bridge-data:/data
+compose.yaml — web:3000 + bridge:8787/60754 → bridge-data:/data
 ```
 
 ---
@@ -74,7 +74,7 @@ bun test && bun run build
 docker compose up --build  # http://localhost:3000 (build from source)
 ```
 
-Bridge URL: `NEXT_PUBLIC_BRIDGE_URL` (build) or `localStorage.nicotineHub.bridgeUrl` (runtime). All env vars are documented in [`docs/architecture.md#env-full`](docs/architecture.md#env-full) — including `BRIDGE_TOKEN`, `DATA_DIR`, `LISTEN_PORT` (62904, editable in Settings → Network), `SHARED_DIRS`, `UPLOAD_LIMIT`, etc.
+Bridge URL: `NEXT_PUBLIC_BRIDGE_URL` (build) or `localStorage.nicotineHub.bridgeUrl` (runtime). All env vars are documented in [`docs/architecture.md#env-full`](docs/architecture.md#env-full) — including `BRIDGE_TOKEN`, `DATA_DIR`, `LISTEN_PORT` (60754, editable in Settings → Network), `SHARED_DIRS`, `UPLOAD_LIMIT`, etc.
 
 For prebuilt images and release workflow, see [`docs/deployment.md`](docs/deployment.md).
 

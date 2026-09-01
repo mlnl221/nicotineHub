@@ -17,7 +17,7 @@ Nicotine+ stores configuration as a **two-level dictionary**: `section` → `key
 
 ```
 "sections": {
-    "server":     { "portrange": (62904,62904), "auto_connect_startup": True, ... },
+    "server":     { "portrange": (60754,60754), "auto_connect_startup": True, ... },
     "transfers":  { "downloaddir": "...", "uploadslots": 3, ... },
     "searches":   { "maxresults": 300, ... },
     ...
@@ -43,7 +43,7 @@ url-handlers, plugins. (`url-handlers` is hidden in isolated mode.)
 | `interface`        | `""`                        | string              | Text field (opt.)                                 |
 | `autosearch`       | `[]`                        | list[string]        | List editor (future)                              |
 | `autoreply`        | `""`                        | string              | Multi-line text                                   |
-| `portrange`        | `(62904,62904)`             | (min,max) ints → single-ended `[port,port]` in `defaults.ts:207` | Number input **implemented** — Settings → Network «Listening port» (`NetworkSection.tsx:82`) persists to `DATA_DIR/listen_port` and triggers `SetWaitPort 2` + `PortMapper.setPort` + reconnect; compose maps `${LISTEN_PORT:-62904}:${LISTEN_PORT:-62904}` |
+| `portrange`        | `(60754,60754)`             | (min,max) ints → single-ended `[port,port]` in `defaults.ts:207` | Number input **implemented** — Settings → Network «Listening port» (`NetworkSection.tsx:82`) persists to `DATA_DIR/listen_port` and triggers `SetWaitPort 2` + `PortMapper.setPort` + reconnect; compose maps `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` |
 | `upnp`             | `True`                      | bool                | **Implemented** — Toggle `NetworkSection.tsx:109` → bridge `PortMapper` (NAT-PMP → UPnP fallback, lease 43200 / renew 7200) per `docs/architecture.md:57`; disable for manual forward |
 | `auto_connect_startup` | `True`                  | bool                | Toggle                                            |
 | `userlist`         | `[]`                        | list[string]        | List editor (future)                              |
@@ -317,7 +317,7 @@ retention/storage toggle rather than a filesystem path.
 - **Colors/fonts/tab positions** (`chatme/.../tab_changed`, `globalfont/...`, `tabmain/...`) — intentional omit per `docs/DESIGN.md` Omitted Controls (2026-08-30 Phase A/B) + **user request (no global font changes)** to keep Alexandria editorial palette/typography (`Noto Serif/Inter/Public Sans` fixed in `layout.tsx:56`).
 - **MAX_SOCKETS adaptive** — homelab-sufficient fixed `512` (`env MAX_SOCKETS` configurable) intentionally not adaptive `ulimit` (`slskproto.py` `resource.RLIMIT_NOFILE`); see `docs/porting-status.md` Network row.
 - **Diagnostics docked pane** — stays routed `/diagnostics` vs MainWindow bottom pane; mobile uses separate route with scope/level filters, not docked log view.
-- Note: `portrange`/`upnp` are **not** omitted — `LISTEN_PORT` 62904 is editable in Settings → Network (`NetworkSection.tsx:82`) via `server.portrange` + bridge `PortMapper` (`portmapper.ts` NAT-PMP → UPnP, see `docs/architecture.md`).
+- Note: `portrange`/`upnp` are **not** omitted — `LISTEN_PORT` 60754 is editable in Settings → Network (`NetworkSection.tsx:82`) via `server.portrange` + bridge `PortMapper` (`portmapper.ts` NAT-PMP → UPnP, see `docs/architecture.md`).
 
 ## Legend of future-proofing notes
 

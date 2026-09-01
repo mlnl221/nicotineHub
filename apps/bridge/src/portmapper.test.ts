@@ -144,7 +144,7 @@ describe("PortMapper orchestrator", () => {
 
   test("status includes error and lastAttempt after failed mapping", async () => {
     const pm = new PortMapper();
-    pm.setPort(49127, "192.168.1.10");
+    pm.setPort(60754, "192.168.1.10");
     // In CI, no gateway nor UPnP router, so mapping should fail and set error
     await pm.addPortMapping(true);
     // activeName should be null (both NAT-PMP and UPnP failed)

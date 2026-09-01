@@ -46,7 +46,21 @@ function loadInitial(): Transfer[] {
       window.localStorage.removeItem("nicotineHub.demoSeeded");
       window.localStorage.removeItem("nicotine.demoSeeded");
       window.sessionStorage.removeItem("__demoTransfersSeeded");
-      window.sessionStorage.removeItem("__mockTransfers");
+      // Only clear __mockTransfers if it contains demo fixtures — preserve e2e mock transfers (alice/bob) used in playwright
+      try {
+        const mockRaw = window.sessionStorage.getItem("__mockTransfers");
+        if (mockRaw && (mockRaw.includes("jazzcat::") || mockRaw.includes("vinyl_hunter::") || mockRaw.includes("Midnight Groove") || mockRaw.includes("Summer Rain"))) {
+          window.sessionStorage.removeItem("__mockTransfers");
+        }
+      } catch {}
+    } catch {}
+    // Playwright e2e cross-navigation: hydrate from sessionStorage mock (alice/bob) if present
+    try {
+      const mockRaw = window.sessionStorage.getItem("__mockTransfers");
+      if (mockRaw && (mockRaw.includes("alice::") || mockRaw.includes("bob::") || mockRaw.includes("Archive_Collection") || mockRaw.includes("HighRes_Audio"))) {
+        const parsed = JSON.parse(mockRaw);
+        if (Array.isArray(parsed) && parsed.length) return parsed as Transfer[];
+      }
     } catch {}
     return [];
   }

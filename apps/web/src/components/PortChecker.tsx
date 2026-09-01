@@ -53,7 +53,7 @@ export function PortChecker() {
         setResult({ ok: false, msg: `Health check failed: ${hRes.status}` });
         return;
       }
-      const port = j.listenPort ?? 49127;
+      const port = j.listenPort ?? 60754;
       const upnpInfo = upnp ?? j.upnp;
       let upnpMsg = "";
       if (upnpInfo) {
@@ -87,7 +87,7 @@ export function PortChecker() {
         <span className={`h-2 w-2 rounded-full ${state.status === "connected" ? "bg-green-500" : "bg-outline"}`} title={state.status} />
       </div>
       <p className="mb-3 text-xs text-on-surface-variant">
-        Search results require a reachable inbound peer listener. Default <code>LISTEN_PORT 49127</code> must be port-forwarded (TCP, see README) — edit in Settings → Network. UPnP/NAT-PMP auto-forwards when enabled (toggle in Network, renews every 2 h).
+        Search results require a reachable inbound peer listener. Default <code>LISTEN_PORT 60754</code> (configurable) must be port-forwarded (TCP, see README) — edit in Settings → Network. UPnP/NAT-PMP auto-forwards when enabled (toggle in Network, renews every 2 h). Currently <code>{health?.listenPort ?? 60754}</code>.
       </p>
       {health && (
         <div className="mb-3 rounded-xl bg-surface-container-high px-3 py-2 text-xs dark:bg-surface-container-highest/40">
