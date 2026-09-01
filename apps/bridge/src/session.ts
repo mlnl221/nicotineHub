@@ -1719,10 +1719,13 @@ export class SoulseekSession {
 
   private startListener() {
     const hostname = this.getListenHostname();
+    logger.info("server", "peer listener listening", { port: this._listenPort, hostname });
     this.listener = Bun.listen({
       port: this._listenPort, hostname,
       socket: {
-        open: () => {},
+        open: (peer) => {
+          logger.debug("server", "peer inbound open", { remote: (peer as unknown as { remoteAddress?: string }).remoteAddress });
+        },
         data: (peer, chunk) => {
           // Phase 4: demux P vs F — F starts with uint32 token, no PeerInit prefix
           const buf = Buffer.from(chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk));
@@ -1742,11 +1745,15 @@ export class SoulseekSession {
                 return;
               }
               // Heuristic: if first 5 bytes don't form valid PeerInit/PierceFW frame, treat as F
+              // But don't misclassify normal peer messages (code 4,5,15...) as F — check if it's a known peer code
               if (buf.length >= 5) {
                 const len = buf.readUInt32LE(0);
-                const code = buf[4];
-                if (code !== 0 && code !== 1) {
-                  // Likely F raw token + offset
+                const codeProbe = buf[4];
+                const fullCode = buf.length >= 8 ? buf.readUInt32LE(4) : codeProbe;
+                const knownPeerCodes = new Set([4,5,8,9,15,16,36,37,40,41,42,43,44,46,50,51,52,12547]);
+                const isKnownPeerCode = knownPeerCodes.has(fullCode);
+                if (codeProbe !== 0 && codeProbe !== 1 && !isKnownPeerCode) {
+                  // Likely F raw token + offset (peer messages with known codes are not F)
                   const fileState: PeerState = { buf: Buffer.alloc(0), initDone: true, isFileConn: true, fileToken: token, lastActive: Date.now(), createdAt: Date.now() };
                   this.peerStates.set(peer as Socket, fileState);
                   // The rest after token is offset (8 bytes) + data
@@ -1764,9 +1771,12 @@ export class SoulseekSession {
           }
           this.processPeer(peer as Socket, chunk, false);
         },
-        error: () => {},
+        error: (peer, err) => {
+          logger.warn("server", "peer inbound error", { error: (err as Error)?.message || String(err), remote: (peer as unknown as { remoteAddress?: string }).remoteAddress });
+        },
         close: (peer) => {
           const st = this.peerStates.get(peer as Socket);
+          logger.debug("server", "peer inbound close", { username: st?.username, connType: st?.connType, remote: (peer as unknown as { remoteAddress?: string }).remoteAddress });
           this.peerStates.delete(peer as Socket);
           if (st?.username && st.connType === "D") this._removeChildPeerConnection(st.username);
           this.dequeuePendingSockets();
@@ -2211,6 +2221,31 @@ export class SoulseekSession {
         }
         continue;
       }
+      // Outbound P may receive a stray PeerInit echo from peer (some clients echo init); consume it so it doesn't block peer messages
+      if (state.outbound && state.connType === "P" && state.buf.length >= 5) {
+        const lenProbe = state.buf.readUInt32LE(0);
+        const codeProbe = state.buf[4];
+        if ((codeProbe === 0 || codeProbe === 1) && lenProbe < 1024 * 1024 && state.buf.length >= 5 + lenProbe) {
+          try {
+            const initPayloadProbe = state.buf.subarray(5, 5 + lenProbe);
+            if (codeProbe === 1) {
+              const piProbe = parsePeerInit(initPayloadProbe);
+              if (piProbe.targetUser && piProbe.connType) {
+                state.buf = state.buf.subarray(5 + lenProbe);
+                // Update username if peer provided different (rare)
+                if (!state.username) state.username = piProbe.targetUser;
+                continue;
+              }
+            } else if (codeProbe === 0) {
+              const pfProbe = parsePierceFireWall(initPayloadProbe);
+              if (pfProbe.token !== undefined) {
+                state.buf = state.buf.subarray(5 + lenProbe);
+                continue;
+              }
+            }
+          } catch {}
+        }
+      }
       // Determine max per expected message type (peek len)
       if (state.buf.length >= 4) {
         const peekLen = state.buf.readUInt32LE(0);
@@ -2322,8 +2357,12 @@ export class SoulseekSession {
         }
       } else if (msg.code === PEER_MESSAGE_CODES.sharedFileListRequest) {
         const peerName = state.username || "unknown";
-        if (this.shareDB.shouldThrottle(peerName)) break;
-        try { const perm = this.getSharePermissionLevel(peerName); (peer as Socket).write(this.shareDB.buildSharedFileListResponse(perm)); } catch { try { (peer as Socket).write(emptySharesResponse()); } catch {} }
+        logger.info("browse", "sharedFileListRequest recv inbound", { username: peerName, throttled: this.shareDB.shouldThrottle(peerName) });
+        if (this.shareDB.shouldThrottle(peerName)) {
+          logger.warn("browse", "throttled SharedFileListRequest", { username: peerName });
+          break;
+        }
+        try { const perm = this.getSharePermissionLevel(peerName); const resp = this.shareDB.buildSharedFileListResponse(perm); logger.info("browse", "sending SharedFileListResponse", { username: peerName, len: resp.length }); (peer as Socket).write(resp); } catch (e) { logger.warn("browse", "buildSharedFileListResponse failed", { username: peerName, error: (e as Error).message }); try { (peer as Socket).write(emptySharesResponse()); } catch {} }
       } else if (msg.code === PEER_MESSAGE_CODES.folderContentsRequest) {
         const peerName2 = state.username || "unknown";
         if (this.shareDB.shouldThrottle(peerName2)) break;
@@ -2621,11 +2660,12 @@ export class SoulseekSession {
         open: (sock) => {
           logger.info("browse", "direct peer open", { username, ip: addr.ip, port: addr.port, connType });
           this.setTcpBufferSize(sock as Socket, connType as "F" | "D" | "P");
-          this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, lastActive: Date.now(), createdAt: Date.now() });
+          // Outbound P: consider handshake done after we send PeerInit — don't wait for peer init
+          // (nicotine sends SharedFileListRequest immediately after PeerInit; peer rarely replies with init)
+          this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: true, username, outbound: true, connType, lastActive: Date.now(), createdAt: Date.now() });
           (sock as Socket).write(buildPeerInit(this.username, connType));
-          // queue msg via state — will be sent after initDone in processPeer
-          const st = this.peerStates.get(sock as Socket);
-          if (st) (st as unknown as { pendingMsg?: Buffer }).pendingMsg = msg;
+          // Send the actual peer message immediately (don't wait for peer's init — fixes 5s close)
+          try { (sock as Socket).write(msg); } catch {}
         },
         data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
         error: (_sock, err) => { logger.warn("browse", "direct peer error", { username, ip: addr.ip, port: addr.port, error: (err as Error)?.message || String(err) }); this.dequeuePendingSockets(); },
