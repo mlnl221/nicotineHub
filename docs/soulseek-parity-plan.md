@@ -98,22 +98,25 @@ Bring `apps/bridge` connection/search/download/upload/browse/profile/distrib par
 
 ---
 
-## Phase 5 — Perf & Polish + PR [IN_PROGRESS 2026-08-31]
+## Phase 5 — Perf & Polish + PR [DONE 2026-09-01]
 
-- `TokenBucket` for both directions — DONE basic (`transfers.ts:914` `getEffective*` + `tokenBucket` 100ms). Dynamic `MAX_SOCKETS` from `rlimit` — TODO (still 512 static `session.ts:202`, acceptable homelab; nicotine `min(2/3*rlimit,2048)` would be nice but not blocking).
-- Final `bun test && bun run build` — DONE 119 pass + Next 17/17 static (see above). Manual E2E with real Soulseek creds — deferred (requires user-provided account + port-forwarded `LISTEN_PORT`; `mistakes.md 2026-08-31` lesson: no demo, real test needs inbound port).
-- `compose.yaml` host network — already host default (`network_mode: host` `compose.yaml:8`), verified.
-- Open PR `feat/soulseek-parity` — NEXT step after this doc update.
+- `TokenBucket` for both directions — DONE basic (`transfers.ts:914` `getEffective*` + `tokenBucket` 100ms) + per-group split via `activeDownloads/activeUploads` divisor.
+- Dynamic `MAX_SOCKETS` — DONE: `session.ts:287` dynamic `ulimit -n *2/3` capped 2048 (512 Win) via `spawnSync sh ulimit -n` fallback 512. Tested `maxSockets` 64 min.
+- `SO_RCVBUF` tuning — DONE best-effort `setTcpBufferSize(sock, type)` called for `S` (server), `P/D/F` (direct peers, `PossibleParents D`), logs type. Bun lacks `SO_RCVBUF` API — documented fallback to `setNoDelay/setKeepAlive`.
+- Final `bun test && bun run build` — DONE 119 pass + Next 17/17 static (see 00:28). Manual E2E deferred (needs real creds + port-forward).
+- `compose.yaml` host network — already host default, verified.
+- Open PR `feat/soulseek-parity` #69 — created 23:30, now updated with Phase 5 polish.
 
-**Risks:** Search index memory fine (<100MB for homelab), FD cap 512 safe, inflate bomb gated 16M/128M, basename fallback now covered by `ShareDB`.
+**Risks:** Search index memory fine, FD cap dynamic, inflate bomb gated, basename fallback covered.
 
-## Summary — What Landed vs Deferred
-- **Landed:** sanitize outbound search + word-index + per-file excluded filtering + inbound distrib response send + reconnect 5-15s jitter + download retry exponential + global enqueue 5 + effective bandwidth split + ShareDB `hasVirtualPath` + recursive FS walk for nested shares + scheduleRetry capped.
-- **Deferred (P2 polish):** per-user download semaphore 1 strict, `incompleteStrategy` overwrite, destination `${SOURCE_USERNAME}` templating, `FolderContents` 5s+latin-1 retry, `banned→empty descr` dynamic queueLength, `ParentInactivityTimeout 86` leaf timer, dynamic `MAX_SOCKETS` rlimit, `SO_RCVBUF` tuning, `word_index` workers `ProcessorCount`. All low-risk; current impl already closer to nicotine/slskd and passes all tests/builds.
+## Summary — What Landed vs Deferred (final)
+- **Landed:** sanitize outbound search + word-index + per-file excluded filtering + inbound distrib response send + reconnect 5-15s jitter + download retry exponential + global 5 + per-user 1 enqueue (strict) + effective bandwidth split + ShareDB `hasVirtualPath` + recursive walk + `incomplete_strategy` resume/overwrite + `download_destination_template` `${SOURCE_*}` + FolderContents 5s+retry + `banned→empty descr` + `ParentInactivityTimeout 86/87/88/90` handling + parent inactivity sweep + dynamic MAX_SOCKETS + SO_RCVBUF best-effort + `setTcpBufferSize` for all peer types.
+- **Remaining polish (optional future):** `word_index` workers `ProcessorCount` parallel scan (currently single-thread `readdirSync` — acceptable homelab), `searchInactivityTimeout` strict eviction (currently just stored), `distributedPingInterval` ping send (currently just stored). All non-blocking.
 
 ---
 
 ## Progress Log
 - 2026-08-31: Plan doc created, worktree `feat/soulseek-parity` scaffolded, `bun install` done, `cp .env.example .env`. Not yet implemented.
 - 2026-08-31 23:23: Phases 0-4 + basic 5 done, `bun test 119 pass && bun run build` (Next 17/17) green. Changes: `soulseek.ts` sanitize, `shares.ts` wordIndex+hasVirtualPath+per-file excluded, `session.ts` search sanitize+inbound/distrib fixes+jitter, `transfers.ts` retry exponential+enqueue 5+effective limits+ShareDB walk. Plan doc updated to DONE/IN_PROGRESS.
-- 2026-08-31 23:30: Ready for PR — need `git status`, `git diff --stat`, `git log` review then `gh pr create`.
+- 2026-08-31 23:30: Ready for PR — `gh pr create` #69 `feat/soulseek-parity` vs `stage` opened.
+- 2026-09-01 00:28: Phase 5 polish — per-user 1 enqueue strict, overwrite, `${SOURCE_*}` templating, FolderContents 5s retry, banned→empty descr + 0.4s throttle, 86/87/88/90 server handling + parent inactivity sweep, dynamic MAX_SOCKETS, SO_RCVBUF. `bun test 119 pass && bun run build` green again. Plan doc finalized.

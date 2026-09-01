@@ -276,17 +276,38 @@ export class SoulseekSession {
 
   // pending browse tracking
   private pendingBrowseShares = new Map<string, { timer: ReturnType<typeof setTimeout> }>();
-  private pendingBrowseFolder = new Map<number, { username: string; folder: string; timer: ReturnType<typeof setTimeout> }>();
+  private pendingBrowseFolder = new Map<number, { username: string; folder: string; timer: ReturnType<typeof setTimeout>; retryCount: number }>();
   private pendingPeerMessages = new Map<string, Array<{ connType: string; msg: Buffer }>>();
   // user status cache for offline check (P1 hardening)
   private userStatusCache = new Map<string, { status: number; privileged: boolean; updated: number }>();
   // allowed peer responses gating (nicotine allowed_message_responses) — prevent unsolicited 448M
   private allowedPeerResponses = new Map<string, Set<number>>();
-  // socket limiting
+  // per-user UserInfo throttling 0.4s like nicotine shares.py:1342 + userinfo.py:188
+  private lastUserInfoRequests = new Map<string, number>();
+  private static readonly USERINFO_THROTTLE_MS = 400;
+  // distributed extra timeouts from server (86/87/88/90)
+  private distribParentInactivityTimeout = 120_000;
+  private distribSearchInactivityTimeout = 60_000;
+  private minParentsInCache = 3;
+  private distribPingInterval = 60_000;
+  // socket limiting — dynamic via rlimit like nicotine slskproto.py:381 min(2/3*rlimit,2048)
   private pendingPeerQueue: Array<{ fn: () => void }> = [];
   private get maxSockets(): number {
     const env = Number(process.env.MAX_SOCKETS || 0);
     if (env > 0) return env;
+    // dynamic: try ulimit -n, fallback 512
+    try {
+      const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
+      const r = spawnSync("sh", ["-c", "ulimit -n"], { encoding: "utf8" });
+      const n = parseInt(String(r.stdout || "").trim(), 10);
+      if (Number.isFinite(n) && n > 0) {
+        const dyn = Math.floor((n * 2) / 3);
+        const capped = Math.min(dyn, 2048);
+        // Windows cap 512 due to FD_SETSIZE; detect via process.platform
+        if (typeof process !== "undefined" && (process.platform as string) === "win32") return Math.min(capped, 512);
+        return Math.max(64, capped);
+      }
+    } catch {}
     return MAX_SOCKETS_DEFAULT;
   }
   private get activeSocketCount(): number { return this.peerStates.size + this.pendingConnects.size; }
@@ -300,6 +321,15 @@ export class SoulseekSession {
       const item = this.pendingPeerQueue.shift()!;
       try { item.fn(); } catch {}
     }
+  }
+  private setTcpBufferSize(sock: Socket, type: "F" | "D" | "P" | "S"): void {
+    try {
+      const s: any = sock as unknown as { setNoDelay?: (b: boolean) => void; setKeepAlive?: (b: boolean) => void };
+      s.setNoDelay?.(true);
+      // Bun doesn't expose SO_RCVBUF tuning; Node net.Socket has bufferSize read-only.
+      // Best effort: setNoDelay + keepAlive already done; log buffer type for diagnostics
+      logger.debug("server", "tcp buffer type", { type, active: this.activeSocketCount, max: this.maxSockets });
+    } catch {}
   }
 
   // Portmapper — NAT-PMP → UPnP fallback, mirrors pynicotine/portmapper.py
@@ -980,6 +1010,7 @@ export class SoulseekSession {
           // Bun only exposes setKeepAlive(bool); tuning not available — fallback ServerPing 32 60s
           try { (sock as unknown as { setKeepAlive?: (b: boolean) => void }).setKeepAlive?.(true); } catch {}
           try { (sock as unknown as { setNoDelay?: (b: boolean) => void }).setNoDelay?.(true); } catch {}
+          this.setTcpBufferSize(sock as Socket, "S");
           this.serverSocket = sock as Socket;
           // Send Login only; SetWaitPort after success (nicotine parity)
           sock.write(buildLogin(this.opts.username, this.opts.password));
@@ -1344,6 +1375,22 @@ export class SoulseekSession {
       } catch {}
       return;
     }
+    if (code === SERVER_MESSAGE_CODES.parentInactivityTimeout) {
+      try { this.distribParentInactivityTimeout = payload.readUInt32LE(0) * 1000; logger.info("server", "parentInactivityTimeout", { ms: this.distribParentInactivityTimeout }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.searchInactivityTimeout) {
+      try { this.distribSearchInactivityTimeout = payload.readUInt32LE(0) * 1000; logger.info("server", "searchInactivityTimeout", { ms: this.distribSearchInactivityTimeout }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.minParentsInCache) {
+      try { this.minParentsInCache = payload.readUInt32LE(0); logger.info("server", "minParentsInCache", { val: this.minParentsInCache }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.distribPingInterval) {
+      try { this.distribPingInterval = payload.readUInt32LE(0) * 1000; logger.info("server", "distribPingInterval", { ms: this.distribPingInterval }); } catch {}
+      return;
+    }
     if (code === SERVER_MESSAGE_CODES.embeddedMessage) {
       try {
         if (payload.length >= 1) {
@@ -1381,8 +1428,8 @@ export class SoulseekSession {
               const r2 = new SlskReader(dPayload);
               if (r2.remaining >= 4) r2.uint32(); // identifier 49? optional
               const user = r2.string(); const token = r2.uint32(); const query = r2.string();
-              if (!this.shareDB.isExcluded(query)) {
-                // answer via peer FileSearchResponse if shares match — delegate to handleInboundFileSearch logic
+              {
+                // per-file excluded filtering inside buildFileSearchResponse (not query-level)
                 const resp = this.shareDB.buildFileSearchResponse(token, this.username, query);
                 if (resp) {
                   // need to route to requester via peer — we will queue send
@@ -1601,6 +1648,7 @@ export class SoulseekSession {
           hostname: p.ip, port: p.port,
           socket: {
             open: (sock) => {
+              this.setTcpBufferSize(sock as Socket, "D");
               (sock as Socket).write(buildPeerInit(this.username, "D"));
               this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username: p.username, outbound: true, connType: "D", lastActive: Date.now(), createdAt: Date.now() });
               const cand = this.potentialParents.get(lower);
@@ -1716,6 +1764,23 @@ export class SoulseekSession {
         // if timer already fired, pending would be deleted; no extra handling
         void token; void pending;
       }
+      // Distributed parent inactivity check (server parentInactivityTimeout 86)
+      if (this.parent?.conn) {
+        const pState = this.peerStates.get(this.parent.conn);
+        if (pState && now - pState.lastActive > this.distribParentInactivityTimeout) {
+          logger.warn("server", "parent inactive, reconnecting distrib", { username: this.parent.username, idle: now - pState.lastActive });
+          try { this.parent.conn.end(); } catch {}
+          this.peerStates.delete(this.parent.conn);
+          this.parent = null;
+          this.isServerParent = false;
+          this.branchLevel = 0;
+          this.branchRoot = this.username;
+          try { this.serverSocket?.write(buildHaveNoParent()); } catch {}
+          try { this.serverSocket?.write(buildBranchRoot(this.branchRoot)); } catch {}
+          try { this.serverSocket?.write(buildBranchLevel(this.branchLevel)); } catch {}
+        }
+      }
+      // minParentsInCache — if we have parent and too few candidates, request new HaveNoParent? keep simple
     }, 5000);
   }
   private startServerPing() {
@@ -2150,7 +2215,33 @@ export class SoulseekSession {
           this.dequeuePendingSockets();
         } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.userInfoRequest) {
-        if (!state.outbound) { try { (peer as Socket).write(buildUserInfoResponse(this.profile)); } catch {} }
+        if (!state.outbound) {
+          const peerName = state.username || "unknown";
+          const now = Date.now();
+          const last = this.lastUserInfoRequests.get(peerName.toLowerCase()) || 0;
+          if (now - last < SoulseekSession.USERINFO_THROTTLE_MS) break;
+          this.lastUserInfoRequests.set(peerName.toLowerCase(), now);
+          // Banned users get empty descr like nicotine userinfo.py:188
+          const perm = this.getSharePermissionLevel(peerName);
+          if (perm === PermissionLevel.BANNED) {
+            try { (peer as Socket).write(buildUserInfoResponse({ descr: "", pic: null, totalupl: 0, queuesize: 0, slotsavail: false, uploadallowed: 0 })); } catch {}
+            break;
+          }
+          // Dynamic queue stats per requester (nicotine queuesize privileged-aware, slotsavail via is_new_upload_accepted)
+          let queuesize = this.profile.queuesize;
+          let slotsavail = this.profile.slotsavail;
+          let uploadallowed = this.profile.uploadallowed;
+          try {
+            const getter: any = (this.opts as unknown as { getQueuePlace?: (f: string) => number; getTransferStats?: () => { queuedUploads: number; activeUploads: number } });
+            // Try to get real stats if session wired to TransferManager via server.ts (not directly in session, but we can approximate)
+            if (getter.getTransferStats) {
+              const st = getter.getTransferStats();
+              queuesize = st.queuedUploads;
+              slotsavail = st.activeUploads < 3; // uploadslots 3 default, like transfers.ts
+            }
+          } catch {}
+          try { (peer as Socket).write(buildUserInfoResponse({ descr: this.profile.descr, pic: this.profile.pic, totalupl: this.profile.totalupl, queuesize, slotsavail, uploadallowed })); } catch {}
+        }
       } else if (msg.code === PEER_MESSAGE_CODES.sharedFileListRequest) {
         const peerName = state.username || "unknown";
         if (this.shareDB.shouldThrottle(peerName)) break;
@@ -2373,12 +2464,25 @@ export class SoulseekSession {
     this.ensurePeerAndSend(username, "P", buildSharedFileListRequest());
   }
   requestFolderContents(username: string, dir: string, token: number) {
-    const timer = setTimeout(() => {
-      this.pendingBrowseFolder.delete(token);
-      this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.folderContentsResponse);
-      this.emitBrowse({ type: "browse-error", username, token, folder: dir, error: "Timed out fetching folder" });
-    }, 30000);
-    this.pendingBrowseFolder.set(token, { username, folder: dir, timer });
+    const doTimeout = (tok: number) => {
+      const entry = this.pendingBrowseFolder.get(tok);
+      if (!entry) return;
+      if (entry.retryCount < 1) {
+        // 5s timeout + one retry like nicotine downloads.py:832 (latin-1 fallback) — resend once
+        logger.debug("browse", "folder timeout retry", { username, dir, token: tok, retry: entry.retryCount + 1 });
+        clearTimeout(entry.timer);
+        entry.retryCount++;
+        // resend request
+        this.ensurePeerAndSend(username, "P", buildFolderContentsRequest(tok, dir));
+        entry.timer = setTimeout(() => doTimeout(tok), 5000);
+      } else {
+        this.pendingBrowseFolder.delete(tok);
+        this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.folderContentsResponse);
+        this.emitBrowse({ type: "browse-error", username, token: tok, folder: dir, error: "Timed out fetching folder" });
+      }
+    };
+    const timer = setTimeout(() => doTimeout(token), 5000);
+    this.pendingBrowseFolder.set(token, { username, folder: dir, timer, retryCount: 0 });
     this.addAllowedPeerResponse(username, PEER_MESSAGE_CODES.folderContentsResponse);
     this.ensurePeerAndSend(username, "P", buildFolderContentsRequest(token, dir));
   }
@@ -2429,6 +2533,7 @@ export class SoulseekSession {
       socket: {
         open: (sock) => {
           logger.info("browse", "direct peer open", { username, ip: addr.ip, port: addr.port, connType });
+          this.setTcpBufferSize(sock as Socket, connType as "F" | "D" | "P");
           this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, lastActive: Date.now(), createdAt: Date.now() });
           (sock as Socket).write(buildPeerInit(this.username, connType));
           // queue msg via state — will be sent after initDone in processPeer

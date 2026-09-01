@@ -149,7 +149,9 @@ export class TransferManager {
   private activeEnqueueCount = 0;
   private enqueueQueue: Array<() => void> = [];
   private readonly MAX_CONCURRENT_ENQUEUE = 5;
-  // Config mirrors nicotine transfers.* — updated via setConfig from server.ts WS
+  private perUserActive = new Set<string>();
+  private perUserQueues = new Map<string, Array<() => void>>();
+  // Config mirrors nicotine transfers.* + slskd incompleteStrategy/destination templating — updated via setConfig
   private config = {
     uploadslots: 3,
     useupslots: true,
@@ -169,6 +171,9 @@ export class TransferManager {
     autoclear_downloads: false,
     autoclear_uploads: false,
     usernamesubfolders: false,
+    incomplete_strategy: "resume" as "resume" | "overwrite",
+    download_destination_template: null as string | null, // slskd DeriveDestination tokens e.g. "${SOURCE_DIRECTORY}/${SOURCE_USERNAME}"
+    download_subdirectory: null as string | null, // legacy alias
     downloadfilters: [] as [string, number][],
     enablefilters: false,
     groupdownloads: "folder_grouping",
@@ -554,22 +559,57 @@ export class TransferManager {
   private async sendQueueUpload(t: BridgeTransfer) {
     const sess = this.session;
     if (!sess) { this.startPolling(t.id); return; }
-    const run = async () => {
-      this.activeEnqueueCount++;
-      try {
-        try { await sess.connectPeer(t.username, "P"); } catch {}
-        sess.queueUpload(t.username, t.virtualPath);
-      } catch {} finally {
-        this.activeEnqueueCount = Math.max(0, this.activeEnqueueCount - 1);
-        const next = this.enqueueQueue.shift();
-        if (next) next();
+    const user = t.username;
+    const processQueues = () => {
+      // try per-user queues first
+      for (const [u, q] of this.perUserQueues) {
+        if (q.length && !this.perUserActive.has(u) && this.activeEnqueueCount < this.MAX_CONCURRENT_ENQUEUE) {
+          const fn = q.shift()!;
+          if (q.length === 0) this.perUserQueues.delete(u);
+          this.perUserActive.add(u);
+          this.activeEnqueueCount++;
+          void (async () => {
+            try { await fn(); } finally {
+              this.perUserActive.delete(u);
+              this.activeEnqueueCount = Math.max(0, this.activeEnqueueCount - 1);
+              processQueues();
+              // also drain legacy global queue
+              const nextGlobal = this.enqueueQueue.shift();
+              if (nextGlobal) nextGlobal();
+            }
+          })();
+          // only one at a time per loop
+          return;
+        }
       }
+      // drain legacy global queue if no per-user pending
+      if (this.enqueueQueue.length && this.activeEnqueueCount < this.MAX_CONCURRENT_ENQUEUE) {
+        const fn = this.enqueueQueue.shift()!;
+        this.activeEnqueueCount++;
+        void (async () => {
+          try { await fn(); } finally {
+            this.activeEnqueueCount = Math.max(0, this.activeEnqueueCount - 1);
+            processQueues();
+          }
+        })();
+      }
+    };
+    const run = async () => {
+      try { await sess.connectPeer(user, "P"); } catch {}
+      try { sess.queueUpload(user, t.virtualPath); } catch {}
       this.startPolling(t.id);
     };
-    if (this.activeEnqueueCount >= this.MAX_CONCURRENT_ENQUEUE) {
-      this.enqueueQueue.push(() => { void run(); });
+    if (this.perUserActive.has(user) || this.activeEnqueueCount >= this.MAX_CONCURRENT_ENQUEUE) {
+      if (!this.perUserQueues.has(user)) this.perUserQueues.set(user, []);
+      this.perUserQueues.get(user)!.push(run);
     } else {
-      await run();
+      this.perUserActive.add(user);
+      this.activeEnqueueCount++;
+      try { await run(); } finally {
+        this.perUserActive.delete(user);
+        this.activeEnqueueCount = Math.max(0, this.activeEnqueueCount - 1);
+        processQueues();
+      }
     }
   }
 
@@ -1262,21 +1302,26 @@ export class TransferManager {
   }
 
   private async prepareIncompleteFile(t: BridgeTransfer): Promise<number> {
-    // Handle usernamesubfolders for incomplete as well? Keep incomplete flat, finished will respect subfolders
     const incompletePath = getIncompletePath(t.virtualPath, t.username, this.incompleteDir);
     t._incompletePath = incompletePath;
     try {
       mkdirSync(this.incompleteDir, { recursive: true });
-      const { openSync, closeSync } = require("node:fs");
-      // Open ab+
+      const { openSync, closeSync, unlinkSync: ulink } = require("node:fs");
+      // slskd incompleteStrategy: resume (default, slskd) vs overwrite (truncate)
+      if (this.config.incomplete_strategy === "overwrite" && existsSync(incompletePath)) {
+        try { ulink(incompletePath); } catch {}
+      }
+      // Open ab+ (resume) or w+ (overwrite already deleted)
       const fd = openSync(incompletePath, "a+");
       t._fileHandle = fd;
       const stat = statSync(incompletePath);
       let offset = stat.size;
-      // size_changed → truncate to 0 (nicotine truncates to 0 and restarts; we truncate to 0)
+      // size_changed → truncate to 0 (nicotine truncates to 0 and restarts)
       if (offset > t.size) {
         try { const { ftruncateSync } = require("node:fs"); ftruncateSync(fd, 0); offset = 0; } catch {}
       }
+      // overwrite strategy always starts 0
+      if (this.config.incomplete_strategy === "overwrite") { try { const { ftruncateSync } = require("node:fs"); ftruncateSync(fd, 0); offset = 0; } catch {} }
       return offset;
     } catch {
       t.status = "Local file error";
@@ -1285,14 +1330,43 @@ export class TransferManager {
       return 0;
     }
   }
+  private deriveDestination(virtualPath: string, username: string): string {
+    const tmpl = this.config.download_destination_template || this.config.download_subdirectory || null;
+    if (!tmpl) return getFinishedPath(virtualPath, this.downloadsDir, username, this.config.usernamesubfolders);
+    // Simple token replacement like slskd: ${SOURCE_USERNAME}, ${SOURCE_DIRECTORY}, ${SOURCE_PATH}, ${BATCH_ID}
+    const sourcePath = virtualPath;
+    const sourceDir = virtualPath.includes("\\") ? virtualPath.slice(0, virtualPath.lastIndexOf("\\")) : "";
+    const sourceUsername = username.replace(/[/\\]/g, "_");
+    const clean = (s: string) => s.replace(/[/\\]/g, "_").replace(/\.\./g, "_");
+    let expanded = tmpl
+      .replace(/\$\{SOURCE_USERNAME\}/g, clean(sourceUsername))
+      .replace(/\$\{SOURCE_DIRECTORY\}/g, clean(sourceDir.split("\\")[0] || ""))
+      .replace(/\$\{SOURCE_PATH\}/g, clean(sourcePath))
+      .replace(/\$\{BATCH_ID\}/g, "batch");
+    // guard traversal
+    expanded = expanded.replace(/\.\./g, "_").replace(/^[/\\]+/, "");
+    let dir = join(this.downloadsDir, expanded);
+    try { mkdirSync(dir, { recursive: true }); } catch {}
+    const base = fileNameOf(virtualPath).replace(/[/\\]/g, "_") || "file";
+    let dest = join(dir, base);
+    let counter = 1; let candidate = dest;
+    while (existsSync(candidate)) {
+      const dot = base.lastIndexOf(".");
+      const name = dot >= 0 ? base.slice(0, dot) : base;
+      const ext = dot >= 0 ? base.slice(dot) : "";
+      candidate = join(dir, `${name} (${counter})${ext}`);
+      counter++; if (counter > 1000) break;
+    }
+    return candidate;
+  }
 
   private finishDownload(t: BridgeTransfer, socket: Socket) {
     try { const { closeSync } = require("node:fs"); if (t._fileHandle !== undefined) { try { closeSync(t._fileHandle); } catch {} t._fileHandle = undefined; } } catch {}
     const stall = (t as unknown as { _stallTimer?: Timer })._stallTimer;
     if (stall) clearTimeout(stall);
-    // Move to downloads dir with collision handling + usernamesubfolders
+    // Move to downloads dir with collision handling + templating (slskd DeriveDestination)
     try {
-      const dest = getFinishedPath(t.virtualPath, this.downloadsDir, t.username, this.config.usernamesubfolders);
+      const dest = this.deriveDestination(t.virtualPath, t.username);
       renameSync(t._incompletePath!, dest);
       t._downloadUrl = `/files/${t.token}`;
       t._incompletePath = dest;

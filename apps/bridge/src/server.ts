@@ -1283,8 +1283,13 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             if (key === "downloadfilters" || key === "enablefilters") {
               tm?.setConfig?.({ [key]: value });
             }
-            if (["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "groupdownloads", "groupuploads"].includes(key)) {
-              tm?.setConfig?.({ [key]: value });
+            if (["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "groupdownloads", "groupuploads", "incomplete_strategy", "incompleteStrategy", "download_destination_template", "downloadDestinationTemplate", "download_subdirectory", "downloadSubdirectory"].includes(key)) {
+              const norm: Record<string, unknown> = {};
+              if (key === "incompleteStrategy") norm["incomplete_strategy"] = value;
+              else if (key === "downloadDestinationTemplate") norm["download_destination_template"] = value;
+              else if (key === "downloadSubdirectory") norm["download_subdirectory"] = value;
+              else norm[key] = value;
+              tm?.setConfig?.(norm);
             }
             if (["rescanonstartup", "rescan_shares_daily", "rescan_shares_hour"].includes(key)) {
               (session as unknown as { setRescanConfig?: (o: Record<string, unknown>) => void })?.setRescanConfig?.({ [key]: value });
