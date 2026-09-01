@@ -1,19 +1,24 @@
-# Example override for VPN-forwarded port (no Docker port remap needed).
-# With VPN (e.g. Mullvad/Proton forward 49127) use host network so bridge's
-# Bun.listen 49127 is directly host-reachable. Then Settings → Network Save
-# hot-swaps without `docker compose up -d` and WS stays open.
+# Example override — host network is now default in compose.yaml.
+# This file is kept for users who prefer bridge network (no host) or need a template.
 #
-# Usage:
+# To use bridge network instead of host:
 #   cp compose.override.example.yaml compose.override.yaml
-#   # edit LISTEN_PORT if your VPN uses a different forward
+#   # Then in compose.override.yaml set for bridge:
+#   #   network_mode: bridge  # (or remove host) + uncomment ports
 #   docker compose up -d
 #
-# For bridge network (default) keep ports mapping and run the watcher:
-#   ./scripts/sync-listen-port.sh  # watches DATA_DIR/listen_port → .env → up -d
+# For Gluetun VPN: DO NOT use host — use compose.gluetun.yaml instead:
+#   docker compose -f compose.yaml -f compose.gluetun.yaml up -d
+# See docs/deployment.md#gluetun
+#
+# Bridge network example (bridge 172.x — UPnP will fail, forward manually):
 services:
   bridge:
-    network_mode: host
-    # ports: not needed in host mode – bridge binds directly to host 49127
+    network_mode: bridge
+    ports:
+      - "8787:8787"
+      - "${LISTEN_PORT:-49127}:${LISTEN_PORT:-49127}"
+      - "${LISTEN_PORT:-49127}:${LISTEN_PORT:-49127}/udp"
     environment:
       LISTEN_PORT: "${LISTEN_PORT:-49127}"
       PORT: "8787"

@@ -1,0 +1,81 @@
+# Gluetun VPN compose override — use when your Soulseek port is forwarded via VPN (e.g. https://github.com/qdm12/gluetun).
+#
+# IMPORTANT: `network_mode: host` (default in compose.yaml) CONFLICTS with Gluetun's `network_mode: service:gluetun`.
+# You MUST pick one. For Gluetun, remove `network_mode: host` from the bridge — this file does that by
+# overriding bridge to `service:gluetun` and routing 8787/LISTEN_PORT through Gluetun.
+#
+# Usage:
+#   # 1. Keep your gluetun service (example minimal gluetun — adjust VPN provider, creds, forwarded port):
+#   # 2. Start everything together:
+#   docker compose -f compose.yaml -f compose.gluetun.yaml up -d
+#
+#   # Or make it permanent:
+#   cp compose.gluetun.yaml compose.override.yaml
+#   docker compose up -d
+#
+# Why two files? Docker image is identical; only compose network mode differs. No second build is needed.
+# See docs/deployment.md#gluetun and https://github.com/qdm12/gluetun/wiki
+#
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    ports:
+      - "8787:8787"       # bridge WS
+      - "3000:3000"       # web (optional if web also via gluetun; else expose web directly)
+      - "${LISTEN_PORT:-49127}:${LISTEN_PORT:-49127}"       # Soulseek TCP
+      - "${LISTEN_PORT:-49127}:${LISTEN_PORT:-49127}/udp"   # Soulseek UDP
+    environment:
+      # === VPN SETUP — pick your provider, see https://github.com/qdm12/gluetun/wiki ===
+      # VPN_SERVICE_PROVIDER: mullvad
+      # VPN_TYPE: wireguard
+      # WIREGUARD_PRIVATE_KEY: ...
+      # WIREGUARD_ADDRESSES: ...
+      # Or OpenVPN: OPENVPN_USER / OPENVPN_PASSWORD
+      # === PORT FORWARDING — if your VPN forwards a static port (Mullvad/Proton), set it here ===
+      # VPN_PORT_FORWARDING: "on"
+      # VPN_PORT_FORWARDING_PROVIDER: mullvad  # or protonvpn
+      # FIREWALL_VPN_INPUT_PORTS: "${LISTEN_PORT:-49127}"  # allow forwarded port through gluetun firewall
+      TZ: "${TZ:-UTC}"
+    volumes:
+      - gluetun-data:/gluetun
+    restart: unless-stopped
+
+  bridge:
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    # When using service:gluetun, `ports` are defined on gluetun, not here.
+    # Do NOT set `network_mode: host` here — it would conflict.
+    environment:
+      LISTEN_PORT: "${LISTEN_PORT:-49127}"
+      PORT: "8787"
+    # healthcheck still hits localhost:8787 via gluetun network namespace
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  web:
+    # Web can stay on host network or also route via gluetun — choose one:
+    # - Host (default below): expose 3000 directly, NEXT_PUBLIC_BRIDGE_URL must be reachable (e.g. host IP:8787)
+    # - Via gluetun: uncomment `network_mode: service:gluetun` and move its port to gluetun above
+    # network_mode: "service:gluetun"
+    # depends_on: [gluetun]
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+      # When web is NOT via gluetun but bridge IS, web reaches bridge via gluetun's forwarded 8787 on host:
+      # NEXT_PUBLIC_BRIDGE_URL: "ws://localhost:8787/ws"
+
+volumes:
+  gluetun-data:
