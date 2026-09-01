@@ -231,8 +231,7 @@ export class TransferManager {
 
   setConfig(partial: Partial<typeof this.config>) {
     Object.assign(this.config, partial);
-    // reconfigure token bucket if upload limit changed
-    try { const l = this.getUploadLimit(); if (l) this.tokenBucket.configure(l); } catch {}
+    try { const ul = this.getUploadLimit(); if (ul) this.uploadBucket.configure(ul); const dl = this.getDownloadLimit(); if (dl) this.downloadBucket.configure(dl); } catch {}
   }
 
   getStatsSummary() {
@@ -1023,24 +1022,49 @@ export class TransferManager {
   }
   private limiterDelay(bytes: number, limitBps: number): number {
     if (!limitBps) return 0;
-    // adaptive chunk: max(4096, sent*1.25/dt) parity — simple delay = bytes/limit*1000
     return Math.ceil((bytes / limitBps) * 1000);
   }
-  // Lightweight TokenBucket per slskd Common/TokenBucket.ts — interval 100ms, capacity = limit/10
-  private tokenBucket = new (class {
-    capacity = 0; tokens = 0; lastRefill = Date.now();
-    configure(limitBps: number) { this.capacity = Math.max(1024, Math.floor(limitBps / 10)); this.tokens = this.capacity; this.lastRefill = Date.now(); }
-    refill(limitBps: number) {
-      const now = Date.now(); const elapsed = now - this.lastRefill;
-      if (elapsed >= 100) { const add = Math.floor(limitBps * (elapsed / 1000)); this.tokens = Math.min(this.capacity, this.tokens + add); this.lastRefill = now; }
+  // TokenBucket per Soulseek.NET Common/TokenBucket.cs:57 + TransferInternal.cs:278 EMA — two buckets (up/down) capacity limit/10 interval 100ms FIFO
+  private makeTokenBucket() {
+    return new (class {
+      capacity = 0; tokens = 0; lastRefill = Date.now(); private queue: Array<() => void> = [];
+      configure(limitBps: number) { this.capacity = Math.max(1024, Math.floor(limitBps / 10)); this.tokens = this.capacity; this.lastRefill = Date.now(); }
+      refill(limitBps: number) {
+        const now = Date.now(); const elapsed = now - this.lastRefill;
+        if (elapsed >= 100) { const add = Math.floor(limitBps * (elapsed / 1000)); this.tokens = Math.min(this.capacity, this.tokens + add); this.lastRefill = now; if (this.tokens > 0) { const q = this.queue.shift(); if (q) q(); } }
+      }
+      tryConsume(bytes: number, limitBps: number): boolean {
+        if (!limitBps) return true;
+        this.refill(limitBps);
+        if (this.tokens >= bytes) { this.tokens -= bytes; return true; }
+        return false;
+      }
+      async GetAsync(requested: number, limitBps: number): Promise<number> {
+        if (!limitBps) return requested;
+        this.refill(limitBps);
+        if (this.tokens >= requested) { this.tokens -= requested; return requested; }
+        if (this.tokens > 0) { const avail = this.tokens; this.tokens = 0; return avail; }
+        // wait for refill interval 100ms FIFO
+        await new Promise<void>((res) => { this.queue.push(res); setTimeout(res, 100); });
+        this.refill(limitBps);
+        const granted = Math.min(this.tokens, requested);
+        this.tokens -= granted;
+        return granted;
+      }
+    })();
+  }
+  private uploadBucket = this.makeTokenBucket();
+  private downloadBucket = this.makeTokenBucket();
+  private updateEmaSpeed(t: BridgeTransfer, currentSpeed: number, now: number): void {
+    const last = (t as unknown as { _lastSpeedUpdate?: number })._lastSpeedUpdate || 0;
+    const elapsed = now - last;
+    if (elapsed >= 1000) {
+      if (!t.avgSpeed) t.avgSpeed = currentSpeed;
+      else t.avgSpeed = t.avgSpeed * 0.8 + currentSpeed * 0.2; // Soulseek.NET TransferInternal.cs:278 EMA alpha 0.2
+      (t as unknown as { _lastSpeedUpdate?: number })._lastSpeedUpdate = now;
     }
-    tryConsume(bytes: number, limitBps: number): boolean {
-      if (!limitBps) return true;
-      this.refill(limitBps);
-      if (this.tokens >= bytes) { this.tokens -= bytes; return true; }
-      return false;
-    }
-  })();
+    t.speed = Math.max(1024, currentSpeed);
+  }
 
   getQueuePlace(file: string): number {
     let idx = 0;
@@ -1103,17 +1127,30 @@ export class TransferManager {
       try { socket.end(); } catch {}
       return;
     }
-    const onData = (chunk: Buffer) => {
+    const onData = async (chunk: Buffer) => {
       if (left <= 0) return;
       const toWrite = chunk.subarray(0, Math.min(chunk.length, left));
-      // Bandwidth throttling: delay processing if limit exceeded (mimics slskproto adaptive 4096 logic)
-      const dlLimit = this.getDownloadLimit();
+      const dlLimit = this.getEffectiveDownloadLimit();
       if (dlLimit) {
-        const delay = this.limiterDelay(toWrite.length, dlLimit);
-        if (delay > 10) {
-          // Simple throttle: pause socket briefly
-          try { (socket as unknown as { pause?: () => void })?.pause?.(); } catch {}
-          setTimeout(() => { try { (socket as unknown as { resume?: () => void })?.resume?.(); } catch {} }, delay);
+        // TokenBucket async FIFO like Soulseek.NET Common/TokenBucket.cs:155
+        const granted = await this.downloadBucket.GetAsync(toWrite.length, dlLimit);
+        if (granted < toWrite.length) {
+          // bucket granted partial — would need to slice; for now we wrote full, but next chunk will be throttled
+          // still apply limiterDelay for partial backpressure
+          const delay = this.limiterDelay(toWrite.length - granted, dlLimit);
+          if (delay > 10) {
+            try { (socket as unknown as { pause?: () => void })?.pause?.(); } catch {}
+            await new Promise(r => setTimeout(r, Math.min(delay, 100)));
+            try { (socket as unknown as { resume?: () => void })?.resume?.(); } catch {}
+          }
+        } else {
+          // also apply simple delay for large chunks to avoid burst
+          const delay = this.limiterDelay(toWrite.length, dlLimit);
+          if (delay > 10) {
+            try { (socket as unknown as { pause?: () => void })?.pause?.(); } catch {}
+            await new Promise(r => setTimeout(r, Math.min(delay, 50)));
+            try { (socket as unknown as { resume?: () => void })?.resume?.(); } catch {}
+          }
         }
       }
       try {
@@ -1129,10 +1166,9 @@ export class TransferManager {
       t.current += toWrite.length;
       left -= toWrite.length;
       const elapsed = (Date.now() - (t._startTime ?? Date.now())) / 1000;
-      // Adaptive speed calc like slskproto: max(4096, sent*1.25/dt)
       const rawSpeed = elapsed > 0 ? (t.current - startOffset) / elapsed : toWrite.length * 2;
-      t.speed = Math.max(4096, Math.min(rawSpeed, dlLimit || rawSpeed));
-      t.avgSpeed = elapsed > 0 ? (t.current - startOffset) / elapsed : t.speed;
+      const curr = Math.max(1024, Math.min(rawSpeed, dlLimit || rawSpeed));
+      this.updateEmaSpeed(t, curr, Date.now());
       t.timeLeft = t.speed > 0 ? Math.ceil(left / t.speed) : null;
       // throttle emit 500 ms
       this.emit(t);
@@ -1239,30 +1275,32 @@ export class TransferManager {
       logger.warn("transfer", "upload denied — file not shared (no real path)", { username: t.username, virtualPath: t.virtualPath });
       return;
     }
-    // Real file streaming
+    // Real file streaming — TokenBucket + EMA like Soulseek.NET TransferInternal.cs:278
     try {
       const { createReadStream } = require("node:fs") as typeof import("node:fs");
       const rs = createReadStream(realPath, { start: offset });
       let sent = 0;
       const start = Date.now();
-      const ulLimit = this.getUploadLimit();
-      rs.on("data", (chunk: Buffer) => {
+      (t as unknown as { _lastSpeedUpdate?: number })._lastSpeedUpdate = start;
+      const ulLimit = this.getEffectiveUploadLimit();
+      if (ulLimit) this.uploadBucket.configure(ulLimit);
+      rs.on("data", async (chunk: Buffer) => {
         const toSend = chunk as Buffer;
-        // throttle
         if (ulLimit) {
-          const delay = this.limiterDelay(toSend.length, ulLimit);
-          if (delay > 10) {
+          const granted = await this.uploadBucket.GetAsync(toSend.length, ulLimit);
+          if (granted < toSend.length) {
             try { (rs as unknown as { pause?: () => void }).pause?.(); } catch {}
-            setTimeout(() => { try { (rs as unknown as { resume?: () => void }).resume?.(); } catch {} }, delay);
+            await new Promise(r => setTimeout(r, 50));
+            try { (rs as unknown as { resume?: () => void }).resume?.(); } catch {}
           }
         }
         try { socket.write(toSend); } catch { rs.destroy(); }
         sent += toSend.length;
         t.current = offset + sent;
         const elapsed = (Date.now() - start) / 1000;
-        const speed = elapsed > 0 ? sent / elapsed : toSend.length * 2;
-        t.speed = ulLimit ? Math.min(speed, ulLimit) : speed;
-        t.avgSpeed = speed;
+        const raw = elapsed > 0 ? sent / elapsed : toSend.length * 2;
+        const curr = ulLimit ? Math.min(raw, ulLimit) : raw;
+        this.updateEmaSpeed(t, curr, Date.now());
         this.emit(t);
         this.emitStats();
       });

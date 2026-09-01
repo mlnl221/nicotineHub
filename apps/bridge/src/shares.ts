@@ -674,6 +674,10 @@ export class ShareDB {
   /** Build SharedFileListResponse 5 payload (zlib lvl4, sorted) — respects PermissionLevel + reveal flags (shares.py:392) */
   buildSharedFileListResponse(permission: PermissionLevel = PermissionLevel.PUBLIC): Buffer {
     const folders = this.getFoldersForPermission(permission);
+    // Locked directories are those not visible to requester (Soulseek.NET BrowseResponseFactory.cs:83)
+    const all = [...this.publicFolders, ...this.buddyFolders, ...this.trustedFolders];
+    const visibleNames = new Set(folders.map(f => f.name));
+    const locked = all.filter(f => !visibleNames.has(f.name));
     // inner payload: uint32 ndirs, then for each dir: string name, uint32 nfiles, then files
     const parts: Buffer[] = [];
     parts.push(packUint32(folders.length));
@@ -697,11 +701,37 @@ export class ShareDB {
         }
       }
     }
-    // Include unknown int 0 + priv? Nicotine adds private share count (0)
-    // For simplicity inner includes only above; nicotine also expects private block later but we omit (0)
-    // Append npriv 0 as uint32 for compatibility with FileSearch private parsing? For shares response nicotine does not add it.
+    // Include unknown int 0 + locked dirs block (BrowseResponseFactory.cs:83)
+    parts.push(packUint32(0)); // unknown
+    parts.push(packUint32(locked.length));
+    const lockedSorted = [...locked].sort((a,b)=> a.name.localeCompare(b.name));
+    for (const folder of lockedSorted) {
+      parts.push(packString(folder.name));
+      parts.push(packUint32(folder.files.length));
+      const filesSorted = [...folder.files].sort((a,b)=> a.name.localeCompare(b.name));
+      for (const f of filesSorted) {
+        parts.push(Buffer.from([1]));
+        parts.push(packString(f.name));
+        const sz = typeof f.size === "bigint" ? f.size : BigInt(f.size);
+        parts.push(packUint64(sz));
+        parts.push(packString(f.ext || ""));
+        const attrs = f.attrs || [];
+        parts.push(packUint32(attrs.length));
+        for (const [type, val] of attrs) {
+          parts.push(packUint32(type));
+          parts.push(packUint32(val));
+        }
+      }
+    }
     const inner = Buffer.concat(parts);
     const compressed = deflateSync(inner, { level: 4 });
+    // Raw cache for BrowseResponse (Soulseek.NET RawBrowseResponse disk-cache) — persist compressed
+    try {
+      const cachePath = join(this.dataDir, "browse.cache");
+      writeFileSync(cachePath + ".tmp", compressed);
+      // atomic rename? keep simple
+      try { const { renameSync } = require("node:fs") as typeof import("node:fs"); renameSync(cachePath + ".tmp", cachePath); } catch { try { writeFileSync(cachePath, compressed); } catch {} }
+    } catch {}
     return frameMessage(PEER_MESSAGE_CODES.sharedFileListResponse, compressed);
   }
 
