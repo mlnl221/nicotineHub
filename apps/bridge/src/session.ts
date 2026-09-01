@@ -33,6 +33,7 @@ import {
   buildHaveNoParent,
   buildJoinGlobalRoom,
   buildJoinRoom,
+  sanitizeSearchTerm,
   buildLeaveGlobalRoom,
   buildLeaveRoom,
   buildLogin,
@@ -659,8 +660,11 @@ export class SoulseekSession {
     const intervalMs = Math.max(30_000, this.wishlistInterval * 1000);
     this.wishlistTimer = setInterval(() => {
       if (!this.loggedIn || !this.serverSocket || !this.wishlistTerms.length) return;
-      const term = this.wishlistTerms[this.wishlistIndex % this.wishlistTerms.length];
+      const rawTerm = this.wishlistTerms[this.wishlistIndex % this.wishlistTerms.length];
       this.wishlistIndex++;
+      const clean = sanitizeSearchTerm(rawTerm);
+      const term = clean.transmitted || clean.sanitized || rawTerm;
+      if (!term) return;
       try {
         const token = this.tokenCounter++;
         if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
@@ -1016,7 +1020,12 @@ export class SoulseekSession {
   private scheduleReconnect(reason: string) {
     if (!this.shouldReconnect || this.opts.signal?.aborted) return;
     if (this.reconnectTimer) return;
-    const base = RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempts);
+    let base: number;
+    if (this.reconnectAttempts === 0) {
+      base = RECONNECT_BASE_MS + Math.random() * 10000; // 5-15s first, like nicotine _set_server_timer
+    } else {
+      base = RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempts);
+    }
     const jitter = base * 0.2 * (Math.random() * 2 - 1);
     const delay = Math.min(RECONNECT_MAX_MS, Math.max(RECONNECT_BASE_MS, base + jitter));
     this.reconnectAttempts += 1;
@@ -1557,7 +1566,7 @@ export class SoulseekSession {
         username = undefined;
       }
       if (!query) return;
-      if (this.shareDB.isExcluded(query)) return;
+      // Note: excluded phrases are file-level, filtered inside buildFileSearchResponse via isFileExcluded — don't early return on query
       // emit diagnostic
       this.emitTransfer({ type: "transfer-request", username, token: token!, file: query.slice(0, 120) });
       // respect private_search_results: if disabled, don't include private (buddy/trusted) folders for non-buddies
@@ -1989,11 +1998,12 @@ export class SoulseekSession {
               if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
               if (status === ParentStatus.ACCEPTED) {
                 this._sendMessageToChildPeers(payload, 3);
-                if (this._searchEnabled && !this.shareDB.isExcluded(ds.query)) {
-                  // local shares search — also emit for server side (capped by maxResults)
+                if (this._searchEnabled) {
+                  // local shares search — filtered per-file via isFileExcluded inside buildFileSearchResponse
                   const resp = this.shareDB.buildFileSearchResponse(ds.token, this.username, ds.query, true, 0, 0, this.getSharePermissionLevel(ds.username), this._maxResults);
                   if (resp) {
-                    // resp is peer FileSearchResponse, but for distrib we need to support search via shares? Just emit
+                    // send response to distributor requester via peer if possible
+                    try { this.ensurePeerAndSend(ds.username, "P", resp); } catch {}
                     this.emitTransfer({ type: "transfer-request", username: ds.username, token: ds.token, file: ds.query.slice(0,120) });
                   } else {
                     this.emitTransfer({ type: "transfer-request", username: ds.username, token: ds.token, file: ds.query.slice(0,120) });
@@ -2154,16 +2164,14 @@ export class SoulseekSession {
           logger.debug("server", "peer FileSearchRequest ignored — search_results disabled", { username: state.username });
         } else {
           try {
-            // peer FileSearchRequest 8: [token][query] — respond with FileSearchResponse 9 via same peer, respecting permission
+            // peer FileSearchRequest 8: [token][query] — respond with FileSearchResponse 9 via same peer, respecting permission; per-file excluded filtering inside buildFileSearchResponse
             const r = new SlskReader(msg.payload);
             const token = r.uint32(); const query = r.string();
-            if (!this.shareDB.isExcluded(query)) {
             const peerName = state.username || "unknown";
             const perm = this.getSharePermissionLevel(peerName);
             // if private_search_results false, downgrade BUDDY/TRUSTED to PUBLIC for non-buddies (getSharePermissionLevel already PUBLIC for strangers)
             const resp = this.shareDB.buildFileSearchResponse(token, this.username, query, true, 0, 0, perm, this._maxResults);
             if (resp) (peer as Socket).write(resp);
-            }
           } catch {}
         }
       } else if (msg.code === PEER_MESSAGE_CODES.transferRequest) {
@@ -2228,16 +2236,16 @@ export class SoulseekSession {
 
   search(query: string, searchId: string, handlers: SearchHandlers): number {
     if (!this.serverSocket || !this.loggedIn) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
-    // Excluded phrases filter (case-insensitive)
-    const qLower = query.toLowerCase();
-    for (const phrase of this.excludedPhrases) { if (qLower.includes(phrase)) { handlers.onEnd({ searchId, reason: "error" }); return 0; } }
+    const clean = sanitizeSearchTerm(query);
+    const outQuery = clean.transmitted || clean.sanitized || query.trim();
+    if (!outQuery) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
     const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
     search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
     this.searches.set(token, search); this.searchIds.set(searchId, token);
-    this.serverSocket.write(buildFileSearch(token, query));
+    this.serverSocket.write(buildFileSearch(token, outQuery));
     return token;
   }
   cancelSearch(searchId: string) {
@@ -2250,13 +2258,16 @@ export class SoulseekSession {
   }
   searchUser(username: string, query: string, searchId: string, handlers: SearchHandlers): number {
     if (!this.loggedIn || !this.serverSocket) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    const clean = sanitizeSearchTerm(query);
+    const outQuery = clean.transmitted || clean.sanitized || query.trim();
+    if (!outQuery) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
     const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
     search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
     this.searches.set(token, search); this.searchIds.set(searchId, token);
-    this.serverSocket.write(buildUserSearch(username, token, query));
+    this.serverSocket.write(buildUserSearch(username, token, outQuery));
     return token;
   }
 
@@ -2264,6 +2275,9 @@ export class SoulseekSession {
   searchBuddies(usernames: string[], query: string, searchId: string, handlers: SearchHandlers): number {
     if (!this.loggedIn || !this.serverSocket) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
     if (!usernames.length) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    const clean = sanitizeSearchTerm(query);
+    const outQuery = clean.transmitted || clean.sanitized || query.trim();
+    if (!outQuery) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
@@ -2271,30 +2285,36 @@ export class SoulseekSession {
     search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
     this.searches.set(token, search); this.searchIds.set(searchId, token);
     for (const username of usernames) {
-      try { this.serverSocket.write(buildUserSearch(username, token, query)); } catch {}
+      try { this.serverSocket.write(buildUserSearch(username, token, outQuery)); } catch {}
     }
     return token;
   }
   searchRoom(room: string, query: string, searchId: string, handlers: SearchHandlers): number {
     if (!this.loggedIn || !this.serverSocket) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    const clean = sanitizeSearchTerm(query);
+    const outQuery = clean.transmitted || clean.sanitized || query.trim();
+    if (!outQuery) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
     const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
     search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
     this.searches.set(token, search); this.searchIds.set(searchId, token);
-    this.serverSocket.write(buildRoomSearch(room, token, query));
+    this.serverSocket.write(buildRoomSearch(room, token, outQuery));
     return token;
   }
   wishlistSearch(query: string, searchId: string, handlers: SearchHandlers): number {
     if (!this.loggedIn || !this.serverSocket) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    const clean = sanitizeSearchTerm(query);
+    const outQuery = clean.transmitted || clean.sanitized || query.trim();
+    if (!outQuery) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
     const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
     search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
     this.searches.set(token, search); this.searchIds.set(searchId, token);
-    this.serverSocket.write(buildWishlistSearch(token, query));
+    this.serverSocket.write(buildWishlistSearch(token, outQuery));
     return token;
   }
   watchUser(username: string) { this.serverSocket?.write(buildWatchUser(username)); this.serverSocket?.write(buildGetUserStats(username)); }

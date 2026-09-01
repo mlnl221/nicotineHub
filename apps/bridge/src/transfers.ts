@@ -140,11 +140,15 @@ export class TransferManager {
   private dataDir: string;
   private incompleteDir: string;
   private downloadsDir: string;
-  private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; connectPeer: (u: string, t: string) => Promise<Socket> } | undefined;
+  private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
   private tokenCounter = Math.floor(Math.random() * 900000) + 10000;
   private statsManager: StatsManager;
   private userUpdateCounter = new Map<string, number>();
   private globalUpdateCounter = 0;
+  private retryAttempts = new Map<string, number>();
+  private activeEnqueueCount = 0;
+  private enqueueQueue: Array<() => void> = [];
+  private readonly MAX_CONCURRENT_ENQUEUE = 5;
   // Config mirrors nicotine transfers.* — updated via setConfig from server.ts WS
   private config = {
     uploadslots: 3,
@@ -222,6 +226,8 @@ export class TransferManager {
 
   setConfig(partial: Partial<typeof this.config>) {
     Object.assign(this.config, partial);
+    // reconfigure token bucket if upload limit changed
+    try { const l = this.getUploadLimit(); if (l) this.tokenBucket.configure(l); } catch {}
   }
 
   getStatsSummary() {
@@ -547,17 +553,24 @@ export class TransferManager {
 
   private async sendQueueUpload(t: BridgeTransfer) {
     const sess = this.session;
-    if (!sess) return;
-    try {
-      // Ensure we have a P connection; connectPeer will handle direct+relay
+    if (!sess) { this.startPolling(t.id); return; }
+    const run = async () => {
+      this.activeEnqueueCount++;
       try {
-        await sess.connectPeer(t.username, "P");
-      } catch {}
-      // Send QueueUpload (43)
-      sess.queueUpload(t.username, t.virtualPath);
-    } catch {}
-    // Also register poll
-    this.startPolling(t.id);
+        try { await sess.connectPeer(t.username, "P"); } catch {}
+        sess.queueUpload(t.username, t.virtualPath);
+      } catch {} finally {
+        this.activeEnqueueCount = Math.max(0, this.activeEnqueueCount - 1);
+        const next = this.enqueueQueue.shift();
+        if (next) next();
+      }
+      this.startPolling(t.id);
+    };
+    if (this.activeEnqueueCount >= this.MAX_CONCURRENT_ENQUEUE) {
+      this.enqueueQueue.push(() => { void run(); });
+    } else {
+      await run();
+    }
   }
 
   private startPolling(id: string) {
@@ -646,31 +659,49 @@ export class TransferManager {
       this.emit(t);
       return t;
     }
-    // 3. file_is_shared — check shares.json if exists, else verify file exists in shared dirs (deny by default, not allow)
+    // 3. file_is_shared — check ShareDB direct (preferred), then shares.json, then FS recursive (deny by default)
     let shared = false;
     let shareCheckedViaJson = false;
+    // Try ShareDB via session (best, knows full virtual paths including nested)
     try {
-      const sharesPath = join(this.dataDir, "shares.json");
-      if (existsSync(sharesPath)) {
-        shareCheckedViaJson = true;
-        const raw = JSON.parse(readFileSync(sharesPath, "utf8")) as Record<string, unknown>;
-        // shares.json format: { folders: ShareFolder[], publicFolders, ... } or legacy { [virtualPath]: realPath }
-        if (Array.isArray((raw as { folders?: unknown[] }).folders)) {
-          const folders = (raw as { folders: Array<{ name?: string; files: Array<{ name?: string }> }> }).folders;
-          shared = folders.some((fo) => fo.files?.some((f) => f.name === virtualPath) || virtualPath.startsWith((fo.name || "") + "\\"));
-          // fallback to publicFolders if not found in combined
-          if (!shared && Array.isArray((raw as { publicFolders?: unknown[] }).publicFolders)) {
-            const pub = (raw as { publicFolders: Array<{ name?: string; files: Array<{ name?: string }> }> }).publicFolders;
-            shared = pub.some((fo) => fo.files?.some((f) => f.name === virtualPath) || virtualPath.startsWith((fo.name || "") + "\\"));
+      const sess: any = this.session;
+      const sdb = sess?.shareDBInstance ?? (this.sessionGetter?.() as any)?.shareDBInstance ?? (sess as any)?.shareDB ?? null;
+      if (sdb) {
+        // sdb may be ShareDB instance with getFolders etc.
+        if (typeof sdb.hasVirtualPath === "function" && sdb.hasVirtualPath(virtualPath)) shared = true;
+        else if (typeof sdb.getFolders === "function") {
+          const folders = sdb.getFolders();
+          for (const fo of folders) {
+            if (fo.name === virtualPath || virtualPath.startsWith((fo.name || "") + "\\")) { shared = true; break; }
+            if (fo.files?.some((f: { name: string }) => f.name === virtualPath)) { shared = true; break; }
           }
-        } else if (Array.isArray(raw)) {
-          shared = (raw as string[]).includes(virtualPath);
-        } else {
-          shared = Object.keys(raw).some((k) => virtualPath.startsWith(k) || virtualPath === k);
         }
+        // also check virtual2real mapping if available
+        if (!shared && typeof sdb.getVirtual2Real === "function" && sdb.getVirtual2Real(virtualPath)) shared = true;
       }
-    } catch { shared = false; }
-    // If not found via JSON, check FS shared dirs (like startUploadStream) — file must exist on disk to be shared
+    } catch {}
+    if (!shared) {
+      try {
+        const sharesPath = join(this.dataDir, "shares.json");
+        if (existsSync(sharesPath)) {
+          shareCheckedViaJson = true;
+          const raw = JSON.parse(readFileSync(sharesPath, "utf8")) as Record<string, unknown>;
+          if (Array.isArray((raw as { folders?: unknown[] }).folders)) {
+            const folders = (raw as { folders: Array<{ name?: string; files: Array<{ name?: string }> }> }).folders;
+            shared = folders.some((fo) => fo.files?.some((f) => f.name === virtualPath) || virtualPath.startsWith((fo.name || "") + "\\"));
+            if (!shared && Array.isArray((raw as { publicFolders?: unknown[] }).publicFolders)) {
+              const pub = (raw as { publicFolders: Array<{ name?: string; files: Array<{ name?: string }> }> }).publicFolders;
+              shared = pub.some((fo) => fo.files?.some((f) => f.name === virtualPath) || virtualPath.startsWith((fo.name || "") + "\\"));
+            }
+          } else if (Array.isArray(raw)) {
+            shared = (raw as string[]).includes(virtualPath);
+          } else {
+            shared = Object.keys(raw).some((k) => virtualPath.startsWith(k) || virtualPath === k);
+          }
+        }
+      } catch { shared = false; }
+    }
+    // If not found via JSON/ShareDB, check FS shared dirs recursive (covers nested shares)
     if (!shared) {
       try {
         const base = fileNameOf(virtualPath);
@@ -678,16 +709,28 @@ export class TransferManager {
         const sharedEnv = process.env.SHARED_DIRS || process.env.SHARES_DIR || "";
         if (sharedEnv) candidates.push(...sharedEnv.split(":").map((s) => s.trim()).filter(Boolean));
         candidates.push(join(this.dataDir, "shared"), join(this.dataDir, "shares"), join(this.dataDir, "uploads"), this.dataDir);
-        // If shares.json was checked and no match, still allow if file exists on disk in shared dirs (covers FS scan without persist)
-        // If shares.json not present, require file existence
+        const { readdirSync: rds } = require("node:fs") as typeof import("node:fs");
+        const searchRecursive = (dir: string, target: string, depth = 2): boolean => {
+          if (depth < 0) return false;
+          try {
+            const cand = join(dir, target);
+            if (existsSync(cand)) return true;
+            if (!existsSync(dir)) return false;
+            const ents = rds(dir);
+            for (const e of ents) {
+              const p = join(dir, e);
+              try {
+                const st = require("node:fs").statSync(p);
+                if (st.isDirectory() && searchRecursive(p, target, depth - 1)) return true;
+              } catch {}
+            }
+          } catch {}
+          return false;
+        };
         for (const dir of candidates) {
-          const cand = join(dir, base);
-          if (existsSync(cand)) { shared = true; break; }
-          // also check exact virtual path mapping via walk? For now basename check is sufficient homelab.
+          if (searchRecursive(dir, base, 2)) { shared = true; break; }
         }
-        // If still not shared and we had no shares.json, deny (no dummy file serving)
         if (!shared && !shareCheckedViaJson) shared = false;
-        // If shares.json existed but no FS file, keep JSON result (already false) — deny
       } catch { shared = false; }
     }
     if (!shared) {
@@ -882,18 +925,33 @@ export class TransferManager {
     const t = this.transfers.get(id);
     if (!t) return;
     if (t._retryTimer) clearTimeout(t._retryTimer);
+    // Exponential backoff like slskd Retry.Do: base 5s max 60s attempts 3, else cap 180s
+    const attempts = (this.retryAttempts.get(id) ?? 0) + 1;
+    this.retryAttempts.set(id, attempts);
+    if (attempts > 3 && t.status !== "Filtered") {
+      // After 3 attempts, cap delay to max 60s but keep retrying for resilience; log
+      logger.debug("transfer", "retry attempts exceeded 3, capping", { id, attempts });
+    }
+    const base = 5000;
+    const max = 60000;
+    const exp = Math.min(max, base * Math.pow(2, attempts - 1));
+    const jitter = exp * 0.2 * (Math.random() * 2 - 1);
+    const computed = Math.min(180000, Math.max(base, exp + jitter));
+    const finalDelay = delayMs && delayMs !== 180000 ? delayMs : Math.round(computed);
     t._retryTimer = setTimeout(() => {
       const cur = this.transfers.get(id);
       if (!cur) return;
-      // Re-queue
+      // Don't retry if already Finished/Cancelled
+      if (cur.status === "Finished" || cur.status === "Cancelled") return;
       cur.status = "Queued";
-      cur.queuePosition = 1;
+      cur.queuePosition = Math.max(1, [...this.transfers.values()].filter((x) => !x.isUpload && x.status === "Queued").length + 1);
       this.emit(cur);
       this.sendQueueUpload(cur);
-    }, delayMs);
+    }, finalDelay);
   }
+  private clearRetryAttempts(id: string) { this.retryAttempts.delete(id); }
 
-  // Bandwidth limiter — token bucket approximation (nicotine slskproto.py Limetr)
+  // Bandwidth limiter — token bucket approximation (nicotine slskproto.py Limetr + slskd TokenBucket)
   // Env UPLOAD_LIMIT / DOWNLOAD_LIMIT in KB/s (0 = unlimited) + config use_*_speed_limit
   private getUploadLimit(): number {
     const envRaw = Number(process.env.UPLOAD_LIMIT || process.env.UPLOADLIMIT || 0);
@@ -911,11 +969,38 @@ export class TransferManager {
     const limit = cfg.use_download_speed_limit === "alternative" ? cfg.downloadlimitalt : cfg.downloadlimit;
     return limit > 0 ? limit * 1024 : 0;
   }
+  private getEffectiveUploadLimit(): number {
+    const base = this.getUploadLimit();
+    if (!base) return 0;
+    const active = [...this.transfers.values()].filter(t => t.isUpload && t.status === "Transferring").length || 1;
+    return Math.max(1024, Math.floor(base / active));
+  }
+  private getEffectiveDownloadLimit(): number {
+    const base = this.getDownloadLimit();
+    if (!base) return 0;
+    const active = [...this.transfers.values()].filter(t => !t.isUpload && t.status === "Transferring").length || 1;
+    return Math.max(1024, Math.floor(base / active));
+  }
   private limiterDelay(bytes: number, limitBps: number): number {
     if (!limitBps) return 0;
     // adaptive chunk: max(4096, sent*1.25/dt) parity — simple delay = bytes/limit*1000
     return Math.ceil((bytes / limitBps) * 1000);
   }
+  // Lightweight TokenBucket per slskd Common/TokenBucket.ts — interval 100ms, capacity = limit/10
+  private tokenBucket = new (class {
+    capacity = 0; tokens = 0; lastRefill = Date.now();
+    configure(limitBps: number) { this.capacity = Math.max(1024, Math.floor(limitBps / 10)); this.tokens = this.capacity; this.lastRefill = Date.now(); }
+    refill(limitBps: number) {
+      const now = Date.now(); const elapsed = now - this.lastRefill;
+      if (elapsed >= 100) { const add = Math.floor(limitBps * (elapsed / 1000)); this.tokens = Math.min(this.capacity, this.tokens + add); this.lastRefill = now; }
+    }
+    tryConsume(bytes: number, limitBps: number): boolean {
+      if (!limitBps) return true;
+      this.refill(limitBps);
+      if (this.tokens >= bytes) { this.tokens -= bytes; return true; }
+      return false;
+    }
+  })();
 
   getQueuePlace(file: string): number {
     let idx = 0;
