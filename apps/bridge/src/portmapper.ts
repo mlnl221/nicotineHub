@@ -78,8 +78,21 @@ export class NATPMP extends BaseImplementation {
     try {
       const out = spawnSync("ip", ["route"], { encoding: "utf8", timeout: 2000 });
       const text = (out.stdout as string) || "";
-      const m = text.match(/default via (\d+\.\d+\.\d+\.\d+)/);
+      let m = text.match(/default via (\d+\.\d+\.\d+\.\d+)/);
       if (m) return m[1];
+      // fallback: `default dev eth0 proto ...` without via
+      const devMatch = text.match(/default\s+dev\s+(\S+)/);
+      if (devMatch) {
+        // Try to resolve dev's IP via networkInterfaces fallback in caller
+        return null;
+      }
+    } catch {}
+    // Third fallback: `ip -j route show default` JSON
+    try {
+      const out = spawnSync("ip", ["-j", "route", "show", "default"], { encoding: "utf8", timeout: 2000 });
+      const text = (out.stdout as string) || "";
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed) && parsed[0]?.gateway) return parsed[0].gateway;
     } catch {}
     return null;
   }
@@ -215,14 +228,33 @@ export class UPnP extends BaseImplementation {
       const t = setTimeout(() => controller.abort(), UPnP.HTTP_REQUEST_TIMEOUT);
       let res: Response;
       try {
-        res = await fetch(locationUrl, { signal: controller.signal });
+        // Prevent SSRF via redirect — python validates host, we enforce manual + same-host
+        res = await fetch(locationUrl, { signal: controller.signal, redirect: "manual" as RequestRedirect });
+        // Follow single same-host redirect only
+        if (res.status >= 300 && res.status < 400) {
+          const loc = res.headers.get("location");
+          if (loc) {
+            try {
+              const orig = new URL(locationUrl);
+              const nxt = new URL(loc, locationUrl);
+              if (nxt.host === orig.host) {
+                res = await fetch(nxt.toString(), { signal: controller.signal, redirect: "manual" as RequestRedirect });
+              } else {
+                clearTimeout(t);
+                logger.debug("bridge", `UPnP: redirect to different host blocked ${loc}`);
+                return { serviceType: null, controlUrl: null };
+              }
+            } catch { /* ignore */ }
+          }
+        }
       } catch (e) {
         clearTimeout(t);
         throw e;
       }
       clearTimeout(t);
-      // Read body even on non-2xx (python handles HTTPError body)
-      const body = await res.text().catch(() => "");
+      // Read body even on non-2xx (python handles HTTPError body) — cap 16k
+      let body = await res.text().catch(() => "");
+      if (body.length > 16384) body = body.slice(0, 16384);
       logger.debug("bridge", `UPnP: device description from ${locationUrl} status=${res.status}`, { body: body.slice(0, 800) });
       if (!body) return { serviceType: null, controlUrl: null };
       // Mirror python ElementTree namespace handling: look for service blocks, then check serviceType
@@ -334,7 +366,7 @@ export class UPnP extends BaseImplementation {
           }
         } catch {}
       });
-      setTimeout(doResolve, (UPnP.MX_RESPONSE_DELAY + 0.5) * 1000 + 500);
+      // Single resolve at 5.5s — accommodates slow IGD while MX=1; previous 2s cut off late responders
       setTimeout(doResolve, 5500);
     });
   }

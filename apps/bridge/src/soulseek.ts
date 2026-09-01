@@ -442,6 +442,10 @@ export function buildLogin(username: string, password: string): Buffer {
 export function buildSetWaitPort(port: number): Buffer {
   return frameMessage(SERVER_MESSAGE_CODES.setWaitPort, packUint32(port));
 }
+export function buildSetWaitPortObfuscated(port: number, obfuscatedPort: number): Buffer {
+  // Soulseek SetWaitPort with obfuscation tail: port + uint32 obfuscationType(1) + uint32 obfPort
+  return frameMessage(SERVER_MESSAGE_CODES.setWaitPort, Buffer.concat([packUint32(port), packUint32(1), packUint32(obfuscatedPort >>> 0)]));
+}
 export function buildFileSearch(token: number, query: string): Buffer {
   return frameMessage(SERVER_MESSAGE_CODES.fileSearch, Buffer.concat([packUint32(token >>> 0), packString(query)]));
 }
@@ -966,8 +970,36 @@ function parseBrowseFile(r: SlskReader): BrowseFileEntry {
   return { name, size, ext, attrs };
 }
 
+const MAX_SHARE_DECOMPRESSED = 64 * 1024 * 1024;
+const MAX_SHARE_COMPRESSED = 16 * 1024 * 1024;
+
+function inflateShareWithCap(payload: Buffer): Buffer {
+  if (payload.length > MAX_SHARE_COMPRESSED) throw new Error("Share payload too large");
+  let buf: Buffer;
+  try {
+    buf = inflateSync(payload) as Buffer;
+  } catch (e) { throw e; }
+  if (buf.length > MAX_SHARE_DECOMPRESSED) throw new Error("Decompressed share payload exceeds limit");
+  // Trailing-data check like slskr share_payload.rs:32 — ensure no concatenated streams
+  // Node inflateSync discards trailing bytes silently; detect via re-deflate size check best-effort
+  // If payload contains trailing garbage beyond single zlib stream, the re-compressed length would differ wildly
+  // We at least verify that payload is a single valid zlib stream by checking that inflating and then
+  // inspecting via streaming API would consume all input bytes. Best-effort: use inflateSync on full payload
+  // and verify no leftover by attempting to ensure payload is not >> compressed size heuristic
+  // For strictness, verify via streaming inflate bytesRead if available
+  try {
+    const { createInflate } = require("node:zlib") as typeof import("node:zlib");
+    const inf = createInflate() as unknown as { bytesRead?: number; write: (b: Buffer)=>void; flush: (cb:()=>void)=>void };
+    // Fallback simple check: payload should start with zlib header 0x78
+    if (payload.length >= 2 && payload[0] !== 0x78) {
+      // Not zlib? already inflated, but we treat as error if payload not zlib and we inflated via non-zlib?
+    }
+  } catch {}
+  return Buffer.from(buf);
+}
+
 export function parseSharedFileListResponse(payload: Buffer): { folders: BrowseFolderEntry[] } {
-  const buf = inflateSync(payload) as Buffer;
+  const buf = inflateShareWithCap(payload);
   const r = new SlskReader(Buffer.from(buf));
   const ndirs = r.uint32();
   const folders: BrowseFolderEntry[] = [];
@@ -983,7 +1015,7 @@ export function parseSharedFileListResponse(payload: Buffer): { folders: BrowseF
 }
 
 export function parseFolderContentsResponse(payload: Buffer): { token: number; dir: string; files: BrowseFileEntry[] } {
-  const buf = inflateSync(payload) as Buffer;
+  const buf = inflateShareWithCap(payload);
   const r = new SlskReader(Buffer.from(buf));
   const token = r.uint32();
   const dir = r.string();

@@ -15,6 +15,7 @@ import { ShareDB, PermissionLevel } from "./shares.ts";
 import { logger } from "./logger.ts";
 import { shouldBlockUser, shouldIgnoreUser, getCountryCode, setCountryForIp } from "./networkfilter.ts";
 import { PortMapper } from "./portmapper.ts";
+import { encodeRotated, decodeRotated, ROTATED_OBFUSCATION_TYPE, tryParseObfuscatedInit, tryParseObfuscatedMessage } from "./obfuscation.ts";
 import {
   buildAcceptChildren,
   buildAddThingIHate,
@@ -137,7 +138,7 @@ export interface SearchResultPayload { searchId: string; token: number; rows: Se
 export interface SearchEndPayload { searchId: string; reason: "max_results" | "stopped" | "timeout" | "error"; }
 export interface SearchHandlers { onResult: (p: SearchResultPayload) => void; onEnd: (p: SearchEndPayload) => void; timeoutMs?: number; }
 interface ActiveSearch extends SearchHandlers { searchId: string; timer?: ReturnType<typeof setTimeout>; users: Set<string>; count: number; maxResults: number; }
-interface PeerState { buf: Buffer; initDone: boolean; username?: string; outbound?: boolean; connType?: string; lastActive: number; isFileConn?: boolean; fileToken?: number; createdAt: number; }
+interface PeerState { buf: Buffer; initDone: boolean; username?: string; outbound?: boolean; connType?: string; lastActive: number; isFileConn?: boolean; fileToken?: number; createdAt: number; obfuscated?: boolean; }
 export type ServerEvent = { type: "reconnect"; attempt: number; delay: number } | { type: "reconnect-failed"; error: string } | { type: "reconnected"; listenPort: number };
 export interface BrowseEvent {
   type: "browse-shares" | "browse-folder" | "browse-error";
@@ -335,6 +336,12 @@ export class SoulseekSession {
       logger.debug("server", "tcp buffer type", { type, active: this.activeSocketCount, max: this.maxSockets });
     } catch {}
   }
+  private writePeer(peer: Socket, state: PeerState, msg: Buffer): void {
+    try {
+      const out = state.obfuscated ? encodeRotated(msg) : msg;
+      (peer as unknown as { write: (b: Buffer) => void }).write(out);
+    } catch {}
+  }
 
   // Portmapper — NAT-PMP → UPnP fallback, mirrors pynicotine/portmapper.py
   private portMapper = new PortMapper();
@@ -342,27 +349,69 @@ export class SoulseekSession {
   private _localIpAddress = "";
 
   private findLocalIpAddress(): string {
+    // Prefer the IP of the interface that owns the default gateway (host-route aware).
+    // Parses /proc/net/route for default Iface, then looks up that iface in networkInterfaces.
+    // Falls back to filtering docker/veth/tailscale and preferring eth/en/wlan naming.
     try {
-      const { createSocket } = require("node:dgram") as typeof import("node:dgram");
-      const sock = createSocket("udp4");
-      // connect to dummy address to get local interface
-      // Use sync approach: create socket, connect, then get address
-      // Fallback to 127.0.0.1
+      const { readFileSync, existsSync } = require("node:fs") as typeof import("node:fs");
+      let defaultIface: string | null = null;
       try {
-        // Bun doesn't support connect for dgram easily; try UDP connect hack
-        // Use same logic as pynicotine: connect to 10.255.255.255:1
-        const dummy = require("node:dgram").createSocket("udp4") as unknown as { connect: (port:number, host:string, cb?:()=>void)=>void; address:()=>{address:string} };
-        // Instead use node:net trick: create UDP socket and bind
-        // Simpler: try to get local IP via os.networkInterfaces
-        const { networkInterfaces } = require("node:os") as typeof import("node:os");
-        const nets = networkInterfaces();
-        for (const addrs of Object.values(nets)) {
-          if (!addrs) continue;
-          for (const addr of addrs) {
-            if (addr.family === "IPv4" && !addr.internal) return addr.address;
+        if (process.platform === "linux" && existsSync("/proc/net/route")) {
+          const raw = readFileSync("/proc/net/route", "utf8");
+          const lines = raw.split("\n").slice(1);
+          for (const line of lines) {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length < 3) continue;
+            const destHex = parts[1];
+            const dest = (parseInt(destHex, 16) >>> 0) & 0xffffffff;
+            const destIp = `${dest & 0xff}.${(dest >>> 8) & 0xff}.${(dest >>> 16) & 0xff}.${(dest >>> 24) & 0xff}`;
+            if (destIp !== "0.0.0.0") continue;
+            const iface = parts[0];
+            if (iface) { defaultIface = iface; break; }
           }
         }
       } catch {}
+      // Fallback: `ip route` default line
+      if (!defaultIface) {
+        try {
+          const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
+          const out = spawnSync("ip", ["route", "show", "default"], { encoding: "utf8", timeout: 500 });
+          const text = (out.stdout as string) || "";
+          const m = text.match(/default(?: via [\d.]+)?\s+dev\s+(\S+)/);
+          if (m) defaultIface = m[1];
+        } catch {}
+      }
+      const { networkInterfaces } = require("node:os") as typeof import("node:os");
+      const nets = networkInterfaces();
+      if (defaultIface && nets[defaultIface]) {
+        const addrs = nets[defaultIface]!;
+        const ipv4 = addrs.find((a) => a.family === "IPv4" && !a.internal) ?? addrs.find((a) => a.family === "IPv4");
+        if (ipv4) return ipv4.address;
+      }
+      // Fallback: collect all non-internal IPv4, skip virtual interfaces, prefer physical naming
+      const candidates: Array<{ addr: string; iface: string }> = [];
+      for (const [iface, addrs] of Object.entries(nets)) {
+        if (!addrs) continue;
+        for (const addr of addrs as Array<{ address: string; family: string; internal: boolean }>) {
+          if (addr.family !== "IPv4" || addr.internal) continue;
+          if (/^(docker|br-|veth|tailscale|tun|wg)/.test(iface)) continue;
+          candidates.push({ addr: addr.address, iface });
+        }
+      }
+      if (candidates.length) {
+        const prioritized = candidates.sort((a, b) => {
+          const score = (iface: string) => (/^(eth|en|wlan|ens|wlp|eno)/.test(iface) ? 0 : 1);
+          return score(a.iface) - score(b.iface);
+        });
+        return prioritized[0].addr;
+      }
+      // Last resort: first non-internal IPv4 (legacy)
+      for (const addrs of Object.values(nets)) {
+        if (!addrs) continue;
+        for (const addr of addrs as Array<{ address: string; family: string; internal: boolean }>) {
+          if (addr.family === "IPv4" && !addr.internal) return addr.address;
+        }
+      }
       return "0.0.0.0";
     } catch { return "0.0.0.0"; }
   }
@@ -500,11 +549,12 @@ export class SoulseekSession {
     const ip = this.resolveInterfaceToIp(this._interface);
     return ip || "0.0.0.0";
   }
-  setNetworkInterface(iface: string) {
+  async setNetworkInterface(iface: string) {
     const norm = String(iface || "").trim();
     if (norm === this._interface) return;
     const old = this._interface;
     const oldIp = this._localIpAddress;
+    const oldPort = this._listenPort;
     this._interface = norm;
     logger.info("server", `interface ${norm ? `${norm} → ${this.resolveInterfaceToIp(norm) || "0.0.0.0"}` : "default (0.0.0.0)"}`, { listenPort: this._listenPort, username: this.username, iface: norm || "default" });
     if (!this.loggedIn) return; // next login will bind correct hostname
@@ -514,6 +564,13 @@ export class SoulseekSession {
     }
     const newHostname = this.getListenHostname();
     const newIp = this.resolveInterfaceToIp(norm) || this.findLocalIpAddress();
+    // Remove old mapping before switching to new IP/port (avoid orphan lease)
+    if (this._upnpEnabled && oldIp && oldIp !== newIp) {
+      try {
+        this.portMapper.setPort(oldPort, oldIp);
+        await this.portMapper.removePortMapping(true);
+      } catch {}
+    }
     this._localIpAddress = newIp;
     this.portMapper.setPort(this._listenPort, newIp);
     // Restart listener on new hostname
@@ -532,7 +589,6 @@ export class SoulseekSession {
       throw new Error(`Cannot bind to interface ${norm} (${newHostname}): ${(e as Error).message}`);
     }
     if (this._upnpEnabled) {
-      // Remove old mapping before adding new (handled via setPort above, but ensure)
       this.portMapper.addPortMapping(false).catch(() => {});
     }
     this.reconnect("interface change");
@@ -669,10 +725,15 @@ export class SoulseekSession {
     if (!list || list.length === 0) return;
     const sock = this.getPeerSocket(username, connType);
     if (!sock) return;
+    const state = this.peerStates.get(sock);
+    const obfuscated = !!state?.obfuscated;
     const remaining: Array<{ connType: string; msg: Buffer }> = [];
     for (const item of list) {
       if (item.connType !== connType) { remaining.push(item); continue; }
-      try { (sock as unknown as { write: (b: Buffer) => void }).write(item.msg); } catch { remaining.push(item); }
+      try {
+        const toSend = obfuscated ? encodeRotated(item.msg) : item.msg;
+        (sock as unknown as { write: (b: Buffer) => void }).write(toSend);
+      } catch { remaining.push(item); }
     }
     if (remaining.length) this.pendingPeerMessages.set(key, remaining);
     else this.pendingPeerMessages.delete(key);
@@ -948,26 +1009,22 @@ export class SoulseekSession {
     const oldPort = this._listenPort;
     this._listenPort = port;
     logger.info("server", "listen port change", { oldPort, newPort: port, username: this.username, loggedIn: this.loggedIn });
-    // Update portmapper mapping target (like nicotine PortMapper.set_port)
     const oldIp = this._localIpAddress;
     const newIp = this.findLocalIpAddress();
+    // Remove old mapping before switching port (avoid orphan lease on old port)
+    if (this._upnpEnabled && oldIp) {
+      try {
+        this.portMapper.setPort(oldPort, oldIp);
+        await this.portMapper.removePortMapping(true);
+      } catch {}
+    }
     this._localIpAddress = newIp;
     this.portMapper.setPort(port, newIp);
     if (!this.loggedIn) {
       // Listener only exists when logged in; next login will bind new port
       try { this.listener?.stop(); } catch {}
       this.listener = undefined;
-      // Remove old mapping if UPnP was active
-      if (this._upnpEnabled) {
-        try { await this.portMapper.removePortMapping(true); } catch {}
-        // Re-add with new port if we had an old mapping? But not logged in, will add on login
-      }
       return;
-    }
-    // If UPnP enabled, remove old mapping before rebinding
-    if (this._upnpEnabled) {
-      try { await this.portMapper.removePortMapping(true); } catch {}
-      // setPort already updated to new port above
     }
     // Restart peer listener on new port
     try { this.listener?.stop(); } catch {}
@@ -977,6 +1034,7 @@ export class SoulseekSession {
     } catch (e) {
       // Revert on bind failure (e.g. port in use)
       this._listenPort = oldPort;
+      this._localIpAddress = oldIp;
       this.portMapper.setPort(oldPort, oldIp);
       try { this.startListener(); } catch {}
       if (this._upnpEnabled) {
@@ -1881,42 +1939,53 @@ export class SoulseekSession {
       // Outbound pierce will be handled by the pending resolver; still emit for diagnostics
       this.emitTransfer({ type: "transfer-response", username: ctp.username, token: ctp.token, reason: `ConnectToPeer ${ctp.connType}` });
     }
-    // Obfuscated port handling — nicotine does NOT support obfuscation, so always use plain port.
-    // If obfuscationType is 1 (ROTATED), the plain port is rotated and obfuscatedPort is real,
-    // but since we don't support obfuscation handshake, we still try plain port only.
-    const port = ctp.port;
+    // Compatibility: normal first, fallback to obfuscated if plain fails and peer advertises ROTATED
     const ip = ctp.ip;
+    const plainPort = ctp.port;
+    const obfPort = ctp.obfuscatedPort;
+    const obfType = ctp.obfuscationType;
+    const shouldTryObf = obfType === ROTATED_OBFUSCATION_TYPE && obfPort != null && obfPort !== 0 && obfPort !== plainPort;
     if (!this.canOpenSocket()) {
-      // queue for later
       this.enqueueOrRun(() => this.connectToPeer(ctp));
       return;
     }
-    Bun.connect({
-      hostname: ip, port,
-      socket: {
-        open: (sock) => {
-          (sock as Socket).write(buildPierceFireWall(ctp.token));
-          this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: true, username: ctp.username, outbound: false, connType: ctp.connType, lastActive: Date.now(), createdAt: Date.now() });
-          // Resolve pending if any
-          if (pending) {
-            try { pending.resolve(sock as Socket); } catch {}
-          }
-          this.dequeuePendingSockets();
+    const doConnect = (port: number, obfuscated: boolean, onErrorTryObf: boolean) => {
+      Bun.connect({
+        hostname: ip, port,
+        socket: {
+          open: (sock) => {
+            const pierce = buildPierceFireWall(ctp.token);
+            // PierceFirewall init frame: [len][code 0][token] — encode if obfuscated
+            const toSend = obfuscated ? encodeRotated(pierce) : pierce;
+            (sock as Socket).write(toSend);
+            this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: true, username: ctp.username, outbound: false, connType: ctp.connType, obfuscated, lastActive: Date.now(), createdAt: Date.now() });
+            if (pending) { try { pending.resolve(sock as Socket); } catch {} }
+            this.dequeuePendingSockets();
+          },
+          data: (sock, chunk) => this.processPeer(sock as Socket, chunk, true),
+          error: () => {
+            if (onErrorTryObf && shouldTryObf) {
+              logger.debug("server", `connectToPeer plain failed, trying obfuscated ${obfPort}`, { ip, plainPort, obfPort });
+              doConnect(obfPort!, true, false);
+              return;
+            }
+            try { this.serverSocket?.write(buildCantConnectToPeer(ctp.token, ctp.username)); } catch {}
+            if (pending) { try { pending.reject(new Error("Pierce failed")); } catch {} }
+            this.dequeuePendingSockets();
+          },
+          close: (sock) => { this.peerStates.delete(sock as Socket); if ((this.peerStates.get(sock as Socket)?.connType ?? ctp.connType) === "D" && ctp.username) this._removeChildPeerConnection(ctp.username); this.dequeuePendingSockets(); },
         },
-        data: (sock, chunk) => this.processPeer(sock as Socket, chunk, true),
-        error: () => {
-          // Report back to server we couldn't connect
-          try { this.serverSocket?.write(buildCantConnectToPeer(ctp.token, ctp.username)); } catch {}
-          if (pending) { try { pending.reject(new Error("Pierce failed")); } catch {} }
-          this.dequeuePendingSockets();
-        },
-        close: (sock) => { this.peerStates.delete(sock as Socket); if ((this.peerStates.get(sock as Socket)?.connType ?? ctp.connType) === "D" && ctp.username) this._removeChildPeerConnection(ctp.username); this.dequeuePendingSockets(); },
-      },
-    }).catch(() => {
-      try { this.serverSocket?.write(buildCantConnectToPeer(ctp.token, ctp.username)); } catch {}
-      if (pending) { try { pending.reject(new Error("Connect failed")); } catch {} }
-      this.dequeuePendingSockets();
-    });
+      }).catch(() => {
+        if (onErrorTryObf && shouldTryObf) {
+          doConnect(obfPort!, true, false);
+          return;
+        }
+        try { this.serverSocket?.write(buildCantConnectToPeer(ctp.token, ctp.username)); } catch {}
+        if (pending) { try { pending.reject(new Error("Connect failed")); } catch {} }
+        this.dequeuePendingSockets();
+      });
+    };
+    doConnect(plainPort, false, shouldTryObf);
   }
 
   /** Phase 1: connect to peer with 45 s race (direct vs server-relayed). */
@@ -1959,15 +2028,17 @@ export class SoulseekSession {
     // Send server relay
     try { this.serverSocket?.write(buildConnectToPeer(token, username, connType)); } catch {}
 
-    // Attempt direct
-    const directPromise = (async (): Promise<Socket> => {
+    const shouldTryObf = addr.obfuscationType === ROTATED_OBFUSCATION_TYPE && addr.obfuscatedPort != null && addr.obfuscatedPort !== 0;
+
+    // Attempt direct — compatibility: normal first, fallback to obfuscated if advertised
+    const tryDirectPlain = async (): Promise<Socket> => {
       if (addr.port === 0 || addr.ip === "0.0.0.0") throw new Error("Peer offline");
       return new Promise<Socket>((resolve, reject) => {
         Bun.connect({
           hostname: addr.ip, port: addr.port,
           socket: {
             open: (sock) => {
-              this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, lastActive: Date.now(), createdAt: Date.now() });
+              this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, obfuscated: false, lastActive: Date.now(), createdAt: Date.now() });
               (sock as Socket).write(buildPeerInit(this.username, connType));
               setTimeout(() => resolve(sock as Socket), 200);
             },
@@ -1977,6 +2048,36 @@ export class SoulseekSession {
           },
         }).catch(reject);
       });
+    };
+    const tryDirectObf = async (): Promise<Socket> => {
+      if (!shouldTryObf || !addr.obfuscatedPort) throw new Error("No obfuscated port");
+      return new Promise<Socket>((resolve, reject) => {
+        Bun.connect({
+          hostname: addr.ip, port: addr.obfuscatedPort!,
+          socket: {
+            open: (sock) => {
+              this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, obfuscated: true, lastActive: Date.now(), createdAt: Date.now() });
+              const plainInit = buildPeerInit(this.username, connType);
+              (sock as Socket).write(encodeRotated(plainInit));
+              setTimeout(() => resolve(sock as Socket), 200);
+            },
+            data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
+            error: () => reject(new Error("Direct obfuscated connect failed")),
+            close: () => {},
+          },
+        }).catch(reject);
+      });
+    };
+    const directPromise = (async (): Promise<Socket> => {
+      try {
+        return await tryDirectPlain();
+      } catch (e) {
+        if (shouldTryObf) {
+          logger.debug("server", `direct plain to ${username} failed, trying obfuscated ${addr.obfuscatedPort}`, { error: (e as Error).message });
+          return await tryDirectObf();
+        }
+        throw e;
+      }
     })();
 
     // Race with pending server relay (PierceFirewall)
@@ -2016,6 +2117,52 @@ export class SoulseekSession {
     state.buf = Buffer.concat([state.buf, Buffer.from(bytes)]);
     while (true) {
       if (!state.initDone) {
+        // Try obfuscated init first (compatibility: peer may send rotated)
+        const obInit = tryParseObfuscatedInit(state.buf);
+        if (obInit) {
+          state.obfuscated = true;
+          state.initDone = true;
+          if (obInit.code === 1) {
+            try {
+              const pi = parsePeerInit(obInit.payload);
+              if (pi.targetUser.length === 0 || pi.targetUser.length > 256 || pi.targetUser === "server") {
+                try { peer.end(); } catch {}
+                break;
+              }
+              state.username = pi.targetUser;
+              state.connType = pi.connType;
+              if (pi.connType === "F") state.isFileConn = true;
+            } catch {}
+          } else if (obInit.code === 0) {
+            try {
+              const pf = parsePierceFireWall(obInit.payload);
+              const pending = this.pendingConnects.get(pf.token);
+              if (pending) {
+                clearTimeout(pending.timer);
+                this.pendingConnects.delete(pf.token);
+                state.username = pending.username;
+                state.connType = pending.connType;
+                setTimeout(() => this.flushPendingPeerMessages(pending.username, pending.connType), 10);
+              }
+            } catch {}
+          }
+          if (state.username && state.connType) {
+            setTimeout(() => this.flushPendingPeerMessages(state.username!, state.connType!), 10);
+            if (state.connType === "D" && !state.outbound) {
+              const ok = this._acceptChildPeerConnection(peer, state.username);
+              if (!ok) { /* handled */ }
+            }
+          }
+          const pendingMsg = (state as unknown as { pendingMsg?: Buffer }).pendingMsg as Buffer | undefined;
+          if (pendingMsg) {
+            try { (peer as Socket).write(encodeRotated(pendingMsg)); } catch {}
+            delete (state as unknown as { pendingMsg?: Buffer }).pendingMsg;
+          } else if (state.outbound && state.connType === "P" && !state.username) {
+            try { (peer as Socket).write(encodeRotated(buildUserInfoRequest())); } catch {}
+          }
+          state.buf = state.buf.subarray(obInit.rawLen);
+          continue;
+        }
         // Phase 1 F demux: raw [uint32 token] without PeerInit — detect via pendingFileTokens heuristic
         if (state.buf.length >= 4) {
           const peekToken = state.buf.readUInt32LE(0);
@@ -2222,50 +2369,98 @@ export class SoulseekSession {
         continue;
       }
       // Outbound P may receive a stray PeerInit echo from peer (some clients echo init); consume it so it doesn't block peer messages
-      if (state.outbound && state.connType === "P" && state.buf.length >= 5) {
-        const lenProbe = state.buf.readUInt32LE(0);
-        const codeProbe = state.buf[4];
-        if ((codeProbe === 0 || codeProbe === 1) && lenProbe < 1024 * 1024 && state.buf.length >= 5 + lenProbe) {
-          try {
-            const initPayloadProbe = state.buf.subarray(5, 5 + lenProbe);
-            if (codeProbe === 1) {
-              const piProbe = parsePeerInit(initPayloadProbe);
-              if (piProbe.targetUser && piProbe.connType) {
-                state.buf = state.buf.subarray(5 + lenProbe);
-                // Update username if peer provided different (rare)
-                if (!state.username) state.username = piProbe.targetUser;
-                continue;
+      if (state.outbound && state.connType === "P") {
+        // Try obfuscated echo first if connection is obfuscated
+        if (state.obfuscated) {
+          const obInit = tryParseObfuscatedInit(state.buf);
+          if (obInit) {
+            try {
+              if (obInit.code === 1) {
+                const piProbe = parsePeerInit(obInit.payload);
+                if (piProbe.targetUser && piProbe.connType) {
+                  state.buf = state.buf.subarray(obInit.rawLen);
+                  if (!state.username) state.username = piProbe.targetUser;
+                  continue;
+                }
+              } else if (obInit.code === 0) {
+                const pfProbe = parsePierceFireWall(obInit.payload);
+                if (pfProbe.token !== undefined) {
+                  state.buf = state.buf.subarray(obInit.rawLen);
+                  continue;
+                }
               }
-            } else if (codeProbe === 0) {
-              const pfProbe = parsePierceFireWall(initPayloadProbe);
-              if (pfProbe.token !== undefined) {
-                state.buf = state.buf.subarray(5 + lenProbe);
-                continue;
+            } catch {}
+          }
+        }
+        if (state.buf.length >= 5) {
+          const lenProbe = state.buf.readUInt32LE(0);
+          const codeProbe = state.buf[4];
+          if ((codeProbe === 0 || codeProbe === 1) && lenProbe < 1024 * 1024 && state.buf.length >= 5 + lenProbe) {
+            try {
+              const initPayloadProbe = state.buf.subarray(5, 5 + lenProbe);
+              if (codeProbe === 1) {
+                const piProbe = parsePeerInit(initPayloadProbe);
+                if (piProbe.targetUser && piProbe.connType) {
+                  state.buf = state.buf.subarray(5 + lenProbe);
+                  // Update username if peer provided different (rare)
+                  if (!state.username) state.username = piProbe.targetUser;
+                  continue;
+                }
+              } else if (codeProbe === 0) {
+                const pfProbe = parsePierceFireWall(initPayloadProbe);
+                if (pfProbe.token !== undefined) {
+                  state.buf = state.buf.subarray(5 + lenProbe);
+                  continue;
+                }
               }
+            } catch {}
+          }
+        }
+      }
+      // Determine max per expected message type (peek len) — obfuscated aware
+      let msg: { code: number; payload: Buffer } | null = null;
+      let rawConsumed = 0;
+      if (state.obfuscated) {
+        const ob = tryParseObfuscatedMessage(state.buf);
+        if (ob) {
+          msg = { code: ob.code, payload: ob.payload };
+          rawConsumed = ob.rawLen;
+        } else {
+          // Not enough data for obfuscated frame yet
+          if (state.buf.length >= 4) {
+            const peekLen = state.buf.length >= 8 ? (() => { try { const dec = decodeRotated(state.buf.subarray(0, 8)); return dec.readUInt32LE(0); } catch { return 0; } })() : 0;
+            if (peekLen > MAX_INCOMING.server448M) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+          }
+          break;
+        }
+      } else {
+        // Try plain first, fallback to obfuscated detection (peer may have switched)
+        const plain = tryParseMessage(state.buf, MAX_INCOMING.server448M);
+        if (plain) {
+          msg = plain;
+          rawConsumed = 8 + plain.payload.length;
+        } else {
+          const ob = tryParseObfuscatedMessage(state.buf);
+          if (ob) {
+            // Auto-upgrade to obfuscated for this connection
+            state.obfuscated = true;
+            logger.debug("server", "auto-upgraded peer to obfuscated", { username: state.username });
+            msg = { code: ob.code, payload: ob.payload };
+            rawConsumed = ob.rawLen;
+          } else {
+            if (state.buf.length >= 4) {
+              const len = state.buf.readUInt32LE(0);
+              if (len > MAX_INCOMING.server448M) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
             }
-          } catch {}
+            break;
+          }
         }
-      }
-      // Determine max per expected message type (peek len)
-      if (state.buf.length >= 4) {
-        const peekLen = state.buf.readUInt32LE(0);
-        // Quick overflow check against max generic; detailed per-code check after parse
-        if (peekLen > MAX_INCOMING.server448M) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
-      }
-      // Use appropriate max for tryParse (shares need 448M)
-      const msg = tryParseMessage(state.buf, MAX_INCOMING.server448M);
-      if (!msg) {
-        if (state.buf.length >= 4) {
-          const len = state.buf.readUInt32LE(0);
-          if (len > MAX_INCOMING.server448M) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
-        }
-        break;
       }
       // Per-code enforcement: close on overflow for non-shares
       const maxForCode = (msg.code === PEER_MESSAGE_CODES.sharedFileListResponse || msg.code === PEER_MESSAGE_CODES.folderContentsResponse) ? MAX_INCOMING.server448M
         : (msg.code === PEER_MESSAGE_CODES.fileSearchResponse ? MAX_INCOMING.server16M : MAX_INCOMING.server1M);
       if (msg.payload.length > maxForCode) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
-      state.buf = state.buf.subarray(8 + msg.payload.length);
+      state.buf = state.buf.subarray(rawConsumed);
       if (msg.code === 9) {
         // Gate on allowed token to prevent zlib bomb from unsolicited peers
         const tokenProbe = (() => { try { const b = inflateProbeToken(msg.payload); return b; } catch { return null; } })();
@@ -2337,7 +2532,7 @@ export class SoulseekSession {
           // Banned users get empty descr like nicotine userinfo.py:188
           const perm = this.getSharePermissionLevel(peerName);
           if (perm === PermissionLevel.BANNED) {
-            try { (peer as Socket).write(buildUserInfoResponse({ descr: "", pic: null, totalupl: 0, queuesize: 0, slotsavail: false, uploadallowed: 0 })); } catch {}
+            try { this.writePeer(peer, state, buildUserInfoResponse({ descr: "", pic: null, totalupl: 0, queuesize: 0, slotsavail: false, uploadallowed: 0 })); } catch {}
             break;
           }
           // Dynamic queue stats per requester (nicotine queuesize privileged-aware, slotsavail via is_new_upload_accepted)
@@ -2353,7 +2548,7 @@ export class SoulseekSession {
               slotsavail = st.activeUploads < 3; // uploadslots 3 default, like transfers.ts
             }
           } catch {}
-          try { (peer as Socket).write(buildUserInfoResponse({ descr: this.profile.descr, pic: this.profile.pic, totalupl: this.profile.totalupl, queuesize, slotsavail, uploadallowed })); } catch {}
+          try { this.writePeer(peer, state, buildUserInfoResponse({ descr: this.profile.descr, pic: this.profile.pic, totalupl: this.profile.totalupl, queuesize, slotsavail, uploadallowed })); } catch {}
         }
       } else if (msg.code === PEER_MESSAGE_CODES.sharedFileListRequest) {
         const peerName = state.username || "unknown";
@@ -2362,11 +2557,11 @@ export class SoulseekSession {
           logger.warn("browse", "throttled SharedFileListRequest", { username: peerName });
           break;
         }
-        try { const perm = this.getSharePermissionLevel(peerName); const resp = this.shareDB.buildSharedFileListResponse(perm); logger.info("browse", "sending SharedFileListResponse", { username: peerName, len: resp.length }); (peer as Socket).write(resp); } catch (e) { logger.warn("browse", "buildSharedFileListResponse failed", { username: peerName, error: (e as Error).message }); try { (peer as Socket).write(emptySharesResponse()); } catch {} }
+        try { const perm = this.getSharePermissionLevel(peerName); const resp = this.shareDB.buildSharedFileListResponse(perm); logger.info("browse", "sending SharedFileListResponse", { username: peerName, len: resp.length }); this.writePeer(peer, state, resp); } catch (e) { logger.warn("browse", "buildSharedFileListResponse failed", { username: peerName, error: (e as Error).message }); try { this.writePeer(peer, state, emptySharesResponse()); } catch {} }
       } else if (msg.code === PEER_MESSAGE_CODES.folderContentsRequest) {
         const peerName2 = state.username || "unknown";
         if (this.shareDB.shouldThrottle(peerName2)) break;
-        try { const tok = msg.payload.readUInt32LE(0); const r = new SlskReader(msg.payload); r.uint32(); const dir = r.string(); const perm = this.getSharePermissionLevel(peerName2); const resp = this.shareDB.buildFolderContentsResponse(tok, dir, perm); (peer as Socket).write(resp); } catch { try { const tok = msg.payload.readUInt32LE(0); (peer as Socket).write(emptyFolderResponse(tok)); } catch {} }
+        try { const tok = msg.payload.readUInt32LE(0); const r = new SlskReader(msg.payload); r.uint32(); const dir = r.string(); const perm = this.getSharePermissionLevel(peerName2); const resp = this.shareDB.buildFolderContentsResponse(tok, dir, perm); this.writePeer(peer, state, resp); } catch { try { const tok = msg.payload.readUInt32LE(0); this.writePeer(peer, state, emptyFolderResponse(tok)); } catch {} }
       } else if (msg.code === PEER_MESSAGE_CODES.fileSearchRequest) {
         if (!this._searchEnabled) {
           logger.debug("server", "peer FileSearchRequest ignored — search_results disabled", { username: state.username });
@@ -2379,7 +2574,7 @@ export class SoulseekSession {
             const perm = this.getSharePermissionLevel(peerName);
             // if private_search_results false, downgrade BUDDY/TRUSTED to PUBLIC for non-buddies (getSharePermissionLevel already PUBLIC for strangers)
             const resp = this.shareDB.buildFileSearchResponse(token, this.username, query, true, 0, 0, perm, this._maxResults);
-            if (resp) (peer as Socket).write(resp);
+            if (resp) this.writePeer(peer, state, resp);
           } catch {}
         }
       } else if (msg.code === PEER_MESSAGE_CODES.transferRequest) {
@@ -2396,7 +2591,7 @@ export class SoulseekSession {
             const getter = (this.opts as unknown as { getQueuePlace?: (f: string) => number }).getQueuePlace;
             if (getter) place = getter(file) ?? 1;
           } catch {}
-          try { (peer as Socket).write(buildPlaceInQueueResponse(file, place)); } catch { try { (peer as Socket).write(buildPlaceInQueueRequest(file)); } catch {} }
+          try { this.writePeer(peer, state, buildPlaceInQueueResponse(file, place)); } catch { try { this.writePeer(peer, state, buildPlaceInQueueRequest(file)); } catch {} }
         } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.placeInQueueResponse) {
         try { const p = parsePlaceInQueueResponse(msg.payload); this.emitTransfer({ type: "place-in-queue", username: state.username, file: p.file, place: p.place }); } catch {}

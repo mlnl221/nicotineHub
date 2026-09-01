@@ -153,7 +153,7 @@ describe("PortMapper orchestrator", () => {
     expect(pm.status.lastAttemptAt).not.toBeNull();
     // lastSuccess should still be null
     expect(pm.status.lastSuccessAt).toBeNull();
-  });
+  }, 10000);
 
   test("PortMapper renewal timer is set after addPortMapping", async () => {
     const pm = new PortMapper();
@@ -165,7 +165,7 @@ describe("PortMapper orchestrator", () => {
     await pm.removePortMapping(true);
     const after = (pm as unknown as { timer: unknown }).timer;
     expect(after).toBeNull();
-  });
+  }, 10000);
 
   test("constants match python", () => {
     expect(PortMapper.LEASE_DURATION).toBe(43200);

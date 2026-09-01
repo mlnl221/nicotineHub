@@ -238,19 +238,19 @@ try {
 } catch {}
 
 // Helper to collect current PortMapper status from active sessions (or global defaults)
-function getGlobalPortMapperStatus(): { enabled: boolean; active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; hasPort: boolean } {
-  let best: { enabled: boolean; active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; hasPort: boolean } | null = null;
+function getGlobalPortMapperStatus(): { enabled: boolean; active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; lastAttemptAt: number | null; hasPort: boolean } {
+  let best: { enabled: boolean; active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; lastAttemptAt: number | null; hasPort: boolean } | null = null;
   for (const s of activeSessions) {
     try {
-      const st = (s as unknown as { getPortMapperStatus?: () => { active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; hasPort: boolean }; _upnpEnabled?: boolean }).getPortMapperStatus?.();
+      const st = (s as unknown as { getPortMapperStatus?: () => { active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; lastAttemptAt: number | null; hasPort: boolean }; _upnpEnabled?: boolean }).getPortMapperStatus?.();
       if (st) {
-        best = { enabled: (s as unknown as { _upnpEnabled?: boolean })._upnpEnabled ?? GLOBAL_UPNP_ENABLED, active: st.active, port: st.port, ip: st.ip, error: st.error, lastSuccessAt: st.lastSuccessAt, hasPort: st.hasPort };
+        best = { enabled: (s as unknown as { _upnpEnabled?: boolean })._upnpEnabled ?? GLOBAL_UPNP_ENABLED, active: st.active, port: st.port, ip: st.ip, error: st.error, lastSuccessAt: st.lastSuccessAt, lastAttemptAt: st.lastAttemptAt, hasPort: st.hasPort };
         if (st.active) break; // prefer active mapping
       }
     } catch {}
   }
   if (!best) {
-    return { enabled: GLOBAL_UPNP_ENABLED, active: null, port: LISTEN_PORT, ip: null, error: null, lastSuccessAt: null, hasPort: true };
+    return { enabled: GLOBAL_UPNP_ENABLED, active: null, port: LISTEN_PORT, ip: null, error: null, lastSuccessAt: null, lastAttemptAt: null, hasPort: true };
   }
   return best;
 }
@@ -1371,16 +1371,25 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           } else if (section === "server" && ["interface", "autoreply", "autosearch", "autojoin", "userlist", "autoaway"].includes(key)) {
             if (key === "interface") {
               const newIface = String(value || "").trim();
-              const sess = session as unknown as { setNetworkInterface?: (v: string) => void } | undefined;
-              try {
-                sess?.setNetworkInterface?.(newIface);
+              const sess = session as unknown as { setNetworkInterface?: (v: string) => void | Promise<void> } | undefined;
+              const handleSuccess = () => {
                 logger.info("server", `interface set to ${newIface || "default (0.0.0.0)"}`, { iface: newIface || "default", username: (session as unknown as { username?: string })?.username });
-                // Send config updated + health so UI can reflect immediate bind change (WS stays open, Soulseek reconnects if loggedIn)
                 try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: newIface })); } catch {}
                 try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: getGlobalPortMapperStatus() } })); } catch {}
-              } catch (e) {
+              };
+              const handleError = (e: unknown) => {
                 logger.warn("server", "interface change failed", { iface: newIface, error: (e as Error).message });
                 ws.send(JSON.stringify({ type: "error", error: `Cannot bind to interface ${newIface || "default"}: ${(e as Error).message}` }));
+              };
+              try {
+                const result = sess?.setNetworkInterface?.(newIface) as unknown as Promise<void> | void;
+                if (result && typeof (result as Promise<void>).then === "function") {
+                  (result as Promise<void>).then(handleSuccess).catch(handleError);
+                  return;
+                }
+                handleSuccess();
+              } catch (e) {
+                handleError(e);
                 return;
               }
               return; // already sent config:updated, avoid duplicate below
