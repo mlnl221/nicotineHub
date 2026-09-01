@@ -507,266 +507,33 @@ export class PluginManager {
     await this.enablePlugin(name);
   }
 
-  // ---- plugin file operations ----
-
-  // helpers for safe unzip without shell
+  // ---- plugin file operations (ponytail: stubbed — zip/github install removed, builtins only) ----
   private async spawnUnzip(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-    const proc = Bun.spawn(["unzip", ...args], { stdout: "pipe", stderr: "pipe" });
-    const stdout = await new Response(proc.stdout).text();
-    const stderr = await new Response(proc.stderr).text();
-    const exitCode = await proc.exited;
-    return { stdout, stderr, exitCode };
+    return { stdout: "", stderr: "stubbed", exitCode: 1 };
   }
-
-  private isSafeZipEntry(entry: string): boolean {
-    // Reject absolute, traversal, null bytes, Windows drive, leading slash
-    if (!entry || entry.includes("\0")) return false;
-    if (entry.startsWith("/") || entry.startsWith("\\")) return false;
-    if (/^[a-zA-Z]:[\\/]/.test(entry)) return false;
-    if (entry.split("/").some((p) => p === "..")) return false;
-    // Reject entries that would escape userPluginsDir after join
-    const resolved = resolve(join(userPluginsDir(), entry));
-    if (!resolved.startsWith(resolve(userPluginsDir()) + "/") && resolved !== resolve(userPluginsDir())) return false;
-    return true;
-  }
-
-  // ---- TS/JS-only enforcement (mirror nicotine-plus PLUGININFO + __init__.py but for TS/JS) ----
-
-  private static readonly ALLOWED_PLUGIN_EXTS = new Set([".ts", ".mts", ".js", ".mjs", ".json", ".md", ".txt"]);
-  private static readonly FORBIDDEN_EXTS = new Set([".py", ".pyc", ".pyo", ".pyd", ".rb", ".php", ".pl", ".go", ".rs", ".java", ".class", ".exe", ".so", ".dll", ".dylib"]);
-
-  private isAllowedPluginFile(entry: string): boolean {
-    const base = basename(entry);
-    if (base === "PLUGININFO" || base === "plugin.json") return true;
-    if (entry.endsWith("/")) return true;
-    const dot = base.lastIndexOf(".");
-    const ext = dot >= 0 ? base.slice(dot).toLowerCase() : "";
-    if (!ext) return true;
-    if (PluginManager.FORBIDDEN_EXTS.has(ext)) return false;
-    if ([".ts", ".mts", ".js", ".mjs"].includes(ext)) return true;
-    if (PluginManager.ALLOWED_PLUGIN_EXTS.has(ext)) return true;
-    if ([".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif"].includes(ext)) return true;
-    return false;
-  }
-
-  private isPythonContent(text: string): boolean {
-    if (/\bfrom\s+pynicotine\b/.test(text)) return true;
-    if (/\bimport\s+.*\bfrom\s+pynicotine/.test(text)) return true;
-    if (/^\s*def\s+\w+\s*\(.*\)\s*:/m.test(text)) return true;
-    if (/^\s*class\s+\w+\s*\(.*\)\s*:/m.test(text)) return true;
-    if (/^\s*from\s+__future__\s+import/m.test(text)) return true;
-    if (/__init__\.py/.test(text)) return true;
-    return false;
-  }
-
+  private isSafeZipEntry(entry: string): boolean { return false; }
+  private static readonly ALLOWED_PLUGIN_EXTS = new Set([".ts", ".js"]);
+  private static readonly FORBIDDEN_EXTS = new Set([".py"]);
+  private isAllowedPluginFile(entry: string): boolean { return entry.endsWith(".ts") || entry.endsWith(".js"); }
+  private isPythonContent(text: string): boolean { return false; }
   private validateTsJsContent(text: string, filename: string): void {
-    if (this.isPythonContent(text)) {
-      throw new Error(`Python code detected in ${filename} — only TypeScript/JavaScript plugins are allowed`);
-    }
-    if (!/class\s+Plugin\s+extends\s+BasePlugin/.test(text)) {
-      throw new Error(`Missing 'export class Plugin extends BasePlugin' in ${filename}`);
-    }
-    if (!/from\s+["'].*types(\.js)?["']/.test(text)) {
-      throw new Error(`Missing 'from "../types.js"' import in ${filename} — must import BasePlugin`);
-    }
-    try {
-      const transpiler = new (Bun as unknown as { Transpiler: new (opts: unknown) => { transformSync: (s: string) => string } }).Transpiler({ loader: filename.endsWith(".ts") || filename.endsWith(".mts") ? "ts" : "js" });
-      transpiler.transformSync(text);
-    } catch (e) {
-      throw new Error(`Invalid TypeScript/JavaScript syntax in ${filename}: ${(e as Error).message}`);
-    }
+    if (!/class\s+Plugin\s+extends\s+BasePlugin/.test(text)) throw new Error(`Missing Plugin class in ${filename}`);
   }
-
-  private parseInlineManifest(text: string): PluginManifest | null {
-    const m = text.match(/export\s+(?:const|let|var)\s+manifest\s*=\s*(\{[\s\S]*?\n\})/);
-    if (!m) {
-      const m2 = text.match(/export\s+const\s+manifest[^=]*=\s*(\{[\s\S]*?\n\})/);
-      if (!m2) return null;
-      try {
-        const objStr = m2[1].replace(/\/\/.*$/gm, "").replace(/'/g, '"');
-        return JSON.parse(objStr);
-      } catch { return null; }
-    }
-    try {
-      const objStr = m[1].replace(/\/\/.*$/gm, "").replace(/'/g, '"');
-      const jsonLike = objStr.replace(/(\w+)\s*:/g, '"$1":');
-      return JSON.parse(jsonLike);
-    } catch {
-      try {
-        const fn = new Function(`return (${m[1]});`);
-        return fn() as PluginManifest;
-      } catch { return null; }
-    }
-  }
-
+  private parseInlineManifest(text: string): PluginManifest | null { return null; }
   async installPluginFromZip(zipPath: string): Promise<string | null> {
-    const maxSize = 1024 * 1024 * 1024; // 1 GiB cap like Python
-    let pluginName: string | null = null;
-    let folderPrefix: string | null = null;
-    let tmpRoot: string | null = null;
-    try {
-      const stat = (() => { try { return Bun.file(zipPath); } catch { return null; } })();
-      // size guard on zip file itself (20MB already checked in server.ts, but double-check)
-      try { const { statSync } = await import("node:fs"); if (statSync(zipPath).size > 20_000_000) throw new Error("zip too large"); } catch (e) { throw e; }
-
-      // List entries safely via unzip -Z1 (names only) without shell
-      let entries: string[] = [];
-      let totalUncompressed = 0;
-      {
-        const { stdout, exitCode } = await this.spawnUnzip(["-Z1", zipPath]);
-        if (exitCode !== 0) throw new Error("Unable to list zip (unzip failed)");
-        entries = stdout.split("\n").map((s) => s.trim()).filter(Boolean);
-        // limit entries to prevent DoS
-        if (entries.length > 5000) throw new Error("zip has too many entries");
-        // For size cap, also get -l output (bytes)
-        const lOut = await this.spawnUnzip(["-l", zipPath]);
-        if (lOut.exitCode === 0) {
-          // Parse lines like: "  123  2021-01-01 12:00   filename"
-          for (const line of lOut.stdout.split("\n")) {
-            const m = line.match(/^\s*(\d+)\s+\d{4}-\d{2}-\d{2}/);
-            if (m) totalUncompressed += Number(m[1]) || 0;
-          }
-        }
-        if (totalUncompressed > maxSize) throw new Error(`zip uncompressed size ${totalUncompressed} exceeds 1 GiB`);
-        // Validate each entry for zip-slip before extraction
-        for (const ent of entries) {
-          if (!this.isSafeZipEntry(ent)) throw new Error(`unsafe zip entry: ${ent}`);
-        }
-        // Enforce TS/JS-only — forbid Python and other languages
-        for (const ent of entries) {
-          if (!this.isAllowedPluginFile(ent)) throw new Error(`forbidden file type in zip: ${ent} — only .ts/.js/.json/.md/.txt allowed (Python .py blocked)`);
-        }
-        const hasCode = entries.some((e) => e.endsWith(".ts") || e.endsWith(".js") || e.endsWith(".mts") || e.endsWith(".mjs"));
-        if (!hasCode) throw new Error("zip must contain at least one .ts or .js file (found none) — Python not allowed");
-      }
-      if (entries.length === 0) throw new Error("empty zip");
-      // find plugin folder prefix
-      for (const ent of entries) {
-        if (basename(ent) === "PLUGININFO" || basename(ent) === "plugin.json") {
-          const dir = ent.includes("/") ? ent.split("/")[0] : "";
-          if (dir) {
-            folderPrefix = dir;
-            pluginName = basename(dir);
-          } else {
-            pluginName = basename(zipPath, ".zip");
-          }
-          break;
-        }
-      }
-      if (!pluginName) {
-        const top = entries[0]?.split("/")[0];
-        if (top) { pluginName = top; folderPrefix = top; }
-        else pluginName = basename(zipPath, ".zip");
-      }
-      if (pluginName && (pluginName.includes("=") || pluginName.includes("/") || pluginName.includes("\\") || pluginName.includes("\0"))) throw new Error("Invalid plugin name");
-      if (this.isInternalPlugin(pluginName!)) throw new Error(`Plugin ${pluginName} conflicts with builtin`);
-      // sanitize pluginName
-      pluginName = pluginName!.replace(/[^a-zA-Z0-9._\-]/g, "_").slice(0, 64);
-      if (!pluginName) throw new Error("Invalid plugin name after sanitization");
-      if (folderPrefix) folderPrefix = folderPrefix.replace(/[^a-zA-Z0-9._\-]/g, "_");
-
-      this.ensureDirs();
-      const dest = join(userPluginsDir(), pluginName!);
-      if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
-      mkdirSync(dest, { recursive: true });
-
-      // Extract without shell: unzip -q zipPath -d tmpRoot (or dest)
-      if (folderPrefix) {
-        tmpRoot = join(userPluginsDir(), `.tmp_${pluginName}_${Date.now()}`);
-        mkdirSync(tmpRoot, { recursive: true });
-        const ex = await this.spawnUnzip(["-q", zipPath, "-d", tmpRoot]);
-        if (ex.exitCode !== 0) throw new Error(`unzip extract failed: ${ex.stderr.slice(0, 500)}`);
-        // Validate extracted files are still inside tmpRoot and not symlinks escaping
-        const { lstatSync, readlinkSync, readdirSync: rs } = await import("node:fs");
-        const seen: string[] = [];
-        const walk = (dir: string) => {
-          for (const ent of rs(dir)) {
-            const p = join(dir, ent);
-            const st = lstatSync(p);
-            if (st.isSymbolicLink()) {
-              const target = readlinkSync(p);
-              // reject absolute or traversal symlink
-              if (target.startsWith("/") || target.includes("..")) throw new Error(`symlink escape blocked: ${ent} -> ${target}`);
-              const resolved = resolve(p, target);
-              if (!resolved.startsWith(resolve(tmpRoot!) + "/")) throw new Error(`symlink escape blocked: ${ent}`);
-              // remove symlink (don't follow)
-              rmSync(p, { force: true });
-              continue;
-            }
-            if (st.isDirectory()) walk(p);
-            else seen.push(p);
-          }
-        };
-        walk(tmpRoot);
-        const inner = join(tmpRoot, folderPrefix);
-        const src = existsSync(inner) ? inner : tmpRoot;
-        for (const it of readdirSync(src)) {
-          // Validate item name
-          if (it.includes("/") || it.includes("\\") || it.includes("\0") || it === "..") throw new Error(`invalid entry name: ${it}`);
-          const s = join(src, it);
-          const d = join(dest, it);
-          const destResolved = resolve(d);
-          if (!destResolved.startsWith(resolve(dest) + "/") && destResolved !== resolve(dest)) throw new Error(`path traversal blocked: ${it}`);
-          // Use renameSync (no shell) — handles files and dirs
-          const { renameSync } = await import("node:fs");
-          renameSync(s, d);
-        }
-      } else {
-        const ex = await this.spawnUnzip(["-q", zipPath, "-d", dest]);
-        if (ex.exitCode !== 0) throw new Error(`unzip extract failed: ${ex.stderr.slice(0, 500)}`);
-        // Post-extract symlink check
-        const { lstatSync, readlinkSync, readdirSync: rs2 } = await import("node:fs");
-        const walk2 = (dir: string) => {
-          for (const ent of rs2(dir)) {
-            const p = join(dir, ent);
-            const st = lstatSync(p);
-            if (st.isSymbolicLink()) {
-              const target = readlinkSync(p);
-              if (target.startsWith("/") || target.includes("..")) throw new Error(`symlink escape blocked: ${ent}`);
-              const resolved = resolve(p, target);
-              if (!resolved.startsWith(resolve(dest) + "/")) throw new Error(`symlink escape`);
-              rmSync(p, { force: true });
-            } else if (st.isDirectory()) walk2(p);
-          }
-        };
-        walk2(dest);
-      }
-
-      // Strict TS/JS content validation (Python forbidden) — check entry file after extraction
-      try {
-        const manifest = parsePluginInfo(dest);
-        const entryName = (manifest.entry as string) || (manifest.Entry as string) || "index.js";
-        const candidates = [join(dest, entryName), join(dest, "index.ts"), join(dest, "index.js"), join(dest, "index.mts"), join(dest, "index.mjs")];
-        let entryPath: string | null = null;
-        for (const c of candidates) if (existsSync(c)) { entryPath = c; break; }
-        if (entryPath) {
-          const text = readFileSync(entryPath, "utf8");
-          this.validateTsJsContent(text, basename(entryPath));
-          const hasPluginJson = existsSync(join(dest, "plugin.json")) || existsSync(join(dest, "PLUGININFO"));
-          const inline = this.parseInlineManifest(text);
-          if (!hasPluginJson && !inline) {
-            logger.warn("bridge", `plugin ${pluginName} has no plugin.json nor inline manifest — will use folder name`);
-          }
-        }
-      } catch (e) {
-        try { if (existsSync(dest)) rmSync(dest, { recursive: true, force: true }); } catch {}
-        throw e;
-      }
-
-      logger.info("bridge", `installed plugin ${pluginName}`, { pluginName });
-      if (this.isPluginLoaded(pluginName!)) await this.reloadPlugin(pluginName!);
-      return pluginName!;
-    } catch (e) {
-      logger.error("bridge", `failed to install plugin`, { error: (e as Error).message });
-      // cleanup dest on failure
-      try { if (pluginName) { const d = join(userPluginsDir(), pluginName); if (existsSync(d)) rmSync(d, { recursive: true, force: true }); } } catch {}
-      return null;
-    } finally {
-      if (tmpRoot) try { rmSync(tmpRoot, { recursive: true, force: true }); } catch {}
-    }
+    logger.warn("bridge", "plugin install via zip disabled (ponytail stub)");
+    return null;
+  }
+  async installFromGithubTs(url: string): Promise<string | null> {
+    logger.warn("bridge", "github TS install stubbed");
+    return null;
+  }
+  async installFromUrl(url: string): Promise<string | null> {
+    logger.warn("bridge", "plugin install via URL stubbed");
+    return null;
   }
 
-  uninstallPlugin(name: string): boolean {
+    uninstallPlugin(name: string): boolean {
     if (this.isInternalPlugin(name)) return false;
     // disable first
     this.disablePlugin(name).catch(() => {});

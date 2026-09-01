@@ -11,14 +11,15 @@ import { useProfileTabs } from "@/lib/profile-tabs";
 import type { ProfileTab } from "@/lib/profile-tabs";
 
 function profilePicSrc(pic: string): string {
-  const isSvg = pic.trimStart().startsWith("<svg");
+  const trim = pic.trimStart();
+  const isSvg = trim.startsWith("<svg") || trim.startsWith("PHN2");
   const mime = isSvg ? "image/svg+xml" : "image/png";
   return `data:${mime};base64,${pic}`;
 }
 
 function guessMime(pic: string): string {
   const t = pic.trimStart();
-  if (t.startsWith("<svg")) return "image/svg+xml";
+  if (t.startsWith("<svg") || t.startsWith("PHN2")) return "image/svg+xml";
   if (t.startsWith("iVBOR")) return "image/png";
   if (t.startsWith("/9j/")) return "image/jpeg";
   return "image/png";

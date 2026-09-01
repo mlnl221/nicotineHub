@@ -208,21 +208,15 @@ export const REMOVED_SEARCH_CHARACTERS = [
   "‐", "’", "“", "”", "…",
 ];
 const REMOVED_SET = new Set(REMOVED_SEARCH_CHARACTERS);
-const PUNCTUATION_CHARS = [
-  "!", '"', "#", "$", "%", "&", "'", "(", ")", "*", "+", ",", "-", ".", "/", ":", ";",
-  "<", "=", ">", "?", "@", "[", "\\", "]", "^", "_", "`", "{", "|", "}", "~",
-];
-const PUNCTUATION_SET = new Set(PUNCTUATION_CHARS);
-function translateRemoved(s: string): string {
+// ponytail: PUNCTUATION is REMOVED minus unicode dashes/quotes/ellipsis; single source
+const PUNCTUATION_SET = new Set(REMOVED_SEARCH_CHARACTERS.filter((c) => !["–", "—", "‐", "’", "“", "”", "…"].includes(c)));
+function translateWithSet(s: string, set: Set<string>): string {
   let out = "";
-  for (const ch of s) out += REMOVED_SET.has(ch) ? " " : ch;
+  for (const ch of s) out += set.has(ch) ? " " : ch;
   return out;
 }
-function translatePunct(s: string): string {
-  let out = "";
-  for (const ch of s) out += PUNCTUATION_SET.has(ch) ? " " : ch;
-  return out;
-}
+const translateRemoved = (s: string) => translateWithSet(s, REMOVED_SET);
+const translatePunct = (s: string) => translateWithSet(s, PUNCTUATION_SET);
 /** Tokenize respecting quoted phrases — like shlex with " quotes */
 function tokenizeSearchTerm(term: string): string[] {
   const tokens: string[] = [];
