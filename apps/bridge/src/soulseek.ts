@@ -201,6 +201,104 @@ export const MINOR_VERSION = 1;
 export const DEFAULT_SERVER_HOST = "server.slsknet.org";
 export const DEFAULT_SERVER_PORT = 2242;
 
+/* Search sanitization — mirrors pynicotine/search.py REMOVED_SEARCH_CHARACTERS + TRANSLATE_PUNCTUATION */
+export const REMOVED_SEARCH_CHARACTERS = [
+  "!", '"', "#", "$", "%", "&", "'", "(", ")", "*", "+", ",", "-", ".", "/", ":", ";",
+  "<", "=", ">", "?", "@", "[", "\\", "]", "^", "_", "`", "{", "|", "}", "~", "–", "—",
+  "‐", "’", "“", "”", "…",
+];
+const REMOVED_SET = new Set(REMOVED_SEARCH_CHARACTERS);
+const PUNCTUATION_CHARS = [
+  "!", '"', "#", "$", "%", "&", "'", "(", ")", "*", "+", ",", "-", ".", "/", ":", ";",
+  "<", "=", ">", "?", "@", "[", "\\", "]", "^", "_", "`", "{", "|", "}", "~",
+];
+const PUNCTUATION_SET = new Set(PUNCTUATION_CHARS);
+function translateRemoved(s: string): string {
+  let out = "";
+  for (const ch of s) out += REMOVED_SET.has(ch) ? " " : ch;
+  return out;
+}
+function translatePunct(s: string): string {
+  let out = "";
+  for (const ch of s) out += PUNCTUATION_SET.has(ch) ? " " : ch;
+  return out;
+}
+/** Tokenize respecting quoted phrases — like shlex with " quotes */
+function tokenizeSearchTerm(term: string): string[] {
+  const tokens: string[] = [];
+  const re = /"([^"]+)"|\S+/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(term)) !== null) {
+    if (m[1] !== undefined) tokens.push(`"${m[1]}"`);
+    else tokens.push(m[0]);
+  }
+  return tokens;
+}
+export function sanitizeSearchTerm(searchTerm: string): {
+  sanitized: string;
+  transmitted: string;
+  includedWords: string[];
+  excludedWords: string[];
+} {
+  const raw = String(searchTerm || "").trim();
+  if (!raw) return { sanitized: "", transmitted: "", includedWords: [], excludedWords: [] };
+  const words = tokenizeSearchTerm(raw);
+  const included: string[] = [];
+  const excluded: string[] = [];
+  const transmittedWords: string[] = [];
+  const sanitizedWords: string[] = [];
+  const excludedChar = "-";
+  const partialChar = "*";
+  const quoteChar = '"';
+  for (let idx = 0; idx < words.length; idx++) {
+    const w = words[idx];
+    if (!w) continue;
+    const first = w[0];
+    if (first === partialChar && w.length > 1) {
+      const core = w.slice(1);
+      const cleaned = translateRemoved(core).trim().replace(/\s+/g, " ");
+      if (cleaned) {
+        for (const sub of translatePunct(cleaned).trim().split(/\s+/).filter(Boolean)) included.push(sub.toLowerCase());
+        transmittedWords.push(cleaned);
+        sanitizedWords.push(cleaned);
+      } else {
+        included.push(core.toLowerCase());
+        transmittedWords.push(core);
+        sanitizedWords.push(core);
+      }
+      continue;
+    }
+    if (first === excludedChar && w.length > 1) {
+      const core = w.slice(1);
+      const cleaned = translateRemoved(core).trim().replace(/\s+/g, " ");
+      const target = cleaned || core;
+      for (const sub of translatePunct(target).trim().split(/\s+/).filter(Boolean)) excluded.push(sub.toLowerCase());
+      sanitizedWords.push(w);
+      continue;
+    }
+    if (first === quoteChar && w.length > 2 && w[w.length - 1] === quoteChar) {
+      const inner = w.slice(1, -1);
+      included.push(inner.toLowerCase());
+      const cleaned = translateRemoved(inner).trim().replace(/\s+/g, " ");
+      const t = cleaned || inner;
+      transmittedWords.push(t);
+      sanitizedWords.push(`"${inner}"`);
+      continue;
+    }
+    const subwords = translateRemoved(w).trim().split(/\s+/).filter(Boolean);
+    const joined = subwords.join(" ").trim();
+    if (!joined) continue;
+    sanitizedWords.push(joined);
+    transmittedWords.push(joined);
+    for (const sub of joined.split(/\s+/)) {
+      for (const p of translatePunct(sub).trim().split(/\s+/).filter(Boolean)) included.push(p.toLowerCase());
+    }
+  }
+  const sanitized = sanitizedWords.join(" ").trim();
+  const transmitted = transmittedWords.join(" ").trim() || sanitized;
+  return { sanitized: sanitized || raw, transmitted: transmitted || sanitized || raw, includedWords: included, excludedWords: excluded };
+}
+
 /* Packing primitives */
 
 export function packUint32(value: number): Buffer {
@@ -533,7 +631,7 @@ export interface FileSearchResult { token: number; username: string; freeUploadS
 const MAX_SEARCH_DECOMPRESSED = 128 * 1024 * 1024; // 128 MiB guard
 const MAX_SEARCH_COMPRESSED = 16 * 1024 * 1024;
 
-function inflateWithCap(payload: Buffer, max = MAX_SEARCH_DECOMPRESSED): Buffer {
+export function inflateWithCap(payload: Buffer, max = MAX_SEARCH_DECOMPRESSED): Buffer {
   if (payload.length > MAX_SEARCH_COMPRESSED) throw new Error("Search response too large");
   let buf: Buffer;
   try {

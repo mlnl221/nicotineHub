@@ -18,6 +18,8 @@ import { transferMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
 import { useSearchesOptional } from "@/lib/search";
 import { isDemo } from "@/lib/demo";
+import { useSpectrum } from "@/lib/spectrum";
+import { SpectrumHoverCard } from "@/components/transfers/SpectrumHoverCard";
 
 function humanSpeed(bps: number): string {
   if (!bps) return "—";
@@ -40,12 +42,18 @@ function getFolder(vp: string): string {
   const idx = vp.lastIndexOf("\\");
   return idx >= 0 ? (vp.slice(0, idx) || "(root)") : "(root)";
 }
+function isAudioForSpectrum(fileName: string): boolean {
+  const ext = fileName.toLowerCase().split(".").pop() ?? "";
+  return ["flac", "wav", "aiff", "aif", "mp3", "ogg", "wma", "m4a", "wv", "aac", "opus"].includes(ext);
+}
+
 function DownloadsInner() {
   const { downloads, uploads, stats, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer } = useTransfers();
   const { total } = useStatistics();
   const { settings, setOption } = useConfig();
   const searches = useSearchesOptional();
   const router = useRouter();
+  const { requestSpectrum, getEntry } = useSpectrum();
   const totalDown = stats?.downloadSpeed ?? downloads.filter(d => d.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const totalUp = stats?.uploadSpeed ?? uploads.filter(u=>u.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const activeCount = downloads.length + uploads.length;
@@ -196,8 +204,12 @@ function DownloadsInner() {
                         ) : null}
                         {!isCollapsed ? (
                           <div className="space-y-3">
-                            {items.map((t) => (
-                              <div key={t.id} onDoubleClick={() => handleDoubleClick(t, false)} onContextMenu={(e) => { e.preventDefault(); setMenuAnchor({ x: e.clientX, y: e.clientY, transfer: t, isUpload: false }); }}>
+                            {items.map((t) => {
+                              const spectrumEntry = getEntry(t.id);
+                              const hasSpectrum = spectrumEntry?.status === "done";
+                              const isFinished = t.status === "Finished";
+                              const canAnalyze = isFinished && isAudioForSpectrum(t.fileName);
+                              const card = (
                                 <TransferCard
                                   transfer={t}
                                   onPause={() => pauseDownload(t.id)}
@@ -206,8 +218,17 @@ function DownloadsInner() {
                                   onRetry={() => retryDownload(t.id)}
                                   onClear={() => clearTransfer(t.id, false)}
                                 />
-                              </div>
-                            ))}
+                              );
+                              // Wrap with SpectrumHoverCard if finished audio or has spectrum
+                              const wrapped = isFinished && isAudioForSpectrum(t.fileName) ? (
+                                <SpectrumHoverCard transferId={t.id} fileName={t.fileName}>{card}</SpectrumHoverCard>
+                              ) : card;
+                              return (
+                                <div key={t.id} onDoubleClick={() => handleDoubleClick(t, false)} onContextMenu={(e) => { e.preventDefault(); setMenuAnchor({ x: e.clientX, y: e.clientY, transfer: t, isUpload: false }); }}>
+                                  {wrapped}
+                                </div>
+                              );
+                            })}
                           </div>
                         ) : null}
                       </div>
@@ -267,6 +288,12 @@ function DownloadsInner() {
               onRemove: () => menuAnchor.isUpload ? clearTransfer(menuAnchor.transfer.id, true) : cancelDownload(menuAnchor.transfer.id),
               onRetry: () => retryDownload(menuAnchor.transfer.id),
               onClear: () => clearTransfer(menuAnchor.transfer.id, menuAnchor.isUpload),
+              onAnalyzeSpectrum: menuAnchor.isUpload
+                ? undefined
+                : isAudioForSpectrum(menuAnchor.transfer.fileName) && menuAnchor.transfer.status === "Finished"
+                  ? () => requestSpectrum(menuAnchor.transfer.id)
+                  : undefined,
+              hasSpectrum: !!getEntry(menuAnchor.transfer.id) && getEntry(menuAnchor.transfer.id)?.status === "done",
             }
           )}
           onClose={() => setMenuAnchor(null)}

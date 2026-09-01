@@ -116,21 +116,40 @@ export function mockBrowseFolders(username: string): import("@/lib/protocol").Br
   const seed = Math.abs(hash(username.toLowerCase()));
   const rnd = seededRand(seed);
   // include nested sub-directories to demonstrate tree handling (jazzcat has Blue Note + Live, Electronic has Acid)
+  // Added Live Bootlegs/2023 as requested — 2023 contains the bootleg files
   const folderNames = [
     `C:\\Users\\${username}\\Music\\Jazz`,
     `C:\\Users\\${username}\\Music\\Jazz\\Blue Note`,
     `C:\\Users\\${username}\\Music\\Jazz\\Live Bootlegs`,
+    `C:\\Users\\${username}\\Music\\Jazz\\Live Bootlegs\\2023`,
     `C:\\Users\\${username}\\Music\\Electronic`,
     `C:\\Users\\${username}\\Music\\Electronic\\Acid`,
     `C:\\Users\\${username}\\Music\\Hip-Hop`,
     `C:\\Users\\${username}\\Music\\Soul`,
   ];
   return folderNames.map((name) => {
-    const fileCount = 6 + Math.floor(rnd() * 8);
+    const isLiveBootlegs = name.endsWith("\\Live Bootlegs");
+    const is2023 = name.endsWith("\\Live Bootlegs\\2023");
+    // Live Bootlegs parent is a container — keep minimal, files live in 2023
+    const fileCount = isLiveBootlegs ? 0 : is2023 ? 6 + Math.floor(rnd() * 4) : 6 + Math.floor(rnd() * 8);
     const files: import("@/lib/protocol").BrowseFile[] = [];
     for (let i = 0; i < fileCount; i++) {
-      const title = SAMPLE_TITLES[Math.floor(rnd() * SAMPLE_TITLES.length)];
-      const ext = FILE_TYPES[Math.floor(rnd() * FILE_TYPES.length)];
+      let title: string;
+      let ext: string;
+      if (is2023) {
+        // 2023 bootleg-specific titles
+        const bootlegTitles = [
+          `2023-05-15 - Live at Blue Note - Set ${i + 1}`,
+          `2023-08-22 - Village Vanguard Night ${i + 1}`,
+          `2023-11-03 - Jazz Festival Bootleg ${i + 1}`,
+          `2023-03-10 - Late Night Session ${i + 1}`,
+        ];
+        title = bootlegTitles[i % bootlegTitles.length];
+        ext = rnd() > 0.3 ? "flac" : "mp3";
+      } else {
+        title = SAMPLE_TITLES[Math.floor(rnd() * SAMPLE_TITLES.length)];
+        ext = FILE_TYPES[Math.floor(rnd() * FILE_TYPES.length)];
+      }
       const fileName = `${title}.${ext}`;
       const fullPath = `${name}\\${fileName}`;
       const size = Math.floor(3_000_000 + rnd() * 120_000_000);
@@ -258,6 +277,8 @@ export function mockBuddies(): import("@/lib/buddies").Buddy[] {
   ];
 }
 
+export const DEMO_SPECTRUM_TRANSFER_ID = "KernkraftDemo::Music\\12 Kernkraft 400 (DJ Gius Video Cut).flac";
+
 export function mockDemoTransfers(): import("@/lib/protocol").Transfer[] {
   // One downloading, one uploading — both Transferring with animated progress
   const dlSize = 85_000_000; // ~85 MB
@@ -294,6 +315,21 @@ export function mockDemoTransfers(): import("@/lib/protocol").Transfer[] {
       status: "Transferring",
       queuePosition: null,
       isUpload: true,
+    },
+    {
+      // VERCEL DEMO ONLY — fake completed FLAC for spectrum demo (no real .flac in repo, only pngs in public/demo-spectra)
+      id: DEMO_SPECTRUM_TRANSFER_ID,
+      username: "KernkraftDemo",
+      virtualPath: "Music\\12 Kernkraft 400 (DJ Gius Video Cut).flac",
+      fileName: "12 Kernkraft 400 (DJ Gius Video Cut).flac",
+      size: 19630960,
+      current: 19630960,
+      speed: 0,
+      avgSpeed: 0,
+      timeLeft: null,
+      status: "Finished",
+      queuePosition: null,
+      isUpload: false,
     },
   ];
 }
@@ -353,13 +389,113 @@ export function mockDiagnosticsHealth(): import("@/lib/protocol").DiagnosticsHea
     ts: new Date().toISOString(),
     uptime: 3600 * 3 + 42, // 3h +42s
     port: 8787,
-    listenPort: 62904,
+    listenPort: 60754,
     dataDir: "/data (demo — ephemeral)",
     tokenAuth: false,
     version: process.env.NEXT_PUBLIC_BUILD_TAG || process.env.NEXT_PUBLIC_APP_VERSION || "0.1.0",
     commitSha: (process.env.NEXT_PUBLIC_COMMIT_SHA || process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || "demo").slice(0, 7),
     buildDate: new Date().toISOString().split("T")[0],
   };
+}
+
+// ------------------------------------------------------------------
+// Demo Files Explorer — fake /data tree for Vercel demo (no bridge)
+// ------------------------------------------------------------------
+type BridgeFileEntry = import("@/lib/bridgeHttp").BridgeFileEntry;
+
+function demoFile(path: string, name: string, type: BridgeFileEntry["type"], size: number, mtimeOffDays: number): BridgeFileEntry {
+  const mtime = Date.now() - mtimeOffDays * 86400000;
+  return { name, type, size, mtime, path };
+}
+
+// Static tree — keys are normalized paths ("/" = /data root)
+const DEMO_FILE_TREE: Record<string, BridgeFileEntry[]> = {
+  "/": [
+    demoFile("/Music", "Music", "directory", 0, 2),
+    demoFile("/Downloads", "Downloads", "directory", 0, 5),
+    demoFile("/Shares", "Shares", "directory", 0, 10),
+    demoFile("/Incoming", "Incoming", "directory", 0, 12),
+    demoFile("/README.md", "README.md", "file", 2_400, 30),
+    demoFile("/WELCOME.txt", "WELCOME.txt", "file", 890, 1),
+  ],
+  "/Music": [
+    demoFile("/Music/Jazz", "Jazz", "directory", 0, 3),
+    demoFile("/Music/Electronic", "Electronic", "directory", 0, 4),
+    demoFile("/Music/Hip-Hop", "Hip-Hop", "directory", 0, 6),
+    demoFile("/Music/Soul", "Soul", "directory", 0, 8),
+    demoFile("/Music/Collection.nfo", "Collection.nfo", "file", 1_200, 15),
+  ],
+  "/Music/Jazz": [
+    demoFile("/Music/Jazz/Blue Note", "Blue Note", "directory", 0, 3),
+    demoFile("/Music/Jazz/Live Bootlegs", "Live Bootlegs", "directory", 0, 7),
+    demoFile("/Music/Jazz/Miles Davis - Kind of Blue [FLAC].flac", "Miles Davis - Kind of Blue [FLAC].flac", "file", 320_000_000, 20),
+    demoFile("/Music/Jazz/John Coltrane - A Love Supreme.flac", "John Coltrane - A Love Supreme.flac", "file", 280_000_000, 22),
+    demoFile("/Music/Jazz/Chet Baker - My Funny Valentine.mp3", "Chet Baker - My Funny Valentine.mp3", "file", 9_400_000, 18),
+  ],
+  "/Music/Jazz/Blue Note": [
+    demoFile("/Music/Jazz/Blue Note/Art Blakey - Moanin'.flac", "Art Blakey - Moanin'.flac", "file", 210_000_000, 25),
+    demoFile("/Music/Jazz/Blue Note/Lee Morgan - The Sidewinder.flac", "Lee Morgan - The Sidewinder.flac", "file", 198_000_000, 26),
+    demoFile("/Music/Jazz/Blue Note/Herbie Hancock - Maiden Voyage.flac", "Herbie Hancock - Maiden Voyage.flac", "file", 245_000_000, 27),
+  ],
+  "/Music/Jazz/Live Bootlegs": [
+    demoFile("/Music/Jazz/Live Bootlegs/1965 - Village Vanguard (bootleg).mp3", "1965 - Village Vanguard (bootleg).mp3", "file", 45_000_000, 40),
+  ],
+  "/Music/Electronic": [
+    demoFile("/Music/Electronic/Acid", "Acid", "directory", 0, 5),
+    demoFile("/Music/Electronic/Ambient", "Ambient", "directory", 0, 9),
+    demoFile("/Music/Electronic/Daft Punk - Discovery.flac", "Daft Punk - Discovery.flac", "file", 380_000_000, 12),
+    demoFile("/Music/Electronic/Kraftwerk - Trans Europe Express.flac", "Kraftwerk - Trans Europe Express.flac", "file", 295_000_000, 14),
+  ],
+  "/Music/Electronic/Acid": [
+    demoFile("/Music/Electronic/Acid/Acid Trax 303.mp3", "Acid Trax 303.mp3", "file", 12_300_000, 30),
+    demoFile("/Music/Electronic/Acid/303 Dreams.flac", "303 Dreams.flac", "file", 110_000_000, 31),
+  ],
+  "/Music/Electronic/Ambient": [
+    demoFile("/Music/Electronic/Ambient/Brian Eno - Ambient 1.flac", "Brian Eno - Ambient 1.flac", "file", 180_000_000, 33),
+  ],
+  "/Music/Hip-Hop": [
+    demoFile("/Music/Hip-Hop/A Tribe Called Quest - Midnight Marauders.mp3", "A Tribe Called Quest - Midnight Marauders.mp3", "file", 78_000_000, 11),
+    demoFile("/Music/Hip-Hop/Nas - Illmatic.flac", "Nas - Illmatic.flac", "file", 310_000_000, 13),
+  ],
+  "/Music/Soul": [
+    demoFile("/Music/Soul/Aretha Franklin - Respect.flac", "Aretha Franklin - Respect.flac", "file", 95_000_000, 16),
+  ],
+  "/Downloads": [
+    demoFile("/Downloads/complete", "complete", "directory", 0, 1),
+    demoFile("/Downloads/incomplete", "incomplete", "directory", 0, 1),
+    demoFile("/Downloads/linux iso - Midnight Groove.flac", "linux iso - Midnight Groove.flac", "file", 85_000_000, 2),
+  ],
+  "/Downloads/complete": [
+    demoFile("/Downloads/complete/Neon Horizons - Analog Dreams LP.flac", "Neon Horizons - Analog Dreams LP.flac", "file", 420_000_000, 2),
+  ],
+  "/Downloads/incomplete": [],
+  "/Shares": [
+    demoFile("/Shares/Music", "Music", "directory", 0, 4),
+    demoFile("/Shares/Documents", "Documents", "directory", 0, 6),
+    demoFile("/Shares/share.nfo", "share.nfo", "file", 340, 9),
+  ],
+  "/Shares/Music": [
+    demoFile("/Shares/Music/Jazz", "Jazz", "directory", 0, 3),
+    demoFile("/Shares/Music/Electronic", "Electronic", "directory", 0, 3),
+  ],
+  "/Shares/Documents": [
+    demoFile("/Shares/Documents/notes.txt", "notes.txt", "file", 2_100, 20),
+  ],
+  "/Incoming": [],
+};
+
+export function mockFileExplorerResponse(path: string): { path: string; parent: string | null; entries: BridgeFileEntry[] } {
+  const normalized = !path || path === "" ? "/" : path.startsWith("/") ? path : `/${path}`;
+  // collapse // and remove trailing slash (except root)
+  const clean = normalized.length > 1 ? normalized.replace(/\/+$/, "") : normalized;
+  const entries = DEMO_FILE_TREE[clean];
+  if (entries) {
+    const parent = clean === "/" ? null : clean.split("/").slice(0, -1).join("/") || "/";
+    return { path: clean, parent, entries };
+  }
+  // Unknown path — treat as empty leaf folder (demo fallback)
+  const parent = clean.split("/").slice(0, -1).join("/") || "/";
+  return { path: clean, parent, entries: [] };
 }
 
 export function mockPrivateConversations(): Record<string, DemoPrivateMessage[]> {

@@ -14,6 +14,7 @@ import { useConfig } from "@/lib/config/provider";
 import { useCompletion } from "@/lib/completion";
 import { useBuddies } from "@/lib/buddies";
 import { highlightKeywords, usernameHotspotClass } from "@/lib/chatFormat";
+import { isDemo } from "@/lib/demo";
 
 export default function ChatRoomsPage() {
   const { state } = useSession();
@@ -92,7 +93,7 @@ export default function ChatRoomsPage() {
           </div>
         </header>
 
-        <div className="flex flex-1 overflow-hidden min-h-0">
+        <div className="flex flex-1 overflow-hidden min-h-0" style={isDemo ? ({ marginTop: "var(--demo-banner-h)" } as React.CSSProperties) : undefined}>
           {/* Left: Rooms */}
           <aside className="hidden w-80 flex-col border-r border-outline-variant/15 bg-surface md:flex">
             <div className="border-b border-outline-variant/15 p-3 space-y-3">

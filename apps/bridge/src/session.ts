@@ -33,6 +33,7 @@ import {
   buildHaveNoParent,
   buildJoinGlobalRoom,
   buildJoinRoom,
+  sanitizeSearchTerm,
   buildLeaveGlobalRoom,
   buildLeaveRoom,
   buildLogin,
@@ -124,6 +125,7 @@ import {
   type UserStatsMessage,
   type UserStatusMessage,
   type UserInfoResponseMessage,
+  inflateWithCap,
 } from "./soulseek.ts";
 
 export interface SearchRow {
@@ -188,7 +190,7 @@ export interface TransferEvent {
   username?: string; file?: string; token?: number; place?: number; reason?: string;
 }
 
-const MAX_DISPLAYED_RESULTS = 2500;
+const MAX_DISPLAYED_RESULTS = 400;
 const DEFAULT_SEARCH_TIMEOUT_MS = 20_000;
 const PEER_ADDRESS_TIMEOUT_MS = 20_000; // INDIRECT_REQUEST_TIMEOUT
 const CONNECTION_MAX_IDLE_MS = 60_000;
@@ -237,6 +239,7 @@ export class SoulseekSession {
   private idleTimer: ReturnType<typeof setInterval> | undefined;
   private wishlistTimer: ReturnType<typeof setInterval> | undefined;
   private serverPingTimer: ReturnType<typeof setInterval> | undefined;
+  private distribWatchdogTimer: ReturnType<typeof setInterval> | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectAttempts = 0;
   private shouldReconnect = true;
@@ -251,6 +254,9 @@ export class SoulseekSession {
   private distribParentMinSpeed = PARENT_MIN_SPEED_DEFAULT;
   private distribParentSpeedRatio = PARENT_SPEED_RATIO_DEFAULT;
   private uploadSpeed = 0;
+  // SearchResponseCache second-chance TTL 60s like Soulseek.NET SearchResponder.cs:166
+  private searchResponseCache = new Map<number, { username: string; token: number; query: string; response: Buffer; ts: number }>();
+  private static readonly SEARCH_RESPONSE_CACHE_TTL_MS = 60_000;
   // legacy compat aliases
   private get parentCandidate(): string | undefined { return this.parent?.username; }
   private set parentCandidate(v: string | undefined) { void v; }
@@ -274,17 +280,38 @@ export class SoulseekSession {
 
   // pending browse tracking
   private pendingBrowseShares = new Map<string, { timer: ReturnType<typeof setTimeout> }>();
-  private pendingBrowseFolder = new Map<number, { username: string; folder: string; timer: ReturnType<typeof setTimeout> }>();
+  private pendingBrowseFolder = new Map<number, { username: string; folder: string; timer: ReturnType<typeof setTimeout>; retryCount: number }>();
   private pendingPeerMessages = new Map<string, Array<{ connType: string; msg: Buffer }>>();
   // user status cache for offline check (P1 hardening)
   private userStatusCache = new Map<string, { status: number; privileged: boolean; updated: number }>();
   // allowed peer responses gating (nicotine allowed_message_responses) — prevent unsolicited 448M
   private allowedPeerResponses = new Map<string, Set<number>>();
-  // socket limiting
+  // per-user UserInfo throttling 0.4s like nicotine shares.py:1342 + userinfo.py:188
+  private lastUserInfoRequests = new Map<string, number>();
+  private static readonly USERINFO_THROTTLE_MS = 400;
+  // distributed extra timeouts from server (86/87/88/90)
+  private distribParentInactivityTimeout = 120_000;
+  private distribSearchInactivityTimeout = 60_000;
+  private minParentsInCache = 3;
+  private distribPingInterval = 60_000;
+  // socket limiting — dynamic via rlimit like nicotine slskproto.py:381 min(2/3*rlimit,2048)
   private pendingPeerQueue: Array<{ fn: () => void }> = [];
   private get maxSockets(): number {
     const env = Number(process.env.MAX_SOCKETS || 0);
     if (env > 0) return env;
+    // dynamic: try ulimit -n, fallback 512
+    try {
+      const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
+      const r = spawnSync("sh", ["-c", "ulimit -n"], { encoding: "utf8" });
+      const n = parseInt(String(r.stdout || "").trim(), 10);
+      if (Number.isFinite(n) && n > 0) {
+        const dyn = Math.floor((n * 2) / 3);
+        const capped = Math.min(dyn, 2048);
+        // Windows cap 512 due to FD_SETSIZE; detect via process.platform
+        if (typeof process !== "undefined" && (process.platform as string) === "win32") return Math.min(capped, 512);
+        return Math.max(64, capped);
+      }
+    } catch {}
     return MAX_SOCKETS_DEFAULT;
   }
   private get activeSocketCount(): number { return this.peerStates.size + this.pendingConnects.size; }
@@ -298,6 +325,15 @@ export class SoulseekSession {
       const item = this.pendingPeerQueue.shift()!;
       try { item.fn(); } catch {}
     }
+  }
+  private setTcpBufferSize(sock: Socket, type: "F" | "D" | "P" | "S"): void {
+    try {
+      const s: any = sock as unknown as { setNoDelay?: (b: boolean) => void; setKeepAlive?: (b: boolean) => void };
+      s.setNoDelay?.(true);
+      // Bun doesn't expose SO_RCVBUF tuning; Node net.Socket has bufferSize read-only.
+      // Best effort: setNoDelay + keepAlive already done; log buffer type for diagnostics
+      logger.debug("server", "tcp buffer type", { type, active: this.activeSocketCount, max: this.maxSockets });
+    } catch {}
   }
 
   // Portmapper — NAT-PMP → UPnP fallback, mirrors pynicotine/portmapper.py
@@ -553,7 +589,7 @@ export class SoulseekSession {
   private _searchEnabled = true;
   private _privateSearchEnabled = false;
   private _maxResults = 300;
-  private _maxDisplayedResults = 2500;
+  private _maxDisplayedResults = 400;
   setSearchConfig(opts: Partial<{ search_results: boolean; private_search_results: boolean; maxresults: number; max_displayed_results: number }>) {
     if (opts.search_results !== undefined) this._searchEnabled = !!opts.search_results;
     if (opts.private_search_results !== undefined) this._privateSearchEnabled = !!opts.private_search_results;
@@ -658,8 +694,11 @@ export class SoulseekSession {
     const intervalMs = Math.max(30_000, this.wishlistInterval * 1000);
     this.wishlistTimer = setInterval(() => {
       if (!this.loggedIn || !this.serverSocket || !this.wishlistTerms.length) return;
-      const term = this.wishlistTerms[this.wishlistIndex % this.wishlistTerms.length];
+      const rawTerm = this.wishlistTerms[this.wishlistIndex % this.wishlistTerms.length];
       this.wishlistIndex++;
+      const clean = sanitizeSearchTerm(rawTerm);
+      const term = clean.transmitted || clean.sanitized || rawTerm;
+      if (!term) return;
       try {
         const token = this.tokenCounter++;
         if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
@@ -669,7 +708,7 @@ export class SoulseekSession {
           onResult: (p) => this.opts.onWishlistEvent?.({ type: "result", searchId: p.searchId, token: p.token, rows: p.rows }),
           onEnd: (p) => this.opts.onWishlistEvent?.({ type: "end", searchId: p.searchId, token, reason: p.reason }),
         };
-        const active: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
+        const active: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
         active.timer = setTimeout(() => {
           this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token);
           handlers.onEnd({ searchId, reason: "timeout" });
@@ -733,10 +772,45 @@ export class SoulseekSession {
     return ParentStatus.REJECTED;
   }
 
-  private _adoptParent(username: string): void {
+  private _adoptParent(username?: string): void {
     if (this.parent !== null) return;
-    const cand = this.potentialParents.get(username.toLowerCase());
-    if (!cand || !cand.conn) return;
+    // Soulseek.NET DistributedConnectionManager.cs:408 OrderBy BranchLevel — pick best candidate
+    let cand: ParentCandidate | undefined;
+    let candKey: string | undefined;
+    if (username) {
+      const c = this.potentialParents.get(username.toLowerCase());
+      if (c && c.conn && c.branchLevel !== null && c.branchRoot) {
+        // check if there's a better candidate with lower branchLevel
+        let best: ParentCandidate | undefined = c;
+        let bestKey = username.toLowerCase();
+        for (const [k, v] of this.potentialParents) {
+          if (!v.conn || v.branchLevel === null || !v.branchRoot) continue;
+          if (best.branchLevel === null || (v.branchLevel !== null && v.branchLevel < best.branchLevel)) {
+            best = v;
+            bestKey = k;
+          }
+        }
+        cand = best;
+        candKey = bestKey;
+      }
+    } else {
+      // no username — pick best among all candidates
+      let best: ParentCandidate | undefined;
+      let bestKey2: string | undefined;
+      for (const [k, v] of this.potentialParents) {
+        if (!v.conn || v.branchLevel === null || !v.branchRoot) continue;
+        if (!best || (v.branchLevel !== null && best.branchLevel !== null && v.branchLevel < best.branchLevel)) {
+          best = v;
+          bestKey2 = k;
+        } else if (!best) {
+          best = v;
+          bestKey2 = k;
+        }
+      }
+      cand = best;
+      candKey = bestKey2;
+    }
+    if (!cand || !cand.conn || candKey === undefined) return;
     if (cand.branchLevel === null || !cand.branchRoot) return;
     this.parent = cand;
     this.branchLevel = (cand.branchLevel ?? 0) + 1;
@@ -975,6 +1049,7 @@ export class SoulseekSession {
           // Bun only exposes setKeepAlive(bool); tuning not available — fallback ServerPing 32 60s
           try { (sock as unknown as { setKeepAlive?: (b: boolean) => void }).setKeepAlive?.(true); } catch {}
           try { (sock as unknown as { setNoDelay?: (b: boolean) => void }).setNoDelay?.(true); } catch {}
+          this.setTcpBufferSize(sock as Socket, "S");
           this.serverSocket = sock as Socket;
           // Send Login only; SetWaitPort after success (nicotine parity)
           sock.write(buildLogin(this.opts.username, this.opts.password));
@@ -1015,7 +1090,12 @@ export class SoulseekSession {
   private scheduleReconnect(reason: string) {
     if (!this.shouldReconnect || this.opts.signal?.aborted) return;
     if (this.reconnectTimer) return;
-    const base = RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempts);
+    let base: number;
+    if (this.reconnectAttempts === 0) {
+      base = RECONNECT_BASE_MS + Math.random() * 10000; // 5-15s first, like nicotine _set_server_timer
+    } else {
+      base = RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempts);
+    }
     const jitter = base * 0.2 * (Math.random() * 2 - 1);
     const delay = Math.min(RECONNECT_MAX_MS, Math.max(RECONNECT_BASE_MS, base + jitter));
     this.reconnectAttempts += 1;
@@ -1037,6 +1117,7 @@ export class SoulseekSession {
     if (this.wishlistTimer) { clearInterval(this.wishlistTimer); this.wishlistTimer = undefined; }
     if (this._autoawayTimer) { clearInterval(this._autoawayTimer); this._autoawayTimer = undefined; }
     if (this._rescanTimer) { clearInterval(this._rescanTimer); this._rescanTimer = undefined; }
+    if (this.distribWatchdogTimer) { clearInterval(this.distribWatchdogTimer); this.distribWatchdogTimer = undefined; }
   }
 
   private handleServerData(chunk: ArrayBuffer | Uint8Array) {
@@ -1084,6 +1165,7 @@ export class SoulseekSession {
         try { this.startListener(); } catch (e) { logger.warn("server", "peer listener bind failed (will retry on next port change)", { error: (e as Error).message, port: this._listenPort }); }
         this.startIdleSweep();
         this.startServerPing();
+        this.startDistribWatchdog();
         // Portmapper: NAT-PMP → UPnP fallback (like nicotine PortMapper LEASE_DURATION 12h, RENEWAL 2h)
         this._localIpAddress = this.resolveInterfaceToIp(this._interface) || this.findLocalIpAddress();
         this.portMapper.setPort(this._listenPort, this._localIpAddress);
@@ -1334,6 +1416,22 @@ export class SoulseekSession {
       } catch {}
       return;
     }
+    if (code === SERVER_MESSAGE_CODES.parentInactivityTimeout) {
+      try { this.distribParentInactivityTimeout = payload.readUInt32LE(0) * 1000; logger.info("server", "parentInactivityTimeout", { ms: this.distribParentInactivityTimeout }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.searchInactivityTimeout) {
+      try { this.distribSearchInactivityTimeout = payload.readUInt32LE(0) * 1000; logger.info("server", "searchInactivityTimeout", { ms: this.distribSearchInactivityTimeout }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.minParentsInCache) {
+      try { this.minParentsInCache = payload.readUInt32LE(0); logger.info("server", "minParentsInCache", { val: this.minParentsInCache }); } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.distribPingInterval) {
+      try { this.distribPingInterval = payload.readUInt32LE(0) * 1000; logger.info("server", "distribPingInterval", { ms: this.distribPingInterval }); } catch {}
+      return;
+    }
     if (code === SERVER_MESSAGE_CODES.embeddedMessage) {
       try {
         if (payload.length >= 1) {
@@ -1371,8 +1469,8 @@ export class SoulseekSession {
               const r2 = new SlskReader(dPayload);
               if (r2.remaining >= 4) r2.uint32(); // identifier 49? optional
               const user = r2.string(); const token = r2.uint32(); const query = r2.string();
-              if (!this.shareDB.isExcluded(query)) {
-                // answer via peer FileSearchResponse if shares match — delegate to handleInboundFileSearch logic
+              {
+                // per-file excluded filtering inside buildFileSearchResponse (not query-level)
                 const resp = this.shareDB.buildFileSearchResponse(token, this.username, query);
                 if (resp) {
                   // need to route to requester via peer — we will queue send
@@ -1403,10 +1501,18 @@ export class SoulseekSession {
         }
         // also cleanup file token pending (F)
         if (this.pendingFileTokens.has(token)) this.pendingFileTokens.delete(token);
-        // also try to parse optional username string for diagnostic
-        if (payload.length > 4) {
-          try { const r = new SlskReader(payload); r.uint32(); const user = r.string(); this.emitTransfer({ type: "transfer-response", username: user, token, reason: "CantConnectToPeer" }); } catch {}
-        }
+        // Soulseek.NET SearchResponder.cs:348 TryDiscard on CannotConnect — discard cached search response
+        if (this.searchResponseCache.has(token)) this.searchResponseCache.delete(token);
+        // also discard pendingPeerMessages for that user (no second-chance after explicit CannotConnect)
+        try {
+          if (payload.length > 4) {
+            const r = new SlskReader(payload); r.uint32(); const user = r.string();
+            const key = user.toLowerCase();
+            this.pendingPeerMessages.delete(key);
+            this.searchResponseCache.delete(token);
+            this.emitTransfer({ type: "transfer-response", username: user, token, reason: "CantConnectToPeer" });
+          }
+        } catch {}
       } catch {}
       return;
     }
@@ -1556,7 +1662,7 @@ export class SoulseekSession {
         username = undefined;
       }
       if (!query) return;
-      if (this.shareDB.isExcluded(query)) return;
+      // Note: excluded phrases are file-level, filtered inside buildFileSearchResponse via isFileExcluded — don't early return on query
       // emit diagnostic
       this.emitTransfer({ type: "transfer-request", username, token: token!, file: query.slice(0, 120) });
       // respect private_search_results: if disabled, don't include private (buddy/trusted) folders for non-buddies
@@ -1591,6 +1697,7 @@ export class SoulseekSession {
           hostname: p.ip, port: p.port,
           socket: {
             open: (sock) => {
+              this.setTcpBufferSize(sock as Socket, "D");
               (sock as Socket).write(buildPeerInit(this.username, "D"));
               this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username: p.username, outbound: true, connType: "D", lastActive: Date.now(), createdAt: Date.now() });
               const cand = this.potentialParents.get(lower);
@@ -1612,10 +1719,13 @@ export class SoulseekSession {
 
   private startListener() {
     const hostname = this.getListenHostname();
+    logger.info("server", "peer listener listening", { port: this._listenPort, hostname });
     this.listener = Bun.listen({
       port: this._listenPort, hostname,
       socket: {
-        open: () => {},
+        open: (peer) => {
+          logger.debug("server", "peer inbound open", { remote: (peer as unknown as { remoteAddress?: string }).remoteAddress });
+        },
         data: (peer, chunk) => {
           // Phase 4: demux P vs F — F starts with uint32 token, no PeerInit prefix
           const buf = Buffer.from(chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk));
@@ -1635,11 +1745,15 @@ export class SoulseekSession {
                 return;
               }
               // Heuristic: if first 5 bytes don't form valid PeerInit/PierceFW frame, treat as F
+              // But don't misclassify normal peer messages (code 4,5,15...) as F — check if it's a known peer code
               if (buf.length >= 5) {
                 const len = buf.readUInt32LE(0);
-                const code = buf[4];
-                if (code !== 0 && code !== 1) {
-                  // Likely F raw token + offset
+                const codeProbe = buf[4];
+                const fullCode = buf.length >= 8 ? buf.readUInt32LE(4) : codeProbe;
+                const knownPeerCodes = new Set([4,5,8,9,15,16,36,37,40,41,42,43,44,46,50,51,52,12547]);
+                const isKnownPeerCode = knownPeerCodes.has(fullCode);
+                if (codeProbe !== 0 && codeProbe !== 1 && !isKnownPeerCode) {
+                  // Likely F raw token + offset (peer messages with known codes are not F)
                   const fileState: PeerState = { buf: Buffer.alloc(0), initDone: true, isFileConn: true, fileToken: token, lastActive: Date.now(), createdAt: Date.now() };
                   this.peerStates.set(peer as Socket, fileState);
                   // The rest after token is offset (8 bytes) + data
@@ -1657,9 +1771,12 @@ export class SoulseekSession {
           }
           this.processPeer(peer as Socket, chunk, false);
         },
-        error: () => {},
+        error: (peer, err) => {
+          logger.warn("server", "peer inbound error", { error: (err as Error)?.message || String(err), remote: (peer as unknown as { remoteAddress?: string }).remoteAddress });
+        },
         close: (peer) => {
           const st = this.peerStates.get(peer as Socket);
+          logger.debug("server", "peer inbound close", { username: st?.username, connType: st?.connType, remote: (peer as unknown as { remoteAddress?: string }).remoteAddress });
           this.peerStates.delete(peer as Socket);
           if (st?.username && st.connType === "D") this._removeChildPeerConnection(st.username);
           this.dequeuePendingSockets();
@@ -1706,6 +1823,23 @@ export class SoulseekSession {
         // if timer already fired, pending would be deleted; no extra handling
         void token; void pending;
       }
+      // Distributed parent inactivity check (server parentInactivityTimeout 86)
+      if (this.parent?.conn) {
+        const pState = this.peerStates.get(this.parent.conn);
+        if (pState && now - pState.lastActive > this.distribParentInactivityTimeout) {
+          logger.warn("server", "parent inactive, reconnecting distrib", { username: this.parent.username, idle: now - pState.lastActive });
+          try { this.parent.conn.end(); } catch {}
+          this.peerStates.delete(this.parent.conn);
+          this.parent = null;
+          this.isServerParent = false;
+          this.branchLevel = 0;
+          this.branchRoot = this.username;
+          try { this.serverSocket?.write(buildHaveNoParent()); } catch {}
+          try { this.serverSocket?.write(buildBranchRoot(this.branchRoot)); } catch {}
+          try { this.serverSocket?.write(buildBranchLevel(this.branchLevel)); } catch {}
+        }
+      }
+      // minParentsInCache — if we have parent and too few candidates, request new HaveNoParent? keep simple
     }, 5000);
   }
   private startServerPing() {
@@ -1715,6 +1849,26 @@ export class SoulseekSession {
     this.serverPingTimer = setInterval(() => {
       try { this.serverSocket?.write(Buffer.concat([Buffer.from([4, 0, 0, 0]), Buffer.from([32, 0, 0, 0])])); } catch {}
     }, 60000);
+  }
+  private startDistribWatchdog() {
+    if (this.distribWatchdogTimer) clearInterval(this.distribWatchdogTimer);
+    // Soulseek.NET DistributedConnectionManager.cs:50 WatchdogTimer 15m
+    this.distribWatchdogTimer = setInterval(() => {
+      if (!this.loggedIn) return;
+      if (!this.parent && !this.isServerParent) {
+        logger.info("server", "distrib watchdog: no parent, requesting HaveNoParent", { username: this.username });
+        try { this.serverSocket?.write(buildHaveNoParent()); } catch {}
+        try { this.serverSocket?.write(buildBranchRoot(this.branchRoot || this.username)); } catch {}
+        try { this.serverSocket?.write(buildBranchLevel(this.branchLevel)); } catch {}
+      }
+      // also sweep stale searchResponseCache entries
+      const now = Date.now();
+      for (const [tok, e] of this.searchResponseCache) {
+        if (now - e.ts > SoulseekSession.SEARCH_RESPONSE_CACHE_TTL_MS) this.searchResponseCache.delete(tok);
+      }
+    }, 15 * 60 * 1000);
+    // don't keep process alive just for this
+    try { (this.distribWatchdogTimer as unknown as { unref?: () => void }).unref?.(); } catch {}
   }
 
   private connectToPeer(ctp: ReturnType<typeof parseConnectToPeer>) {
@@ -1968,7 +2122,15 @@ export class SoulseekSession {
         const payload = state.buf.subarray(5, total);
         state.buf = state.buf.subarray(total);
         if (code === 0) {
-          // DistribPing — ignore
+          // DistribPing — reply with DistributedPingResponse GetNextToken() like Soulseek.NET DistributedMessageHandler.cs:92
+          try {
+            if (state.username && this.childPeers.has(state.username.toLowerCase())) {
+              const token = this.tokenCounter++ >>> 0;
+              if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
+              const resp = Buffer.concat([packUint32(5), Buffer.from([0]), packUint32(token >>> 0)]);
+              try { (peer as unknown as { write: (b: Buffer) => void }).write(resp); } catch {}
+            }
+          } catch {}
         } else if (code === 3) {
           try {
             const ds = (()=>{ try{ const r=new SlskReader(payload); // identifier 49?
@@ -1988,11 +2150,12 @@ export class SoulseekSession {
               if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
               if (status === ParentStatus.ACCEPTED) {
                 this._sendMessageToChildPeers(payload, 3);
-                if (this._searchEnabled && !this.shareDB.isExcluded(ds.query)) {
-                  // local shares search — also emit for server side (capped by maxResults)
+                if (this._searchEnabled) {
+                  // local shares search — filtered per-file via isFileExcluded inside buildFileSearchResponse
                   const resp = this.shareDB.buildFileSearchResponse(ds.token, this.username, ds.query, true, 0, 0, this.getSharePermissionLevel(ds.username), this._maxResults);
                   if (resp) {
-                    // resp is peer FileSearchResponse, but for distrib we need to support search via shares? Just emit
+                    // send response to distributor requester via peer if possible
+                    try { this.ensurePeerAndSend(ds.username, "P", resp); } catch {}
                     this.emitTransfer({ type: "transfer-request", username: ds.username, token: ds.token, file: ds.query.slice(0,120) });
                   } else {
                     this.emitTransfer({ type: "transfer-request", username: ds.username, token: ds.token, file: ds.query.slice(0,120) });
@@ -2016,7 +2179,7 @@ export class SoulseekSession {
             } else if (status === ParentStatus.WAITING) {
               const lower = (state.username || "").toLowerCase();
               const cand = this.potentialParents.get(lower);
-              if (cand) { cand.conn = peer; cand.branchLevel = level; if (level === 0) cand.branchRoot = cand.username; }
+              if (cand) { cand.conn = peer; cand.branchLevel = level; if (level === 0) cand.branchRoot = cand.username; if (cand.branchLevel !== null && cand.branchRoot) this._adoptParent(cand.username); }
             } else if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
           } catch {}
         } else if (code === 5) {
@@ -2032,7 +2195,7 @@ export class SoulseekSession {
             } else if (status === ParentStatus.WAITING) {
               const lower = (state.username || "").toLowerCase();
               const cand = this.potentialParents.get(lower);
-              if (cand) { cand.conn = peer; cand.branchRoot = root; }
+              if (cand) { cand.conn = peer; cand.branchRoot = root; if (cand.branchLevel !== null && cand.branchRoot) this._adoptParent(cand.username); }
             } else if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
           } catch {}
         } else if (code === 7) {
@@ -2044,11 +2207,12 @@ export class SoulseekSession {
             const rest = payload.subarray(1);
             if (innerCode===3) {
               const ds2=(()=>{ try{ const rr=new SlskReader(rest); if(rr.remaining>=4) rr.uint32(); const u=rr.string(); const t=rr.uint32(); const q=rr.string(); return {username:u, token:t, query:q}; }catch{return null;}})();
-              if (ds2 && !this.shareDB.isExcluded(ds2.query)) {
+              if (ds2) {
                 if (this.parent===null) this._adoptParent(ds2.username);
                 const st2 = this._verifyParentStatus(peer, "DistribSearch");
                 if (st2===ParentStatus.ACCEPTED) {
                   this._sendMessageToChildPeers(rest, 3);
+                  // per-file excluded filtering inside buildFileSearchResponse, not query-level
                   this.emitTransfer({ type: "transfer-request", username: ds2.username, token: ds2.token, file: ds2.query.slice(0,120) });
                 }
               }
@@ -2056,6 +2220,31 @@ export class SoulseekSession {
           } catch {}
         }
         continue;
+      }
+      // Outbound P may receive a stray PeerInit echo from peer (some clients echo init); consume it so it doesn't block peer messages
+      if (state.outbound && state.connType === "P" && state.buf.length >= 5) {
+        const lenProbe = state.buf.readUInt32LE(0);
+        const codeProbe = state.buf[4];
+        if ((codeProbe === 0 || codeProbe === 1) && lenProbe < 1024 * 1024 && state.buf.length >= 5 + lenProbe) {
+          try {
+            const initPayloadProbe = state.buf.subarray(5, 5 + lenProbe);
+            if (codeProbe === 1) {
+              const piProbe = parsePeerInit(initPayloadProbe);
+              if (piProbe.targetUser && piProbe.connType) {
+                state.buf = state.buf.subarray(5 + lenProbe);
+                // Update username if peer provided different (rare)
+                if (!state.username) state.username = piProbe.targetUser;
+                continue;
+              }
+            } else if (codeProbe === 0) {
+              const pfProbe = parsePierceFireWall(initPayloadProbe);
+              if (pfProbe.token !== undefined) {
+                state.buf = state.buf.subarray(5 + lenProbe);
+                continue;
+              }
+            }
+          } catch {}
+        }
       }
       // Determine max per expected message type (peek len)
       if (state.buf.length >= 4) {
@@ -2139,11 +2328,41 @@ export class SoulseekSession {
           this.dequeuePendingSockets();
         } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.userInfoRequest) {
-        if (!state.outbound) { try { (peer as Socket).write(buildUserInfoResponse(this.profile)); } catch {} }
+        if (!state.outbound) {
+          const peerName = state.username || "unknown";
+          const now = Date.now();
+          const last = this.lastUserInfoRequests.get(peerName.toLowerCase()) || 0;
+          if (now - last < SoulseekSession.USERINFO_THROTTLE_MS) break;
+          this.lastUserInfoRequests.set(peerName.toLowerCase(), now);
+          // Banned users get empty descr like nicotine userinfo.py:188
+          const perm = this.getSharePermissionLevel(peerName);
+          if (perm === PermissionLevel.BANNED) {
+            try { (peer as Socket).write(buildUserInfoResponse({ descr: "", pic: null, totalupl: 0, queuesize: 0, slotsavail: false, uploadallowed: 0 })); } catch {}
+            break;
+          }
+          // Dynamic queue stats per requester (nicotine queuesize privileged-aware, slotsavail via is_new_upload_accepted)
+          let queuesize = this.profile.queuesize;
+          let slotsavail = this.profile.slotsavail;
+          let uploadallowed = this.profile.uploadallowed;
+          try {
+            const getter: any = (this.opts as unknown as { getQueuePlace?: (f: string) => number; getTransferStats?: () => { queuedUploads: number; activeUploads: number } });
+            // Try to get real stats if session wired to TransferManager via server.ts (not directly in session, but we can approximate)
+            if (getter.getTransferStats) {
+              const st = getter.getTransferStats();
+              queuesize = st.queuedUploads;
+              slotsavail = st.activeUploads < 3; // uploadslots 3 default, like transfers.ts
+            }
+          } catch {}
+          try { (peer as Socket).write(buildUserInfoResponse({ descr: this.profile.descr, pic: this.profile.pic, totalupl: this.profile.totalupl, queuesize, slotsavail, uploadallowed })); } catch {}
+        }
       } else if (msg.code === PEER_MESSAGE_CODES.sharedFileListRequest) {
         const peerName = state.username || "unknown";
-        if (this.shareDB.shouldThrottle(peerName)) break;
-        try { const perm = this.getSharePermissionLevel(peerName); (peer as Socket).write(this.shareDB.buildSharedFileListResponse(perm)); } catch { try { (peer as Socket).write(emptySharesResponse()); } catch {} }
+        logger.info("browse", "sharedFileListRequest recv inbound", { username: peerName, throttled: this.shareDB.shouldThrottle(peerName) });
+        if (this.shareDB.shouldThrottle(peerName)) {
+          logger.warn("browse", "throttled SharedFileListRequest", { username: peerName });
+          break;
+        }
+        try { const perm = this.getSharePermissionLevel(peerName); const resp = this.shareDB.buildSharedFileListResponse(perm); logger.info("browse", "sending SharedFileListResponse", { username: peerName, len: resp.length }); (peer as Socket).write(resp); } catch (e) { logger.warn("browse", "buildSharedFileListResponse failed", { username: peerName, error: (e as Error).message }); try { (peer as Socket).write(emptySharesResponse()); } catch {} }
       } else if (msg.code === PEER_MESSAGE_CODES.folderContentsRequest) {
         const peerName2 = state.username || "unknown";
         if (this.shareDB.shouldThrottle(peerName2)) break;
@@ -2153,16 +2372,14 @@ export class SoulseekSession {
           logger.debug("server", "peer FileSearchRequest ignored — search_results disabled", { username: state.username });
         } else {
           try {
-            // peer FileSearchRequest 8: [token][query] — respond with FileSearchResponse 9 via same peer, respecting permission
+            // peer FileSearchRequest 8: [token][query] — respond with FileSearchResponse 9 via same peer, respecting permission; per-file excluded filtering inside buildFileSearchResponse
             const r = new SlskReader(msg.payload);
             const token = r.uint32(); const query = r.string();
-            if (!this.shareDB.isExcluded(query)) {
             const peerName = state.username || "unknown";
             const perm = this.getSharePermissionLevel(peerName);
             // if private_search_results false, downgrade BUDDY/TRUSTED to PUBLIC for non-buddies (getSharePermissionLevel already PUBLIC for strangers)
             const resp = this.shareDB.buildFileSearchResponse(token, this.username, query, true, 0, 0, perm, this._maxResults);
             if (resp) (peer as Socket).write(resp);
-            }
           } catch {}
         }
       } else if (msg.code === PEER_MESSAGE_CODES.transferRequest) {
@@ -2217,6 +2434,15 @@ export class SoulseekSession {
     const batch = rows.slice(0, remaining);
     search.count += batch.length;
     search.onResult({ searchId: search.searchId, token: resp.token, rows: batch });
+    // sliding timeout: reset timer on every response (Soulseek.NET SearchInternal.cs:266)
+    if (search.timer) clearTimeout(search.timer);
+    const timeoutMs = search.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS;
+    search.timer = setTimeout(() => {
+      this.searches.delete(resp.token);
+      this.searchIds.delete(search.searchId);
+      this.allowedSearchTokens.delete(resp.token);
+      search.onEnd({ searchId: search.searchId, reason: "timeout" });
+    }, timeoutMs);
     if (search.count >= search.maxResults) {
       if (search.timer) clearTimeout(search.timer);
       this.searches.delete(resp.token); this.searchIds.delete(search.searchId);
@@ -2227,16 +2453,16 @@ export class SoulseekSession {
 
   search(query: string, searchId: string, handlers: SearchHandlers): number {
     if (!this.serverSocket || !this.loggedIn) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
-    // Excluded phrases filter (case-insensitive)
-    const qLower = query.toLowerCase();
-    for (const phrase of this.excludedPhrases) { if (qLower.includes(phrase)) { handlers.onEnd({ searchId, reason: "error" }); return 0; } }
-    const token = this.tokenCounter++;
+    const clean = sanitizeSearchTerm(query);
+    const outQuery = clean.transmitted || clean.sanitized || query.trim();
+    if (!outQuery) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
-    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
+    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
     this.searches.set(token, search); this.searchIds.set(searchId, token);
-    this.serverSocket.write(buildFileSearch(token, query));
+    this.serverSocket.write(buildFileSearch(token, outQuery));
     return token;
   }
   cancelSearch(searchId: string) {
@@ -2249,32 +2475,63 @@ export class SoulseekSession {
   }
   searchUser(username: string, query: string, searchId: string, handlers: SearchHandlers): number {
     if (!this.loggedIn || !this.serverSocket) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
-    const token = this.tokenCounter++;
+    const clean = sanitizeSearchTerm(query);
+    const outQuery = clean.transmitted || clean.sanitized || query.trim();
+    if (!outQuery) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    const token = this.tokenCounter++ >>> 0;
+    if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
-    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
+    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
     this.searches.set(token, search); this.searchIds.set(searchId, token);
-    this.serverSocket.write(buildUserSearch(username, token, query));
+    this.serverSocket.write(buildUserSearch(username, token, outQuery));
+    return token;
+  }
+
+  /** Buddies search — mirrors pynicotine _send_buddies_search_request: single token, loop UserSearch per buddy */
+  searchBuddies(usernames: string[], query: string, searchId: string, handlers: SearchHandlers): number {
+    if (!this.loggedIn || !this.serverSocket) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    if (!usernames.length) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    const clean = sanitizeSearchTerm(query);
+    const outQuery = clean.transmitted || clean.sanitized || query.trim();
+    if (!outQuery) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    const token = this.tokenCounter++ >>> 0;
+    if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
+    this.allowedSearchTokens.add(token);
+    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
+    search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
+    this.searches.set(token, search); this.searchIds.set(searchId, token);
+    for (const username of usernames) {
+      try { this.serverSocket.write(buildUserSearch(username, token, outQuery)); } catch {}
+    }
     return token;
   }
   searchRoom(room: string, query: string, searchId: string, handlers: SearchHandlers): number {
     if (!this.loggedIn || !this.serverSocket) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
-    const token = this.tokenCounter++;
+    const clean = sanitizeSearchTerm(query);
+    const outQuery = clean.transmitted || clean.sanitized || query.trim();
+    if (!outQuery) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    const token = this.tokenCounter++ >>> 0;
+    if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
-    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
+    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
     this.searches.set(token, search); this.searchIds.set(searchId, token);
-    this.serverSocket.write(buildRoomSearch(room, token, query));
+    this.serverSocket.write(buildRoomSearch(room, token, outQuery));
     return token;
   }
   wishlistSearch(query: string, searchId: string, handlers: SearchHandlers): number {
     if (!this.loggedIn || !this.serverSocket) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
-    const token = this.tokenCounter++;
+    const clean = sanitizeSearchTerm(query);
+    const outQuery = clean.transmitted || clean.sanitized || query.trim();
+    if (!outQuery) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    const token = this.tokenCounter++ >>> 0;
+    if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
-    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: MAX_DISPLAYED_RESULTS };
+    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
     this.searches.set(token, search); this.searchIds.set(searchId, token);
-    this.serverSocket.write(buildWishlistSearch(token, query));
+    this.serverSocket.write(buildWishlistSearch(token, outQuery));
     return token;
   }
   watchUser(username: string) { this.serverSocket?.write(buildWatchUser(username)); this.serverSocket?.write(buildGetUserStats(username)); }
@@ -2333,12 +2590,25 @@ export class SoulseekSession {
     this.ensurePeerAndSend(username, "P", buildSharedFileListRequest());
   }
   requestFolderContents(username: string, dir: string, token: number) {
-    const timer = setTimeout(() => {
-      this.pendingBrowseFolder.delete(token);
-      this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.folderContentsResponse);
-      this.emitBrowse({ type: "browse-error", username, token, folder: dir, error: "Timed out fetching folder" });
-    }, 30000);
-    this.pendingBrowseFolder.set(token, { username, folder: dir, timer });
+    const doTimeout = (tok: number) => {
+      const entry = this.pendingBrowseFolder.get(tok);
+      if (!entry) return;
+      if (entry.retryCount < 1) {
+        // 5s timeout + one retry like nicotine downloads.py:832 (latin-1 fallback) — resend once
+        logger.debug("browse", "folder timeout retry", { username, dir, token: tok, retry: entry.retryCount + 1 });
+        clearTimeout(entry.timer);
+        entry.retryCount++;
+        // resend request
+        this.ensurePeerAndSend(username, "P", buildFolderContentsRequest(tok, dir));
+        entry.timer = setTimeout(() => doTimeout(tok), 5000);
+      } else {
+        this.pendingBrowseFolder.delete(tok);
+        this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.folderContentsResponse);
+        this.emitBrowse({ type: "browse-error", username, token: tok, folder: dir, error: "Timed out fetching folder" });
+      }
+    };
+    const timer = setTimeout(() => doTimeout(token), 5000);
+    this.pendingBrowseFolder.set(token, { username, folder: dir, timer, retryCount: 0 });
     this.addAllowedPeerResponse(username, PEER_MESSAGE_CODES.folderContentsResponse);
     this.ensurePeerAndSend(username, "P", buildFolderContentsRequest(token, dir));
   }
@@ -2389,11 +2659,13 @@ export class SoulseekSession {
       socket: {
         open: (sock) => {
           logger.info("browse", "direct peer open", { username, ip: addr.ip, port: addr.port, connType });
-          this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, lastActive: Date.now(), createdAt: Date.now() });
+          this.setTcpBufferSize(sock as Socket, connType as "F" | "D" | "P");
+          // Outbound P: consider handshake done after we send PeerInit — don't wait for peer init
+          // (nicotine sends SharedFileListRequest immediately after PeerInit; peer rarely replies with init)
+          this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: true, username, outbound: true, connType, lastActive: Date.now(), createdAt: Date.now() });
           (sock as Socket).write(buildPeerInit(this.username, connType));
-          // queue msg via state — will be sent after initDone in processPeer
-          const st = this.peerStates.get(sock as Socket);
-          if (st) (st as unknown as { pendingMsg?: Buffer }).pendingMsg = msg;
+          // Send the actual peer message immediately (don't wait for peer's init — fixes 5s close)
+          try { (sock as Socket).write(msg); } catch {}
         },
         data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
         error: (_sock, err) => { logger.warn("browse", "direct peer error", { username, ip: addr.ip, port: addr.port, error: (err as Error)?.message || String(err) }); this.dequeuePendingSockets(); },
@@ -2407,58 +2679,59 @@ export class SoulseekSession {
       if (this.userInfoRequests.has(username)) { reject(new Error("Already requesting this user.")); return; }
       this.userInfoRequests.set(username, resolve);
       this.addAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
-      const cached = this.userAddresses.get(username);
+      // Timeout for overall userInfo fetch (includes indirect relay)
+      const overallTimer = setTimeout(() => {
+        if (this.userInfoRequests.has(username)) {
+          this.userInfoRequests.delete(username);
+          this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
+          this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username });
+          reject(new Error("Peer address request timed out."));
+        }
+      }, PEER_ADDRESS_TIMEOUT_MS + 10000); // 30s total (20s indirect + 10s grace)
+      const cleanup = () => clearTimeout(overallTimer);
+      // Override resolver to cleanup timer
+      const origResolve = resolve;
+      const wrappedResolve = (info: UserInfoResponseMessage) => { cleanup(); origResolve(info); };
+      this.userInfoRequests.set(username, wrappedResolve);
+      const wrappedReject = (e: Error) => { cleanup(); this.userInfoRequests.delete(username); this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse); this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username }); reject(e); };
+
+      // Use same dual-path as browse: queue UserInfoRequest + indirect ConnectToPeer + direct
+      // This ensures firewalled users can pierce to us (critical for profiles)
+      this.queuePendingPeerMessage(username, "P", buildUserInfoRequest());
+      this.sendConnectToPeerFallback(username, "P");
+
       const doConnect = (addr: PeerAddress) => {
         if (addr.port === 0 || addr.ip === "0.0.0.0") {
-          this.userInfoRequests.delete(username); this.peerAddressRequests.delete(username);
-          this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
-          this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username });
-          reject(new Error("User offline or port unknown."));
+          // Don't fail immediately — wait for indirect pierce (fallback already sent)
+          // Only fail if no fallback pending and timeout will fire
+          logger.debug("browse", "peer address 0.0.0.0 for userInfo, waiting for pierce", { username });
           return;
         }
-        // enforce MAX_SOCKETS
-        if (!this.canOpenSocket()) {
-          this.enqueueOrRun(() => doConnect(addr));
-          return;
-        }
-        Bun.connect({
-          hostname: addr.ip, port: addr.port,
-          socket: {
-            open: (sock) => {
-              this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType: "P", lastActive: Date.now(), createdAt: Date.now() });
-              (sock as Socket).write(buildPeerInit(this.username, "P"));
-            },
-            data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
-            error: () => {
-              this.userInfoRequests.delete(username); this.peerAddressRequests.delete(username);
-              this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
-              this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username });
-              this.dequeuePendingSockets();
-              reject(new Error("Peer connection failed."));
-            },
-            close: (sock) => { this.peerStates.delete(sock as Socket); this.dequeuePendingSockets(); },
-          },
-        }).catch(() => {
-          this.userInfoRequests.delete(username); this.peerAddressRequests.delete(username);
-          this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
-          this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username });
-          this.dequeuePendingSockets();
-          reject(new Error("Unable to reach peer."));
-        });
+        this.connectToPeerViaAddress(username, addr, "P", buildUserInfoRequest());
       };
-      if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) { doConnect(cached.addr); return; }
-      const existing = this.peerAddressRequests.get(username);
-      if (existing) {
-        existing.cbs.push((addr) => { this.userAddresses.set(username, { addr, updated: Date.now() }); doConnect(addr); });
-        return;
+      const cached = this.userAddresses.get(username);
+      if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) { doConnect(cached.addr); }
+      else {
+        const existing = this.peerAddressRequests.get(username);
+        if (existing) {
+          existing.cbs.push((addr) => { this.userAddresses.set(username, { addr, updated: Date.now() }); doConnect(addr); });
+        } else {
+          const timer = setTimeout(() => {
+            this.peerAddressRequests.delete(username);
+            // don't reject yet — indirect may still succeed, let overallTimer handle
+            logger.debug("browse", "GetPeerAddress timeout for userInfo, waiting for pierce fallback", { username });
+          }, PEER_ADDRESS_TIMEOUT_MS);
+          this.peerAddressRequests.set(username, {
+            cbs: [(addr) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); doConnect(addr); }],
+            timer,
+            createdAt: Date.now(),
+          });
+          this.serverSocket?.write(buildGetPeerAddress(username));
+        }
       }
-      const timer = setTimeout(() => {
-        this.peerAddressRequests.delete(username); this.userInfoRequests.delete(username);
-        this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username });
-        reject(new Error("Peer address request timed out."));
-      }, PEER_ADDRESS_TIMEOUT_MS);
-      this.peerAddressRequests.set(username, { cbs: [(addr) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); doConnect(addr); }], timer, createdAt: Date.now() });
-      this.serverSocket?.write(buildGetPeerAddress(username));
+      // Also wire reject on overall timeout already; keep peerAddressRequests cleanup via overallTimer
+      void wrappedReject;
+      return;
     });
   }
 
@@ -2509,7 +2782,7 @@ function buildItemSim(item: string): Buffer {
 }
 function inflateProbeToken(payload: Buffer): number | null {
   try {
-    const buf: Buffer = inflateSync(payload);
+    const buf: Buffer = inflateWithCap(payload);
     if (buf.length < 8) return null;
     const unameLen = buf.readUInt32LE(0);
     if (4 + unameLen + 4 > buf.length) return null;

@@ -59,6 +59,9 @@ RUN mkdir -p ./dist/data && \
 COPY COPYING ./COPYING
 COPY LICENSES ./LICENSES
 COPY ATTRIBUTION.md ./ATTRIBUTION.md
+# Spectrum: sox + flac for decoding + oxipng for compression (port of smoked-salmon sox spectrogram)
+RUN apk add --no-cache sox flac oxipng && mkdir -p /tmp/hub-spectrum && chmod 777 /tmp/hub-spectrum || true
 RUN mkdir -p $DATA_DIR $DATA_DIR/incomplete $DATA_DIR/downloads $DATA_DIR/uploads && chown -R bun:bun $DATA_DIR || chown -R 1000:1000 $DATA_DIR || true
-EXPOSE 8787 49127
+# default LISTEN_PORT 60754; host mapping uses LISTEN_PORT env
+EXPOSE 8787 60754
 CMD ["bun", "run", "dist/server.js"]

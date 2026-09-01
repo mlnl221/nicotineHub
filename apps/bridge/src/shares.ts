@@ -12,7 +12,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { join, basename, relative, extname } from "node:path";
 import { deflateSync } from "node:zlib";
-import { frameMessage, packString, packUint32, packUint64, PEER_MESSAGE_CODES } from "./soulseek.ts";
+import { frameMessage, packString, packUint32, packUint64, PEER_MESSAGE_CODES, sanitizeSearchTerm } from "./soulseek.ts";
 
 export interface ShareFile {
   name: string; // virtual path e.g. Music\Artist\file.mp3
@@ -62,6 +62,7 @@ export class ShareDB {
   private real2virtual = new Map<string, string>();
   private revealBuddyShares = false;
   private revealTrustedShares = false;
+  private wordIndex = new Map<string, Set<ShareFile>>(); // word -> files containing word (lower, punctuation-split)
 
   constructor(opts?: { dataDir?: string; shareFilters?: string[] }) {
     this.dataDir = opts?.dataDir || defaultDataDir();
@@ -158,6 +159,7 @@ export class ShareDB {
   private rebuildCombined() {
     this.folders = [...this.publicFolders, ...this.buddyFolders, ...this.trustedFolders];
     this.rebuildVirtualMaps();
+    this.rebuildWordIndex();
   }
   private rebuildVirtualMaps() {
     this.virtual2real.clear();
@@ -264,6 +266,14 @@ export class ShareDB {
   }
   getVirtual2Real(virtualPath: string): string | undefined { return this.virtual2real.get(virtualPath); }
   getReal2Virtual(realPath: string): string | undefined { return this.real2virtual.get(realPath); }
+  hasVirtualPath(virtualPath: string): boolean {
+    if (this.virtual2real.has(virtualPath)) return true;
+    for (const f of this.folders) {
+      if (f.name === virtualPath || virtualPath.startsWith(f.name + "\\")) return true;
+      if (f.files.some(fi => fi.name === virtualPath)) return true;
+    }
+    return false;
+  }
 
   getSharedCounts(): { dirs: number; files: number } {
     let files = 0;
@@ -578,24 +588,85 @@ export class ShareDB {
     for (const ph of phrases) this.excludedPhrases.add(ph.toLowerCase());
   }
 
-  /** Check if query contains excluded phrase */
+  /** Check if file name contains excluded phrase (server 160 filtering) */
   isExcluded(query: string): boolean {
     const lower = query.toLowerCase();
     for (const ph of this.excludedPhrases) if (lower.includes(ph)) return true;
     return false;
   }
+  isFileExcluded(fileName: string): boolean {
+    const lower = fileName.toLowerCase();
+    for (const ph of this.excludedPhrases) if (lower.includes(ph)) return true;
+    return false;
+  }
 
-  /** Search shares by query (space-separated tokens, case-insensitive, all must match) */
-  search(query: string): ShareFile[] {
-    if (this.isExcluded(query)) return [];
-    const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-    if (!tokens.length) return [];
-    const out: ShareFile[] = [];
+  private rebuildWordIndex() {
+    this.wordIndex.clear();
+    const punctRe = /[!"#$%&'()*+,\-.\/:;<=>?@\[\\\]^_`{|}~]+/g;
     for (const folder of this.folders) {
       for (const f of folder.files) {
-        const nameLower = f.name.toLowerCase();
-        if (tokens.every(t => nameLower.includes(t))) out.push(f);
+        const lower = f.name.toLowerCase();
+        // split via punctuation + backslash/space
+        const words = lower.replace(punctRe, " ").replace(/\\/g, " ").split(/\s+/).filter(Boolean);
+        const uniq = new Set(words);
+        for (const w of uniq) {
+          if (!this.wordIndex.has(w)) this.wordIndex.set(w, new Set());
+          this.wordIndex.get(w)!.add(f);
+        }
+        // also index full filename tokens for suffix partial handling
+        // keep raw lower for partial suffix scan fallback
       }
+    }
+  }
+
+  /** Search shares by query (sanitized, word-index accelerated, handles -excluded and *partial) */
+  search(query: string): ShareFile[] {
+    const clean = sanitizeSearchTerm(query);
+    const included = clean.includedWords;
+    const excluded = clean.excludedWords;
+    if (!included.length) return [];
+    // Use wordIndex intersection for exact words where possible, fallback to substring scan
+    let candidates: Set<ShareFile> | null = null;
+    for (const w of included) {
+      const isPartial = false; // sanitized already stripped *, we treat all as exact for index
+      // For partial, we would need suffix scan — fallback to linear
+      const set = this.wordIndex.get(w);
+      if (set) {
+        if (candidates === null) candidates = new Set(set);
+        else {
+          const next = new Set<ShareFile>();
+          for (const f of candidates) if (set.has(f)) next.add(f);
+          candidates = next;
+          if (candidates.size === 0) break;
+        }
+      } else {
+        // No exact word match — fallback to substring linear scan for this word
+        // If candidates already narrowed, filter it; else need full scan
+        if (candidates === null) {
+          // need full scan for first word fallback
+          candidates = new Set();
+          for (const folder of this.folders) for (const f of folder.files) if (f.name.toLowerCase().includes(w)) candidates.add(f);
+        } else {
+          const filtered = new Set<ShareFile>();
+          for (const f of candidates) if (f.name.toLowerCase().includes(w)) filtered.add(f);
+          candidates = filtered;
+        }
+        if (candidates.size === 0) break;
+      }
+    }
+    if (!candidates || candidates.size === 0) return [];
+    let out = [...candidates];
+    // Filter excluded words (must not be present) and excluded phrases (file contains phrase)
+    if (excluded.length) {
+      out = out.filter(f => {
+        const lower = f.name.toLowerCase();
+        for (const ex of excluded) if (lower.includes(ex)) return false;
+        return true;
+      });
+    }
+    // Filter server excluded phrases
+    if (this.excludedPhrases.size) {
+      out = out.filter(f => !this.isFileExcluded(f.name));
     }
     return out.sort((a,b)=> a.name.localeCompare(b.name));
   }
@@ -603,6 +674,10 @@ export class ShareDB {
   /** Build SharedFileListResponse 5 payload (zlib lvl4, sorted) — respects PermissionLevel + reveal flags (shares.py:392) */
   buildSharedFileListResponse(permission: PermissionLevel = PermissionLevel.PUBLIC): Buffer {
     const folders = this.getFoldersForPermission(permission);
+    // Locked directories are those not visible to requester (Soulseek.NET BrowseResponseFactory.cs:83)
+    const all = [...this.publicFolders, ...this.buddyFolders, ...this.trustedFolders];
+    const visibleNames = new Set(folders.map(f => f.name));
+    const locked = all.filter(f => !visibleNames.has(f.name));
     // inner payload: uint32 ndirs, then for each dir: string name, uint32 nfiles, then files
     const parts: Buffer[] = [];
     parts.push(packUint32(folders.length));
@@ -626,11 +701,37 @@ export class ShareDB {
         }
       }
     }
-    // Include unknown int 0 + priv? Nicotine adds private share count (0)
-    // For simplicity inner includes only above; nicotine also expects private block later but we omit (0)
-    // Append npriv 0 as uint32 for compatibility with FileSearch private parsing? For shares response nicotine does not add it.
+    // Include unknown int 0 + locked dirs block (BrowseResponseFactory.cs:83)
+    parts.push(packUint32(0)); // unknown
+    parts.push(packUint32(locked.length));
+    const lockedSorted = [...locked].sort((a,b)=> a.name.localeCompare(b.name));
+    for (const folder of lockedSorted) {
+      parts.push(packString(folder.name));
+      parts.push(packUint32(folder.files.length));
+      const filesSorted = [...folder.files].sort((a,b)=> a.name.localeCompare(b.name));
+      for (const f of filesSorted) {
+        parts.push(Buffer.from([1]));
+        parts.push(packString(f.name));
+        const sz = typeof f.size === "bigint" ? f.size : BigInt(f.size);
+        parts.push(packUint64(sz));
+        parts.push(packString(f.ext || ""));
+        const attrs = f.attrs || [];
+        parts.push(packUint32(attrs.length));
+        for (const [type, val] of attrs) {
+          parts.push(packUint32(type));
+          parts.push(packUint32(val));
+        }
+      }
+    }
     const inner = Buffer.concat(parts);
     const compressed = deflateSync(inner, { level: 4 });
+    // Raw cache for BrowseResponse (Soulseek.NET RawBrowseResponse disk-cache) — persist compressed
+    try {
+      const cachePath = join(this.dataDir, "browse.cache");
+      writeFileSync(cachePath + ".tmp", compressed);
+      // atomic rename? keep simple
+      try { const { renameSync } = require("node:fs") as typeof import("node:fs"); renameSync(cachePath + ".tmp", cachePath); } catch { try { writeFileSync(cachePath, compressed); } catch {} }
+    } catch {}
     return frameMessage(PEER_MESSAGE_CODES.sharedFileListResponse, compressed);
   }
 
@@ -663,15 +764,20 @@ export class ShareDB {
 
   /** Build FileSearchResponse 9 for inbound FileSearch queries (if someone searches us) — respects permission + maxresults cap (nicotine-plus searches.maxresults 300) */
   buildFileSearchResponse(token: number, username: string, query: string, freeSlots = true, speed = 0, inQueue = 0, permission: PermissionLevel = PermissionLevel.PUBLIC, maxResults?: number): Buffer | null {
-    if (this.isExcluded(query)) return null;
+    const clean = sanitizeSearchTerm(query);
+    const included = clean.includedWords;
+    const excluded = clean.excludedWords;
+    if (!included.length) return null;
     // Filter search results by permission level's folders only
     const folders = this.getFoldersForPermission(permission);
-    const lower = query.toLowerCase();
-    const tokens = lower.split(/\s+/).filter(Boolean);
     const filtered: ShareFile[] = [];
     for (const folder of folders) {
       for (const f of folder.files) {
-        if (tokens.every(t => f.name.toLowerCase().includes(t))) filtered.push(f);
+        const nameLower = f.name.toLowerCase();
+        if (!included.every(t => nameLower.includes(t))) continue;
+        if (excluded.length && excluded.some(t => nameLower.includes(t))) continue;
+        if (this.isFileExcluded(f.name)) continue;
+        filtered.push(f);
       }
     }
     let results = filtered.sort((a,b)=> a.name.localeCompare(b.name));

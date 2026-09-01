@@ -206,8 +206,8 @@ export interface Settings {
 export const DEFAULT_SERVER_HOST = "server.slsknet.org";
 export const DEFAULT_SERVER_PORT = 2242;
 
-// Mirrors pynicotine/config.py defaults (browser-relevant subset) — 49127 is VPN-forwarded default (was 62904)
-export const DEFAULT_LISTEN_PORT = 49127;
+// Mirrors pynicotine/config.py defaults (browser-relevant subset) — 60754 is VPN-forwarded default (was 62904)
+export const DEFAULT_LISTEN_PORT = 60754;
 
 export const defaults: Settings = {
   server: {
@@ -274,7 +274,7 @@ export const defaults: Settings = {
   },
   searches: {
     maxresults: 300,
-    max_displayed_results: 2500,
+    max_displayed_results: 400,
     min_search_chars: 3,
     enablefilters: false,
     defilter: {

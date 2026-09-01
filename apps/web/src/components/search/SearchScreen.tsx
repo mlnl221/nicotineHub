@@ -235,7 +235,7 @@ export function SearchScreen() {
             <p className="max-w-md font-body text-xs leading-relaxed text-on-surface-variant">
               {activeTab.reason === "timeout" && activeTab.total === 0 ? (
                 <>
-                  Soulseek returns results peer-to-peer to your listening port (currently <code className="rounded bg-surface-container-high px-1 py-0.5 font-mono text-[11px]">49127</code>). If this port isn&apos;t forwarded through your VPN/router and into WSL, searches will time out with 0 results.
+                  Soulseek returns results peer-to-peer to your listening port (currently <code className="rounded bg-surface-container-high px-1 py-0.5 font-mono text-[11px]">{settings.server.portrange[0] ?? 60754}</code>). If this port isn&apos;t forwarded through your VPN/router and into WSL, searches will time out with 0 results.
                   <br />
                   Check <a href="/settings?tab=network#network" className="text-primary underline">Settings → Network</a> and your ProtonVPN/Windows portproxy.
                 </>
@@ -247,7 +247,7 @@ export function SearchScreen() {
             </p>
             {activeTab.reason === "timeout" && activeTab.total === 0 ? (
               <div className="mt-2 rounded-lg bg-error-container/20 px-3 py-2 font-label text-[11px] text-on-error-container">
-                Search ended: timeout (no peer could connect back). This is expected if 49127 isn&apos;t reachable.
+                Search ended: timeout (no peer could connect back). This is expected if {settings.server.portrange[0] ?? 60754} isn&apos;t reachable.
               </div>
             ) : null}
             <button onClick={() => startSearch(activeTab.query, { mode: activeTab.mode, target: activeTab.target })} className="mt-2 rounded-full bg-primary px-4 py-2 font-label text-xs font-semibold text-on-primary">Search again</button>

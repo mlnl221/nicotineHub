@@ -49,7 +49,7 @@ export async function loginToServer(
 ): Promise<LoginOutcome> {
   const host = opts.host || DEFAULT_SERVER_HOST;
   const port = opts.port || DEFAULT_SERVER_PORT;
-  const listenPort = opts.listenPort ?? 62904;
+  const listenPort = opts.listenPort ?? 60754;
   const timeoutMs = opts.timeoutMs ?? 15_000;
 
   let settled = false;

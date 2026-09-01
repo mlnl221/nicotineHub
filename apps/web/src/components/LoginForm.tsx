@@ -126,7 +126,7 @@ export function LoginForm() {
                 placeholder="••••••••"
                 className="w-full bg-transparent border-none py-3 pl-10 pr-10 font-body text-sm text-on-surface dark:text-inverse-on-surface placeholder:text-outline-variant/50 focus:ring-0 focus:outline-none"
               />
-              <button type="button" onClick={() => setShowPass(!showPass)} aria-label="Toggle password visibility" className="absolute right-3 text-on-surface-variant/60 hover:text-primary transition-colors">
+              <button type="button" onClick={() => setShowPass(!showPass)} aria-label={showPass ? "Hide password" : "Show password"} aria-pressed={showPass} className="absolute right-3 text-on-surface-variant/60 hover:text-primary transition-colors">
                 <span className="material-symbols-outlined text-[18px]">{showPass ? "visibility_off" : "visibility"}</span>
               </button>
             </div>

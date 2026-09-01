@@ -6,6 +6,7 @@ type HealthJson = {
   listenPort?: number;
   upnp?: { enabled: boolean; active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null };
 };
+type PortCheckJson = { port: number; open: boolean | null; error?: string; upnp?: HealthJson["upnp"] };
 
 function getBridgeHttpBase(): string {
   const envUrl = typeof window !== "undefined" ? process.env.NEXT_PUBLIC_BRIDGE_URL : undefined;
@@ -40,9 +41,11 @@ export function PortChecker() {
     setResult(null);
     try {
       const httpBase = getBridgeHttpBase();
-      const [hRes, upnpRes] = await Promise.all([
+      const [hRes, upnpRes, pcRes] = await Promise.all([
         fetch(`${httpBase}/health?json=1`, { cache: "no-store" }),
         fetch(`${httpBase}/api/upnp/status`, { cache: "no-store" }).catch(() => null),
+        // external port check via slsknet.org (like nicotine-plus portchecker.py)
+        fetch(`${httpBase}/api/portchecker`, { cache: "no-store" }).catch(() => null),
       ]);
       const j = (await hRes.json().catch(() => ({}))) as HealthJson;
       const upnp = upnpRes ? ((await upnpRes.json().catch(() => ({}))) as HealthJson["upnp"]) : j.upnp;
@@ -50,17 +53,24 @@ export function PortChecker() {
         setResult({ ok: false, msg: `Health check failed: ${hRes.status}` });
         return;
       }
-      const port = j.listenPort ?? 49127;
+      const port = j.listenPort ?? 60754;
       const upnpInfo = upnp ?? j.upnp;
       let upnpMsg = "";
       if (upnpInfo) {
         if (!upnpInfo.enabled) upnpMsg = " UPnP disabled (manual forward required).";
         else if (upnpInfo.active) upnpMsg = ` UPnP via ${upnpInfo.active} mapped ${upnpInfo.port} → ${upnpInfo.ip}:${upnpInfo.port} ✓`;
-        else if (upnpInfo.error) upnpMsg = ` UPnP attempted but failed: ${upnpInfo.error} — ensure router supports UPnP/NAT-PMP or forward manually. Host network required inside Docker (else container 172.x).`;
+        else if (upnpInfo.error) upnpMsg = ` UPnP attempted but failed: ${upnpInfo.error} — ensure router supports UPnP/NAT-PMP or forward manually. Host network required inside Docker (else container 172.x). Use compose.gluetun.yaml if on Gluetun.`;
         else upnpMsg = " UPnP enabled — waiting for mapping (or router not found).";
       }
+      let extMsg = "";
+      if (pcRes) {
+        const pc = (await pcRes.json().catch(() => ({}))) as PortCheckJson;
+        if (pc.open === true) extMsg = ` External check: ${port}/tcp open ✓ (slsknet.org)`;
+        else if (pc.open === false) extMsg = ` External check: ${port}/tcp closed — forward ${port} on router/VPN or enable UPnP (slsknet.org).`;
+        else if (pc.error) extMsg = ` External check error: ${pc.error}`;
+      }
       setHealth(j);
-      setResult({ ok: true, msg: `Bridge reachable at ${httpBase} — listen port ${port}.${upnpMsg} Ensure ${port} is reachable (TCP) for incoming searches.` });
+      setResult({ ok: true, msg: `Bridge reachable at ${httpBase} — listen port ${port}.${upnpMsg}${extMsg} Ensure ${port} is reachable (TCP) for incoming searches.` });
     } catch (e) {
       setResult({ ok: false, msg: `Cannot reach bridge. Check NEXT_PUBLIC_BRIDGE_URL / localStorage.nicotineHub.bridgeUrl. ${(e as Error).message}` });
     } finally {
@@ -77,7 +87,7 @@ export function PortChecker() {
         <span className={`h-2 w-2 rounded-full ${state.status === "connected" ? "bg-green-500" : "bg-outline"}`} title={state.status} />
       </div>
       <p className="mb-3 text-xs text-on-surface-variant">
-        Search results require a reachable inbound peer listener. Default <code>LISTEN_PORT 49127</code> must be port-forwarded (TCP, see README) — edit in Settings → Network. UPnP/NAT-PMP auto-forwards when enabled (toggle in Network, renews every 2 h).
+        Search results require a reachable inbound peer listener. Default <code>LISTEN_PORT 60754</code> (configurable) must be port-forwarded (TCP, see README) — edit in Settings → Network. UPnP/NAT-PMP auto-forwards when enabled (toggle in Network, renews every 2 h). Currently <code>{health?.listenPort ?? 60754}</code>.
       </p>
       {health && (
         <div className="mb-3 rounded-xl bg-surface-container-high px-3 py-2 text-xs dark:bg-surface-container-highest/40">
