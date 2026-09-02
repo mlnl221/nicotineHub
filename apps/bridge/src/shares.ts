@@ -10,7 +10,7 @@
  * Also handles inbound FileSearch (server 26) filtering.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
-import { join, basename, relative, extname } from "node:path";
+import { join, basename, relative, extname, resolve } from "node:path";
 import { deflateSync } from "node:zlib";
 import { frameMessage, packString, packUint32, packUint64, PEER_MESSAGE_CODES, sanitizeSearchTerm } from "./soulseek.ts";
 
@@ -307,15 +307,32 @@ export class ShareDB {
   checkSharesAvailable(): boolean {
     return this.folders.length > 0 && this.folders.some(f => f.files.length > 0);
   }
+  // ponytail: /data is Docker convention; WSL bun DATA_DIR falls back to ./data — resolve /data/* against actual DATA_DIR
+  private resolveRealPath(p: string): string {
+    if (!p) return p;
+    if (existsSync(p)) return p;
+    if ((p === "/data" || p.startsWith("/data/")) && this.dataDir !== "/data") {
+      const suffix = p === "/data" ? "" : p.slice(5);
+      const cand = suffix ? join(this.dataDir, suffix.replace(/^\//, "")) : this.dataDir;
+      if (existsSync(cand)) return cand;
+      try {
+        const absCand = suffix ? resolve(this.dataDir, suffix.replace(/^\//, "")) : resolve(this.dataDir);
+        if (absCand !== cand && existsSync(absCand)) return absCand;
+      } catch {}
+    }
+    return p;
+  }
+
   /** Mirrors pynicotine/shares.py check_shares_available: list roots not accessible on bridge FS (e.g. /data/Music not mounted) */
   getUnavailableShares(): [string, string][] {
     const out: [string, string][] = [];
     for (const roots of this.customRootsByLevel.values()) {
       for (const [v, p] of roots) {
-        if (!existsSync(p)) out.push([v, p]);
+        const real = this.resolveRealPath(p);
+        if (!existsSync(real)) out.push([v, p]);
         else {
           try {
-            const st = statSync(p);
+            const st = statSync(real);
             if (!st.isDirectory() && !st.isFile()) out.push([v, p]);
           } catch {
             out.push([v, p]);
@@ -365,15 +382,16 @@ export class ShareDB {
     const beforePublic = level === PermissionLevel.PUBLIC ? [] : [...this.publicFolders];
     const beforeBuddy = level === PermissionLevel.BUDDY ? [] : [...this.buddyFolders];
     const beforeTrusted = level === PermissionLevel.TRUSTED ? [] : [...this.trustedFolders];
-    // Scan each requested root
+    // Scan each requested root — always on full real path, never virtual name
     for (const [virtualRaw, realRaw] of roots) {
       const vName = (virtualRaw || "").trim().replace(/[/\\]+/g, "_").replace(/^[" ]+|[" ]+$/g, "") || "Shared";
-      const rPath = (realRaw || "").trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
-      if (!vName || !rPath) continue;
+      const rawPath = (realRaw || "").trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
+      if (!vName || !rawPath) continue;
+      const rPath = this.resolveRealPath(rawPath);
       if (!existsSync(rPath)) {
         // Path not mounted — keep placeholder so UI shows, but no files. Persist virtual→real mapping anyway.
-        this.virtual2real.set(vName, rPath);
-        this.real2virtual.set(rPath, vName);
+        this.virtual2real.set(vName, rawPath);
+        this.real2virtual.set(rawPath, vName);
         // create empty folder entry so peer sees virtual name even if host path missing (nicotine parity: empty dirs still reported)
         const existsVirtual = folders.find((f) => f.name === vName);
         if (!existsVirtual) folders.push({ name: vName, files: [] });
@@ -418,8 +436,11 @@ export class ShareDB {
       for (const w of this.watchers) try { (w as unknown as { close: () => void }).close(); } catch {}
       this.watchers = [];
       const dirs = this.resolveSharedDirs();
-      // also watch custom roots
-      for (const [, r] of roots) if (existsSync(r)) dirs.push(r);
+      // also watch custom roots (resolve /data/* against DATA_DIR)
+      for (const [, r] of roots) {
+        const real = this.resolveRealPath(r.trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, ""));
+        if (existsSync(real)) dirs.push(real);
+      }
       for (const d of dirs) {
         if (!existsSync(d)) continue;
         try {
@@ -633,11 +654,12 @@ export class ShareDB {
     const folders: ShareFolder[] = [];
     for (const [virtualRaw, realRaw] of roots) {
       const vName = (virtualRaw || "").trim().replace(/[/\\]+/g, "_").replace(/^[" ]+|[" ]+$/g, "") || "Shared";
-      const rPath = (realRaw || "").trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
-      if (!vName || !rPath) continue;
+      const rawPath = (realRaw || "").trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
+      if (!vName || !rawPath) continue;
+      const rPath = this.resolveRealPath(rawPath);
       if (!existsSync(rPath)) {
-        this.virtual2real.set(vName, rPath);
-        this.real2virtual.set(rPath, vName);
+        this.virtual2real.set(vName, rawPath);
+        this.real2virtual.set(rawPath, vName);
         if (!folders.find((f) => f.name === vName)) folders.push({ name: vName, files: [] });
         continue;
       }
@@ -674,11 +696,12 @@ export class ShareDB {
     const folders: ShareFolder[] = [];
     for (const [virtualRaw, realRaw] of roots) {
       const vName = (virtualRaw || "").trim().replace(/[/\\]+/g, "_").replace(/^[" ]+|[" ]+$/g, "") || "Shared";
-      const rPath = (realRaw || "").trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
-      if (!vName || !rPath) continue;
+      const rawPath = (realRaw || "").trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
+      if (!vName || !rawPath) continue;
+      const rPath = this.resolveRealPath(rawPath);
       if (!existsSync(rPath)) {
-        this.virtual2real.set(vName, rPath);
-        this.real2virtual.set(rPath, vName);
+        this.virtual2real.set(vName, rawPath);
+        this.real2virtual.set(rawPath, vName);
         if (!folders.find((f) => f.name === vName)) folders.push({ name: vName, files: [] });
         continue;
       }
