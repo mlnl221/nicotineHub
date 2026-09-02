@@ -26,6 +26,8 @@ export interface SessionState {
   status: SessionStatus;
   error?: string;
   user?: string;
+  /** True while a background reconnect is in progress — UI stays on `connected` */
+  reconnecting?: boolean;
 }
 
 interface SessionApi {
@@ -154,12 +156,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (saved) {
           try {
             const parsed = JSON.parse(saved) as { user?: string };
-            if (parsed?.user) { setState({ status: "connected", user: parsed.user }); return; }
+            if (parsed?.user) { setState({ status: "connected", user: parsed.user, reconnecting: false }); return; }
           } catch {
-            if (saved === "1") { setState({ status: "connected", user: "demo" }); return; }
+            if (saved === "1") { setState({ status: "connected", user: "demo", reconnecting: false }); return; }
           }
         }
-      } else if (sessionStorage.getItem("__mockLoggedIn") === "1") setState({ status: "connected", user: "tester" });
+      } else if (sessionStorage.getItem("__mockLoggedIn") === "1") setState({ status: "connected", user: "tester", reconnecting: false });
     } catch {}
   }, []);
 
@@ -208,13 +210,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     clearCreds();
     teardown();
     lastLogin.current = null;
-    setState({ status: "idle" });
+    setState({ status: "idle", reconnecting: false });
   }, [teardown]);
 
   const connectSocket = useCallback((loginReq: Omit<LoginRequest, "type">) => {
     const gen = ++generation.current;
     socketRef.current?.close();
-    setState({ status: "connecting" });
+    // Background reconnect: keep UI on `connected` with subtle banner, don't flash fullscreen spinner
+    if (stateRef.current.status === "connected" || stateRef.current.reconnecting) {
+      setState((s) => ({ ...s, reconnecting: true, error: undefined }));
+    } else {
+      setState({ status: "connecting", reconnecting: false });
+    }
 
     const protocols = bridgeProtocols();
     const ws = protocols ? new WebSocket(bridgeUrl(), protocols) : new WebSocket(bridgeUrl());
@@ -259,55 +266,71 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // still forward to listeners in case someone cares
       }
 
-      switch (data.type) {
-        case "login:result":
-          if (data.ok) {
-            setState((s) => ({ ...s, status: "connected", user: loginReq.username, error: undefined }));
-            clearReconnect();
-            reconnectAttempts.current = 0;
-            shouldReconnect.current = true;
-          } else {
-            // auth failures should NOT auto-reconnect (invalid pass etc) — also clear persisted creds so we don't loop with bad password
-            const isAuthFailure = /INVALIDPASS|INVALIDUSERNAME|EMPTYPASSWORD|INVALIDVERSION/i.test(data.error || "");
-            if (isAuthFailure) {
-              clearCreds();
-              lastLogin.current = null;
+        switch (data.type) {
+          case "login:result":
+            if (data.ok) {
+              setState((s) => ({ ...s, status: "connected", user: loginReq.username, error: undefined, reconnecting: false }));
+              clearReconnect();
+              reconnectAttempts.current = 0;
+              shouldReconnect.current = true;
+            } else {
+              // auth failures should NOT auto-reconnect (invalid pass etc) — also clear persisted creds so we don't loop with bad password
+              const isAuthFailure = /INVALIDPASS|INVALIDUSERNAME|EMPTYPASSWORD|INVALIDVERSION/i.test(data.error || "");
+              if (isAuthFailure) {
+                clearCreds();
+                lastLogin.current = null;
+              }
+              shouldReconnect.current = !isAuthFailure;
+              const wasConnected = stateRef.current.status === "connected" || !!stateRef.current.reconnecting;
+              if (!isAuthFailure && wasConnected) {
+                // Background transient failure — keep UI interactive, retry silently
+                setState((s) => ({ ...s, error: data.error, reconnecting: true }));
+                clearHeartbeat();
+                if (shouldReconnect.current) scheduleReconnect();
+              } else {
+                setState((s) => ({ ...s, status: "failed", error: data.error, reconnecting: false }));
+                clearHeartbeat();
+                if (shouldReconnect.current) scheduleReconnect();
+              }
             }
-            shouldReconnect.current = !isAuthFailure;
-            setState((s) => ({ ...s, status: "failed", error: data.error }));
-            clearHeartbeat();
-            if (shouldReconnect.current) scheduleReconnect();
-          }
-          break;
+            break;
         case "server:reconnect": {
           // Bridge is reconnecting Soulseek TCP (e.g. after listening port change via portrange)
-          // Keep UI in connecting state so user sees progress; Web WS stays open
+          // WS stays open — reconnect silently with subtle banner, don't flash fullscreen spinner
           const d = data as unknown as { error?: string; ok?: boolean; listenPort?: number };
+          const wasConnected = stateRef.current.status === "connected" || !!stateRef.current.reconnecting;
           if (d.error) {
-            // reconnect-failed after 15 attempts or listen port bind failure — surface but keep creds for manual retry
-            setState((s) => ({ ...s, status: "failed", error: d.error }));
+            // reconnect-failed after 15 attempts or listen port bind failure
+            if (wasConnected) {
+              // Keep UI interactive, surface error subtly
+              setState((s) => ({ ...s, error: d.error, reconnecting: false }));
+            } else {
+              setState((s) => ({ ...s, status: "failed", error: d.error, reconnecting: false }));
+            }
           } else if (d.ok) {
-            // Fresh reconnect success (e.g. after port change) – WS never dropped, go back to connected
-            setState((s) => ({ ...s, status: "connected", error: undefined }));
+            // Fresh reconnect success (e.g. after port change) – WS never dropped
+            setState((s) => ({ ...s, status: "connected", error: undefined, reconnecting: false }));
             clearReconnect();
             reconnectAttempts.current = 0;
             shouldReconnect.current = true;
-          } else if (stateRef.current.status === "connected") {
-            setState((s) => ({ ...s, status: "connecting" }));
+          } else if (wasConnected) {
+            setState((s) => ({ ...s, reconnecting: true }));
+          } else if (stateRef.current.status !== "connected") {
+            setState((s) => ({ ...s, status: "connecting", reconnecting: false }));
           }
           break;
         }
         case "server:reconnected": {
           // Background reconnect succeeded (e.g. after port change) — restore connected without user re-login
-          setState((s) => ({ ...s, status: "connected", user: s.user ?? loginReq.username, error: undefined }));
+          setState((s) => ({ ...s, status: "connected", user: s.user ?? loginReq.username, error: undefined, reconnecting: false }));
           clearReconnect();
           reconnectAttempts.current = 0;
           shouldReconnect.current = true;
           break;
         }
         case "error":
-          if (stateRef.current.status !== "connected") {
-            setState((s) => ({ ...s, status: "failed", error: data.error }));
+          if (stateRef.current.status !== "connected" && !stateRef.current.reconnecting) {
+            setState((s) => ({ ...s, status: "failed", error: data.error, reconnecting: false }));
           }
           break;
       }
@@ -317,9 +340,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     ws.onerror = () => {
       if (generation.current !== gen) return;
-      // let onclose handle reconnect; just surface error if idle
-      if (stateRef.current.status !== "connected" && stateRef.current.status !== "connecting") {
-        setState((s) => ({ ...s, status: "failed", error: "Could not reach the Nicotine Hub bridge. Is it running?" }));
+      // let onclose handle reconnect; just surface error if idle/failed (not during background reconnect)
+      if (stateRef.current.status !== "connected" && stateRef.current.status !== "connecting" && !stateRef.current.reconnecting) {
+        setState((s) => ({ ...s, status: "failed", error: "Could not reach the Nicotine Hub bridge. Is it running?", reconnecting: false }));
       }
     };
 
@@ -335,13 +358,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         }
       }
       if (shouldReconnect.current && lastLogin.current) {
-        setState((s) => s.status === "connected" ? { ...s, status: "connecting" } : s);
+        const wasConnected = stateRef.current.status === "connected" || !!stateRef.current.reconnecting;
+        if (wasConnected) {
+          setState((s) => ({ ...s, reconnecting: true }));
+        } else {
+          setState((s) => ({ ...s, status: "connecting", reconnecting: false }));
+        }
         scheduleReconnect();
       } else {
+        const wasConnected = stateRef.current.status === "connected" || !!stateRef.current.reconnecting;
         setState((s) =>
-          s.status === "connected"
-            ? s
-            : { ...s, status: "failed", error: "Connection to the bridge closed." },
+          wasConnected
+            ? { ...s, reconnecting: false }
+            : { ...s, status: "failed", error: "Connection to the bridge closed.", reconnecting: false },
         );
       }
     };
@@ -406,18 +435,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const user = req.username.trim() || "demo";
         if (!req.username.trim() || !req.password) {
           if (!req.username.trim()) {
-            setState({ status: "failed", error: "Enter any username to try the demo." });
+            setState({ status: "failed", error: "Enter any username to try the demo.", reconnecting: false });
             return;
           }
         }
-        setState({ status: "connecting" });
+        setState({ status: "connecting", reconnecting: false });
         setTimeout(() => {
           try {
             sessionStorage.setItem("__mockLoggedIn", JSON.stringify({ user }));
             // Seed demo fixtures on first login — provides 2 chats/shares/profiles/searches/buddies/transfers
             if (isDemo) seedDemoStorage();
           } catch {}
-          setState({ status: "connected", user, error: undefined });
+          setState({ status: "connected", user, error: undefined, reconnecting: false });
           const result: BridgeOutboundMessage = {
             type: "login:result",
             ok: true,

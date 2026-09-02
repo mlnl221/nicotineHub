@@ -18,6 +18,7 @@ import { WindowGeometrySync } from "@/components/WindowGeometrySync";
 import { SpectrumProvider } from "@/lib/spectrum";
 import { SearchProvider } from "@/lib/search";
 import { BrowseProvider } from "@/lib/browse-tabs";
+import { ReconnectBanner } from "@/components/ReconnectBanner";
 
 export const metadata: Metadata = {
   title: "Nicotine Hub",
@@ -81,17 +82,18 @@ export default function RootLayout({
         <ThemeProvider>
           <ConfigProvider>
             <SessionProvider>
+              <ReconnectBanner />
               <SearchProvider>
                 <BrowseProvider>
                   <WishlistProvider>
                     <StatisticsProvider>
                       <TransfersProvider>
                         <SpectrumProvider>
-                         <ConfigBridgeSync />
-                         <ExitDialogHandler />
-                         <WindowGeometrySync />
-                         <NowPlayingSync />
-                         {children}
+                          <ConfigBridgeSync />
+                          <ExitDialogHandler />
+                          <WindowGeometrySync />
+                          <NowPlayingSync />
+                          {children}
                     <ToastHost />
                     <GlobalContextMenu />
                     </SpectrumProvider>

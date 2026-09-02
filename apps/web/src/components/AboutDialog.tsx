@@ -135,7 +135,7 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
                 <a href="/settings?tab=about#about" onClick={onClose} className="font-label text-xs font-semibold text-primary hover:underline">
                   Open full About page →
                 </a>
-                <span className="font-mono text-[10px] text-outline">Soulseek {soulseekClientVersion} experimental • 177/1</span>
+                <span className="font-mono text-[10px] text-outline">Soulseek {soulseekClientVersion} • 160/3</span>
               </div>
             </>
           ) : tab === "authors" ? (

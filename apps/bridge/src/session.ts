@@ -1081,8 +1081,19 @@ export class SoulseekSession {
           try { (sock as unknown as { setNoDelay?: (b: boolean) => void }).setNoDelay?.(true); } catch {}
           this.setTcpBufferSize(sock as Socket, "S");
           this.serverSocket = sock as Socket;
-          // Send Login only; SetWaitPort after success (nicotine parity)
-          sock.write(buildLogin(this.opts.username, this.opts.password));
+          // Send Login + SetWaitPort together (nicotine slskproto.py sends both before response;
+          // Soulseek.NET concatenates to avoid race). SetWaitPort is resent after success anyway.
+          try {
+            const loginBuf = buildLogin(this.opts.username, this.opts.password);
+            const waitPortBuf = buildSetWaitPort(this._listenPort);
+            // single flush like Soulseek.NET: Login+SetWaitPort concatenated
+            sock.write(Buffer.concat([loginBuf, waitPortBuf]));
+            logger.debug("server", "login+SetWaitPort sent", { len: loginBuf.length + waitPortBuf.length, loginLen: loginBuf.length, waitPortLen: waitPortBuf.length, hex: loginBuf.toString("hex").slice(0,120) + "..." });
+          } catch (e) {
+            // fallback
+            sock.write(buildLogin(this.opts.username, this.opts.password));
+            logger.warn("server", "login concat failed, fallback", { error: (e as Error).message });
+          }
         },
         data: (_sock, chunk) => this.handleServerData(chunk),
         error: (_sock, err) => {
@@ -1091,7 +1102,12 @@ export class SoulseekSession {
           this.scheduleReconnect(`Connection error: ${err.message}`);
         },
         close: () => {
-          logger.warn("server", "tcp close", { loggedIn: this.loggedIn, username: this.username });
+          // Diagnostic: log any buffered bytes before discarding (helps debug silent close vs rejection)
+          if (this.serverBuffer.length) {
+            logger.warn("server", "tcp close with buffered data", { loggedIn: this.loggedIn, username: this.username, bufLen: this.serverBuffer.length, bufHex: this.serverBuffer.toString("hex").slice(0,512) });
+          } else {
+            logger.warn("server", "tcp close", { loggedIn: this.loggedIn, username: this.username, bufLen: 0 });
+          }
           const wasLoggedIn = this.loggedIn;
           if (wasLoggedIn) {
             // Portmapper cleanup mirrors pynicotine _server_disconnect remove_port_mapping

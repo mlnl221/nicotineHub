@@ -11,7 +11,7 @@ export const buildDate: string = process.env.NEXT_PUBLIC_BUILD_DATE || "";
 
 export const appVersion: string = buildTag;
 
-export const soulseekClientVersion = "177.1";
+export const soulseekClientVersion = "160.3";
 
 export function displayVersion(): string {
   // Prefer buildTag; if it looks like sha-xxxx, keep as is, if numeric tag add v prefix for consistency
