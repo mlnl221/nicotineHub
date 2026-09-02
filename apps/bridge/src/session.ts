@@ -92,6 +92,7 @@ import {
   parsePierceFireWall,
   parsePlaceInQueueResponse,
   parsePossibleParents,
+  parsePrivileges,
   parsePrivilegedUsers,
   parseQueueUpload,
   parseRecommendations,
@@ -1467,7 +1468,10 @@ export class SoulseekSession {
             // local emit for search handling via shares
             try {
               const r2 = new SlskReader(dPayload);
-              if (r2.remaining >= 4) r2.uint32(); // identifier 49? optional
+              if (r2.remaining >= 4) {
+                const ident = r2.uint32();
+                if (ident !== 49) throw new Error("DistribSearch ident !=49");
+              }
               const user = r2.string(); const token = r2.uint32(); const query = r2.string();
               {
                 // per-file excluded filtering inside buildFileSearchResponse (not query-level)
@@ -1547,11 +1551,11 @@ export class SoulseekSession {
       return;
     }
     if (code === SERVER_MESSAGE_CODES.roomMembershipGranted) {
-      try { const m = parseRoomMember(payload); this.emitRoom({ type: "membership-granted", room: m.room, username: m.username }); } catch {}
+      try { const room = new SlskReader(payload).string(); this.emitRoom({ type: "membership-granted", room }); } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.roomMembershipRevoked) {
-      try { const m = parseRoomMember(payload); this.emitRoom({ type: "membership-revoked", room: m.room, username: m.username }); } catch {}
+      try { const room = new SlskReader(payload).string(); this.emitRoom({ type: "membership-revoked", room }); } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.addRoomOperator) {
@@ -1563,11 +1567,11 @@ export class SoulseekSession {
       return;
     }
     if (code === SERVER_MESSAGE_CODES.roomOperatorshipGranted) {
-      try { const m = parseRoomMember(payload); this.emitRoom({ type: "operatorship-granted", room: m.room, username: m.username }); } catch {}
+      try { const room = new SlskReader(payload).string(); this.emitRoom({ type: "operatorship-granted", room }); } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.roomOperatorshipRevoked) {
-      try { const m = parseRoomMember(payload); this.emitRoom({ type: "operatorship-revoked", room: m.room, username: m.username }); } catch {}
+      try { const room = new SlskReader(payload).string(); this.emitRoom({ type: "operatorship-revoked", room }); } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.roomOperators) {
@@ -1590,7 +1594,14 @@ export class SoulseekSession {
       try { const room = parseCantCreateRoom(payload); this.emitRoom({ type: "cant-create-room", room }); } catch {}
       return;
     }
-    if (code === SERVER_MESSAGE_CODES.userPrivileged || code === SERVER_MESSAGE_CODES.givePrivileges || code === SERVER_MESSAGE_CODES.notifyPrivileges || code === SERVER_MESSAGE_CODES.ackNotifyPrivileges) {
+    if (code === SERVER_MESSAGE_CODES.userPrivileged) {
+      try {
+        const { username } = (() => { try { return parsePrivileges(payload); } catch { return { username: "" }; } })();
+        if (username) this.emit({ type: "privileged-users", privilegedUsers: [username] });
+      } catch {}
+      return;
+    }
+    if (code === SERVER_MESSAGE_CODES.givePrivileges || code === SERVER_MESSAGE_CODES.notifyPrivileges || code === SERVER_MESSAGE_CODES.ackNotifyPrivileges) {
       try { const v = payload.length >= 4 ? payload.readUInt32LE(0) : 0; this.emit({ type: "check-privileges", checkPrivileges: v }); } catch {}
       return;
     }
@@ -2133,13 +2144,11 @@ export class SoulseekSession {
           } catch {}
         } else if (code === 3) {
           try {
-            const ds = (()=>{ try{ const r=new SlskReader(payload); // identifier 49?
+            const ds = (()=>{ try{ const r=new SlskReader(payload);
               if (r.remaining >=4) {
                 const id = r.uint32();
-                if (id !== 49 && r.remaining > 0) {
-                  // if not 49, maybe it's already username length — rewind?
-                }
-              }
+                if (id !== 49) return null;
+              } else return null;
               const u=r.string(); const t=r.uint32(); const q=r.string(); return { username:u, token:t, query:q, identifier: "1" }; } catch { return null; } })();
             if (ds) {
               // validate identifier should be "1" — if ds fails, ignore

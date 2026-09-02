@@ -1002,7 +1002,7 @@ export class ShareDB {
     parts.push(Buffer.from([freeSlots ? 1 : 0]));
     parts.push(packUint32(speed));
     parts.push(packUint32(inQueue));
-    // no private block
+    parts.push(packUint32(0)); // unknown 0 separator before private block (Peer Code 9 step 8)
     const inner = Buffer.concat(parts);
     const compressed = deflateSync(inner);
     return frameMessage(PEER_MESSAGE_CODES.fileSearchResponse, compressed);

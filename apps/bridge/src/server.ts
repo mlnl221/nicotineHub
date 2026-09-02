@@ -209,8 +209,35 @@ const APP_VERSION = process.env.APP_VERSION || process.env.BUILD_TAG || process.
 const COMMIT_SHA = (process.env.COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 7);
 const BUILD_DATE = process.env.BUILD_DATE || process.env.NEXT_PUBLIC_BUILD_DATE || "";
 
+// Ensure data volume exists (dev/sandbox fallback when /data not writable)
+// WSL bun dev: /data not writable → fallback to ./data or /tmp/nicotine-hub, then env-sync so ShareDB/others see same dir.
+// MUST run before any DATA_DIR-dependent reads (listen_port, upnp, PluginManager) — otherwise WSL fallback causes EACCES.
+try {
+  mkdirSync(DATA_DIR, { recursive: true });
+} catch {
+  const { tmpdir } = require("node:os") as typeof import("node:os");
+  const fallbacks = ["./data", join(tmpdir(), "nicotine-hub")];
+  for (const cand of fallbacks) {
+    try {
+      mkdirSync(cand, { recursive: true });
+      const testFile = join(cand, ".writetest");
+      writeFileSync(testFile, "ok");
+      rmSync(testFile);
+      if (DATA_DIR === "/data") {
+        console.warn(`[bridge] DATA_DIR /data not writable, falling back to ${cand}`);
+        DATA_DIR = cand;
+        try { process.env.DATA_DIR = cand; } catch {}
+      }
+      break;
+    } catch {}
+  }
+}
+// Ensure env reflects resolved DATA_DIR for ShareDB defaultDataDir() and diagnostics
+try { if (process.env.DATA_DIR !== DATA_DIR) process.env.DATA_DIR = DATA_DIR; } catch {}
+
 // Persisted listen port override (homelab: survives restart without compose change)
 // File DATA_DIR/listen_port overrides env default but env wins if explicitly set.
+// Now reads from resolved DATA_DIR (fallback-aware).
 try {
   if (!process.env.LISTEN_PORT) {
     const _persistedPath = join(DATA_DIR, "listen_port");
@@ -255,7 +282,11 @@ function getGlobalPortMapperStatus(): { enabled: boolean; active: string | null;
   return best;
 }
 
+// Active Soulseek sessions across all WS connections (for global port sync)
+const activeSessions = new Set<SoulseekSession>();
+
 // Global plugin manager (shared across WS, but per-WS session getter is swapped)
+// Must be after DATA_DIR fallback — otherwise WSL uses stale "/data" and EACCES on persist.
 const pluginManager = new PluginManager({ dataDir: DATA_DIR });
 pluginManager.registerBuiltin("core_commands", coreCommandsManifest as unknown as Record<string, unknown>, () => new CoreCommandsPlugin());
 pluginManager.registerBuiltin("spamfilter", spamManifest as unknown as Record<string, unknown>, () => new SpamfilterPlugin());
@@ -264,9 +295,6 @@ pluginManager.registerBuiltin("leech_detector", leechManifest as unknown as Reco
 pluginManager.start().catch((e) => logger.warn("bridge", "plugin manager start failed", { error: (e as Error).message }));
 // expose for http handlers
 (globalThis as unknown as Record<string, unknown>).__pluginManager = pluginManager;
-
-// Active Soulseek sessions across all WS connections (for global port sync)
-const activeSessions = new Set<SoulseekSession>();
 
 // ── 5-minute in-memory caches (per-process, ephemeral) ──
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -296,31 +324,6 @@ function setCachedSearch(key: string, rows: unknown[], total: number) {
 // Exported for session.ts integration (optional)
 export const bridgeCaches = { searchCache, browseCache, userInfoCache, getCachedSearch, setCachedSearch };
 // ─────────────────────────────────────────────────────────
-
-// Ensure data volume exists (dev/sandbox fallback when /data not writable)
-// WSL bun dev: /data not writable → fallback to ./data or /tmp/nicotine-hub, then env-sync so ShareDB/others see same dir.
-try {
-  mkdirSync(DATA_DIR, { recursive: true });
-} catch {
-  const { tmpdir } = require("node:os") as typeof import("node:os");
-  const fallbacks = ["./data", join(tmpdir(), "nicotine-hub")];
-  for (const cand of fallbacks) {
-    try {
-      mkdirSync(cand, { recursive: true });
-      const testFile = join(cand, ".writetest");
-      writeFileSync(testFile, "ok");
-      rmSync(testFile);
-      if (DATA_DIR === "/data") {
-        console.warn(`[bridge] DATA_DIR /data not writable, falling back to ${cand}`);
-        DATA_DIR = cand;
-        try { process.env.DATA_DIR = cand; } catch {}
-      }
-      break;
-    } catch {}
-  }
-}
-// Ensure env reflects resolved DATA_DIR for ShareDB defaultDataDir() and diagnostics
-try { if (process.env.DATA_DIR !== DATA_DIR) process.env.DATA_DIR = DATA_DIR; } catch {}
 
 function errorMessage(error: string): string { return JSON.stringify({ type: "error", error }); }
 
