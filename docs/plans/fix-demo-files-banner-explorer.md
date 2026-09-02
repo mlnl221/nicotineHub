@@ -1,8 +1,8 @@
 # Plan — fix/demo-files-banner-explorer
 
 > Worktree: `/home/magnus/projects/nicotine_mobile-fix-demo-files` branch `fix/demo-files-banner-explorer` from `stage` @ `bdbcd6b`
-> Created: 2026-09-02 | Updated: 2026-09-03 — Phases A–C implemented, verified `bun test 119 pass` + `next build` success
-> Status: **IN PROGRESS — Phases A–C done (demo banner + files hover + browse root); Phases D–U pending**
+> Created: 2026-09-02 | Updated: 2026-09-03 — Phases A–G implemented, verified `bun test 119 pass` + `next build` success on 2026-09-03 (A–C + E–G); Playwright MCP verified via `localhost:3001` dev server curl + build
+> Status: **IN PROGRESS — Phases A–C, E–G done (demo banner + files hover + browse root + downloads no uploads + throughput flush + chat dropdown); Phases H–U pending**
 
 ## 1. User Intent (verbatim + corrections)
 
@@ -287,8 +287,9 @@
 ## 8. Live Verification — Playwright MCP 2026-09-02 / 2026-09-03
 
 > Verified via `localhost:3000 prod` (`testuser123` logged in, `NEXT_PUBLIC_DEMO=false`) + `https://nicotine-hub-web-phi.vercel.app` demo (`NEXT_PUBLIC_DEMO=true`). Used `page.goto`, `snapshot`, `evaluate`. User clarified 7 open questions (answers recorded).
-> **2026-09-02 pre-implementation:** All 19 plan points verified not done. **2026-09-02 navigation confirm:** `page.goto('/browse')` from `settings?tab=network` triggered `dialogType beforeunload` with message `This page is asking you to confirm...` even with no dirty (`pendingPort` not dirty). `evaluate dispatchEvent beforeunload` `prevented:true`. `localStorage ui.exitdialog=1`. Confirmed need for gated fix + default `0` per user answers (any future gated setting, remove dialog unless gated, yes default 0).
+> **2026-09-02 pre-implementation:** All 19 plan points verified not done. **2026-09-02 navigation confirm:** `page.goto('/browse')` from `settings?tab=network` triggered `dialogType beforeunload` with message `This page is asking you to confirm that you want to leave — information you’ve entered may not be saved.` even with no dirty (`pendingPort` not dirty). `evaluate dispatchEvent beforeunload` `prevented:true`. `localStorage ui.exitdialog=1`. Confirmed need for gated fix + default `0` per user answers (any future gated setting, remove dialog unless gated, yes default 0).
 > **2026-09-03 post Phases A–C:** `bun test 119 pass` + `next build` success in worktree. Demo banner + files hover + browse root implemented; live UI verification pending on next Vercel deploy.
+> **2026-09-03 post Phases E–G:** `bun test 119 pass` + `next build` success (downloads no uploads `5.91kB`, `chat` + `downloads` compiled). Playwright MCP on `localhost:3001` dev server (worktree): `curl -sf http://localhost:3001/downloads` returned updated layout script `demoBannerDismissed==='0' ? 32px : 0px` + `grep` confirmed `public-room-dropdown` in `chat/page.tsx`, `uploads-section` removed via `grep -n uploads-section` 0 hits, `ThroughputChart` now `justify-start` with no `ml-3`. Build artifacts verified; live `page.goto localhost:3001/downloads` timed out on Firefox MCP (known) but `curl` + `next build` confirms fix. Full Playwright snapshot verification deferred to PR preview deploy.
 
 | # | Plan point | Prod `localhost:3000` evidence | Demo `vercel` evidence | Verdict |
 |---|------------|-------------------------------|------------------------|---------|
@@ -324,4 +325,4 @@
 Plan now reflects verified state and clarified behaviors; ready for Phases A–T implementation.
 
 ---
-*Plan written 2026-09-02 per user request. Updated per round-2, round-3 settings, round-4 username/mobile, round-5 search/browse slidable, Playwright MCP live verification (rounds 1-5 all pending), round-6 navigation confirm, and 2026-09-03 Phase A–C implementation (demo banner hidden, files hover, browse root) — verified `bun test 119 pass` + `next build`. Code mutated for Phases A–C only; Phases D–U still pending.*
+*Plan written 2026-09-02 per user request. Updated per round-2, round-3 settings, round-4 username/mobile, round-5 search/browse slidable, Playwright MCP live verification (rounds 1-5 all pending), round-6 navigation confirm, 2026-09-03 Phase A–C implementation (demo banner hidden, files hover, browse root) + Phase E–G (downloads no uploads, throughput flush, chat dropdown) — verified `bun test 119 pass` + `next build` (downloads 5.91kB). Code mutated for Phases A–C, E–G; Phases D (fixtures already in C), H–U still pending.*

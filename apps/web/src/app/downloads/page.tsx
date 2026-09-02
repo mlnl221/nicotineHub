@@ -37,20 +37,17 @@ function isAudioForSpectrum(fileName: string): boolean {
 }
 
 function DownloadsInner() {
-  const { downloads, uploads, stats, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer } = useTransfers();
+  const { downloads, stats, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer } = useTransfers();
   const { total } = useStatistics();
   const { settings, setOption } = useConfig();
   const searches = useSearchesOptional();
   const router = useRouter();
   const { requestSpectrum, getEntry } = useSpectrum();
   const totalDown = stats?.downloadSpeed ?? downloads.filter(d => d.status==="Transferring").reduce((s,t)=>s+t.speed,0);
-  const totalUp = stats?.uploadSpeed ?? uploads.filter(u=>u.status==="Transferring").reduce((s,t)=>s+t.speed,0);
-  const activeCount = downloads.length + uploads.length;
-  const [tab, setTab] = useState<"downloads" | "uploads">("downloads");
-  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; transfer: import("@/lib/protocol").Transfer; isUpload: boolean } | null>(null);
+  const totalUp = stats?.uploadSpeed ?? 0;
+  const activeCount = downloads.length;
 
   const dlCount = downloads.length;
-  const ulCount = uploads.length;
   const dlDone = total?.completed_downloads ?? 0;
   const dlSize = total?.downloaded_size ?? 0;
   const dlPeers = new Set(downloads.map((d) => d.username)).size;
@@ -108,7 +105,7 @@ function DownloadsInner() {
   return (
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
-      <TopBar title="Downloads" subtitle={`${dlCount} downloading • ${ulCount} uploading`} />
+      <TopBar title="Downloads" subtitle={`${dlCount} downloading`} />
       <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <PageHeader
           title="Downloads"
@@ -132,15 +129,8 @@ function DownloadsInner() {
 
           <DownloadStats />
 
-          {/* Mobile tab switcher — downloads tab + download stats replacing uploads button per design */}
+          {/* Mobile download stats */}
           <div className="flex xl:hidden rounded-xl bg-surface-container-low p-1 gap-1">
-            <button
-              data-testid="tab-downloads"
-              onClick={() => setTab("downloads")}
-              className={`flex-1 min-h-11 py-3 rounded-lg font-label text-xs sm:text-sm font-semibold truncate transition-colors ${tab==="downloads" ? "bg-surface-container-lowest shadow text-primary" : "text-on-surface-variant"}`}
-            >
-              Downloading ({dlCount})
-            </button>
             <div
               data-testid="download-stats"
               className="flex-1 min-h-11 py-2 px-2 rounded-lg bg-surface-container-lowest ghost-border flex flex-col items-center justify-center text-center"
@@ -150,8 +140,8 @@ function DownloadsInner() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 max-w-full overflow-hidden">
-            <section data-testid="downloads-section" className={`${tab==="downloads" ? "flex" : "hidden"} xl:flex flex-col gap-4 bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border max-w-full overflow-hidden`}>
+          <div className="grid grid-cols-1 gap-6 max-w-full overflow-hidden">
+            <section data-testid="downloads-section" className="flex flex-col gap-4 bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border max-w-full overflow-hidden">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <h3 className="font-headline text-xl font-semibold flex items-center gap-2">
                   <span className="material-symbols-outlined text-primary">download</span>
@@ -223,40 +213,6 @@ function DownloadsInner() {
                       </div>
                     );
                   })}
-                </div>
-              )}
-            </section>
-
-            <section data-testid="uploads-section" className={`${tab==="uploads" ? "flex" : "hidden"} xl:flex flex-col gap-4 bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border max-w-full overflow-hidden`}>
-              <h3 className="font-headline text-xl font-semibold flex items-center gap-2">
-                <span className="material-symbols-outlined text-tertiary">upload</span>
-                Uploading ({ulCount})
-              </h3>
-              {uploads.length === 0 ? (
-                <div data-testid="empty-uploads" className="py-12 text-center">
-                  <p className="font-body text-on-surface-variant">No active uploads</p>
-                  <p className="font-label text-xs text-outline mt-2 max-w-sm mx-auto">Uploads are queued but cannot start until you configure Shares. This matches nicotine+ behavior where uploads remain visible but disabled when no shares are set.</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {uploads.map((t) => (
-                    <div key={t.id} onContextMenu={(e) => { e.preventDefault(); setMenuAnchor({ x: e.clientX, y: e.clientY, transfer: t, isUpload: true }); }}>
-                      <TransferCard
-                        transfer={t}
-                        onCancel={() => clearTransfer(t.id, true)}
-                        onClear={() => clearTransfer(t.id, true)}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-              {uploads.length === 0 && (
-                <div className="bg-tertiary-fixed/30 dark:bg-tertiary-container/20 rounded-lg p-4 flex gap-3 items-start">
-                  <span className="material-symbols-outlined text-tertiary text-xl">info</span>
-                  <div>
-                    <p className="font-label text-xs font-semibold text-on-tertiary-container dark:text-tertiary-fixed">No shared folders</p>
-                    <p className="font-label text-xs text-on-surface-variant mt-1">Configure shared folders in Settings → Shares to enable uploads. Queue remains inspectable.</p>
-                  </div>
                 </div>
               )}
             </section>

@@ -132,8 +132,8 @@ export function ThroughputChart() {
       </div>
 
       {/* Header — always on top, with backdrop so trendline is behind and dimmed under text */}
-      <div className="relative z-10 flex flex-1 flex-col justify-between p-5 md:p-6 pointer-events-none">
-        <div className="pointer-events-auto w-fit max-w-full rounded-xl bg-surface/60 dark:bg-surface-container-lowest/60 backdrop-blur-sm shadow-sm ghost-border px-3 py-2.5 md:px-4 md:py-3 ml-3 md:ml-6">
+      <div className="relative z-10 flex flex-1 flex-col justify-start p-5 md:p-6 pointer-events-none">
+        <div className="pointer-events-auto w-fit max-w-full rounded-xl bg-surface/60 dark:bg-surface-container-lowest/60 backdrop-blur-sm shadow-sm ghost-border px-3 py-2.5 md:px-4 md:py-3">
           <h3 className="font-label text-xs md:text-sm uppercase tracking-widest text-on-surface-variant dark:text-outline">Network Throughput</h3>
           <div className="font-headline text-xl md:text-2xl font-semibold dark:text-on-surface leading-tight">Real-time Bandwidth</div>
           <div className="mt-1 flex flex-wrap items-center gap-2 md:gap-3 font-label text-xs">

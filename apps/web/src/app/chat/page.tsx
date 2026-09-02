@@ -15,6 +15,7 @@ import { useCompletion } from "@/lib/completion";
 import { useBuddies } from "@/lib/buddies";
 import { highlightKeywords, usernameHotspotClass } from "@/lib/chatFormat";
 import { isDemo } from "@/lib/demo";
+import { DEMO_ROOMS } from "@/lib/demo/fixtures";
 
 export default function ChatRoomsPage() {
   const { state } = useSession();
@@ -32,9 +33,13 @@ export default function ChatRoomsPage() {
 
   const activeMessages = activeRoom ? messages.get(activeRoom) || [] : [];
   const joinedArray = Array.from(joinedRooms.values());
+  const sortedRooms = (() => {
+    const list = roomList.length ? roomList : isDemo ? DEMO_ROOMS.map((r) => ({ name: r.name, users: r.users })) : [];
+    return [...list].sort((a, b) => b.users - a.users);
+  })();
   const filteredRooms = filter
-    ? roomList.filter((r) => r.name.toLowerCase().includes(filter.toLowerCase()))
-    : roomList;
+    ? sortedRooms.filter((r) => r.name.toLowerCase().includes(filter.toLowerCase()))
+    : sortedRooms;
   const activeUsers = activeRoom ? joinedRooms.get(activeRoom)?.users || [] : [];
   const activeTickers = activeRoom ? joinedRooms.get(activeRoom)?.tickers || [] : [];
   const CORE_COMMANDS = ["help","plugin","clear","me","now","join","leave","say","pm","close","msg","ctcp","add","rem","browse","whois","ip","ban","unban","ignore","unignore","share","unshare","shares","rescan","search","rsearch","bsearch","usearch","connect","disconnect","away","quit"];
@@ -113,6 +118,22 @@ export default function ChatRoomsPage() {
                   Join
                 </button>
               </div>
+              <select
+                data-testid="public-room-dropdown"
+                value=""
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v) setJoinInput(v);
+                }}
+                className="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2.5 text-sm focus:border-primary outline-none"
+              >
+                <option value="">Choose a room to join… ({sortedRooms.length})</option>
+                {sortedRooms.slice(0, 50).map((r) => (
+                  <option key={r.name} value={r.name}>
+                    {r.name} ({r.users})
+                  </option>
+                ))}
+              </select>
               <label className="flex items-center gap-2 text-xs text-on-surface-variant">
                 <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} className="rounded" />
                 Private room
@@ -241,6 +262,22 @@ export default function ChatRoomsPage() {
                   Join
                 </button>
               </div>
+              <select
+                data-testid="public-room-dropdown"
+                value=""
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v) setJoinInput(v);
+                }}
+                className="mt-2 w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2.5 text-sm focus:border-primary outline-none"
+              >
+                <option value="">Choose a room to join… ({sortedRooms.length})</option>
+                {sortedRooms.slice(0, 50).map((r) => (
+                  <option key={r.name} value={r.name}>
+                    {r.name} ({r.users})
+                  </option>
+                ))}
+              </select>
               <label className="mt-2 flex items-center gap-2 text-xs text-on-surface-variant">
                 <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} /> Private
               </label>
