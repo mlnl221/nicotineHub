@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, statSync, readdirSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { logger } from "./logger.ts";
 
 export const SPECTRUM_DIR = process.env.SPECTRUM_DIR || "/tmp/hub-spectrum";
@@ -68,66 +68,102 @@ function pruneIfNeeded() {
   } catch {}
 }
 
-async function runSox(inputPath: string, fullPath: string, zoomPath: string, zoomStart: number): Promise<void> {
-  const args = [
-    "--multi-threaded",
-    inputPath,
-    "--buffer",
-    "128000",
-    "-n",
-    "remix",
-    "1",
-    "spectrogram",
-    "-x",
-    "2000",
-    "-y",
-    "513",
-    "-z",
-    "120",
-    "-w",
-    "Kaiser",
-    "-o",
-    fullPath,
-    "remix",
-    "1",
-    "spectrogram",
-    "-x",
-    "500",
-    "-y",
-    "1025",
-    "-z",
-    "120",
-    "-w",
-    "Kaiser",
-    "-S",
-    String(zoomStart),
-    "-d",
-    "0:02",
-    "-o",
-    zoomPath,
-  ];
+function needsTranscode(ext: string): boolean {
+  // sox on this image supports flac/wav/aiff/ogg but not m4a/mp3/aac/wma/opus (see `sox --help` AUDIO FILE FORMATS)
+  return ["mp3", "m4a", "aac", "wma", "opus", "alac"].includes(ext.toLowerCase());
+}
 
-  await new Promise<void>((resolveP, reject) => {
-    const child = spawn("sox", args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stderr = "";
-    child.stderr?.on("data", (d) => (stderr += String(d)));
-    // timeout 90s
-    const timer = setTimeout(() => {
-      try {
-        child.kill("SIGKILL");
-      } catch {}
-      reject(new Error("sox timeout after 90s"));
-    }, 90_000);
-    child.on("error", (e) => {
-      clearTimeout(timer);
-      reject(e);
+async function transcodeToWav(inputPath: string): Promise<string | null> {
+  try {
+    const tmp = join(SPECTRUM_DIR, `.transcode-${Date.now()}-${Math.random().toString(36).slice(2,6)}.wav`);
+    mkdirSync(SPECTRUM_DIR, { recursive: true });
+    const r = spawnSync("ffmpeg", ["-y", "-i", inputPath, "-ac", "1", "-ar", "44100", "-c:a", "pcm_s16le", tmp], { stdio: "ignore", timeout: 20000 });
+    if (r.status === 0 && existsSync(tmp) && statSync(tmp).size > 1000) return tmp;
+    try { unlinkSync(tmp); } catch {}
+  } catch {}
+  return null;
+}
+
+async function runSox(inputPath: string, fullPath: string, zoomPath: string, zoomStart: number): Promise<void> {
+  const ext = inputPath.split(".").pop()?.toLowerCase() ?? "";
+  let effectiveInput = inputPath;
+  let tmpWav: string | null = null;
+  // Pre-transcode m4a/mp3 etc via ffmpeg so sox can handle it (ponytail: one transcoding pass, not custom decoder)
+  if (needsTranscode(ext)) {
+    const transcoded = await transcodeToWav(inputPath);
+    if (transcoded) { effectiveInput = transcoded; tmpWav = transcoded; }
+  }
+
+  const run = async (inp: string) => {
+    const args = [
+      "--multi-threaded",
+      inp,
+      "--buffer",
+      "128000",
+      "-n",
+      "remix",
+      "1",
+      "spectrogram",
+      "-x",
+      "2000",
+      "-y",
+      "513",
+      "-z",
+      "120",
+      "-w",
+      "Kaiser",
+      "-o",
+      fullPath,
+      "remix",
+      "1",
+      "spectrogram",
+      "-x",
+      "500",
+      "-y",
+      "1025",
+      "-z",
+      "120",
+      "-w",
+      "Kaiser",
+      "-S",
+      String(zoomStart),
+      "-d",
+      "0:02",
+      "-o",
+      zoomPath,
+    ];
+    await new Promise<void>((resolveP, reject) => {
+      const child = spawn("sox", args, { stdio: ["ignore", "pipe", "pipe"] });
+      let stderr = "";
+      child.stderr?.on("data", (d) => (stderr += String(d)));
+      const timer = setTimeout(() => {
+        try { child.kill("SIGKILL"); } catch {}
+        reject(new Error("sox timeout after 90s"));
+      }, 90_000);
+      child.on("error", (e) => { clearTimeout(timer); reject(e); });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        if (code === 0) resolveP();
+        else reject(new Error(`sox exited ${code}: ${stderr.slice(0, 500)}`));
+      });
     });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolveP();
-      else reject(new Error(`sox exited ${code}: ${stderr.slice(0, 500)}`));
-    });
-  });
+  };
+
+  try {
+    await run(effectiveInput);
+  } catch (e) {
+    const msg = (e as Error).message || "";
+    // Fallback: if sox failed due to missing handler and we haven't yet transcoded, try ffmpeg transcode once
+    if (!tmpWav && (msg.includes("no handler") || msg.includes("FAIL formats"))) {
+      const transcoded = await transcodeToWav(inputPath);
+      if (transcoded) {
+        tmpWav = transcoded; effectiveInput = transcoded;
+        await run(effectiveInput);
+      } else throw e;
+    } else throw e;
+  } finally {
+    if (tmpWav) try { unlinkSync(tmpWav); } catch {}
+  }
 }
 
 async function compressPng(pngPath: string): Promise<void> {

@@ -681,6 +681,26 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           const altCand = resolve(join(downloadsDir, altSafe));
           if (altCand.startsWith(downloadsDir + "/") && existsSync(altCand)) filePath = altCand;
         }
+        // Legacy stubs: scan DATA_DIR recursively (e.g. DATA_DIR/DJSplash/file.m4a) so old Finished without downloads dest still serves actual file
+        if (!filePath || !existsSync(filePath)) {
+          try {
+            const { readdirSync: rds, statSync: sts } = require("node:fs") as typeof import("node:fs");
+            const scan = (dir: string, target: string, depth = 2): string | null => {
+              try {
+                const c = resolve(join(dir, target));
+                if (c.startsWith(resolve(DATA_DIR) + "/") && existsSync(c)) return c;
+                if (depth <= 0 || !existsSync(dir)) return null;
+                for (const ent of rds(dir)) {
+                  const p = resolve(join(dir, ent));
+                  try { if (sts(p).isDirectory() && p.startsWith(resolve(DATA_DIR) + "/")) { const r = scan(p, target, depth - 1); if (r) return r; } } catch {}
+                }
+              } catch {}
+              return null;
+            };
+            const hit = scan(DATA_DIR, safeName, 2) || scan(DATA_DIR, sanitizeFileNameForHeader(fileName), 2);
+            if (hit && existsSync(hit)) filePath = hit;
+          } catch {}
+        }
         if (!filePath || !existsSync(filePath)) return new Response("Not found", { status: 404, headers: secHeaders });
         const file = Bun.file(filePath);
         const safeDisposition = sanitizeFileNameForHeader(safeName);
@@ -1493,21 +1513,35 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           try { filePath = tm.getFilePathForToken(tr.token); } catch {}
         }
         if (!filePath) {
-          // Fallback: try downloads dir directly
+          // Fallback: try downloads dir + recursive DATA_DIR scan (handles WSL DJSplash share + legacy stubs)
           try {
-            const { existsSync, statSync } = require("node:fs") as typeof import("node:fs");
+            const { existsSync } = require("node:fs") as typeof import("node:fs");
             const { join, resolve } = require("node:path") as typeof import("node:path");
             const cand = resolve(join(DATA_DIR, "downloads", tr.fileName.replace(/[/\\]/g, "_")));
             if (existsSync(cand)) filePath = cand;
             else {
-              // scan downloads dir
-              const { readdirSync } = require("node:fs") as typeof import("node:fs");
+              const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
               const dir = resolve(join(DATA_DIR, "downloads"));
               try {
                 const ents = readdirSync(dir);
                 const m = ents.find((f) => f === tr.fileName);
                 if (m) filePath = join(dir, m);
               } catch {}
+              if (!filePath) {
+                const scan = (d: string, target: string, depth = 2): string | null => {
+                  try {
+                    const c = resolve(join(d, target));
+                    if (c.startsWith(resolve(DATA_DIR) + "/") && existsSync(c)) return c;
+                    if (depth <= 0 || !existsSync(d)) return null;
+                    for (const ent of readdirSync(d)) {
+                      const p = resolve(join(d, ent));
+                      try { if (statSync(p).isDirectory() && p.startsWith(resolve(DATA_DIR) + "/")) { const r = scan(p, target, depth - 1); if (r) return r; } } catch {}
+                    }
+                  } catch {}
+                  return null;
+                };
+                filePath = scan(DATA_DIR, tr.fileName, 2) || scan(DATA_DIR, tr.fileName.replace(/[/\\]/g, "_"), 2);
+              }
             }
           } catch {}
         }

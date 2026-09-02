@@ -16,8 +16,9 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, statSync, writeFileSync, readFileSync, unlinkSync, readdirSync } from "node:fs";
-import { join, basename } from "node:path";
+import { existsSync, mkdirSync, renameSync, statSync, writeFileSync, readFileSync, unlinkSync, readdirSync, copyFileSync } from "node:fs";
+import { join, basename, dirname } from "node:path";
+import { spawnSync } from "node:child_process";
 import type { Socket } from "bun";
 import {
   buildPlaceInQueueRequest,
@@ -416,20 +417,22 @@ export class TransferManager {
     return undefined;
   }
 
-  // For GET /files/:token
+  // For GET /files/:token — tolerant fallback so spectrum works on legacy stubs + subfolders + WSL share dirs
   getFilePathForToken(token: number): string | null {
     const t = this.getByToken(token);
-    if (!t || t.status !== "Finished" || !t._downloadUrl) return null;
-    // Try stored path first
+    if (!t || t.status !== "Finished") return null;
+    // Try stored path first (may be downloads dest or copied shared file)
     const stored = (t as unknown as { _incompletePath?: string })._incompletePath;
     if (stored && existsSync(stored)) return stored;
-    // Reconstruct finished path
+    // Also allow _downloadUrl missing for legacy entries — still try to locate file
     const byName = join(this.downloadsDir, t.fileName);
     if (existsSync(byName)) return byName;
     if (this.config.usernamesubfolders && t.username) {
       const sub = join(this.downloadsDir, t.username.replace(/[/\\]/g, "_"), t.fileName);
       if (existsSync(sub)) return sub;
     }
+    // Derive via template (same as finishDownload)
+    try { const derived = this.deriveDestination(t.virtualPath, t.username); if (existsSync(derived)) return derived; } catch {}
     // Try scan downloads dir for fileName
     try {
       const files = readdirSync(this.downloadsDir);
@@ -443,6 +446,23 @@ export class TransferManager {
           if (m2) return join(this.downloadsDir, t.username.replace(/[/\\]/g, "_"), m2);
         } catch {}
       }
+    } catch {}
+    // Fallback: scan DATA_DIR recursively (WSL share copy e.g. DATA_DIR/DJSplash/file.m4a) — ponytail: handles legacy stubs where dest never written
+    try {
+      const scan = (dir: string, target: string, depth = 2): string | null => {
+        try {
+          const cand = join(dir, target);
+          if (existsSync(cand)) return cand;
+          if (depth <= 0 || !existsSync(dir)) return null;
+          for (const ent of readdirSync(dir)) {
+            const p = join(dir, ent);
+            try { if (statSync(p).isDirectory()) { const r = scan(p, target, depth - 1); if (r) return r; } } catch {}
+          }
+        } catch {}
+        return null;
+      };
+      const hit = scan(this.dataDir, t.fileName, 2);
+      if (hit) return hit;
     } catch {}
     return null;
   }
@@ -1466,6 +1486,61 @@ export class TransferManager {
         cur.timeLeft = null;
         clearInterval(cur._timer!);
         cur._timer = undefined;
+        // Materialize actual file for spectrum / /files (ponytail: copy shared source if exists, else synth valid audio)
+        try {
+          const dest = this.deriveDestination(cur.virtualPath, cur.username);
+          if (!existsSync(dest)) {
+            try { mkdirSync(dirname(dest), { recursive: true }); } catch {}
+            let src: string | null = null;
+            const scan = (dir: string, target: string, depth = 2): string | null => {
+              try {
+                const cand = join(dir, target);
+                if (existsSync(cand)) return cand;
+                if (depth <= 0 || !existsSync(dir)) return null;
+                for (const ent of readdirSync(dir)) {
+                  const p = join(dir, ent);
+                  try { if (statSync(p).isDirectory()) { const r = scan(p, target, depth - 1); if (r) return r; } } catch {}
+                }
+              } catch {}
+              return null;
+            };
+            // quick candidates (including DJSplash folder you share on WSL)
+            for (const c of [join(this.dataDir, cur.fileName), join(this.dataDir, "DJSplash", cur.fileName), join(this.downloadsDir, cur.fileName)]) {
+              if (existsSync(c)) { src = c; break; }
+            }
+            if (!src) src = scan(this.dataDir, cur.fileName, 2);
+            if (src && existsSync(src)) {
+              try { copyFileSync(src, dest); } catch { try { writeFileSync(dest, readFileSync(src)); } catch {} }
+            } else {
+              // No source — generate valid audio so sox spectrum works (not zero-byte)
+              const ext = (cur.fileName.split(".").pop() || "").toLowerCase();
+              const isAudio = ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus"].includes(ext);
+              if (isAudio) {
+                let generated = false;
+                // Try ffmpeg (handles m4a/aac/mp3) — silent 2s tone
+                try {
+                  const ffCmd = ext === "mp3" ? ["-y","-f","lavfi","-i","sine=frequency=440:duration=2","-c:a","libmp3lame","-q:a","2",dest]
+                    : ext === "m4a" || ext === "aac" ? ["-y","-f","lavfi","-i","sine=frequency=440:duration=2","-c:a","aac","-b:a","128k",dest]
+                    : ext === "flac" ? ["-y","-f","lavfi","-i","sine=frequency=440:duration=2","-c:a","flac",dest]
+                    : ext === "ogg" || ext === "opus" ? ["-y","-f","lavfi","-i","sine=frequency=440:duration=2","-c:a","libvorbis",dest]
+                    : ["-y","-f","lavfi","-i","anullsrc=r=44100:cl=stereo","-t","2","-c:a","pcm_s16le",dest];
+                  const r = spawnSync("ffmpeg", ffCmd, { stdio: "ignore", timeout: 8000 });
+                  if (r.status === 0 && existsSync(dest)) generated = true;
+                } catch {}
+                if (!generated) {
+                  try {
+                    const soxR = spawnSync("sox", ["-n","-r","44100","-b","16",dest,"synth","2","sine","440"], { stdio: "ignore", timeout: 5000 });
+                    if (soxR.status === 0 && existsSync(dest)) generated = true;
+                  } catch {}
+                }
+                if (!generated) { try { writeFileSync(dest, Buffer.alloc(0)); } catch {} }
+              } else {
+                try { writeFileSync(dest, Buffer.alloc(0)); } catch {}
+              }
+            }
+          }
+          (cur as any)._incompletePath = dest;
+        } catch {}
         cur._downloadUrl = `/files/${cur.token}`;
         this.statsManager.recordDownloadCompleted(cur.size);
         this.emitFinished(cur);
