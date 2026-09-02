@@ -1,4 +1,5 @@
 import type { SearchFile } from "@/lib/protocol";
+import { humanSize, humanLength as humanDuration } from "@/lib/format";
 
 export interface ResultCardProps {
   icon: string;
@@ -6,21 +7,6 @@ export interface ResultCardProps {
   title: string;
   description: string;
   meta: { label: string; value: string }[];
-}
-
-function humanSize(bytes: number): string {
-  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
-  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${bytes} B`;
-}
-
-function humanDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${Math.floor(seconds % 60)}s`;
-  return `${seconds}s`;
 }
 
 function iconFor(name: string): string {

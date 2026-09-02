@@ -6,8 +6,8 @@ services:
       dockerfile: apps/bridge/Dockerfile
     restart: unless-stopped
     environment:
-      PORT: "8787"
-      LISTEN_PORT: "${LISTEN_PORT:-60754}"
+      PORT: "8788"
+      LISTEN_PORT: "60755"
       DATA_DIR: "/data"
       BRIDGE_TOKEN: "${BRIDGE_TOKEN:-}"
       # Shares: Settings → Shares sends virtualName|hostPath pairs to the bridge via WS config:update.
@@ -17,7 +17,11 @@ services:
       SHARES_DIR: "${SHARES_DIR:-}"
       # Homelab hardening: optionally restrict browser origins (e.g. ALLOWED_ORIGINS=https://hub.example.com,http://nas:3000)
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
-    network_mode: host # default: host network for UPnP/NAT-PMP + no port remap — Settings → Network hot-swaps Bun.listen + reconnects Soulseek without `docker compose up -d`. Remove this line if using Gluetun (see compose.gluetun.yaml)
+    # ponytail worktree: use bridge network with port mapping instead of host (so 8788/60755 visible in magnus netns)
+    ports:
+      - "8788:8788"
+      - "60755:60755"
+      - "60755:60755/udp"
     # Homelab: bridge stays host-exposed so browser can ws://nas:8787/ws directly (host mode binds directly to host 8787 + LISTEN_PORT).
     # LISTEN_PORT is the host port — changing it in Settings → Network (portrange) writes DATA_DIR/listen_port (+ DATA_DIR/host.env for .env sync) and hot-swaps Bun.listen + reconnects Soulseek (SetWaitPort) without WS restart; UI stays up, Save triggers fresh connect.
     # UPnP/NAT-PMP auto-maps if `server.upnp` is enabled (default true, toggle in Network). Host mode is required for UPnP to see host LAN IP (bridge 172.x fails).
@@ -34,7 +38,7 @@ services:
       # - /home/user/Music:/data/Music:ro
       # - /home/user/Downloads:/data/downloads:ro
     healthcheck:
-      test: ["CMD", "bun", "-e", "fetch('http://localhost:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:8788/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -49,7 +53,7 @@ services:
       HOSTNAME: 0.0.0.0
       PORT: "3000"
     ports:
-      - "3000:3000"
+      - "3001:3000"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s

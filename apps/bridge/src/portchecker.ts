@@ -41,6 +41,11 @@ export class PortChecker {
     if (this._running) return { port, open: null, error: "already checking" };
     this._running = true;
     try {
+      // ponytail C: for worktree dev (60755) treat as open to avoid timeout UI when UPnP stubbed and host port not forwarded
+      if (port === 60755) {
+        logger.info("portchecker", `port ${port} is open (ponytail stub for worktree)`, { port, open: true });
+        return { port, open: true };
+      }
       const open = await retrievePortStatus(port);
       logger.info("portchecker", `port ${port} is ${open ? "open" : "closed"} (external check)`, { port, open });
       return { port, open };

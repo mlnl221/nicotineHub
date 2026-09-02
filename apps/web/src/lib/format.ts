@@ -1,7 +1,8 @@
 /** Display formatters for search result metadata. */
 
 export function humanSize(bytes: number, fileSizeUnit?: "B" | ""): string {
-  if (!bytes || bytes <= 0) return "—";
+  if (bytes == null || Number.isNaN(bytes as number) || bytes < 0) return "—";
+  if (!bytes) return "0 B";
   // nicotine-plus ui.file_size_unit === "B" means exact bytes, "" means humanized
   // Read from localStorage if not passed (for non-hook contexts)
   let unit = fileSizeUnit;

@@ -14,6 +14,7 @@ import { useConfig } from "@/lib/config/provider";
 import { formatStrftime } from "@/lib/chatFormat";
 import { isDemo } from "@/lib/demo";
 import { useStatistics } from "@/lib/statistics";
+import { humanSize } from "@/lib/format";
 
 const LEVELS: DiagLevel[] = ["debug", "info", "warn", "error"];
 const LEVEL_COLOR: Record<DiagLevel, string> = {
@@ -41,15 +42,6 @@ function HealthCard({ title, icon, children }: { title: string; icon: string; ch
       <div className="space-y-1 font-body text-xs text-on-surface dark:text-on-surface">{children}</div>
     </div>
   );
-}
-
-function humanSize(n: number): string {
-  if (!n) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let i = 0;
-  let v = n;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 function StatisticsSummaryCard() {

@@ -209,8 +209,35 @@ const APP_VERSION = process.env.APP_VERSION || process.env.BUILD_TAG || process.
 const COMMIT_SHA = (process.env.COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 7);
 const BUILD_DATE = process.env.BUILD_DATE || process.env.NEXT_PUBLIC_BUILD_DATE || "";
 
+// Ensure data volume exists (dev/sandbox fallback when /data not writable)
+// WSL bun dev: /data not writable → fallback to ./data or /tmp/nicotine-hub, then env-sync so ShareDB/others see same dir.
+// MUST run before any DATA_DIR-dependent reads (listen_port, upnp, PluginManager) — otherwise WSL fallback causes EACCES.
+try {
+  mkdirSync(DATA_DIR, { recursive: true });
+} catch {
+  const { tmpdir } = require("node:os") as typeof import("node:os");
+  const fallbacks = ["./data", join(tmpdir(), "nicotine-hub")];
+  for (const cand of fallbacks) {
+    try {
+      mkdirSync(cand, { recursive: true });
+      const testFile = join(cand, ".writetest");
+      writeFileSync(testFile, "ok");
+      rmSync(testFile);
+      if (DATA_DIR === "/data") {
+        console.warn(`[bridge] DATA_DIR /data not writable, falling back to ${cand}`);
+        DATA_DIR = cand;
+        try { process.env.DATA_DIR = cand; } catch {}
+      }
+      break;
+    } catch {}
+  }
+}
+// Ensure env reflects resolved DATA_DIR for ShareDB defaultDataDir() and diagnostics
+try { if (process.env.DATA_DIR !== DATA_DIR) process.env.DATA_DIR = DATA_DIR; } catch {}
+
 // Persisted listen port override (homelab: survives restart without compose change)
 // File DATA_DIR/listen_port overrides env default but env wins if explicitly set.
+// Now reads from resolved DATA_DIR (fallback-aware).
 try {
   if (!process.env.LISTEN_PORT) {
     const _persistedPath = join(DATA_DIR, "listen_port");
@@ -255,7 +282,11 @@ function getGlobalPortMapperStatus(): { enabled: boolean; active: string | null;
   return best;
 }
 
+// Active Soulseek sessions across all WS connections (for global port sync)
+const activeSessions = new Set<SoulseekSession>();
+
 // Global plugin manager (shared across WS, but per-WS session getter is swapped)
+// Must be after DATA_DIR fallback — otherwise WSL uses stale "/data" and EACCES on persist.
 const pluginManager = new PluginManager({ dataDir: DATA_DIR });
 pluginManager.registerBuiltin("core_commands", coreCommandsManifest as unknown as Record<string, unknown>, () => new CoreCommandsPlugin());
 pluginManager.registerBuiltin("spamfilter", spamManifest as unknown as Record<string, unknown>, () => new SpamfilterPlugin());
@@ -264,9 +295,6 @@ pluginManager.registerBuiltin("leech_detector", leechManifest as unknown as Reco
 pluginManager.start().catch((e) => logger.warn("bridge", "plugin manager start failed", { error: (e as Error).message }));
 // expose for http handlers
 (globalThis as unknown as Record<string, unknown>).__pluginManager = pluginManager;
-
-// Active Soulseek sessions across all WS connections (for global port sync)
-const activeSessions = new Set<SoulseekSession>();
 
 // ── 5-minute in-memory caches (per-process, ephemeral) ──
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -296,29 +324,6 @@ function setCachedSearch(key: string, rows: unknown[], total: number) {
 // Exported for session.ts integration (optional)
 export const bridgeCaches = { searchCache, browseCache, userInfoCache, getCachedSearch, setCachedSearch };
 // ─────────────────────────────────────────────────────────
-
-// Ensure data volume exists (dev/sandbox fallback when /data not writable)
-try {
-  mkdirSync(DATA_DIR, { recursive: true });
-} catch {
-  // fallback checked in TransferManager, but also try writable dirs for plugins/persist
-  const { tmpdir } = require("node:os") as typeof import("node:os");
-  const fallbacks = ["./data", join(tmpdir(), "nicotine-hub")];
-  for (const cand of fallbacks) {
-    try {
-      mkdirSync(cand, { recursive: true });
-      // verify writable
-      const testFile = join(cand, ".writetest");
-      writeFileSync(testFile, "ok");
-      rmSync(testFile);
-      if (DATA_DIR === "/data") {
-        console.warn(`[bridge] DATA_DIR /data not writable, falling back to ${cand}`);
-        DATA_DIR = cand;
-      }
-      break;
-    } catch {}
-  }
-}
 
 function errorMessage(error: string): string { return JSON.stringify({ type: "error", error }); }
 
@@ -675,6 +680,26 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           const altSafe = sanitizeFileNameForHeader(fileName);
           const altCand = resolve(join(downloadsDir, altSafe));
           if (altCand.startsWith(downloadsDir + "/") && existsSync(altCand)) filePath = altCand;
+        }
+        // Legacy stubs: scan DATA_DIR recursively (e.g. DATA_DIR/DJSplash/file.m4a) so old Finished without downloads dest still serves actual file
+        if (!filePath || !existsSync(filePath)) {
+          try {
+            const { readdirSync: rds, statSync: sts } = require("node:fs") as typeof import("node:fs");
+            const scan = (dir: string, target: string, depth = 2): string | null => {
+              try {
+                const c = resolve(join(dir, target));
+                if (c.startsWith(resolve(DATA_DIR) + "/") && existsSync(c)) return c;
+                if (depth <= 0 || !existsSync(dir)) return null;
+                for (const ent of rds(dir)) {
+                  const p = resolve(join(dir, ent));
+                  try { if (sts(p).isDirectory() && p.startsWith(resolve(DATA_DIR) + "/")) { const r = scan(p, target, depth - 1); if (r) return r; } } catch {}
+                }
+              } catch {}
+              return null;
+            };
+            const hit = scan(DATA_DIR, safeName, 2) || scan(DATA_DIR, sanitizeFileNameForHeader(fileName), 2);
+            if (hit && existsSync(hit)) filePath = hit;
+          } catch {}
         }
         if (!filePath || !existsSync(filePath)) return new Response("Not found", { status: 404, headers: secHeaders });
         const file = Bun.file(filePath);
@@ -1222,12 +1247,38 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid browse message.")); return; }
         const session = requireLogin(); if (!session) return;
         if (result.data.action === "shares") {
-          logger.info("browse", "browse shares requested", { username: result.data.username });
+          // Local browse — as reported by slsk (ShareDB) — no peer round-trip when browsing own shares
+          if (result.data.username.toLowerCase() === session.username.toLowerCase()) {
+            try {
+              const folders = session.shareDBInstance.getFolders() as unknown[];
+              const all = folders || [];
+              const page = all.slice(0, 200);
+              const hasMore = all.length > 200;
+              try { browseCache.set(result.data.username.toLowerCase(), { folders: all as unknown[], ts: Date.now() }); } catch {}
+              (ws.data as unknown as Record<string, unknown>)._browseFull = all;
+              (ws.data as unknown as Record<string, unknown>)._browseUser = result.data.username;
+              ws.send(JSON.stringify({ type: "browse:shares", username: result.data.username, folders: page as never, total: all.length, hasMore, offset: 0 }));
+            } catch (e) {
+              ws.send(JSON.stringify({ type: "browse:shares", username: result.data.username, folders: [] as never, total: 0, hasMore: false, offset: 0, error: (e as Error).message }));
+            }
+            return;
+          }
           session.requestSharedFileList(result.data.username);
         } else if (result.data.action === "folder" && result.data.folder) {
-          const tok = result.data.token ?? Math.floor(Math.random() * 1e9);
-          logger.info("browse", "browse folder requested", { username: result.data.username, folder: result.data.folder, token: tok });
-          session.requestFolderContents(result.data.username, result.data.folder, tok);
+          // Local folder contents — from ShareDB when browsing own shares
+          if (result.data.username.toLowerCase() === session.username.toLowerCase()) {
+            const tok = result.data.token ?? Math.floor(Math.random() * 1e9);
+            try {
+              const allFolders = session.shareDBInstance.getFolders();
+              const match = allFolders.find((f) => f.name === result.data.folder);
+              const files = match ? (match.files as unknown[]) : [];
+              ws.send(JSON.stringify({ type: "browse:folder", username: result.data.username, folder: result.data.folder, token: tok, files: files as never }));
+            } catch (e) {
+              ws.send(JSON.stringify({ type: "browse:folder", username: result.data.username, folder: result.data.folder!, token: tok, files: [] as never, error: (e as Error).message }));
+            }
+            return;
+          }
+          session.requestFolderContents(result.data.username, result.data.folder, result.data.token ?? Math.floor(Math.random() * 1e9));
         }
         return;
       }
@@ -1252,8 +1303,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (data.type === "shares:rescan") {
         const session = requireLogin(); if (!session) return;
         (session as unknown as { rescanShares: () => Promise<unknown> }).rescanShares().then((folders: unknown) => {
-          const counts = (session as unknown as { shareDBInstance: { getSharedCounts: () => { dirs:number; files:number } } }).shareDBInstance.getSharedCounts();
-          ws.send(JSON.stringify({ type: "shares:rescanned", folders, counts }));
+          const sdb = (session as unknown as { shareDBInstance: { getSharedCounts: () => { dirs:number; files:number }; getUnavailableShares: () => [string,string][] } }).shareDBInstance;
+          const counts = sdb.getSharedCounts();
+          const unavailable = sdb.getUnavailableShares();
+          if (unavailable.length) logger.warn("bridge", "rescan: some shares unavailable on bridge FS", { unavailable, counts });
+          ws.send(JSON.stringify({ type: "shares:rescanned", folders, counts, unavailable }));
         }).catch((e: Error) => ws.send(errorMessage(e.message)));
         return;
       }
@@ -1465,21 +1519,35 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           try { filePath = tm.getFilePathForToken(tr.token); } catch {}
         }
         if (!filePath) {
-          // Fallback: try downloads dir directly
+          // Fallback: try downloads dir + recursive DATA_DIR scan (handles WSL DJSplash share + legacy stubs)
           try {
-            const { existsSync, statSync } = require("node:fs") as typeof import("node:fs");
+            const { existsSync } = require("node:fs") as typeof import("node:fs");
             const { join, resolve } = require("node:path") as typeof import("node:path");
             const cand = resolve(join(DATA_DIR, "downloads", tr.fileName.replace(/[/\\]/g, "_")));
             if (existsSync(cand)) filePath = cand;
             else {
-              // scan downloads dir
-              const { readdirSync } = require("node:fs") as typeof import("node:fs");
+              const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
               const dir = resolve(join(DATA_DIR, "downloads"));
               try {
                 const ents = readdirSync(dir);
                 const m = ents.find((f) => f === tr.fileName);
                 if (m) filePath = join(dir, m);
               } catch {}
+              if (!filePath) {
+                const scan = (d: string, target: string, depth = 2): string | null => {
+                  try {
+                    const c = resolve(join(d, target));
+                    if (c.startsWith(resolve(DATA_DIR) + "/") && existsSync(c)) return c;
+                    if (depth <= 0 || !existsSync(d)) return null;
+                    for (const ent of readdirSync(d)) {
+                      const p = resolve(join(d, ent));
+                      try { if (statSync(p).isDirectory() && p.startsWith(resolve(DATA_DIR) + "/")) { const r = scan(p, target, depth - 1); if (r) return r; } } catch {}
+                    }
+                  } catch {}
+                  return null;
+                };
+                filePath = scan(DATA_DIR, tr.fileName, 2) || scan(DATA_DIR, tr.fileName.replace(/[/\\]/g, "_"), 2);
+              }
             }
           } catch {}
         }

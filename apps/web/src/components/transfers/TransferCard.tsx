@@ -1,27 +1,8 @@
 "use client";
 
 import type { Transfer } from "@/lib/protocol";
-import { humanSize as formatSize } from "@/lib/format";
+import { humanSize } from "@/lib/format";
 import { useConfig } from "@/lib/config/provider";
-
-function humanSize(bytes: number): string {
-  try {
-    const raw = typeof localStorage !== "undefined" ? (localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings")) : null;
-    if (raw) {
-      const parsed = JSON.parse(raw) as { ui?: { file_size_unit?: string } };
-      if (parsed?.ui?.file_size_unit === "B") return `${bytes.toLocaleString()} B`;
-    }
-  } catch {}
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let v = bytes;
-  let i = -1;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2)} ${units[i]}`;
-}
 
 function humanSpeed(bps: number): string {
   if (!bps) return "—";
