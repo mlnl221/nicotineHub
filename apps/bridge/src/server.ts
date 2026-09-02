@@ -983,13 +983,16 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const session = requireLogin(); if (!session) return;
         const { searchId, query } = result.data;
         const out = pluginManager.outgoingGlobalSearchEvent(query);
-        if (out === null) return;
+        if (out === null) {
+          logger.debug("search", "search blocked by plugin", { searchId, query: query.slice(0,80) });
+          return;
+        }
         const finalQuery = (out?.[0] as string) ?? query;
         // Search cache disabled — always hit network for fresh results (see fix/port-search-browse)
-        logger.info("search", "search request", { searchId, query: finalQuery.slice(0,80) });
+        logger.info("search", "search request", { searchId, query: finalQuery.slice(0,80), origQuery: query.slice(0,80) });
         const token = session.search(finalQuery, searchId, {
           onResult: (p) => {
-            logger.debug("search", "search result", { searchId, rows: p.rows?.length });
+            logger.info("search", "search result → ws", { searchId, token: p.token, rows: p.rows?.length });
             ws.send(JSON.stringify({ type: "search:result", ...p }));
           },
           onEnd: (p) => {
@@ -997,8 +1000,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             ws.send(JSON.stringify({ type: "search:end", ...p }));
           },
         });
-        if (token === 0) ws.send(JSON.stringify({ type: "search:end", searchId, reason: "error" }));
-        else ws.send(JSON.stringify({ type: "search:start", searchId, token }));
+        logger.info("search", "search dispatched", { searchId, token, query: finalQuery.slice(0,80) });
+        if (token === 0) {
+          logger.warn("search", "search failed to start (not logged in?)", { searchId, query: finalQuery.slice(0,80) });
+          ws.send(JSON.stringify({ type: "search:end", searchId, reason: "error" }));
+        } else ws.send(JSON.stringify({ type: "search:start", searchId, token }));
         return;
       }
       if (data.type === "search:user") {
@@ -1215,8 +1221,14 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const result = BrowseSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid browse message.")); return; }
         const session = requireLogin(); if (!session) return;
-        if (result.data.action === "shares") session.requestSharedFileList(result.data.username);
-        else if (result.data.action === "folder" && result.data.folder) session.requestFolderContents(result.data.username, result.data.folder, result.data.token ?? Math.floor(Math.random() * 1e9));
+        if (result.data.action === "shares") {
+          logger.info("browse", "browse shares requested", { username: result.data.username });
+          session.requestSharedFileList(result.data.username);
+        } else if (result.data.action === "folder" && result.data.folder) {
+          const tok = result.data.token ?? Math.floor(Math.random() * 1e9);
+          logger.info("browse", "browse folder requested", { username: result.data.username, folder: result.data.folder, token: tok });
+          session.requestFolderContents(result.data.username, result.data.folder, tok);
+        }
         return;
       }
 
