@@ -387,14 +387,15 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                   <p className="p-6 font-body text-sm text-outline">No files match &quot;{fileQuery}&quot; in this folder.</p>
                 ) : (
                   <>
-                    <ul className="divide-y divide-surface-container-highest/30">
-                      {pagedFiles.map((file) => {
+                    <ul className="divide-y divide-surface-container-highest/20 bg-surface-container-lowest">
+                      {pagedFiles.map((file, idx) => {
                         const shortName = file.name.split(/[\\\/]/).pop() || file.name;
                         const attrsMap = new Map(file.attrs);
                         const bitrate = attrsMap.get(0);
                         const length = attrsMap.get(1);
+                        const isEven = idx % 2 === 0;
                         return (
-                          <li key={file.name} onContextMenu={(e) => { e.preventDefault(); const shortName = file.name.split(/[\\\/]/).pop() || file.name; const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : `${activeFolder!.name}\\${shortName}`; setMenuAnchor({ x: e.clientX, y: e.clientY, items: browseFileMenu(username, { path: vp, filename: shortName }, false) }); }} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-container-low/60">
+                          <li key={file.name} onContextMenu={(e) => { e.preventDefault(); const shortName = file.name.split(/[\\\/]/).pop() || file.name; const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : `${activeFolder!.name}\\${shortName}`; setMenuAnchor({ x: e.clientX, y: e.clientY, items: browseFileMenu(username, { path: vp, filename: shortName }, false) }); }} className={`flex items-center gap-3 px-4 py-3 ${isEven ? "bg-surface-container-lowest dark:bg-surface-container-high" : "bg-surface-container-low dark:bg-surface-container-highest/40"} hover:bg-surface-container-high/40 dark:hover:bg-surface-variant/40`}>
                             <span className="material-symbols-outlined text-outline text-[20px]">audio_file</span>
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-body text-sm font-medium text-on-surface" title={file.name}>

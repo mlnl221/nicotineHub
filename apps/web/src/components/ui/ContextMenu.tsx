@@ -34,7 +34,7 @@ function MenuPanel({
   const [openSub, setOpenSub] = useState<string | null>(null);
   return (
     <div
-      className={`min-w-[220px] max-w-[320px] rounded-2xl bg-surface-container-lowest/90 dark:bg-surface-container-high/95 backdrop-blur-xl ghost-border p-1.5 shadow-[0_24px_48px_rgba(0,0,0,0.12)] border border-outline-variant/10 ${nested ? "absolute left-full top-0 ml-1" : ""}`}
+      className={`min-w-[220px] max-w-[320px] rounded-2xl bg-surface-container-lowest/90 dark:bg-surface-container-high/95 backdrop-blur-xl ghost-border p-1.5 shadow-[0_24px_48px_rgba(0,0,0,0.12)] border border-outline-variant/10 ${nested ? "mt-1 ml-3 border-l border-outline-variant/10 pl-2" : ""}`}
       role="menu"
       onClick={(e) => e.stopPropagation()}
     >
