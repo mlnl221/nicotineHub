@@ -344,19 +344,37 @@ export class SoulseekSession {
 
   private findLocalIpAddress(): string {
     try {
-      const { createSocket } = require("node:dgram") as typeof import("node:dgram");
-      const sock = createSocket("udp4");
-      // connect to dummy address to get local interface
-      // Use sync approach: create socket, connect, then get address
-      // Fallback to 127.0.0.1
+      // Prefer interface that shares subnet with default gateway (host network many NICs, pick LAN)
       try {
-        // Bun doesn't support connect for dgram easily; try UDP connect hack
-        // Use same logic as pynicotine: connect to 10.255.255.255:1
-        const dummy = require("node:dgram").createSocket("udp4") as unknown as { connect: (port:number, host:string, cb?:()=>void)=>void; address:()=>{address:string} };
-        // Instead use node:net trick: create UDP socket and bind
-        // Simpler: try to get local IP via os.networkInterfaces
+        const { readFileSync, existsSync } = require("node:fs") as typeof import("node:fs");
+        let gateway: string | null = null;
+        if (existsSync("/proc/net/route")) {
+          const raw = readFileSync("/proc/net/route", "utf8");
+          for (const line of raw.split("\n").slice(1)) {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length < 3) continue;
+            const destHex = parts[1];
+            const gateHex = parts[2];
+            const dest = (parseInt(destHex, 16) >>> 0) & 0xffffffff;
+            const destIp = `${dest & 0xff}.${(dest >>> 8) & 0xff}.${(dest >>> 16) & 0xff}.${(dest >>> 24) & 0xff}`;
+            if (destIp !== "0.0.0.0") continue;
+            const gate = parseInt(gateHex, 16) >>> 0;
+            gateway = `${gate & 0xff}.${(gate >>> 8) & 0xff}.${(gate >>> 16) & 0xff}.${(gate >>> 24) & 0xff}`;
+            if (gateway && gateway !== "0.0.0.0") break;
+          }
+        }
         const { networkInterfaces } = require("node:os") as typeof import("node:os");
         const nets = networkInterfaces();
+        if (gateway) {
+          const gwParts = gateway.split(".").slice(0, 3).join(".");
+          for (const addrs of Object.values(nets)) {
+            if (!addrs) continue;
+            for (const addr of addrs) {
+              if (addr.family === "IPv4" && !addr.internal && addr.address.startsWith(gwParts + ".")) return addr.address;
+            }
+          }
+        }
+        // Fallback: first non-internal
         for (const addrs of Object.values(nets)) {
           if (!addrs) continue;
           for (const addr of addrs) {
@@ -1742,41 +1760,18 @@ export class SoulseekSession {
           const buf = Buffer.from(chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk));
           const state = this.peerStates.get(peer as Socket);
           if (!state || !state.initDone) {
+            // Strict F demux: only treat raw token as F if we actually expect it (pendingFileTokens)
+            // Avoid heuristic misclassification of P as F (e.g. small len, unknown codeProbe)
             if (buf.length >= 4) {
               const token = buf.readUInt32LE(0);
               if (this.pendingFileTokens.has(token)) {
-                // F conn
                 const st: PeerState = state ?? { buf: Buffer.alloc(0), initDone: true, isFileConn: true, fileToken: token, lastActive: Date.now(), createdAt: Date.now() };
                 st.isFileConn = true; st.fileToken = token; st.initDone = true;
                 this.pendingFileTokens.delete(token);
-                // consume token and delegate to file handler
+                logger.debug("transfer", "inbound F demux via token", { token });
                 this.peerStates.set(peer as Socket, st);
                 this.processPeer(peer as Socket, buf.subarray(4), true);
-                // if chunk had more after token, process remainder as file data (offset etc)
                 return;
-              }
-              // Heuristic: if first 5 bytes don't form valid PeerInit/PierceFW frame, treat as F
-              // But don't misclassify normal peer messages (code 4,5,15...) as F — check if it's a known peer code
-              if (buf.length >= 5) {
-                const len = buf.readUInt32LE(0);
-                const codeProbe = buf[4];
-                const fullCode = buf.length >= 8 ? buf.readUInt32LE(4) : codeProbe;
-                const knownPeerCodes = new Set([4,5,8,9,15,16,36,37,40,41,42,43,44,46,50,51,52,12547]);
-                const isKnownPeerCode = knownPeerCodes.has(fullCode);
-                if (codeProbe !== 0 && codeProbe !== 1 && !isKnownPeerCode) {
-                  // Likely F raw token + offset (peer messages with known codes are not F)
-                  const fileState: PeerState = { buf: Buffer.alloc(0), initDone: true, isFileConn: true, fileToken: token, lastActive: Date.now(), createdAt: Date.now() };
-                  this.peerStates.set(peer as Socket, fileState);
-                  // The rest after token is offset (8 bytes) + data
-                  if (buf.length > 4) this.processPeer(peer as Socket, buf.subarray(4), true);
-                  return;
-                }
-                if (len > 1024*1024) {
-                  const fileState2: PeerState = { buf: Buffer.alloc(0), initDone: true, isFileConn: true, fileToken: token, lastActive: Date.now(), createdAt: Date.now() };
-                  this.peerStates.set(peer as Socket, fileState2);
-                  if (buf.length > 4) this.processPeer(peer as Socket, buf.subarray(4), true);
-                  return;
-                }
               }
             }
           }
@@ -2027,26 +2022,17 @@ export class SoulseekSession {
     state.buf = Buffer.concat([state.buf, Buffer.from(bytes)]);
     while (true) {
       if (!state.initDone) {
-        // Phase 1 F demux: raw [uint32 token] without PeerInit — detect via pendingFileTokens heuristic
+        // Strict F demux: only raw token if expected (pendingFileTokens). No heuristic.
         if (state.buf.length >= 4) {
           const peekToken = state.buf.readUInt32LE(0);
           if (this.pendingFileTokens.has(peekToken)) {
+            logger.debug("transfer", "F demux via token in processPeer", { token: peekToken });
             state.isFileConn = true;
             state.fileToken = peekToken;
             state.initDone = true;
             state.connType = "F";
             state.buf = state.buf.subarray(4);
-            // Fall through to file handling
             continue;
-          }
-          // Probe init framing: try to validate [len][code] — if not 0/1, treat as raw F if len looks like token
-          if (state.buf.length >= 5) {
-            const lenProbe = state.buf.readUInt32LE(0);
-            const codeProbe = state.buf[4];
-            if (codeProbe !== 0 && codeProbe !== 1 && lenProbe < 0x1000000) {
-              // Heuristic may be raw token; check if token+remaining could be offset (8 bytes)
-              // Defer to F handling if token in pending set already handled; otherwise continue init path
-            }
           }
         }
         if (state.buf.length < 5) break;
@@ -2423,11 +2409,21 @@ export class SoulseekSession {
   }
 
   private routeResult(resp: { token: number; username: string; freeUploadSlots: boolean; inQueue: number; uploadSpeed: number; results: SearchFile[] }) {
-    if (this.allowedSearchTokens.size && !this.allowedSearchTokens.has(resp.token)) return;
+    if (this.allowedSearchTokens.size && !this.allowedSearchTokens.has(resp.token)) {
+      logger.debug("search", "routeResult dropped — token not allowed", { token: resp.token, allowed: [...this.allowedSearchTokens].slice(0,5), username: resp.username });
+      return;
+    }
     const search = this.searches.get(resp.token);
-    if (!search) return;
-    if (search.users.has(resp.username)) return;
+    if (!search) {
+      logger.debug("search", "routeResult dropped — no search for token", { token: resp.token, username: resp.username });
+      return;
+    }
+    if (search.users.has(resp.username)) {
+      logger.debug("search", "routeResult dropped — duplicate user", { token: resp.token, username: resp.username });
+      return;
+    }
     search.users.add(resp.username);
+    logger.info("search", "routeResult routing", { token: resp.token, searchId: search.searchId, username: resp.username, results: resp.results.length, totalCount: search.count });
     const cc = this.userAddresses.get(resp.username)?.addr ? getCountryCode(this.userAddresses.get(resp.username)!.addr.ip) : "";
     // lazy request address if missing for future
     if (!this.userAddresses.has(resp.username)) {
@@ -2461,17 +2457,31 @@ export class SoulseekSession {
   }
 
   search(query: string, searchId: string, handlers: SearchHandlers): number {
-    if (!this.serverSocket || !this.loggedIn) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    if (!this.serverSocket || !this.loggedIn) {
+      logger.warn("search", "search aborted — not logged in or no socket", { searchId, query: query.slice(0,80), loggedIn: this.loggedIn, hasSocket: !!this.serverSocket });
+      handlers.onEnd({ searchId, reason: "error" }); return 0;
+    }
     const clean = sanitizeSearchTerm(query);
     const outQuery = clean.transmitted || clean.sanitized || query.trim();
-    if (!outQuery) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    logger.info("search", "search sanitized", { searchId, orig: query.slice(0,80), sanitized: clean.sanitized.slice(0,80), transmitted: clean.transmitted.slice(0,80), included: clean.includedWords.join(","), excluded: clean.excludedWords.join(",") });
+    if (!outQuery) {
+      logger.warn("search", "search empty after sanitization", { searchId, query: query.slice(0,80) });
+      handlers.onEnd({ searchId, reason: "error" }); return 0;
+    }
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
     const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
-    search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
+    search.timer = setTimeout(() => {
+      logger.info("search", "search timeout", { searchId, token, users: search.users.size, count: search.count });
+      this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" });
+    }, search.timeoutMs);
     this.searches.set(token, search); this.searchIds.set(searchId, token);
-    this.serverSocket.write(buildFileSearch(token, outQuery));
+    try {
+      const buf = buildFileSearch(token, outQuery);
+      this.serverSocket.write(buf);
+      logger.info("search", "FileSearch sent to server", { searchId, token, outQuery: outQuery.slice(0,80), len: buf.length });
+    } catch (e) { logger.warn("search", "FileSearch send failed", { searchId, token, error: (e as Error).message }); }
     return token;
   }
   cancelSearch(searchId: string) {
@@ -2483,17 +2493,28 @@ export class SoulseekSession {
     search?.onEnd({ searchId, reason: "stopped" });
   }
   searchUser(username: string, query: string, searchId: string, handlers: SearchHandlers): number {
-    if (!this.loggedIn || !this.serverSocket) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
+    if (!this.loggedIn || !this.serverSocket) {
+      logger.warn("search", "searchUser aborted — not logged in", { searchId, username, query: query.slice(0,60), loggedIn: this.loggedIn });
+      handlers.onEnd({ searchId, reason: "error" }); return 0;
+    }
     const clean = sanitizeSearchTerm(query);
     const outQuery = clean.transmitted || clean.sanitized || query.trim();
+    logger.info("search", "searchUser sanitized", { searchId, username, orig: query.slice(0,60), transmitted: outQuery.slice(0,60) });
     if (!outQuery) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
     const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
-    search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
+    search.timer = setTimeout(() => {
+      logger.info("search", "searchUser timeout", { searchId, token, username, users: search.users.size, count: search.count });
+      this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" });
+    }, search.timeoutMs);
     this.searches.set(token, search); this.searchIds.set(searchId, token);
-    this.serverSocket.write(buildUserSearch(username, token, outQuery));
+    try {
+      const buf = buildUserSearch(username, token, outQuery);
+      this.serverSocket.write(buf);
+      logger.info("search", "UserSearch sent to server", { searchId, token, username, outQuery: outQuery.slice(0,60), len: buf.length });
+    } catch (e) { logger.warn("search", "UserSearch send failed", { searchId, token, error: (e as Error).message }); }
     return token;
   }
 
@@ -2630,26 +2651,34 @@ export class SoulseekSession {
   private ensurePeerAndSend(username: string, connType: string, msg: Buffer) {
     const hasPending = this.peerAddressRequests.has(username);
     const cachedCheck = this.userAddresses.get(username);
-    logger.info("browse", "ensurePeerAndSend", { username, connType, hasCached: !!cachedCheck, hasPending, pendingSize: this.pendingBrowseShares.size });
-    if (!this.loggedIn) return;
+    const code = msg.length >= 8 ? msg.readUInt32LE(4) : -1;
+    logger.info("browse", "ensurePeerAndSend", { username, connType, code, msgLen: msg.length, hasCached: !!cachedCheck, hasPending, pendingSize: this.pendingBrowseShares.size });
+    if (!this.loggedIn) {
+      logger.warn("browse", "ensurePeerAndSend aborted — not logged in", { username, connType, code });
+      return;
+    }
     // Queue for indirect fallback (peer connects to us via PierceFirewall)
     this.queuePendingPeerMessage(username, connType, msg);
+    logger.debug("browse", "queued pending peer message", { username, connType, code, queueLen: (this.pendingPeerMessages.get(username.toLowerCase())?.length ?? 0) });
     // Indirect first — nicotine sends ConnectToPeer before direct
     this.sendConnectToPeerFallback(username, connType);
     const cached = this.userAddresses.get(username);
     if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) {
+      logger.debug("browse", "using cached peer address", { username, ip: cached.addr.ip, port: cached.addr.port });
       this.connectToPeerViaAddress(username, cached.addr, connType, msg);
       return;
     }
     const existing = this.peerAddressRequests.get(username);
     if (existing) {
+      logger.debug("browse", "reusing pending GetPeerAddress", { username });
       existing.cbs.push((addr) => {
         this.connectToPeerViaAddress(username, addr, connType, msg);
       });
       return;
     }
-    const timer = setTimeout(() => { this.peerAddressRequests.delete(username); }, PEER_ADDRESS_TIMEOUT_MS);
-    const entry = { cbs: [(addr: PeerAddress) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); this.connectToPeerViaAddress(username, addr, connType, msg); }], timer, createdAt: Date.now() };
+    logger.info("browse", "requesting peer address", { username });
+    const timer = setTimeout(() => { this.peerAddressRequests.delete(username); logger.debug("browse", "GetPeerAddress timeout cleanup", { username }); }, PEER_ADDRESS_TIMEOUT_MS);
+    const entry = { cbs: [(addr: PeerAddress) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); logger.info("browse", "peer address resolved", { username, ip: addr.ip, port: addr.port }); this.connectToPeerViaAddress(username, addr, connType, msg); }], timer, createdAt: Date.now() };
     this.peerAddressRequests.set(username, entry);
     this.serverSocket?.write(buildGetPeerAddress(username));
   }
