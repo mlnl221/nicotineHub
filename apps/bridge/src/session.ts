@@ -1591,6 +1591,14 @@ export class SoulseekSession {
             this.pendingPeerMessages.delete(key);
             this.searchResponseCache.delete(token);
             this.emitTransfer({ type: "transfer-response", username: user, token, reason: "CantConnectToPeer" });
+            // Fast-fail pending browse shares for this user instead of waiting 30s timeout
+            if (this.pendingBrowseShares.has(key)) {
+              const entry = this.pendingBrowseShares.get(key);
+              if (entry) clearTimeout(entry.timer);
+              this.pendingBrowseShares.delete(key);
+              this.clearAllowedPeerResponse(user, PEER_MESSAGE_CODES.sharedFileListResponse);
+              this.emitBrowse({ type: "browse-error", username: user, error: "Peer cannot be reached — may be offline or both peers firewalled (ensure LISTEN_PORT is port-forwarded and try again)" });
+            }
           }
         } catch {}
       } catch {}
@@ -2665,13 +2673,21 @@ export class SoulseekSession {
     logger.info("browse", "requestSharedFileList", { username, pending: this.pendingBrowseShares.has(username.toLowerCase()) });
     // timeout 20s indirect + 10s grace = 30s (nicotine INDIRECT_REQUEST_TIMEOUT 20s + local 10s)
     const key = username.toLowerCase();
+    // Fast-fail if we know user is offline from recent status cache
+    const cachedStatus = this.userStatusCache.get(key);
+    if (cachedStatus && cachedStatus.status === 0) {
+      logger.warn("browse", "browse aborted — user offline per cache", { username });
+      this.emitBrowse({ type: "browse-error", username, error: "User appears offline — may have gone offline recently" });
+      return;
+    }
     const existing = this.pendingBrowseShares.get(key);
     if (existing) { clearTimeout(existing.timer); }
     const timer = setTimeout(() => {
       logger.warn("browse", "browse timeout", { username });
       this.pendingBrowseShares.delete(key);
       this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);
-      this.emitBrowse({ type: "browse-error", username, error: "Timed out fetching shares" });
+      // More helpful: peer may be offline, firewalled, or our LISTEN_PORT not forwarded
+      this.emitBrowse({ type: "browse-error", username, error: "Timed out fetching shares — peer may be offline, firewalled, or your LISTEN_PORT not port-forwarded (check Diagnostics → Network)" });
     }, 30000);
     this.pendingBrowseShares.set(key, { timer });
     this.addAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);
