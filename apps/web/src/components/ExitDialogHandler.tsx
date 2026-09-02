@@ -9,11 +9,11 @@ import { useConfig } from "@/lib/config/provider";
  * Web can only implement "show confirmation" via beforeunload prompt.
  */
 export function ExitDialogHandler() {
-  const { settings } = useConfig();
-  const mode = settings.ui.exitdialog ?? 1;
+  const { settings, hasUnsavedChanges } = useConfig();
+  const mode = settings.ui.exitdialog ?? 0;
 
   useEffect(() => {
-    if (mode !== 1) return;
+    if (mode !== 1 || !hasUnsavedChanges) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
@@ -21,7 +21,7 @@ export function ExitDialogHandler() {
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [mode]);
+  }, [mode, hasUnsavedChanges]);
 
   return null;
 }

@@ -28,6 +28,8 @@ function readStored(): Settings {
 
 interface ConfigApi {
   settings: Settings;
+  hasUnsavedChanges: boolean;
+  setHasUnsavedChanges: (v: boolean) => void;
   setOption: <S extends keyof Settings, K extends keyof Settings[S]>(
     section: S,
     key: K,
@@ -42,6 +44,7 @@ const ConfigContext = createContext<ConfigApi | null>(null);
 
 export function ConfigProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(defaults);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const hydrated = useRef(false);
 
   useEffect(() => {
@@ -81,8 +84,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const api = useMemo<ConfigApi>(
-    () => ({ settings, setOption, setSection, resetSection, resetAll }),
-    [settings, setOption, setSection, resetSection, resetAll],
+    () => ({ settings, hasUnsavedChanges, setHasUnsavedChanges, setOption, setSection, resetSection, resetAll }),
+    [settings, hasUnsavedChanges, setOption, setSection, resetSection, resetAll],
   );
 
   return <ConfigContext.Provider value={api}>{children}</ConfigContext.Provider>;
