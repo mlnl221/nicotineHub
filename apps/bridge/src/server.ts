@@ -355,23 +355,26 @@ function getCorsHeaders(req?: Request): Record<string, string> {
       base["access-control-allow-origin"] = origin;
       base["access-control-allow-credentials"] = "true";
     } else if (!origin) {
-      // non-browser (curl/healthcheck) — keep permissive for homelab
       base["access-control-allow-origin"] = allowed[0] || "*";
     }
-    // if origin present but not allowed → omit header (browser will block)
   } else {
     base["access-control-allow-origin"] = "*";
   }
   return base;
 }
-const CORS_HEADERS = getCorsHeaders();
-
 const SECURITY_HEADERS: Record<string, string> = {
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
   "referrer-policy": "strict-origin-when-cross-origin",
   "permissions-policy": "camera=(), microphone=(), geolocation=()",
 };
+// ponytail: deduped 9× auth blocks into one helper; re-split if per-route auth diverges
+function requireAuth(req: Request, cors: Record<string, string>): Response | null {
+  if (!BRIDGE_TOKEN) return null;
+  const tok = extractToken(req);
+  if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
+  return null;
+}
 
 function sanitizeFileNameForHeader(name: string): string {
   // Strict whitelist: strip CR/LF, quotes, slashes, control chars; fallback to "download"
@@ -436,10 +439,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     }
     // UPnP status endpoint (detailed, auth-gated like health json)
     if ((url.pathname === "/upnp/status" || url.pathname === "/api/upnp/status") && req.method === "GET") {
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const st = getGlobalPortMapperStatus();
       return new Response(JSON.stringify({ ...st, listenPort: LISTEN_PORT, ts: new Date().toISOString() }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
     }
@@ -464,10 +464,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       }
     }
     if ((url.pathname === "/interfaces" || url.pathname === "/api/interfaces") && req.method === "GET") {
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       try {
         const { networkInterfaces } = await import("node:os");
         const raw = networkInterfaces();
@@ -490,10 +487,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     }
     if (url.pathname === "/logs" && req.method === "GET") {
       // Simple auth check via token param/header (mirror /ws)
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const tail = Math.min(Math.max(Number(url.searchParams.get("tail") || "500"), 1), 2000);
       const level = (url.searchParams.get("level") as LogLevel) || "debug";
       const scope = url.searchParams.get("scope") || undefined;
@@ -503,10 +497,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       return new Response(JSON.stringify({ entries, total: entries.length }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
     }
     if (url.pathname === "/diagnostics" && req.method === "GET") {
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const tail = Math.min(Math.max(Number(url.searchParams.get("tail") || "500"), 1), 2000);
       const level = (url.searchParams.get("level") as LogLevel) || "debug";
       let entries = diagTail(2000, level as LogLevel);
@@ -519,10 +510,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     }
 
     if (url.pathname === "/plugins" && req.method === "GET") {
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const list = pluginManager.getInstalledPluginListWithStatus();
       // include meta for each + loaded settings/metasettings
       const enriched = list.map((p) => ({
@@ -533,10 +521,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       return new Response(JSON.stringify({ plugins: enriched, globalEnable: true }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
     }
     if (url.pathname === "/plugins/install" && req.method === "POST") {
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       // expect multipart or raw zip; handle raw body as zip bytes (content-type octet-stream) or JSON {url}
       const ct = req.headers.get("content-type") || "";
       // size guard: reject huge bodies before buffering (homelab: 20MB limit)
@@ -587,10 +572,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
 
     // GET /api/files?path=/subdir — browsing host root (starts at /data but can go up to /). See files.ts BROWSE_ROOT.
     if (url.pathname === "/api/files" && req.method === "GET") {
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const rawPath = url.searchParams.get("path") ?? "/";
       // Reject overly long or null-byte paths early (defense in depth, files.ts also handles)
       if (rawPath.length > 1024 || rawPath.includes("\0")) {
@@ -638,10 +620,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       const token = Number(tokenStr);
       if (!Number.isFinite(token)) return new Response("Not found", { status: 404, headers: secHeaders });
       // Auth gate — mirrors /ws when token enabled; never leak files without valid token
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       try {
         const { existsSync, readFileSync } = require("node:fs") as typeof import("node:fs");
         const { join, basename, resolve } = require("node:path") as typeof import("node:path");
@@ -720,10 +699,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     // GET /spectrum/:token/full | /spectrum/:token/zoom | /api/spectrum/:token
     // Serves sox-generated spectrograms from /tmp/hub-spectrum (ephemeral, wiped on reboot)
     if ((url.pathname.startsWith("/spectrum/") || url.pathname.startsWith("/api/spectrum/")) && req.method === "GET") {
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       try {
         const { existsSync, readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
         const { join, resolve } = require("node:path") as typeof import("node:path");

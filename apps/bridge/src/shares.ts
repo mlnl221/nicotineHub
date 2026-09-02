@@ -613,39 +613,9 @@ export class ShareDB {
     if (files.length) out.push({ name: virtualPath, files: files.sort((a,b)=> a.name.localeCompare(b.name)) });
   }
 
-  private async buildAttrsAsync(full: string, ext: string): Promise<Array<[number, number]>> {
-    if (!["mp3","flac","ogg","m4a","wav","wma","aac","opus","aiff","wv"].includes(ext)) return [];
-    try {
-      const { parseFile } = await import("music-metadata");
-      const meta = await parseFile(full, { duration: true });
-      const attrs: Array<[number, number]> = [];
-      const bitrate = meta.format.bitrate ? Math.round(meta.format.bitrate / 1000) : undefined;
-      const duration = meta.format.duration ? Math.round(meta.format.duration) : undefined;
-      const sampleRate = meta.format.sampleRate;
-      const bitsPerSample = (meta.format as unknown as { bitsPerSample?: number }).bitsPerSample;
-      if (bitrate) attrs.push([0, bitrate]);
-      if (duration) attrs.push([1, duration]);
-      // VBR: attribute 2 — detect via codecProfile containing VBR/CBR or mode, else infer for mp3
-      if (["mp3", "m4a", "ogg", "opus", "wma", "aac"].includes(ext)) {
-        const profile = (meta.format.codecProfile as string | undefined) || "";
-        const isVbr = /vbr/i.test(profile) || (meta.format as unknown as { isVbr?: boolean }).isVbr === true;
-        const isCbr = /cbr/i.test(profile);
-        if (isVbr) attrs.push([2, 1]);
-        else if (isCbr) attrs.push([2, 0]);
-        else if (ext === "mp3" && bitrate) {
-          // Fallback: mp3 without profile — assume CBR if bitrate is standard (128/192/256/320), else VBR
-          // Homelab: treat unknown mp3 as CBR 0 to avoid false filtering
-          attrs.push([2, 0]);
-        } else if (profile) {
-          attrs.push([2, 0]);
-        }
-      }
-      if (sampleRate) attrs.push([4, sampleRate]);
-      if (bitsPerSample) attrs.push([5, bitsPerSample]);
-      return attrs;
-    } catch {
-      return [];
-    }
+  private async buildAttrsAsync(_full: string, _ext: string): Promise<Array<[number, number]>> {
+    // ponytail: music-metadata removed (11MB dep, TinyTag parity); attrs empty — peer reports bitrate/length, add back if search filtering needs local attrs
+    return [];
   }
 
   private async scanCustomRootsAsync(roots: [string, string][]): Promise<ShareFolder[]> {
