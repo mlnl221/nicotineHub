@@ -281,7 +281,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 lastLogin.current = null;
               }
               shouldReconnect.current = !isAuthFailure;
+              const isTransientServer = /Unable to connect|ETIMEOUT|ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ECONNRESET|fetch failed|NetworkError|Connection error|Connection closed before login/i.test(data.error || "");
               const wasConnected = stateRef.current.status === "connected" || !!stateRef.current.reconnecting;
+              if (isTransientServer) {
+                // Bridge Soulseek TCP is retrying in background via server:reconnect — keep WS open, don't flap WS
+                // Don't schedule WS reconnect; rely on server:reconnect banner/delay
+                setState((s) => ({ ...s, error: data.error, reconnecting: true }));
+                clearHeartbeat();
+                break;
+              }
               if (!isAuthFailure && wasConnected) {
                 // Background transient failure — keep UI interactive, retry silently
                 setState((s) => ({ ...s, error: data.error, reconnecting: true }));

@@ -1098,7 +1098,16 @@ export class SoulseekSession {
         data: (_sock, chunk) => this.handleServerData(chunk),
         error: (_sock, err) => {
           logger.warn("server", "tcp error", { error: err.message, username: this.username });
-          if (!this.loggedIn) this.loginReject?.(new Error(`Connection error: ${err.message}`));
+          const transient = /ETIMEOUT|ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ECONNRESET|Unable to connect/i.test(err.message);
+          if (!this.loggedIn && this.loginReject) {
+            if (!this.shouldReconnect || !transient || this.reconnectAttempts >= 15) {
+              this.loginReject(new Error(`Connection error: ${err.message}`));
+              this.loginReject = undefined;
+              this.loginResolve = undefined;
+            } else {
+              logger.info("server", "transient tcp error, keeping login pending", { attempt: this.reconnectAttempts + 1, error: err.message });
+            }
+          }
           this.scheduleReconnect(`Connection error: ${err.message}`);
         },
         close: () => {
@@ -1116,10 +1125,15 @@ export class SoulseekSession {
           // Clear stale framing immediately — next connect must start clean
           this.serverBuffer = Buffer.alloc(0);
           if (!this.loggedIn && this.loginReject) {
-            const err = new Error("Connection closed before login completed.");
-            this.loginReject(err);
-            this.loginReject = undefined;
-            this.loginResolve = undefined;
+            // Transient close before login — keep pending if we're going to retry via scheduleReconnect
+            if (!this.shouldReconnect || this.reconnectAttempts >= 15) {
+              const err = new Error("Connection closed before login completed.");
+              this.loginReject(err);
+              this.loginReject = undefined;
+              this.loginResolve = undefined;
+            } else {
+              logger.info("server", "transient close before login, keeping pending for retry", { attempt: this.reconnectAttempts + 1 });
+            }
           }
           // keep loggedIn false; schedule reconnect if we were logged in or still trying
           if (wasLoggedIn) this.loggedIn = false;
@@ -1130,7 +1144,16 @@ export class SoulseekSession {
       },
     }).catch((err) => {
       logger.error("server", "connect failed", { error: err.message, username: this.username });
-      if (!this.loggedIn) this.loginReject?.(new Error(`Unable to connect: ${err.message}`));
+      const transient = /ETIMEOUT|ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ECONNRESET|Unable to connect/i.test(err.message);
+      if (!this.loggedIn && this.loginReject) {
+        if (!this.shouldReconnect || !transient || this.reconnectAttempts >= 15) {
+          this.loginReject(new Error(`Unable to connect: ${err.message}`));
+          this.loginReject = undefined;
+          this.loginResolve = undefined;
+        } else {
+          logger.info("server", "transient connect failed, keeping login pending", { attempt: this.reconnectAttempts + 1, error: err.message });
+        }
+      }
       this.scheduleReconnect(`Unable to connect: ${err.message}`);
     });
   }
@@ -1157,6 +1180,12 @@ export class SoulseekSession {
     if (this.reconnectAttempts > 15) {
       logger.error("server", "reconnect failed", { reason, attempts: this.reconnectAttempts });
       this.emitServer({ type: "reconnect-failed", error: reason });
+      // Final failure after 15 retries — reject pending login so web can show failed state
+      if (this.loginReject) {
+        try { this.loginReject(new Error(reason)); } catch {}
+        this.loginReject = undefined;
+        this.loginResolve = undefined;
+      }
     }
   }
 
