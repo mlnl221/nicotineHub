@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSession } from "@/lib/session";
 import type { UserInfoEvent, UserInfoStats, UserInfoStatus } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
-import { mockBuddies } from "@/lib/demo/fixtures";
+import { DEMO_BUDDY_USERS, mockBuddies } from "@/lib/demo/fixtures";
 
 export interface Buddy {
   username: string;
@@ -30,7 +30,17 @@ function loadBuddies(): Buddy[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((x: unknown) => typeof (x as Buddy).username === "string").slice(0, MAX_BUDDIES);
+    let list = parsed.filter((x: unknown) => typeof (x as Buddy).username === "string").slice(0, MAX_BUDDIES);
+    if (!isDemo) {
+      const demoSet = new Set(DEMO_BUDDY_USERS.map((u) => u.toLowerCase()));
+      const filtered = list.filter((b) => !demoSet.has(b.username.toLowerCase()));
+      if (filtered.length !== list.length) {
+        try { localStorage.setItem(BUDDIES_KEY, JSON.stringify(filtered)); } catch {}
+        try { sessionStorage.removeItem("__demoBuddiesSeeded"); } catch {}
+        list = filtered;
+      }
+    }
+    return list;
   } catch {
     return [];
   }
@@ -69,6 +79,20 @@ export function useBuddies() {
     setBuddies([]);
     try { sessionStorage.removeItem("__demoBuddiesSeeded"); } catch {}
   }, [state.status]);
+
+  // Prod: purge demo users if they somehow persisted (e.g. visited demo build then prod)
+  useEffect(() => {
+    if (isDemo) return;
+    const demoSet = new Set(DEMO_BUDDY_USERS.map((u) => u.toLowerCase()));
+    setBuddies((prev) => {
+      const filtered = prev.filter((b) => !demoSet.has(b.username.toLowerCase()));
+      if (filtered.length !== prev.length) {
+        try { sessionStorage.removeItem("__demoBuddiesSeeded"); } catch {}
+        return filtered;
+      }
+      return prev;
+    });
+  }, []);
 
   // Subscribe to user-status/stats/watch-user updates
   useEffect(() => {

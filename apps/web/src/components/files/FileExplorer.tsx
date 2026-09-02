@@ -88,8 +88,20 @@ export function FileExplorer({
   useEffect(() => { fetchDir(initialPath); }, [fetchDir, initialPath]);
 
   const breadcrumbs = (() => {
-    const parts = current === "/" ? [] : current.slice(1).split("/");
-    const crumbs: { label: string; path: string }[] = [{ label: "⌂ /data", path: "/" }];
+    if (current === "/") return [{ label: "⌂ /", path: "/" }];
+    if (current === "/data") return [{ label: "⌂ /", path: "/" }, { label: "/data", path: "/data" }];
+    if (current.startsWith("/data/")) {
+      const rest = current.slice("/data".length).split("/").filter(Boolean);
+      const crumbs: { label: string; path: string }[] = [{ label: "⌂ /", path: "/" }, { label: "/data", path: "/data" }];
+      let acc = "/data";
+      for (const p of rest) {
+        acc += "/" + p;
+        crumbs.push({ label: p, path: acc });
+      }
+      return crumbs;
+    }
+    const parts = current.slice(1).split("/").filter(Boolean);
+    const crumbs: { label: string; path: string }[] = [{ label: "⌂ /", path: "/" }];
     let acc = "";
     for (const p of parts) {
       acc += "/" + p;
@@ -245,7 +257,7 @@ export function FileExplorer({
                   type="button"
                   onClick={() => fetchDir(e.path)}
                   className="rounded-full bg-surface-container-high px-2 py-1 font-label text-[11px] text-on-surface-variant hover:bg-surface-container-highest"
-                  title="Try to enter symlink (blocked if it escapes /data)"
+                  title="Try to enter symlink (blocked if it escapes /)"
                 >
                   Open
                 </button>
@@ -269,7 +281,7 @@ export function FileExplorer({
       {/* Footer note */}
       <div className="border-t border-outline-variant/10 bg-surface-container-low px-3 py-2 dark:bg-surface-variant/20">
         <div className="font-body text-[11px] leading-relaxed text-on-surface-variant dark:text-outline">
-          <span className="font-semibold">Security:</span> Listing is sandboxed to <span className="font-mono">/data</span> (container view). Traversal blocked, symlink escapes rejected. If <span className="font-mono">BRIDGE_TOKEN</span> is set, requests require <span className="font-mono">?token</span> or <span className="font-mono">Authorization: Bearer</span> (same as <span className="font-mono">/ws</span>, <span className="font-mono">/logs</span>).
+          <span className="font-semibold">Security:</span> You start at <span className="font-mono">/data</span> but can navigate up to <span className="font-mono">/</span> (host root) — traversal outside <span className="font-mono">/</span> is blocked and symlink escapes are rejected. If <span className="font-mono">BRIDGE_TOKEN</span> is set, requests require <span className="font-mono">?token</span> or <span className="font-mono">Authorization: Bearer</span> (same as <span className="font-mono">/ws</span>, <span className="font-mono">/logs</span>).
         </div>
       </div>
     </div>

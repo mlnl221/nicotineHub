@@ -74,7 +74,7 @@ function useInterfaces(): { ifaces: IfaceEntry[]; loading: boolean; error: strin
 }
 
 export function NetworkSection() {
-  const { settings, setOption } = useConfig();
+  const { settings, setOption, setHasUnsavedChanges } = useConfig();
   const server = settings.server;
   const { state, subscribe, send } = useSession();
   const { current: bridgePort, setCurrent: setBridgePort, upnp: bridgeUpnp, setUpnp: setBridgeUpnp } = useBridgeListenPort();
@@ -138,6 +138,7 @@ export function NetworkSection() {
     return unsub;
   }, [subscribe, saveStatus, pendingPort, bridgePort, listenPort, setBridgePort, setBridgeUpnp, bridgeUpnp]);
   const dirty = pendingPort !== listenPort;
+  useEffect(() => { setHasUnsavedChanges(dirty); }, [dirty, setHasUnsavedChanges]);
   const isSaving = saveStatus === "saving" || state.status === "connecting";
   // Auto-sync Settings to bridge when they diverge (Docker was started with LISTEN_PORT=60754 but Settings still 49127)
   useEffect(() => {
@@ -173,7 +174,7 @@ export function NetworkSection() {
   };
 
   return (
-    <>
+    <div className="flex flex-col gap-6">
       <SectionCard
         title="Connection"
         description="Soulseek server the bridge connects to. Credentials are never stored in the browser."
@@ -408,6 +409,6 @@ export function NetworkSection() {
           onReset={() => setOption("server", "autoreply", "")}
         />
       </SectionCard>
-    </>
+    </div>
   );
 }

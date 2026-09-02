@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 Nicotine Hub Contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
- * Secure filesystem browsing for DATA_DIR.
- * All paths are contained within DATA_DIR; traversal outside is rejected.
+ * Secure filesystem browsing for host root (starts at /data but can navigate up to /).
+ * All paths are contained within the browse root ("/" for the API); host root browsing is gated by BRIDGE_TOKEN like /ws.
+ * Legacy DATA_DIR containment is kept when caller passes DATA_DIR, but /api/files now uses "/".
  */
 import { readdir, stat, lstat, realpath } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -13,7 +14,7 @@ export interface FileEntry {
   type: "directory" | "file" | "symlink";
   size: number;
   mtime: number; // epoch ms
-  path: string; // relative to DATA_DIR, always starts with "/"
+  path: string; // absolute host path, always starts with "/" ("/data" for /data)
 }
 
 export interface BrowseResult {
@@ -50,7 +51,7 @@ export function normalizeRequestedPath(raw: string | null | undefined): string {
 }
 
 /**
- * Resolve a requested relative path to an absolute path under DATA_DIR.
+ * Resolve a requested path to an absolute path under the browse root (DATA_DIR or "/").
  * Returns absolute path if contained, otherwise throws.
  */
 export async function resolveSafePath(requestedPath: string, dataDirOverride?: string): Promise<string> {
@@ -73,7 +74,7 @@ export async function resolveSafePath(requestedPath: string, dataDirOverride?: s
         const real = await realpath(resolved);
         const realResolved = resolve(real);
         if (realResolved !== dataResolved && !realResolved.startsWith(dataResolved + sep)) {
-          throw new Error(`Symlink escapes DATA_DIR`);
+          throw new Error(`Symlink escapes browse root`);
         }
         // Return real path's resolved? We keep resolved (logical) but ensure real is contained
       }
@@ -95,7 +96,7 @@ export function getParentPath(normalizedPath: string): string | null {
 }
 
 /**
- * List directory entries under DATA_DIR.
+ * List directory entries under the browse root ("/" for /api/files, DATA_DIR for legacy/tests).
  * Returns sorted: directories first, then files, alphabetical case-insensitive.
  */
 export async function listDirectory(requestedPath: string, dataDirOverride?: string): Promise<BrowseResult> {

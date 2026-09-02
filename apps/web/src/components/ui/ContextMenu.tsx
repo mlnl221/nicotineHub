@@ -34,7 +34,7 @@ function MenuPanel({
   const [openSub, setOpenSub] = useState<string | null>(null);
   return (
     <div
-      className={`min-w-[220px] max-w-[320px] rounded-2xl bg-surface-container-lowest/90 dark:bg-surface-container-high/95 backdrop-blur-xl ghost-border p-1.5 shadow-[0_24px_48px_rgba(0,0,0,0.12)] border border-outline-variant/10 ${nested ? "absolute left-full top-0 ml-1" : ""}`}
+      className={`min-w-[220px] max-w-[320px] rounded-2xl bg-surface-container-lowest/90 dark:bg-surface-container-high/95 backdrop-blur-xl ghost-border p-1.5 shadow-[0_24px_48px_rgba(0,0,0,0.12)] border border-outline-variant/10 ${nested ? "mt-1 ml-3 border-l border-outline-variant/10 pl-2" : ""}`}
       role="menu"
       onClick={(e) => e.stopPropagation()}
     >
@@ -95,9 +95,11 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
   useLayoutEffect(() => {
     if (!ref.current) return;
     const rect = ref.current.getBoundingClientRect();
-    let left = x;
-    let top = y;
     const pad = 8;
+    const halfH = window.innerHeight / 2;
+    const halfW = window.innerWidth / 2;
+    let left = x > halfW ? x - rect.width - 8 : x;
+    let top = y > halfH ? y - rect.height - 8 : y;
     if (left + rect.width > window.innerWidth - pad) left = window.innerWidth - rect.width - pad;
     if (top + rect.height > window.innerHeight - pad) top = window.innerHeight - rect.height - pad;
     if (left < pad) left = pad;

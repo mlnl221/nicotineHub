@@ -73,29 +73,44 @@ export function Sidebar() {
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setAboutOpen(true)}
-          className={`mt-6 flex items-center ${collapsed ? "justify-center" : "space-x-3"} rounded-xl -mx-1 px-1 py-1 hover:bg-surface-container-high/40 transition-colors text-left w-full`}
-          aria-label={t("About") + " Nicotine Hub"}
-          title="About Nicotine Hub"
-        >
-          <img
-            src="/icon-512.png"
-            alt=""
-            width={40}
-            height={40}
-            className="h-10 w-10 rounded-xl object-contain bg-white p-1 shadow-sm ring-1 ring-black/5 dark:bg-white shrink-0"
-          />
+        <div className={`mt-6 flex items-center ${collapsed ? "justify-center" : "space-x-3"} rounded-xl -mx-1 px-1 py-1 text-left w-full`}>
+          <button
+            type="button"
+            onClick={() => setAboutOpen(true)}
+            className="shrink-0 rounded-xl bg-white p-1 shadow-sm ring-1 ring-black/5 dark:bg-white hover:bg-surface-container-high/40"
+            aria-label={t("About") + " Nicotine Hub"}
+            title="About Nicotine Hub"
+          >
+            <img
+              src="/icon-512.png"
+              alt=""
+              width={40}
+              height={40}
+              className="h-10 w-10 rounded-xl object-contain bg-white p-1 shrink-0"
+            />
+          </button>
           {!collapsed ? (
             <div className="min-w-0 flex-1">
-              <div className="font-label text-sm font-semibold text-primary dark:text-inverse-primary truncate" suppressHydrationWarning title={displayUser}>
-                {displayUser}
-              </div>
+              {mounted && state.user ? (
+                <Link
+                  href={`/profile/${encodeURIComponent(state.user)}`}
+                  data-testid="sidebar-username-link"
+                  aria-label="View my profile"
+                  className="font-label text-sm font-semibold text-primary dark:text-inverse-primary truncate hover:underline block"
+                  title={displayUser}
+                  suppressHydrationWarning
+                >
+                  {displayUser}
+                </Link>
+              ) : (
+                <div className="font-label text-sm font-semibold text-primary dark:text-inverse-primary truncate" suppressHydrationWarning title={displayUser}>
+                  {displayUser}
+                </div>
+              )}
               <div className="font-label text-[10px] uppercase tracking-widest text-outline">About</div>
             </div>
           ) : null}
-        </button>
+        </div>
 
       {/* Primary Search — single blue button (replaces old New Transfer + former Search nav) */}
       <Link

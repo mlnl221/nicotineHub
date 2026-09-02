@@ -522,6 +522,13 @@ export class SoulseekSession {
   setNetworkInterface(iface: string) {
     const norm = String(iface || "").trim();
     if (norm === this._interface) return;
+    if (this.reconnectPending) {
+      // Debounce — config sync burst after login can fire interface + portrange together
+      const old = this._interface;
+      this._interface = norm;
+      logger.debug("server", "interface change debounced (reconnect pending)", { from: old, to: norm || "default" });
+      return;
+    }
     const old = this._interface;
     const oldIp = this._localIpAddress;
     this._interface = norm;
@@ -1031,6 +1038,8 @@ export class SoulseekSession {
     this.distribParentMinSpeed = PARENT_MIN_SPEED_DEFAULT;
     this.distribParentSpeedRatio = PARENT_SPEED_RATIO_DEFAULT;
     this.uploadSpeed = 0;
+    // Clear serverBuffer — stale bytes from prior conn would desync framing (privilegedUsers 69 misparse)
+    this.serverBuffer = Buffer.alloc(0);
     // Peer listener will be rebound on next login success; stop old now to free port for immediate retry
     try { this.listener?.stop(); } catch {}
     this.listener = undefined;
@@ -1057,6 +1066,8 @@ export class SoulseekSession {
   }
 
   private connectServer() {
+    // Ensure clean framing for new TCP — old bytes would cause code 69 vs 1 desync
+    this.serverBuffer = Buffer.alloc(0);
     logger.info("server", `connecting to ${this.opts.host || "server.slsknet.org"}:${this.opts.port || 2242}`, { username: this.username });
     Bun.connect({
       hostname: this.opts.host || "server.slsknet.org",
@@ -1070,27 +1081,59 @@ export class SoulseekSession {
           try { (sock as unknown as { setNoDelay?: (b: boolean) => void }).setNoDelay?.(true); } catch {}
           this.setTcpBufferSize(sock as Socket, "S");
           this.serverSocket = sock as Socket;
-          // Send Login only; SetWaitPort after success (nicotine parity)
-          sock.write(buildLogin(this.opts.username, this.opts.password));
+          // Send Login + SetWaitPort together (nicotine slskproto.py sends both before response;
+          // Soulseek.NET concatenates to avoid race). SetWaitPort is resent after success anyway.
+          try {
+            const loginBuf = buildLogin(this.opts.username, this.opts.password);
+            const waitPortBuf = buildSetWaitPort(this._listenPort);
+            // single flush like Soulseek.NET: Login+SetWaitPort concatenated
+            sock.write(Buffer.concat([loginBuf, waitPortBuf]));
+            logger.debug("server", "login+SetWaitPort sent", { len: loginBuf.length + waitPortBuf.length, loginLen: loginBuf.length, waitPortLen: waitPortBuf.length, hex: loginBuf.toString("hex").slice(0,120) + "..." });
+          } catch (e) {
+            // fallback
+            sock.write(buildLogin(this.opts.username, this.opts.password));
+            logger.warn("server", "login concat failed, fallback", { error: (e as Error).message });
+          }
         },
         data: (_sock, chunk) => this.handleServerData(chunk),
         error: (_sock, err) => {
           logger.warn("server", "tcp error", { error: err.message, username: this.username });
-          if (!this.loggedIn) this.loginReject?.(new Error(`Connection error: ${err.message}`));
+          const transient = /ETIMEOUT|ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ECONNRESET|Unable to connect/i.test(err.message);
+          if (!this.loggedIn && this.loginReject) {
+            if (!this.shouldReconnect || !transient || this.reconnectAttempts >= 15) {
+              this.loginReject(new Error(`Connection error: ${err.message}`));
+              this.loginReject = undefined;
+              this.loginResolve = undefined;
+            } else {
+              logger.info("server", "transient tcp error, keeping login pending", { attempt: this.reconnectAttempts + 1, error: err.message });
+            }
+          }
           this.scheduleReconnect(`Connection error: ${err.message}`);
         },
         close: () => {
-          logger.warn("server", "tcp close", { loggedIn: this.loggedIn, username: this.username });
+          // Diagnostic: log any buffered bytes before discarding (helps debug silent close vs rejection)
+          if (this.serverBuffer.length) {
+            logger.warn("server", "tcp close with buffered data", { loggedIn: this.loggedIn, username: this.username, bufLen: this.serverBuffer.length, bufHex: this.serverBuffer.toString("hex").slice(0,512) });
+          } else {
+            logger.warn("server", "tcp close", { loggedIn: this.loggedIn, username: this.username, bufLen: 0 });
+          }
           const wasLoggedIn = this.loggedIn;
           if (wasLoggedIn) {
             // Portmapper cleanup mirrors pynicotine _server_disconnect remove_port_mapping
             try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}
           }
+          // Clear stale framing immediately — next connect must start clean
+          this.serverBuffer = Buffer.alloc(0);
           if (!this.loggedIn && this.loginReject) {
-            const err = new Error("Connection closed before login completed.");
-            this.loginReject(err);
-            this.loginReject = undefined;
-            this.loginResolve = undefined;
+            // Transient close before login — keep pending if we're going to retry via scheduleReconnect
+            if (!this.shouldReconnect || this.reconnectAttempts >= 15) {
+              const err = new Error("Connection closed before login completed.");
+              this.loginReject(err);
+              this.loginReject = undefined;
+              this.loginResolve = undefined;
+            } else {
+              logger.info("server", "transient close before login, keeping pending for retry", { attempt: this.reconnectAttempts + 1 });
+            }
           }
           // keep loggedIn false; schedule reconnect if we were logged in or still trying
           if (wasLoggedIn) this.loggedIn = false;
@@ -1101,7 +1144,16 @@ export class SoulseekSession {
       },
     }).catch((err) => {
       logger.error("server", "connect failed", { error: err.message, username: this.username });
-      if (!this.loggedIn) this.loginReject?.(new Error(`Unable to connect: ${err.message}`));
+      const transient = /ETIMEOUT|ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ECONNRESET|Unable to connect/i.test(err.message);
+      if (!this.loggedIn && this.loginReject) {
+        if (!this.shouldReconnect || !transient || this.reconnectAttempts >= 15) {
+          this.loginReject(new Error(`Unable to connect: ${err.message}`));
+          this.loginReject = undefined;
+          this.loginResolve = undefined;
+        } else {
+          logger.info("server", "transient connect failed, keeping login pending", { attempt: this.reconnectAttempts + 1, error: err.message });
+        }
+      }
       this.scheduleReconnect(`Unable to connect: ${err.message}`);
     });
   }
@@ -1128,6 +1180,12 @@ export class SoulseekSession {
     if (this.reconnectAttempts > 15) {
       logger.error("server", "reconnect failed", { reason, attempts: this.reconnectAttempts });
       this.emitServer({ type: "reconnect-failed", error: reason });
+      // Final failure after 15 retries — reject pending login so web can show failed state
+      if (this.loginReject) {
+        try { this.loginReject(new Error(reason)); } catch {}
+        this.loginReject = undefined;
+        this.loginResolve = undefined;
+      }
     }
   }
 
@@ -1533,6 +1591,14 @@ export class SoulseekSession {
             this.pendingPeerMessages.delete(key);
             this.searchResponseCache.delete(token);
             this.emitTransfer({ type: "transfer-response", username: user, token, reason: "CantConnectToPeer" });
+            // Fast-fail pending browse shares for this user instead of waiting 30s timeout
+            if (this.pendingBrowseShares.has(key)) {
+              const entry = this.pendingBrowseShares.get(key);
+              if (entry) clearTimeout(entry.timer);
+              this.pendingBrowseShares.delete(key);
+              this.clearAllowedPeerResponse(user, PEER_MESSAGE_CODES.sharedFileListResponse);
+              this.emitBrowse({ type: "browse-error", username: user, error: "Peer cannot be reached — may be offline or both peers firewalled (ensure LISTEN_PORT is port-forwarded and try again)" });
+            }
           }
         } catch {}
       } catch {}
@@ -2607,13 +2673,21 @@ export class SoulseekSession {
     logger.info("browse", "requestSharedFileList", { username, pending: this.pendingBrowseShares.has(username.toLowerCase()) });
     // timeout 20s indirect + 10s grace = 30s (nicotine INDIRECT_REQUEST_TIMEOUT 20s + local 10s)
     const key = username.toLowerCase();
+    // Fast-fail if we know user is offline from recent status cache
+    const cachedStatus = this.userStatusCache.get(key);
+    if (cachedStatus && cachedStatus.status === 0) {
+      logger.warn("browse", "browse aborted — user offline per cache", { username });
+      this.emitBrowse({ type: "browse-error", username, error: "User appears offline — may have gone offline recently" });
+      return;
+    }
     const existing = this.pendingBrowseShares.get(key);
     if (existing) { clearTimeout(existing.timer); }
     const timer = setTimeout(() => {
       logger.warn("browse", "browse timeout", { username });
       this.pendingBrowseShares.delete(key);
       this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);
-      this.emitBrowse({ type: "browse-error", username, error: "Timed out fetching shares" });
+      // More helpful: peer may be offline, firewalled, or our LISTEN_PORT not forwarded
+      this.emitBrowse({ type: "browse-error", username, error: "Timed out fetching shares — peer may be offline, firewalled, or your LISTEN_PORT not port-forwarded (check Diagnostics → Network)" });
     }, 30000);
     this.pendingBrowseShares.set(key, { timer });
     this.addAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);

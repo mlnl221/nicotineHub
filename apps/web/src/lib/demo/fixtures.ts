@@ -404,80 +404,86 @@ function demoFile(path: string, name: string, type: BridgeFileEntry["type"], siz
   return { name, type, size, mtime, path };
 }
 
-// Static tree — keys are normalized paths ("/" = /data root)
+// Static tree — keys are normalized host paths; "/data" is the /data root, "/" is host root (can navigate up)
 const DEMO_FILE_TREE: Record<string, BridgeFileEntry[]> = {
   "/": [
-    demoFile("/Music", "Music", "directory", 0, 2),
-    demoFile("/Downloads", "Downloads", "directory", 0, 5),
-    demoFile("/Shares", "Shares", "directory", 0, 10),
-    demoFile("/Incoming", "Incoming", "directory", 0, 12),
-    demoFile("/README.md", "README.md", "file", 2_400, 30),
-    demoFile("/WELCOME.txt", "WELCOME.txt", "file", 890, 1),
+    demoFile("/data", "data", "directory", 0, 2),
+    demoFile("/home", "home", "directory", 0, 5),
+    demoFile("/tmp", "tmp", "directory", 0, 6),
+    demoFile("/etc", "etc", "directory", 0, 10),
   ],
-  "/Music": [
-    demoFile("/Music/Jazz", "Jazz", "directory", 0, 3),
-    demoFile("/Music/Electronic", "Electronic", "directory", 0, 4),
-    demoFile("/Music/Hip-Hop", "Hip-Hop", "directory", 0, 6),
-    demoFile("/Music/Soul", "Soul", "directory", 0, 8),
-    demoFile("/Music/Collection.nfo", "Collection.nfo", "file", 1_200, 15),
+  "/data": [
+    demoFile("/data/Music", "Music", "directory", 0, 2),
+    demoFile("/data/Downloads", "Downloads", "directory", 0, 5),
+    demoFile("/data/Shares", "Shares", "directory", 0, 10),
+    demoFile("/data/Incoming", "Incoming", "directory", 0, 12),
+    demoFile("/data/README.md", "README.md", "file", 2_400, 30),
+    demoFile("/data/WELCOME.txt", "WELCOME.txt", "file", 890, 1),
   ],
-  "/Music/Jazz": [
-    demoFile("/Music/Jazz/Blue Note", "Blue Note", "directory", 0, 3),
-    demoFile("/Music/Jazz/Live Bootlegs", "Live Bootlegs", "directory", 0, 7),
-    demoFile("/Music/Jazz/Miles Davis - Kind of Blue [FLAC].flac", "Miles Davis - Kind of Blue [FLAC].flac", "file", 320_000_000, 20),
-    demoFile("/Music/Jazz/John Coltrane - A Love Supreme.flac", "John Coltrane - A Love Supreme.flac", "file", 280_000_000, 22),
-    demoFile("/Music/Jazz/Chet Baker - My Funny Valentine.mp3", "Chet Baker - My Funny Valentine.mp3", "file", 9_400_000, 18),
+  "/data/Music": [
+    demoFile("/data/Music/Jazz", "Jazz", "directory", 0, 3),
+    demoFile("/data/Music/Electronic", "Electronic", "directory", 0, 4),
+    demoFile("/data/Music/Hip-Hop", "Hip-Hop", "directory", 0, 6),
+    demoFile("/data/Music/Soul", "Soul", "directory", 0, 8),
+    demoFile("/data/Music/Collection.nfo", "Collection.nfo", "file", 1_200, 15),
   ],
-  "/Music/Jazz/Blue Note": [
+  "/data/Music/Jazz": [
+    demoFile("/data/Music/Jazz/Blue Note", "Blue Note", "directory", 0, 3),
+    demoFile("/data/Music/Jazz/Live Bootlegs", "Live Bootlegs", "directory", 0, 7),
+    demoFile("/data/Music/Jazz/Miles Davis - Kind of Blue [FLAC].flac", "Miles Davis - Kind of Blue [FLAC].flac", "file", 320_000_000, 20),
+    demoFile("/data/Music/Jazz/John Coltrane - A Love Supreme.flac", "John Coltrane - A Love Supreme.flac", "file", 280_000_000, 22),
+    demoFile("/data/Music/Jazz/Chet Baker - My Funny Valentine.mp3", "Chet Baker - My Funny Valentine.mp3", "file", 9_400_000, 18),
+  ],
+  "/data/Music/Jazz/Blue Note": [
     demoFile("/Music/Jazz/Blue Note/Art Blakey - Moanin'.flac", "Art Blakey - Moanin'.flac", "file", 210_000_000, 25),
     demoFile("/Music/Jazz/Blue Note/Lee Morgan - The Sidewinder.flac", "Lee Morgan - The Sidewinder.flac", "file", 198_000_000, 26),
     demoFile("/Music/Jazz/Blue Note/Herbie Hancock - Maiden Voyage.flac", "Herbie Hancock - Maiden Voyage.flac", "file", 245_000_000, 27),
   ],
-  "/Music/Jazz/Live Bootlegs": [
+  "/data/Music/Jazz/Live Bootlegs": [
     demoFile("/Music/Jazz/Live Bootlegs/1965 - Village Vanguard (bootleg).mp3", "1965 - Village Vanguard (bootleg).mp3", "file", 45_000_000, 40),
   ],
-  "/Music/Electronic": [
-    demoFile("/Music/Electronic/Acid", "Acid", "directory", 0, 5),
-    demoFile("/Music/Electronic/Ambient", "Ambient", "directory", 0, 9),
-    demoFile("/Music/Electronic/Daft Punk - Discovery.flac", "Daft Punk - Discovery.flac", "file", 380_000_000, 12),
-    demoFile("/Music/Electronic/Kraftwerk - Trans Europe Express.flac", "Kraftwerk - Trans Europe Express.flac", "file", 295_000_000, 14),
+  "/data/Music/Electronic": [
+    demoFile("/data/Music/Electronic/Acid", "Acid", "directory", 0, 5),
+    demoFile("/data/Music/Electronic/Ambient", "Ambient", "directory", 0, 9),
+    demoFile("/data/Music/Electronic/Daft Punk - Discovery.flac", "Daft Punk - Discovery.flac", "file", 380_000_000, 12),
+    demoFile("/data/Music/Electronic/Kraftwerk - Trans Europe Express.flac", "Kraftwerk - Trans Europe Express.flac", "file", 295_000_000, 14),
   ],
-  "/Music/Electronic/Acid": [
+  "/data/Music/Electronic/Acid": [
     demoFile("/Music/Electronic/Acid/Acid Trax 303.mp3", "Acid Trax 303.mp3", "file", 12_300_000, 30),
     demoFile("/Music/Electronic/Acid/303 Dreams.flac", "303 Dreams.flac", "file", 110_000_000, 31),
   ],
-  "/Music/Electronic/Ambient": [
+  "/data/Music/Electronic/Ambient": [
     demoFile("/Music/Electronic/Ambient/Brian Eno - Ambient 1.flac", "Brian Eno - Ambient 1.flac", "file", 180_000_000, 33),
   ],
-  "/Music/Hip-Hop": [
-    demoFile("/Music/Hip-Hop/A Tribe Called Quest - Midnight Marauders.mp3", "A Tribe Called Quest - Midnight Marauders.mp3", "file", 78_000_000, 11),
-    demoFile("/Music/Hip-Hop/Nas - Illmatic.flac", "Nas - Illmatic.flac", "file", 310_000_000, 13),
+  "/data/Music/Hip-Hop": [
+    demoFile("/data/Music/Hip-Hop/A Tribe Called Quest - Midnight Marauders.mp3", "A Tribe Called Quest - Midnight Marauders.mp3", "file", 78_000_000, 11),
+    demoFile("/data/Music/Hip-Hop/Nas - Illmatic.flac", "Nas - Illmatic.flac", "file", 310_000_000, 13),
   ],
-  "/Music/Soul": [
-    demoFile("/Music/Soul/Aretha Franklin - Respect.flac", "Aretha Franklin - Respect.flac", "file", 95_000_000, 16),
+  "/data/Music/Soul": [
+    demoFile("/data/Music/Soul/Aretha Franklin - Respect.flac", "Aretha Franklin - Respect.flac", "file", 95_000_000, 16),
   ],
-  "/Downloads": [
-    demoFile("/Downloads/complete", "complete", "directory", 0, 1),
-    demoFile("/Downloads/incomplete", "incomplete", "directory", 0, 1),
-    demoFile("/Downloads/linux iso - Midnight Groove.flac", "linux iso - Midnight Groove.flac", "file", 85_000_000, 2),
+  "/data/Downloads": [
+    demoFile("/data/Downloads/complete", "complete", "directory", 0, 1),
+    demoFile("/data/Downloads/incomplete", "incomplete", "directory", 0, 1),
+    demoFile("/data/Downloads/linux iso - Midnight Groove.flac", "linux iso - Midnight Groove.flac", "file", 85_000_000, 2),
   ],
-  "/Downloads/complete": [
+  "/data/Downloads/complete": [
     demoFile("/Downloads/complete/Neon Horizons - Analog Dreams LP.flac", "Neon Horizons - Analog Dreams LP.flac", "file", 420_000_000, 2),
   ],
-  "/Downloads/incomplete": [],
-  "/Shares": [
-    demoFile("/Shares/Music", "Music", "directory", 0, 4),
-    demoFile("/Shares/Documents", "Documents", "directory", 0, 6),
-    demoFile("/Shares/share.nfo", "share.nfo", "file", 340, 9),
+  "/data/Downloads/incomplete": [],
+  "/data/Shares": [
+    demoFile("/data/Shares/Music", "Music", "directory", 0, 4),
+    demoFile("/data/Shares/Documents", "Documents", "directory", 0, 6),
+    demoFile("/data/Shares/share.nfo", "share.nfo", "file", 340, 9),
   ],
-  "/Shares/Music": [
+  "/data/Shares/Music": [
     demoFile("/Shares/Music/Jazz", "Jazz", "directory", 0, 3),
     demoFile("/Shares/Music/Electronic", "Electronic", "directory", 0, 3),
   ],
-  "/Shares/Documents": [
+  "/data/Shares/Documents": [
     demoFile("/Shares/Documents/notes.txt", "notes.txt", "file", 2_100, 20),
   ],
-  "/Incoming": [],
+  "/data/Incoming": [],
 };
 
 export function mockFileExplorerResponse(path: string): { path: string; parent: string | null; entries: BridgeFileEntry[] } {

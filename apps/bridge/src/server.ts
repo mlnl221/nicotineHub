@@ -585,7 +585,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       } catch (e) { return new Response(JSON.stringify({ error: (e as Error).message }), { status: 500, headers: { "content-type": "application/json", ...cors } }); }
     }
 
-    // GET /api/files?path=/subdir — secure browsing of DATA_DIR (Docker explorer; host Explorer not needed)
+    // GET /api/files?path=/subdir — browsing host root (starts at /data but can go up to /). See files.ts BROWSE_ROOT.
     if (url.pathname === "/api/files" && req.method === "GET") {
       if (BRIDGE_TOKEN) {
         const tok = extractToken(req);
@@ -597,7 +597,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         return new Response(JSON.stringify({ error: "invalid path" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
       }
       try {
-        const result = await listDirectory(rawPath, DATA_DIR);
+        const result = await listDirectory(rawPath, "/");
         // Do not expose absolute disk path outside container in production; but exposing DATA_DIR-relative is fine.
         // Keep absolutePath for debugging only when token auth passes, otherwise strip to prevent info leak? For homelab we include sanitized version.
         return new Response(JSON.stringify({
