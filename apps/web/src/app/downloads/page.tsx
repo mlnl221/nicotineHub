@@ -43,6 +43,7 @@ function DownloadsInner() {
   const searches = useSearchesOptional();
   const router = useRouter();
   const { requestSpectrum, getEntry } = useSpectrum();
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; transfer: import("@/lib/protocol").Transfer; isUpload: boolean } | null>(null);
   const totalDown = stats?.downloadSpeed ?? downloads.filter(d => d.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const totalUp = stats?.uploadSpeed ?? 0;
   const activeCount = downloads.length;

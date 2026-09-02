@@ -16,7 +16,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join } from "node:path";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
-export type LogScope = "bridge" | "server" | "peer" | "transfer" | "search" | "chat" | "system" | "auth";
+export type LogScope = "bridge" | "server" | "peer" | "transfer" | "search" | "chat" | "system" | "auth" | "portchecker" | "spectrum" | "browse";
 
 export interface LogEntry {
   ts: string; // ISO

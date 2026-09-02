@@ -50,8 +50,6 @@ import {
   buildUploadFailed,
   buildUploadDenied,
   buildConnectToPeer,
-  buildCantConnectToPeer,
-  buildSendUploadSpeed,
   buildUserSearch,
   buildRoomSearch,
   buildWishlistSearch,
@@ -66,7 +64,6 @@ import {
   parsePlaceInQueueRequest,
   parseFileTransferInit,
   parseFileOffset,
-  PEER_MESSAGE_CODES,
   SlskReader,
 } from "./soulseek.ts";
 

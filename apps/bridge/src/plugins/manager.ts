@@ -11,7 +11,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, statSync } from "node:fs";
 import { join, basename, resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { BasePlugin, returncode, type CommandDef, type PluginManifest, type PluginCoreShim } from "./types.ts";
+import { BasePlugin, returncode, type CommandDef, type PluginManifest, type PluginCoreShim, type PluginReturn } from "./types.ts";
 import { logger } from "../logger.ts";
 
 // ---- persistence file DATA_DIR/plugins.json ----
@@ -353,17 +353,17 @@ export class PluginManager {
     // expose manager as parent for command_source
     (plugin as unknown as { parent: PluginManager }).parent = manager;
     plugin.core = {
-      sendPublic: (room, text) => {
+      sendPublic: (room: string, text: string) => {
         try { session?.sayChatroom(room, text); } catch {}
       },
-      sendPrivate: (user, text) => {
+      sendPrivate: (user: string, text: string) => {
         try { session?.sendPrivateMessage(user, text); } catch {}
       },
-      echoPublic: (_room, _text) => {
+      echoPublic: (_room: string, _text: string) => {
         // echo is UI-only; bridge logs it for diagnostics
         logger.info("chat", `[echo public] ${_room}: ${_text}`);
       },
-      echoPrivate: (_user, _text) => {
+      echoPrivate: (_user: string, _text: string) => {
         logger.info("chat", `[echo private] ${_user}: ${_text}`);
       },
       // leech_detector helpers — delegate to session if available
@@ -524,16 +524,8 @@ export class PluginManager {
     logger.warn("bridge", "plugin install via zip disabled (ponytail stub)");
     return null;
   }
-  async installFromGithubTs(url: string): Promise<string | null> {
-    logger.warn("bridge", "github TS install stubbed");
-    return null;
-  }
-  async installFromUrl(url: string): Promise<string | null> {
-    logger.warn("bridge", "plugin install via URL stubbed");
-    return null;
-  }
 
-    uninstallPlugin(name: string): boolean {
+  uninstallPlugin(name: string): boolean {
     if (this.isInternalPlugin(name)) return false;
     // disable first
     this.disablePlugin(name).catch(() => {});
@@ -658,9 +650,9 @@ export class PluginManager {
           const callback = ((data as CommandDef)[cbKey] as CommandDef["callback"]) ?? (data as CommandDef).callback;
           if (!callback) continue;
           let res: unknown;
-          if (ctx.room !== undefined) res = await (callback as (a: string, ctx: { room: string }) => unknown)(args, { room: ctx.room, interface: iface as "chatroom" });
-          else if (ctx.user !== undefined) res = await (callback as (a: string, ctx: { user: string }) => unknown)(args, { user: ctx.user, interface: iface as "private_chat" });
-          else res = await (callback as (a: string, ctx: { interface: "cli" }) => unknown)(args, { interface: "cli" as const });
+          if (ctx.room !== undefined) res = await (callback as any)(args, { room: ctx.room, interface: iface as "chatroom" });
+          else if (ctx.user !== undefined) res = await (callback as any)(args, { user: ctx.user, interface: iface as "private_chat" });
+          else res = await (callback as any)(args, { interface: "cli" as const });
           isSuccessful = res !== false;
           if (res === undefined) isSuccessful = true;
         }

@@ -133,15 +133,15 @@ async function runSox(inputPath: string, fullPath: string, zoomPath: string, zoo
       zoomPath,
     ];
     await new Promise<void>((resolveP, reject) => {
-      const child = spawn("sox", args, { stdio: ["ignore", "pipe", "pipe"] });
+      const child: any = spawn("sox", args, { stdio: ["ignore", "pipe", "pipe"] });
       let stderr = "";
-      child.stderr?.on("data", (d) => (stderr += String(d)));
+      child.stderr?.on("data", (d: any) => (stderr += String(d)));
       const timer = setTimeout(() => {
         try { child.kill("SIGKILL"); } catch {}
         reject(new Error("sox timeout after 90s"));
       }, 90_000);
-      child.on("error", (e) => { clearTimeout(timer); reject(e); });
-      child.on("close", (code) => {
+      child.on("error", (e: any) => { clearTimeout(timer); reject(e); });
+      child.on("close", (code: any) => {
         clearTimeout(timer);
         if (code === 0) resolveP();
         else reject(new Error(`sox exited ${code}: ${stderr.slice(0, 500)}`));
@@ -169,7 +169,7 @@ async function runSox(inputPath: string, fullPath: string, zoomPath: string, zoo
 async function compressPng(pngPath: string): Promise<void> {
   // Try oxipng -o 2 --strip all ; fallback to no-op if not installed
   await new Promise<void>((resolveP) => {
-    const child = spawn("oxipng", ["-o", "2", "--strip", "all", pngPath], { stdio: ["ignore", "pipe", "pipe"] });
+    const child: any = spawn("oxipng", ["-o", "2", "--strip", "all", pngPath], { stdio: ["ignore", "pipe", "pipe"] });
     let done = false;
     const timer = setTimeout(() => {
       try {
