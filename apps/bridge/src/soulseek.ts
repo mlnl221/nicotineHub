@@ -197,6 +197,11 @@ export const LOGIN_REJECT_REASONS = {
 
 export const MAJOR_VERSION = 177;
 export const MINOR_VERSION = 1;
+// Nicotine+ stable reserved version (for reference / fallback). Experimental 177 is kept as default per AGENTS.md — use MAJOR_VERSION.
+// See SLSKPROTOCOL.md Reserved 160 = Nicotine+, 177 = Experimental.
+export const NICOTINE_MAJOR_VERSION = 160;
+export const NICOTINE_MINOR_VERSION = 3;
+export const EXPERIMENTAL_VERSION_FLAG = true;
 
 export const DEFAULT_SERVER_HOST = "server.slsknet.org";
 export const DEFAULT_SERVER_PORT = 2242;

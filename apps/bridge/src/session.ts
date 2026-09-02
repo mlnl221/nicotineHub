@@ -116,6 +116,9 @@ import {
   tryParseMessage,
   PEER_MESSAGE_CODES,
   SERVER_MESSAGE_CODES,
+  MAJOR_VERSION,
+  MINOR_VERSION,
+  EXPERIMENTAL_VERSION_FLAG,
   type BrowseFolderEntry,
   type LoginResponse,
   type PeerAddress,
@@ -237,6 +240,10 @@ export class SoulseekSession {
   private loggedIn = false;
   private loginResolve: ((r: LoginResponse & { success: true }) => void) | undefined;
   private loginReject: ((e: Error) => void) | undefined;
+  // BANNED detection: silent close with 0 buffer before any Login response → server omits BANNED response per SLSKPROTOCOL.md:124
+  private hasReceivedLoginResponse = false;
+  private loginAttemptAt = 0;
+  private consecutiveSilentCloses = 0;
   private idleTimer: ReturnType<typeof setInterval> | undefined;
   private wishlistTimer: ReturnType<typeof setInterval> | undefined;
   private serverPingTimer: ReturnType<typeof setInterval> | undefined;
@@ -1068,7 +1075,9 @@ export class SoulseekSession {
   private connectServer() {
     // Ensure clean framing for new TCP — old bytes would cause code 69 vs 1 desync
     this.serverBuffer = Buffer.alloc(0);
-    logger.info("server", `connecting to ${this.opts.host || "server.slsknet.org"}:${this.opts.port || 2242}`, { username: this.username });
+    this.hasReceivedLoginResponse = false;
+    this.loginAttemptAt = Date.now();
+    logger.info("server", `connecting to ${this.opts.host || "server.slsknet.org"}:${this.opts.port || 2242}`, { username: this.username, version: `${MAJOR_VERSION}/${MINOR_VERSION}${EXPERIMENTAL_VERSION_FLAG ? " experimental" : ""}` });
     Bun.connect({
       hostname: this.opts.host || "server.slsknet.org",
       port: this.opts.port || 2242,
@@ -1081,6 +1090,8 @@ export class SoulseekSession {
           try { (sock as unknown as { setNoDelay?: (b: boolean) => void }).setNoDelay?.(true); } catch {}
           this.setTcpBufferSize(sock as Socket, "S");
           this.serverSocket = sock as Socket;
+          this.hasReceivedLoginResponse = false;
+          this.loginAttemptAt = Date.now();
           // Send Login only; SetWaitPort after success (nicotine parity)
           sock.write(buildLogin(this.opts.username, this.opts.password));
         },
@@ -1091,24 +1102,49 @@ export class SoulseekSession {
           this.scheduleReconnect(`Connection error: ${err.message}`);
         },
         close: () => {
-          logger.warn("server", "tcp close", { loggedIn: this.loggedIn, username: this.username });
+          const elapsed = Date.now() - (this.loginAttemptAt || Date.now());
+          const isSilentCloseBeforeLogin = !this.loggedIn && !this.hasReceivedLoginResponse && this.serverBuffer.length === 0 && elapsed < 5000 && !!this.loginReject;
+          if (isSilentCloseBeforeLogin) {
+            this.consecutiveSilentCloses += 1;
+            logger.warn("server", "tcp close — silent (BANNED per SLSKPROTOCOL.md:124, server omits login response)", { loggedIn: this.loggedIn, username: this.username, elapsed, bufLen: this.serverBuffer.length, consecutive: this.consecutiveSilentCloses });
+          } else {
+            logger.warn("server", "tcp close", { loggedIn: this.loggedIn, username: this.username, bufLen: this.serverBuffer.length, hasLoginResp: this.hasReceivedLoginResponse });
+          }
           const wasLoggedIn = this.loggedIn;
           if (wasLoggedIn) {
             // Portmapper cleanup mirrors pynicotine _server_disconnect remove_port_mapping
             try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}
           }
           // Clear stale framing immediately — next connect must start clean
+          const bufferedBeforeClear = this.serverBuffer.length;
           this.serverBuffer = Buffer.alloc(0);
           if (!this.loggedIn && this.loginReject) {
-            const err = new Error("Connection closed before login completed.");
-            this.loginReject(err);
-            this.loginReject = undefined;
-            this.loginResolve = undefined;
+            if (isSilentCloseBeforeLogin) {
+              // BANNED — server omits response per SLSKPROTOCOL.md Obsolete BANNED. Stop auto-retry.
+              this.shouldReconnect = false;
+              const bannedMsg = `Banned — Server closed connection without response (SLSKPROTOCOL.md BANNED: server omits login response instead). Try a different username or wait before retrying. Auto-reconnect stopped. [elapsed ${elapsed}ms]`;
+              const err = new Error(bannedMsg);
+              // attach code for UI detection
+              (err as unknown as Record<string, unknown>).code = "BANNED";
+              this.loginReject(err);
+              this.loginReject = undefined;
+              this.loginResolve = undefined;
+              // surface as reconnect-failed so UI shows banned
+              this.emitServer({ type: "reconnect-failed", error: bannedMsg });
+            } else {
+              const err = new Error(bufferedBeforeClear ? `Connection closed before login completed (buffered ${bufferedBeforeClear} bytes).` : "Connection closed before login completed.");
+              this.loginReject(err);
+              this.loginReject = undefined;
+              this.loginResolve = undefined;
+            }
           }
           // keep loggedIn false; schedule reconnect if we were logged in or still trying
           if (wasLoggedIn) this.loggedIn = false;
           this.cleanupServerTimers();
-          if (this.shouldReconnect) this.scheduleReconnect("Server closed");
+          if (isSilentCloseBeforeLogin) {
+            // Do NOT schedule reconnect for BANNED — require manual retry with different username/wait
+            this.close();
+          } else if (this.shouldReconnect) this.scheduleReconnect("Server closed");
           else this.close();
         },
       },
@@ -1181,6 +1217,8 @@ export class SoulseekSession {
   private dispatchServerMessage(code: number, payload: Buffer) {
     logger.debug("server", "server message", { code, len: payload.length });
     if (code === SERVER_MESSAGE_CODES.login) {
+      this.hasReceivedLoginResponse = true;
+      this.consecutiveSilentCloses = 0;
       const resp = parseLoginResponse(payload);
       if (resp.success) {
         logger.info("server", "login success", { banner: resp.banner?.slice(0,60), ip: resp.ipAddress });

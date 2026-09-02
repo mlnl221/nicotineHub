@@ -268,10 +268,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             shouldReconnect.current = true;
           } else {
             // auth failures should NOT auto-reconnect (invalid pass etc) — also clear persisted creds so we don't loop with bad password
-            const isAuthFailure = /INVALIDPASS|INVALIDUSERNAME|EMPTYPASSWORD|INVALIDVERSION/i.test(data.error || "");
+            // BANNED is silent close per SLSKPROTOCOL.md:124 — server omits response, bridge emits BANNED. Stop retry and show actionable message.
+            const errStr = data.error || "";
+            const isAuthFailure = /INVALIDPASS|INVALIDUSERNAME|EMPTYPASSWORD|INVALIDVERSION/i.test(errStr);
+            const isBanned = /BANNED|banned|Server closed connection without response/i.test(errStr);
             if (isAuthFailure) {
               clearCreds();
               lastLogin.current = null;
+            }
+            if (isBanned) {
+              // Keep creds for manual retry but stop hammering. Show banned UX.
+              shouldReconnect.current = false;
+              clearReconnect();
+              setState((s) => ({ ...s, status: "failed", error: errStr }));
+              clearHeartbeat();
+              // Do NOT scheduleReconnect — user must try different username / wait
+              break;
             }
             shouldReconnect.current = !isAuthFailure;
             setState((s) => ({ ...s, status: "failed", error: data.error }));
@@ -284,7 +296,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           // Keep UI in connecting state so user sees progress; Web WS stays open
           const d = data as unknown as { error?: string; ok?: boolean; listenPort?: number };
           if (d.error) {
-            // reconnect-failed after 15 attempts or listen port bind failure — surface but keep creds for manual retry
+            const isBanned = /BANNED|banned|Server closed connection without response/i.test(d.error || "");
+            if (isBanned) {
+              shouldReconnect.current = false;
+              clearReconnect();
+              clearHeartbeat();
+            }
+            // reconnect-failed after 15 attempts or listen port bind failure or BANNED — surface but keep creds for manual retry (BANNED stops retry)
             setState((s) => ({ ...s, status: "failed", error: d.error }));
           } else if (d.ok) {
             // Fresh reconnect success (e.g. after port change) – WS never dropped, go back to connected
