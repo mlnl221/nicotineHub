@@ -560,6 +560,8 @@ export interface SharesRescannedMessage {
   type: "shares:rescanned";
   folders: BrowseFolder[];
   counts: { dirs: number; files: number };
+  /** Roots not found on bridge FS (e.g. /data/Music not mounted / WSL path wrong) */
+  unavailable?: [string, string][];
 }
 
 /* ------------------------------------------------------------------ *

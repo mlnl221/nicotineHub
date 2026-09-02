@@ -219,35 +219,48 @@ export class ShareDB {
   getShareFilters(): string[] { return [...this.shareFilters]; }
 
   private compileShareFilters() {
+    // Mirrors pynicotine/shares.py Scanner.load_filters:
+    // escaped = re.escape(sfilter).replace("\\*", ".*")
+    // folder if escaped endswith ("\\", "\\.*") else file
+    // regex = re.compile("(\\\\(" + "|".join(filters) + ")$)", re.I)
+    const fileFilters: string[] = [];
+    const folderFilters: string[] = [];
+    for (const pat of [...this.shareFilters].sort()) {
+      if (!pat) continue;
+      const escaped = pat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\*/g, ".*");
+      if (escaped.endsWith("\\\\") || escaped.endsWith("\\\\.*")) {
+        folderFilters.push(escaped);
+      } else {
+        fileFilters.push(escaped);
+      }
+    }
     this.fileFilterRegexes = [];
     this.folderFilterRegexes = [];
-    for (const pat of this.shareFilters) {
-      if (!pat) continue;
-      // Trailing \ indicates folder filter (nicotine shares.py: share_filters with trailing \)
-      const isFolder = pat.endsWith("\\");
+    if (fileFilters.length) {
       try {
-        const regex = new RegExp(pat, "i");
-        if (isFolder) this.folderFilterRegexes.push(regex);
-        else this.fileFilterRegexes.push(regex);
-      } catch {
-        // invalid regex — skip (nicotine validates via new RegExp("(" + pattern + ")")
-        try {
-          const regex = new RegExp(`(${pat})`, "i");
-          if (isFolder) this.folderFilterRegexes.push(regex);
-          else this.fileFilterRegexes.push(regex);
-        } catch {}
-      }
+        this.fileFilterRegexes = [new RegExp("(\\\\(" + fileFilters.join("|") + ")$)", "i")];
+      } catch {}
+    }
+    if (folderFilters.length) {
+      try {
+        this.folderFilterRegexes = [new RegExp("(\\\\(" + folderFilters.join("|") + ")$)", "i")];
+      } catch {}
     }
   }
 
   isFileFiltered(fileName: string): boolean {
-    for (const re of this.fileFilterRegexes) if (re.test(fileName)) return true;
+    if (this.fileFilterRegexes.length === 0) return false;
+    const test = "\\" + fileName;
+    for (const re of this.fileFilterRegexes) if (re.test(test)) return true;
     return false;
   }
 
   isFolderFiltered(folderName: string): boolean {
-    // folder filters tested against virtual path + real folder name
-    for (const re of this.folderFilterRegexes) if (re.test(folderName)) return true;
+    if (this.folderFilterRegexes.length === 0) return false;
+    let t = folderName;
+    if (!t.endsWith("\\")) t += "\\";
+    if (!t.startsWith("\\")) t = "\\" + t;
+    for (const re of this.folderFilterRegexes) if (re.test(t)) return true;
     return false;
   }
 
@@ -294,6 +307,25 @@ export class ShareDB {
   checkSharesAvailable(): boolean {
     return this.folders.length > 0 && this.folders.some(f => f.files.length > 0);
   }
+  /** Mirrors pynicotine/shares.py check_shares_available: list roots not accessible on bridge FS (e.g. /data/Music not mounted) */
+  getUnavailableShares(): [string, string][] {
+    const out: [string, string][] = [];
+    for (const roots of this.customRootsByLevel.values()) {
+      for (const [v, p] of roots) {
+        if (!existsSync(p)) out.push([v, p]);
+        else {
+          try {
+            const st = statSync(p);
+            if (!st.isDirectory() && !st.isFile()) out.push([v, p]);
+          } catch {
+            out.push([v, p]);
+          }
+        }
+      }
+    }
+    return out;
+  }
+  hasUnavailableShares(): boolean { return this.getUnavailableShares().length > 0; }
   getVirtual2Real(virtualPath: string): string | undefined { return this.virtual2real.get(virtualPath); }
   getReal2Virtual(realPath: string): string | undefined { return this.real2virtual.get(realPath); }
   hasVirtualPath(virtualPath: string): boolean {

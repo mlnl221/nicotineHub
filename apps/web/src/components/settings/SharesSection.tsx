@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
@@ -81,15 +82,17 @@ export function SharesSection() {
   const [lastCounts, setLastCounts] = useState<{ dirs: number; files: number } | null>(null);
   const [rescanError, setRescanError] = useState<string | null>(null);
   const [lastRescanAt, setLastRescanAt] = useState<number | null>(null);
+  const [unavailableShares, setUnavailableShares] = useState<[string, string][] | null>(null);
 
   useEffect(() => {
     return subscribe((msg) => {
       if ((msg as { type: string }).type === "shares:rescanned") {
-        const m = msg as unknown as { counts?: { dirs: number; files: number } };
+        const m = msg as unknown as { counts?: { dirs: number; files: number }; unavailable?: [string, string][] };
         setRescanning(false);
         if (m.counts) setLastCounts(m.counts);
         setLastRescanAt(Date.now());
         setRescanError(null);
+        setUnavailableShares(m.unavailable?.length ? m.unavailable : null);
       } else if ((msg as { type: string }).type === "error" && rescanning) {
         const m = msg as unknown as { error?: string };
         setRescanning(false);
@@ -123,6 +126,7 @@ export function SharesSection() {
     ...t.buddyshared.map(([v, p]) => ({ virtualName: v, folderPath: p, permission: "buddy" as const })),
     ...t.trustedshared.map(([v, p]) => ({ virtualName: v, folderPath: p, permission: "trusted" as const })),
   ].sort((a, b) => a.virtualName.localeCompare(b.virtualName));
+  const unavailablePathSet = new Set((unavailableShares ?? []).map(([, p]) => normalizeFolderPath(p).toLowerCase()));
 
   function removeShareByPathOrName(folderPath: string, virtualName: string) {
     const norm = normalizeFolderPath(folderPath);
@@ -328,11 +332,16 @@ export function SharesSection() {
     <div className="flex flex-col gap-6">
       <SectionCard
         title="Shared folders"
-        description="Folders you share on the Soulseek network. Docker: browse container /data (and its subdirectories) to add any nested folder. Browser pickers are a fallback."
+        description="Folders you share on the Soulseek network. WSL (bun): use absolute WSL paths like /home/user/Music or /mnt/c/Users/you/Music. Docker: browse container /data to add any nested folder. Browser pickers are a fallback."
       >
         <div className="py-4 space-y-3">
           <div className="rounded-xl bg-amber-50 px-4 py-3 font-body text-xs leading-relaxed text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-            <span className="font-semibold">Docker:</span> use <span className="font-mono">Browse /data</span> below to see the container&apos;s <span className="font-mono">/data</span> volume (or bind mount like <span className="font-mono">/home/user/m/data:/data</span>) and add any subdirectory as a share. This is the browser equivalent of <span className="font-mono">explorer /data</span> (container has no display server). For local device folders, use <span className="font-mono">Add folder</span> (File System Access API where available).
+            <span className="font-semibold">Docker:</span> use <span className="font-mono">Browse /data</span> below to see the container&apos;s <span className="font-mono">/data</span> volume (or bind mount like <span className="font-mono">/home/user/Music:/data/Music:ro</span> then share <span className="font-mono">/data/Music</span>) and add any subdirectory as a share. This is the browser equivalent of <span className="font-mono">explorer /data</span> (container has no display server). For local device folders, use <span className="font-mono">Add folder</span> (File System Access API where available).
+          </div>
+          <div className="rounded-xl bg-surface-container-low px-3 py-2 dark:bg-surface-variant/20">
+            <div className="font-body text-[11px] leading-relaxed text-on-surface-variant dark:text-outline">
+              <span className="font-semibold">WSL (bun):</span> <span className="font-mono">/data</span> on WSL bun falls back to <span className="font-mono">./data</span> or <span className="font-mono">/tmp/nicotine-hub</span> if <span className="font-mono">/data</span> not writable. Add shares with absolute WSL paths (<span className="font-mono">/home/magnus/Music</span>, <span className="font-mono">/mnt/c/Users/you/Music</span>) that <span className="font-mono">existsSync</span> on the bridge — <span className="font-mono">/data/Music</span> only works inside Docker when mounted. Rescan shows <span className="font-mono">unavailable: [v→p]</span> if the path is not found (you saw <span className="font-mono">1 dirs · 0 files</span>).
+            </div>
           </div>
           <div className="rounded-xl bg-surface-container-high px-3 py-2 dark:bg-surface-variant/30">
             <div className="font-body text-[11px] leading-relaxed text-on-surface-variant dark:text-outline">
@@ -373,9 +382,9 @@ export function SharesSection() {
           </div>
         </div>
 
-        {/* Browse modal */}
-        {browseOpen && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => setBrowseOpen(false)}>
+        {/* Browse modal — portal to body so fixed inset-0 escapes parent relative z-10 stacking context */}
+        {browseOpen && mounted && createPortal(
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => setBrowseOpen(false)}>
             <div className="max-h-[90dvh] w-full max-w-3xl overflow-hidden rounded-2xl bg-surface-container-lowest shadow-xl dark:bg-surface-container-high" onClick={(e) => e.stopPropagation()}>
               <FileExplorer
                 initialPath="/"
@@ -400,7 +409,8 @@ export function SharesSection() {
                 <button type="button" onClick={() => setBrowseOpen(false)} className="rounded-xl px-4 py-2 font-label text-sm text-on-surface-variant">Close</button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* Hidden fallback file input for webkitdirectory */}
@@ -444,10 +454,15 @@ export function SharesSection() {
                   <div>Accessible To</div>
                   <div className="text-right">Actions</div>
                 </div>
-                {allShares.map((row) => (
-                  <div key={`${row.permission}:${row.virtualName}`} className="grid grid-cols-[1.2fr_1.8fr_110px_88px] items-center gap-2 border-b border-outline-variant/10 px-3 py-2.5 last:border-0 hover:bg-surface-container-high/40 dark:hover:bg-surface-variant/20">
+                {allShares.map((row) => {
+                  const isUnavailable = unavailablePathSet.has(normalizeFolderPath(row.folderPath).toLowerCase());
+                  return (
+                  <div key={`${row.permission}:${row.virtualName}`} className={`grid grid-cols-[1.2fr_1.8fr_110px_88px] items-center gap-2 border-b border-outline-variant/10 px-3 py-2.5 last:border-0 hover:bg-surface-container-high/40 dark:hover:bg-surface-variant/20 ${isUnavailable ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
                     <div className="min-w-0 truncate font-body text-sm font-medium text-on-surface dark:text-inverse-on-surface" title={row.virtualName}>{row.virtualName}</div>
-                    <div className="min-w-0 truncate font-mono text-xs text-on-surface-variant dark:text-outline" title={row.folderPath}>{row.folderPath}</div>
+                    <div className="min-w-0 truncate font-mono text-xs dark:text-outline" title={row.folderPath}>
+                      <span className={isUnavailable ? "text-amber-700 dark:text-amber-300" : "text-on-surface-variant"}>{row.folderPath}</span>
+                      {isUnavailable && <span className="ml-1 inline-flex items-center rounded bg-amber-100 px-1 py-0.5 font-label text-[10px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">not found</span>}
+                    </div>
                     <div>
                       <span className={`inline-flex rounded-full px-2 py-0.5 font-label text-[11px] font-medium ${row.permission === "public" ? "bg-primary-container text-on-primary-container" : row.permission === "buddy" ? "bg-tertiary-container text-on-tertiary-container" : "bg-secondary-container text-on-secondary-container"}`}>{PERM_LABEL[row.permission]}</span>
                     </div>
@@ -460,7 +475,8 @@ export function SharesSection() {
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
               {/* Mobile cards */}
               <div className="divide-y divide-outline-variant/10 sm:hidden">
@@ -471,8 +487,8 @@ export function SharesSection() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-label text-sm font-medium text-on-surface dark:text-inverse-on-surface">{row.virtualName}</div>
-                      <div className="truncate font-mono text-[11px] text-on-surface-variant dark:text-outline">{row.folderPath}</div>
-                      <div className="mt-1"><span className={`inline-flex rounded-full px-2 py-0.5 font-label text-[10px] font-medium ${row.permission === "public" ? "bg-primary-container text-on-primary-container" : row.permission === "buddy" ? "bg-tertiary-container text-on-tertiary-container" : "bg-secondary-container text-on-secondary-container"}`}>{PERM_LABEL[row.permission]}</span></div>
+                      <div className={`truncate font-mono text-[11px] ${unavailablePathSet.has(normalizeFolderPath(row.folderPath).toLowerCase()) ? "text-amber-700 dark:text-amber-300" : "text-on-surface-variant dark:text-outline"}`}>{row.folderPath}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1"><span className={`inline-flex rounded-full px-2 py-0.5 font-label text-[10px] font-medium ${row.permission === "public" ? "bg-primary-container text-on-primary-container" : row.permission === "buddy" ? "bg-tertiary-container text-on-tertiary-container" : "bg-secondary-container text-on-secondary-container"}`}>{PERM_LABEL[row.permission]}</span>{unavailablePathSet.has(normalizeFolderPath(row.folderPath).toLowerCase()) && <span className="inline-flex items-center rounded bg-amber-100 px-1 py-0.5 font-label text-[10px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">not found</span>}</div>
                     </div>
                     <div className="flex shrink-0 gap-1">
                       <button type="button" aria-label={`Edit ${row.virtualName}`} onClick={() => openEditDialog(row)} className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-surface-container-high text-on-surface-variant dark:bg-surface-variant dark:text-outline">
@@ -571,9 +587,9 @@ export function SharesSection() {
         </div>
       </SectionCard>
 
-      {/* Add / Edit dialogs — mirrors nicotine-plus EntryDialog with virtual name + second_droplist=PERMISSION_LEVELS */}
-      {(addOpen || editTarget) && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => { setAddOpen(false); setEditTarget(null); }}>
+      {/* Add / Edit dialogs — portal so z beats Sidebar z-50 */}
+      {(addOpen || editTarget) && mounted && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => { setAddOpen(false); setEditTarget(null); }}>
           <div
             role="dialog"
             aria-modal="true"
@@ -631,8 +647,9 @@ export function SharesSection() {
                 {editTarget ? "Save" : "Add"}
               </button>
             </div>
-          </div>
-        </div>
+            </div>
+          </div>,
+        document.body
       )}
 
       <SectionCard title="Share filters" description="Patterns excluded from shares (case-insensitive, * wildcard). Trailing \ means folder.">
@@ -668,6 +685,7 @@ export function SharesSection() {
                 if (rescanning || state.status !== "connected") return;
                 setRescanning(true);
                 setRescanError(null);
+                setUnavailableShares(null);
                 send({ type: "shares:rescan" });
                 // ponytail: single-promise rescan, no progress stream — add shares:scan:progress if scans >5s become common
                 setTimeout(() => setRescanning((v) => (v ? false : v)), 30_000);
@@ -680,6 +698,17 @@ export function SharesSection() {
             </button>
           </div>
           {rescanError && <div className="rounded-xl bg-error-container px-3 py-2 font-body text-xs text-on-error-container">{rescanError}</div>}
+          {unavailableShares && unavailableShares.length > 0 && (
+            <div className="rounded-xl bg-amber-50 px-3 py-3 font-body text-xs leading-relaxed text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+              <div className="font-semibold">Share path not found on bridge — rescan shows 1 dirs · 0 files:</div>
+              <ul className="mt-1 list-disc pl-4">
+                {unavailableShares.map(([v, p]) => (
+                  <li key={`${v}:${p}`} className="font-mono break-all">{v} → {p}</li>
+                ))}
+              </ul>
+              <div className="mt-2">WSL (bun): use absolute WSL path like <span className="font-mono">/home/magnus/Music</span> or <span className="font-mono">/mnt/c/Users/you/Music</span>. Docker: mount host folder into container (e.g. <span className="font-mono">-v /home/you/Music:/data/Music:ro</span>) then share <span className="font-mono">/data/Music</span>. Check bridge <span className="font-mono">/health?json</span> <span className="font-mono">dataDir</span> + <span className="font-mono">/api/files?path=/</span>.</div>
+            </div>
+          )}
           {state.status !== "connected" && (
             <div className="font-body text-[11px] text-on-surface-variant dark:text-outline">Bridge not connected — button enables after login.</div>
           )}
