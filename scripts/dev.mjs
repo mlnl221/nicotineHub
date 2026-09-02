@@ -62,8 +62,8 @@ if (listenPortArg === null && !process.env.LISTEN_PORT) {
   }
 }
 
-const bridgeUrl = `ws://localhost:${bridgePort}/ws`;
-const httpBridgeBase = `http://localhost:${bridgePort}`;
+const bridgeUrl = process.env.NEXT_PUBLIC_BRIDGE_URL || `ws://localhost:${bridgePort}/ws`;
+const httpBridgeBase = bridgeUrl.replace(/^ws/, "http").replace(/\/ws.*$/, "");
 
 console.log(`\n┌─ Nicotine Hub dev (offset +${N}) ─────────────────────`);
 console.log(`│ web:    http://localhost:${webPort} (PORT=${webPort})`);
