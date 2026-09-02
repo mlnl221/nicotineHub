@@ -16,6 +16,8 @@ import { SidebarProvider } from "@/components/SidebarContext";
 import { ExitDialogHandler } from "@/components/ExitDialogHandler";
 import { WindowGeometrySync } from "@/components/WindowGeometrySync";
 import { SpectrumProvider } from "@/lib/spectrum";
+import { SearchProvider } from "@/lib/search";
+import { BrowseProvider } from "@/lib/browse-tabs";
 
 export const metadata: Metadata = {
   title: "Nicotine Hub",
@@ -79,21 +81,25 @@ export default function RootLayout({
         <ThemeProvider>
           <ConfigProvider>
             <SessionProvider>
-              <WishlistProvider>
-                <StatisticsProvider>
-                  <TransfersProvider>
-                    <SpectrumProvider>
-                     <ConfigBridgeSync />
-                     <ExitDialogHandler />
-                     <WindowGeometrySync />
-                     <NowPlayingSync />
-                     {children}
+              <SearchProvider>
+                <BrowseProvider>
+                  <WishlistProvider>
+                    <StatisticsProvider>
+                      <TransfersProvider>
+                        <SpectrumProvider>
+                         <ConfigBridgeSync />
+                         <ExitDialogHandler />
+                         <WindowGeometrySync />
+                         <NowPlayingSync />
+                         {children}
                     <ToastHost />
                     <GlobalContextMenu />
                     </SpectrumProvider>
                   </TransfersProvider>
                 </StatisticsProvider>
               </WishlistProvider>
+                </BrowseProvider>
+              </SearchProvider>
             </SessionProvider>
           </ConfigProvider>
         </ThemeProvider>

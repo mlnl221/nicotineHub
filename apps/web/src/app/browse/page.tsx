@@ -7,7 +7,7 @@ import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
-import { BrowseProvider, useBrowseTabs } from "@/lib/browse-tabs";
+import { useBrowseTabs } from "@/lib/browse-tabs";
 import { BrowseTabs } from "@/components/browse/BrowseTabs";
 import { BrowseView } from "@/components/browse/BrowseView";
 
@@ -164,9 +164,5 @@ export default function BrowseSharesPage() {
   useEffect(() => { if (state.status === "failed") router.replace("/"); }, [state.status, router]);
   if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
   if (state.status !== "connected") return null;
-  return (
-    <BrowseProvider>
-      <BrowseInner />
-    </BrowseProvider>
-  );
+  return <BrowseInner />;
 }

@@ -4,7 +4,6 @@ import { useEffect } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
-import { SearchProvider } from "@/lib/search";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
@@ -29,9 +28,7 @@ export default function SearchPage() {
       <Sidebar />
       <TopBar title="Search" subtitle="Find files across the network" />
       <main className="md:ml-72 flex min-h-screen flex-1 flex-col bg-surface-container-low dark:bg-inverse-surface pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
-        <SearchProvider>
-          <SearchScreen />
-        </SearchProvider>
+        <SearchScreen />
       </main>
       <BottomNav />
     </div>
