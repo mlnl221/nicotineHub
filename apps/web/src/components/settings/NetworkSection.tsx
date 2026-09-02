@@ -173,7 +173,7 @@ export function NetworkSection() {
   };
 
   return (
-    <>
+    <div className="flex flex-col gap-6">
       <SectionCard
         title="Connection"
         description="Soulseek server the bridge connects to. Credentials are never stored in the browser."
@@ -408,6 +408,6 @@ export function NetworkSection() {
           onReset={() => setOption("server", "autoreply", "")}
         />
       </SectionCard>
-    </>
+    </div>
   );
 }

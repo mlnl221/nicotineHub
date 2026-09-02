@@ -15,7 +15,7 @@ export function SearchesSection() {
   const s = settings.searches;
 
   return (
-    <>
+    <div className="flex flex-col gap-6">
       <SectionCard
         title="Search results"
         description="How many results are kept and shown for a query."
@@ -166,6 +166,6 @@ export function SearchesSection() {
           onChange={(v) => setOption("searches", "defilter", { ...s.defilter, publicFiles: v })}
         />
       </SectionCard>
-    </>
+    </div>
   );
 }

@@ -95,9 +95,11 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
   useLayoutEffect(() => {
     if (!ref.current) return;
     const rect = ref.current.getBoundingClientRect();
-    let left = x;
-    let top = y;
     const pad = 8;
+    const halfH = window.innerHeight / 2;
+    const halfW = window.innerWidth / 2;
+    let left = x > halfW ? x - rect.width - 8 : x;
+    let top = y > halfH ? y - rect.height - 8 : y;
     if (left + rect.width > window.innerWidth - pad) left = window.innerWidth - rect.width - pad;
     if (top + rect.height > window.innerHeight - pad) top = window.innerHeight - rect.height - pad;
     if (left < pad) left = pad;
