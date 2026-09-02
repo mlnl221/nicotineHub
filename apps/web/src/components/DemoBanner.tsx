@@ -7,14 +7,16 @@ const STORAGE_KEY = "nicotineHub.demoBannerDismissed";
 
 export function DemoBanner() {
   const ref = useRef<HTMLDivElement>(null);
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState(true);
 
   useEffect(() => {
     try {
-      if (localStorage.getItem(STORAGE_KEY) === "1") {
-        setDismissed(true);
-      }
-    } catch {}
+      const v = localStorage.getItem(STORAGE_KEY);
+      if (v === "0") setDismissed(false);
+      else setDismissed(true);
+    } catch {
+      setDismissed(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -52,7 +54,7 @@ export function DemoBanner() {
         type="button"
         onClick={() => {
           try {
-            localStorage.removeItem(STORAGE_KEY);
+            localStorage.setItem(STORAGE_KEY, "0");
           } catch {}
           setDismissed(false);
           // restore height on next effect cycle; set fallback immediately for snappy UI

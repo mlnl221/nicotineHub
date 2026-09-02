@@ -54,7 +54,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning data-demo={isDemoBuild ? "true" : undefined} style={isDemoBuild ? ({ ["--demo-banner-h" as string]: "32px" } as React.CSSProperties) : undefined}>
+    <html lang="en" suppressHydrationWarning data-demo={isDemoBuild ? "true" : undefined} style={isDemoBuild ? ({ ["--demo-banner-h" as string]: "0px" } as React.CSSProperties) : undefined}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -69,7 +69,7 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "try{var t=localStorage.getItem('nicotineHub.theme')||localStorage.getItem('nicotine.theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}try{if(localStorage.getItem('nicotineHub.demoBannerDismissed')==='1'){document.documentElement.style.setProperty('--demo-banner-h','0px');}}catch(e){}",
+              "try{var t=localStorage.getItem('nicotineHub.theme')||localStorage.getItem('nicotine.theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}try{if(localStorage.getItem('nicotineHub.demoBannerDismissed')==='0'){document.documentElement.style.setProperty('--demo-banner-h','32px');}else{document.documentElement.style.setProperty('--demo-banner-h','0px');}}catch(e){document.documentElement.style.setProperty('--demo-banner-h','0px')}",
           }}
         />
       </head>
