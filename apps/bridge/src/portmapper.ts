@@ -1,11 +1,9 @@
 // SPDX-FileCopyrightText: 2020-2026 Nicotine+ Contributors
 // SPDX-FileCopyrightText: 2025-2026 Nicotine Hub Contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Port of pynicotine/portmapper.py — ponytail C: UPnP only (NATPMP stubbed) — NAT-PMP removed
+// Port of pynicotine/portmapper.py — UPnP only (ponytail: NATPMP removed, UPnP is homelab default; re-add NATPMP if UDP gateway needed)
 
 import { createSocket } from "node:dgram";
-import { readFileSync, existsSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { logger } from "./logger.ts";
 
 export class PortmapError extends Error {}
@@ -16,31 +14,6 @@ abstract class BaseImplementation {
   setPort(port: number | null, localIpAddress: string | null) {
     this.port = port;
     this.localIpAddress = localIpAddress;
-  }
-}
-
-// ── NAT-PMP (RFC6886) — ponytail C: stubbed, UPnP only (manual forward fallback removed)
-export class NATPMP extends BaseImplementation {
-  static readonly NAME = "NAT-PMP";
-  static readonly REQUEST_PORT = 5351;
-  static readonly REQUEST_ATTEMPTS = 2;
-  static readonly REQUEST_INIT_TIMEOUT = 0.25;
-  static readonly SUCCESS_RESULT = 0;
-  private gatewayAddress: string | null = null;
-  private static getGatewayAddress(): string | null { return null; }
-  static _testGetGatewayAddress = NATPMP.getGatewayAddress;
-  private async requestPortMapping(publicPort: number, privatePort: number, leaseDuration: number): Promise<number | null> {
-    throw new PortmapError("NATPMP stubbed — UPnP only (ponytail C)");
-  }
-  async addPortMapping(leaseDuration: number): Promise<void> {
-    if (this.port == null || this.localIpAddress == null) throw new PortmapError("No port/ip");
-    if (this.localIpAddress === "0.0.0.0") throw new PortmapError("Local IP is 0.0.0.0, skipping NAT-PMP (use host network or set interface)");
-    throw new PortmapError("No gateway found for NAT-PMP");
-  }
-  async removePortMapping(): Promise<void> {
-    if (this.port == null) return;
-    this.gatewayAddress = null;
-    return;
   }
 }
 
@@ -281,12 +254,6 @@ export class UPnP extends BaseImplementation {
   async addPortMapping(leaseDuration: number): Promise<void> {
     if (this.port == null || this.localIpAddress == null) throw new PortmapError("No port/ip");
     if (this.localIpAddress === "0.0.0.0") throw new PortmapError("Local IP is 0.0.0.0, skipping UPnP (container bridge — use host network or set interface)");
-    // ponytail C: for worktree 60755, treat as mapped even without IGD (so health shows active, portChecker stubbed open)
-    if (this.port === 60755) {
-      this.service = { serviceType: "urn:schemas-upnp-org:service:WANIPConnection:1", controlUrl: "http://worktree-stub/ctl" };
-      logger.info("bridge", "UPnP: worktree 60755 stubbed as mapped (ponytail C)");
-      return;
-    }
     this.service = await this.findService(this.localIpAddress);
     if (!this.service) throw new PortmapError("No UPnP devices found");
     logger.debug("bridge", `UPnP: trying redirect ${this.port} TCP => ${this.localIpAddress}:${this.port}`);
@@ -341,11 +308,10 @@ export class UPnP extends BaseImplementation {
 // ── PortMapper orchestrator (mirrors pynicotine/portmapper.py PortMapper) ──
 
 export class PortMapper {
-  private activeImplementation: NATPMP | UPnP | null = null;
+  private activeImplementation: UPnP | null = null;
   private hasPort = false;
   private isMappingPort = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private natpmp = new NATPMP();
   private upnp = new UPnP();
   private currentPort: number | null = null;
   private currentIp: string | null = null;
@@ -364,7 +330,7 @@ export class PortMapper {
     await this.waitUntilReady();
     this.isMappingPort = true;
     this.lastAttemptAt = Date.now();
-    logger.debug("bridge", "Creating Port Mapping rule… (UPnP only, ponytail C)");
+    logger.debug("bridge", "Creating Port Mapping rule… (UPnP)");
     try {
       this.activeImplementation = this.upnp;
       await this.upnp.addPortMapping(PortMapper.LEASE_DURATION);
@@ -418,12 +384,10 @@ export class PortMapper {
   }
 
   setPort(port: number | null, localIpAddress: string | null) {
-    this.natpmp.setPort(port, localIpAddress);
     this.upnp.setPort(port, localIpAddress);
     this.currentPort = port;
     this.currentIp = localIpAddress;
     this.hasPort = port != null;
-    // Reset error on port change to allow retry
     if (port != null) this.lastError = null;
   }
 
