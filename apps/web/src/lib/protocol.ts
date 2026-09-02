@@ -547,6 +547,11 @@ export interface ServerReconnectedMessage {
   ok: true;
   listenPort: number;
 }
+export interface ServerReconnectedAltMessage {
+  type: "server:reconnected";
+  ok?: true;
+  listenPort?: number;
+}
 
 /* ------------------------------------------------------------------ *
  * Shares rescan
@@ -761,6 +766,7 @@ export type BridgeOutboundMessage =
   | ServerReconnectMessage
   | ServerReconnectFailedMessage
   | ServerReconnectedMessage
+  | ServerReconnectedAltMessage
   | DiagnosticsInitMessage
   | DiagnosticsLogMessage
   | DiagnosticsHealthMessage

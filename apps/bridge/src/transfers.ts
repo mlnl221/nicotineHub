@@ -198,7 +198,7 @@ export class TransferManager {
     onStats: TransferStatsCb;
     onQueue?: TransferQueueCb;
     onFinished?: TransferFinishedCb;
-    getSession?: () => ReturnType<TransferManager["sessionGetter"]>;
+    getSession?: () => any;
   }) {
     this.onUpdate = opts.onUpdate;
     this.onRemoved = opts.onRemoved;
@@ -227,7 +227,7 @@ export class TransferManager {
     setInterval(() => this.pollQueuePositions(), 300_000);
   }
 
-  setSessionGetter(getter: () => ReturnType<TransferManager["sessionGetter"]>) {
+  setSessionGetter(getter: () => any) {
     this.sessionGetter = getter;
   }
 
@@ -329,7 +329,7 @@ export class TransferManager {
             t.status = "User logged off";
           }
         }
-        if (t.status === "Transferring") t.status = "Paused";
+        if ((t.status as any) === "Transferring") (t as any).status = "Paused";
         t.current = t.current ?? 0;
         t.speed = 0;
         t.queuePosition = t.queuePosition ?? null;
@@ -380,7 +380,7 @@ export class TransferManager {
   private emit(t: BridgeTransfer) {
     const { _timer: _t, _pollTimer: _p, _statusTimer: _s, _retryTimer: _r, _fileHandle: _f, ...publicT } = t as unknown as Record<string, unknown>;
     logger.debug("transfer", `transfer ${t.status}`, { id: t.id, username: t.username, status: t.status, current: t.current, queuePosition: t.queuePosition });
-    this.onUpdate(publicT as BridgeTransfer);
+    this.onUpdate(publicT as unknown as BridgeTransfer);
     this.persist();
   }
 
@@ -910,7 +910,7 @@ export class TransferManager {
     this.statsManager.recordUploadStarted();
     const token = this.tokenCounter++ >>> 0;
     candidate.token = token;
-    try { this.session?.transferRequest?.(candidate.username, 1, token, candidate.virtualPath, BigInt(candidate.size || 0)); } catch {}
+    try { (this.session as any)?.transferRequest?.(candidate.username, 1, token, candidate.virtualPath, BigInt(candidate.size || 0)); } catch {}
   }
 
   handlePlaceInQueueResponse(file: string, place: number) {

@@ -399,7 +399,7 @@ export function frameMessage(code: number, payload: Buffer): Buffer {
   const len = payload.length + 4;
   return Buffer.concat([packUint32(len), packUint32(code), payload]);
 }
-export function tryParseMessage(buffer: Buffer, maxLen = MAX_INCOMING.server16M): { code: number; payload: Buffer } | null {
+export function tryParseMessage(buffer: Buffer, maxLen: number = MAX_INCOMING.server16M): { code: number; payload: Buffer } | null {
   if (buffer.length < 4) return null;
   const len = buffer.readUInt32LE(0);
   if (len > maxLen) return null; // guard — caller may treat as overflow close
@@ -556,9 +556,6 @@ export function buildFileOffset(offset: number | bigint): Buffer { return packUi
 
 export interface PierceFireWall { token: number; }
 export function parsePierceFireWall(payload: Buffer): PierceFireWall { return { token: payload.readUInt32LE(0) }; }
-export function uint32ToIp(value: number): string {
-  return `${(value >>> 24) & 0xff}.${(value >>> 16) & 0xff}.${(value >>> 8) & 0xff}.${(value >>> 0) & 0xff}`;
-}
 
 export interface ConnectToPeer {
   username: string; connType: string; ip: string; port: number; token: number; privileged: boolean;

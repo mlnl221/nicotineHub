@@ -11,7 +11,7 @@
 
 import type { Socket, TCPSocketListener } from "bun";
 import { deflateSync, inflateSync } from "node:zlib";
-import { ShareDB, PermissionLevel } from "./shares.ts";
+import { ShareDB, PermissionLevel, type ShareFolder } from "./shares.ts";
 import { logger } from "./logger.ts";
 import { shouldBlockUser, shouldIgnoreUser, getCountryCode, setCountryForIp } from "./networkfilter.ts";
 import { PortMapper } from "./portmapper.ts";
@@ -872,7 +872,7 @@ export class SoulseekSession {
         } catch {}
       }
     } catch {}
-    this.childPeers.delete(username.toLowerCase());
+    if (username) this.childPeers.delete(username.toLowerCase());
     logger.info("server", "adopted parent", { username, branchLevel: this.branchLevel, branchRoot: this.branchRoot });
   }
 
