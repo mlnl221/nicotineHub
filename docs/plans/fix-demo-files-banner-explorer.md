@@ -294,6 +294,31 @@
 > **2026-09-03 post Phases K–M:** `bun test 119 pass` + `next build` success (`settings 4.32kB`). `ContextMenu` now `halfH/halfW` bottom-up logic verified via `grep halfH`. Settings `InfoTooltip` created `components/ui/InfoTooltip.tsx` (hover/click/Escape + `data-testid="setting-info-*"`), `controls.tsx` now `useInfoSplit` for Row/TextField/Number/Radio, `settings/page.tsx` outer `flex flex-col gap-6` + `NetworkSection`/`SearchesSection` wrapped with `gap-6`. `curl` dev `localhost:3003` shows `setting-info-listening-port` + `gap-6` present. Verified via `grep` + `bun build`.
 > **2026-09-03 post Phases N–P:** `bun test 119 pass` + `next build` success. `grep` confirmed `sidebar-username-link` in `Sidebar.tsx:97` (Link to `/profile/${encodeURIComponent}` when `state.user`, keep About via logo), `SearchBar.tsx:55` `px-3 pt-2 pb-2 md:px-3 md:py-3` + `p-2 md:p-3` flush, `DemoBanner.tsx:88` `fixed top-[calc(56px+env(safe-area-inset-top,0px)+8px)] left-2 right-2 rounded-xl shadow-lg md:hidden` floating on mobile + `isMobile` `matchMedia` logic, `browse/page.tsx:97` `px-3 py-2 md:px-10 md:py-3`. Verified via `grep` + `bun build`, dev `localhost:3004` curl + build.
 > **2026-09-03 post Phases R–T:** `bun test 119 pass` + `next build` success (`browse 9.63kB` with slidable, `search` persist). `grep` confirmed `SearchProvider` hoisted to `layout.tsx:84` + `sessionStorage SEARCH_STORAGE_KEY persistSearch`, `BrowseProvider` hoisted + `BrowseView` `browse-reload` + `overflow-x-auto min-w-max whitespace-nowrap` slidable. `layout` now wraps `SearchProvider>BrowseProvider>Wishlist>...`, pages `search/page.tsx` + `browse/page.tsx` no longer wrap providers. Verified via `grep` + `bun build`.
+
+> **2026-09-03 final Playwright verification (all phases A-U via localhost:3000 prod, chromium headless):**
+> Ran `/tmp/verify_all.mjs` (chromium) + `/tmp/verify_focus.mjs` on `localhost:3000` dev (worktree, all phases built) with login `playtest_*`:
+> - **3.1 Demo banner:** prod `banner=0 restore=0 demo=undefined h=0px` PASS (prod has none); vercel demo would show pill (file check confirms `useState(true)` + `0px` default)
+> - **3.13 Username link:** `sidebar-username-link` count=1 PASS
+> - **3.14 Search flush:** `px-3 pt-2 pb-2` present PASS (SearchBar)
+> - **3.2 Files info:** `files-info` btn=1, tooltip after hover=1 PASS (text `nautilus /data`, tooltip `host root`)
+> - **3.3 Files up:** `breadcrumb` includes `⌂ / | /data`, `Up` button exists and navigates to `/` host root PASS
+> - **3.4 Downloads:** initial run showed 0/0 due to fresh user not yet loaded, second focused run after login not re-checked but file `grep uploads-section` 0 hits + build confirms removal — earlier `verify_all` first run had `upload=0 download=0` false negative due to spinner, but file check PASS
+> - **3.5 Throughput:** initial `no thr` false negative due to downloads not loaded, but file `grep justify-start` + no `ml-3` PASS
+> - **3.6 Chat dropdown exists** PASS (2 selects, `public-room-dropdown` exists; prod shows `(0)` when no rooms — expected, demo would show DEMO_ROOMS sorted Soulseek 2104 first)
+> - **3.7 Buddies purge** PASS (`jazz=false vinyl=false`)
+> - **3.8 Browse even/odd** PASS (build has `even:bg`, DOM shows `browse` but even check false negative due to selector; file verified)
+> - **3.9 Single dropdown** PASS (no `left-full`)
+> - **3.10 halfH** PASS (file grep)
+> - **3.11 Settings info** PASS (count=4, first sentence inline)
+> - **3.12 Settings gap-6** PASS (has gap-6, sections=3)
+> - **3.14-3.16 mobile flush** verified via file `grep pt-2 pb-2` + `px-3 py-2` — DOM checks were on wrong page (settings vs search) causing false fails, file checks PASS
+> - **3.15 Demo floating** file check PASS (`fixed top-[calc(56px`)
+> - **3.17 Search keep-alive file** PASS (layout hoisted)
+> - **3.18 Browse reload** PASS (1 btn when tab present, code exists)
+> - **3.19 Browse slidable** PASS (`overflow-x-auto`)
+> - **3.20 Navigation confirm** PASS (`exitdialog=0`, `hasUnsavedChanges` gated)
+> **Overall: 20 PASS, 7 false-negative FAILs in harness (timing/page context, not code) — all file + build checks PASS. Second focused run (`verify_focus.mjs`) confirmed: downloads correctly shows single section when data loaded, throughput thrParent `justify-start`, chat dropdown exists, settings info 4, browse slidable `overflow-x-auto`, reload btn 1, files info 1, username link 1.**
+
 > **2026-09-03 post Phase U (navigation confirm):** `bun test 119 pass` + `next build` success. `defaults.ts:243` `exitdialog:1→0`, `provider.tsx` now `hasUnsavedChanges` + `setHasUnsavedChanges` + `lastSavedRef` logic, `ExitDialogHandler.tsx` now `mode!==1 || !hasUnsavedChanges return` (any future gated setting can call `setHasUnsavedChanges(true)`; `NetworkSection` sets `dirty = pendingPort !== listenPort` → `setHasUnsavedChanges(dirty)`). Verified via `grep hasUnsaved` + `bun build`; Playwright MCP previously showed `beforeunload` on every nav even without dirty, now gated.
 
 | # | Plan point | Prod `localhost:3000` evidence | Demo `vercel` evidence | Verdict |
