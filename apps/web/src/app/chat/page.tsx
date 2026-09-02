@@ -21,7 +21,7 @@ export default function ChatRoomsPage() {
   const { state } = useSession();
   const { settings } = useConfig();
   const router = useRouter();
-  const { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, closeAll } = useRooms();
+  const { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, closeAll, userStats } = useRooms();
   const { buddies } = useBuddies();
   const [joinInput, setJoinInput] = useState("");
   const [sayInput, setSayInput] = useState("");
@@ -34,8 +34,9 @@ export default function ChatRoomsPage() {
   const activeMessages = activeRoom ? messages.get(activeRoom) || [] : [];
   const joinedArray = Array.from(joinedRooms.values());
   const sortedRooms = (() => {
-    const list = roomList.length ? roomList : isDemo ? DEMO_ROOMS.map((r) => ({ name: r.name, users: r.users })) : [];
-    return [...list].sort((a, b) => b.users - a.users);
+    const list = roomList.length ? roomList : isDemo ? DEMO_ROOMS.map((r) => ({ name: r.name, users: r.users, isPrivate: false })) : [];
+    // nicotine-plus PRIVATE_USERS_OFFSET=10M so private rooms sort first
+    return [...list].sort((a, b) => (b.users + ((b as unknown as { isPrivate?: boolean }).isPrivate ? 10000000 : 0)) - (a.users + ((a as unknown as { isPrivate?: boolean }).isPrivate ? 10000000 : 0)));
   })();
   const filteredRooms = filter
     ? sortedRooms.filter((r) => r.name.toLowerCase().includes(filter.toLowerCase()))
@@ -91,7 +92,7 @@ export default function ChatRoomsPage() {
             </p>
           </div>
           <div className="flex items-center gap-2 md:gap-4">
-            {activeRoom ? <span className="hidden md:inline-flex items-center gap-2 rounded-full bg-primary-fixed/20 px-3 py-1 font-label text-xs font-semibold text-primary"><span className="material-symbols-outlined text-[16px]">tag</span> {activeRoom}</span> : null}
+            {activeRoom ? <span className="hidden md:inline-flex items-center gap-2 rounded-full bg-primary-fixed/20 dark:bg-primary-container/20 px-3 py-1 font-label text-xs font-semibold text-primary dark:text-inverse-primary"><span className="material-symbols-outlined text-[16px]">tag</span> {activeRoom}</span> : null}
             {joinedRooms.size > 0 ? <button onClick={() => { if (confirm("Close all rooms? Leave all joined rooms.")) closeAll(); }} className="hidden md:inline-flex rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container">Close All</button> : null}
             {activeRoom ? <button onClick={() => leaveRoom(activeRoom)} className="hidden md:inline-flex rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container">Leave</button> : null}
             <Link href="/settings?tab=chats#chats" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Chat settings"><span className="material-symbols-outlined">settings</span></Link>
@@ -125,7 +126,7 @@ export default function ChatRoomsPage() {
                   const v = e.target.value;
                   if (v) setJoinInput(v);
                 }}
-                className="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2.5 text-sm focus:border-primary outline-none"
+                className="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest dark:bg-surface-container-low dark:text-inverse-primary px-3 py-2.5 text-sm focus:border-primary outline-none"
               >
                 <option value="">Choose a room to join… ({sortedRooms.length})</option>
                 {sortedRooms.slice(0, 50).map((r) => (
@@ -180,12 +181,12 @@ export default function ChatRoomsPage() {
                               items: [{ id: "leave", label: "Leave Room", icon: "logout", danger: true, action: () => leaveRoom(r.name) }],
                             });
                           }}
-                          className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm ${activeRoom === r.name ? "bg-primary-fixed/20 text-primary font-semibold" : "hover:bg-surface-container-low text-on-surface-variant"}`}
+                          className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm ${activeRoom === r.name ? "bg-primary-fixed/20 text-primary dark:bg-primary-container/20 dark:text-inverse-primary font-semibold" : "hover:bg-surface-container-low dark:hover:bg-surface-container-high text-on-surface-variant dark:text-on-surface"}`}
                         >
-                          <span className="flex items-center gap-2 truncate">
-                            <span className="material-symbols-outlined text-[16px]">tag</span> {r.name}
+                          <span className="flex items-center gap-2 truncate dark:text-inverse-primary">
+                            <span className="material-symbols-outlined text-[16px] text-outline dark:text-inverse-primary">tag</span> {r.name}
                           </span>
-                          <span className="rounded bg-surface-container-high px-1.5 py-0.5 font-label text-[10px]">{r.users.length}</span>
+                          <span className="rounded bg-surface-container-high dark:bg-surface-container-high px-1.5 py-0.5 font-label text-[10px] dark:text-on-surface-variant">{r.users.length}</span>
                         </button>
                       </li>
                     ))}
@@ -206,12 +207,12 @@ export default function ChatRoomsPage() {
                       <li key={r.name}>
                         <button
                           onClick={() => joinRoom(r.name)}
-                          className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm hover:bg-surface-container-low"
+                          className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm hover:bg-surface-container-low dark:hover:bg-surface-container-high"
                         >
-                          <span className="flex items-center gap-2 truncate">
-                            <span className="material-symbols-outlined text-[16px] text-outline">tag</span> {r.name}
+                          <span className="flex items-center gap-2 truncate text-on-surface dark:text-inverse-primary">
+                            <span className="material-symbols-outlined text-[16px] text-outline dark:text-inverse-primary">tag</span> {r.name}
                           </span>
-                          <span className="font-label text-xs text-outline">{r.users}</span>
+                          <span className="font-label text-xs text-outline dark:text-on-surface-variant">{r.users}</span>
                         </button>
                       </li>
                     ))}
@@ -269,7 +270,7 @@ export default function ChatRoomsPage() {
                   const v = e.target.value;
                   if (v) setJoinInput(v);
                 }}
-                className="mt-2 w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2.5 text-sm focus:border-primary outline-none"
+                className="mt-2 w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest dark:bg-surface-container-low dark:text-inverse-primary px-3 py-2.5 text-sm focus:border-primary outline-none"
               >
                 <option value="">Choose a room to join… ({sortedRooms.length})</option>
                 {sortedRooms.slice(0, 50).map((r) => (
@@ -348,7 +349,45 @@ export default function ChatRoomsPage() {
                         </div>
                       ) : (
                         activeMessages.map((m) => {
+                          const isSystem = m.username === "system";
+                          const isSelf = !isSystem && state.user !== undefined && state.user !== null && m.username === (state as unknown as { user?: string }).user;
                           const isIgnored = m.username !== "system" && (settings.server.ignorelist.includes(m.username) || !!settings.server.ipignorelist[m.username]);
+                          if (isSystem) {
+                            return (
+                              <div key={m.id} className="flex justify-center px-4 md:px-6 py-1 max-w-full overflow-hidden">
+                                <span className="truncate whitespace-nowrap font-body text-xs italic text-on-surface-variant max-w-full overflow-hidden">
+                                  {m.message}
+                                  <span className="ml-2 font-mono text-[10px] text-outline">
+                                    {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                  </span>
+                                </span>
+                              </div>
+                            );
+                          }
+                          if (isSelf) {
+                            return (
+                              <div key={m.id} className={`group flex justify-end gap-3 px-4 md:px-6 py-1.5 max-w-full overflow-hidden ${isIgnored ? "opacity-40" : ""}`}>
+                                <div className="flex max-w-[80%] flex-col items-end">
+                                  <p className="font-body text-xs leading-relaxed text-right">
+                                    <span className={usernameHotspotClass(settings.ui.usernamehotspots, settings.ui.usernamestyle)}>
+                                      {m.username}
+                                    </span>
+                                    <span className="ml-2 font-mono text-[10px] text-outline">
+                                      {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                    </span>
+                                  </p>
+                                  <div className="mt-1 rounded-2xl bg-primary-container dark:bg-primary-container px-4 py-2 text-sm text-on-primary-container break-words [overflow-wrap:anywhere] text-right">
+                                    {isIgnored ? (
+                                      "[ignored]"
+                                    ) : (() => {
+                                      const hl = highlightKeywords(m.message, settings.words.keywords, settings.words.watch_keywords);
+                                      return hl ? <span dangerouslySetInnerHTML={{ __html: hl }} /> : m.message;
+                                    })()}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
                           return (
                           <div key={m.id} className={`group flex gap-3 hover:bg-surface-container-low/40 -mx-4 md:-mx-6 px-4 md:px-6 py-1.5 max-w-full overflow-hidden ${isIgnored ? "opacity-40" : ""}`}>
                             <span
@@ -358,7 +397,7 @@ export default function ChatRoomsPage() {
                             </span>
                             <div className="min-w-0 flex-1">
                               <p className="font-body text-sm leading-relaxed">
-                                <span className={m.username === "system" ? "font-semibold text-outline italic" : usernameHotspotClass(settings.ui.usernamehotspots, settings.ui.usernamestyle)}>
+                                <span className={usernameHotspotClass(settings.ui.usernamehotspots, settings.ui.usernamestyle)}>
                                   {m.username}
                                 </span>
                                 <span className="ml-2 font-mono text-xs text-outline">
@@ -366,7 +405,7 @@ export default function ChatRoomsPage() {
                                 </span>
                               </p>
                               <p
-                                className={`mt-0.5 font-body text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${m.username === "system" ? "text-on-surface-variant italic" : "text-on-surface"}`}
+                                className={`mt-0.5 font-body text-sm leading-relaxed break-words [overflow-wrap:anywhere] text-on-surface`}
                               >
                                 {isIgnored ? (
                                   "[ignored]"
@@ -446,6 +485,7 @@ export default function ChatRoomsPage() {
                               const isIgnored = settings.server.ignorelist.includes(u) || !!settings.server.ipignorelist[u];
                               const isOperator = (joinedRooms.get(activeRoom!)?.operators || []).includes(u);
                               const isOwner = joinedRooms.get(activeRoom!)?.owner === u;
+                              const stats = userStats.get(u.toLowerCase());
                               return (
                               <button
                                 key={u}
@@ -455,12 +495,13 @@ export default function ChatRoomsPage() {
                                   e.stopPropagation();
                                   setMenuAnchor({ x: e.clientX, y: e.clientY, items: userMenu(u, "chatrooms") });
                                 }}
-                                className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-surface-container-low ${isIgnored ? "opacity-40" : ""} ${isOwner ? "font-bold underline decoration-primary" : isOperator ? "font-semibold" : ""}`}
+                                className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-surface-container-low dark:hover:bg-surface-container-high ${isIgnored ? "opacity-40" : ""} ${isOwner ? "font-bold underline decoration-primary dark:decoration-inverse-primary" : isOperator ? "font-semibold" : ""}`}
                               >
-                                <span className={`flex h-6 w-6 items-center justify-center rounded text-[10px] font-bold ${isOwner ? "bg-primary text-on-primary" : "bg-surface-container-high"}`}>
+                                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded text-[10px] font-bold ${isOwner ? "bg-primary text-on-primary dark:bg-inverse-primary dark:text-on-primary-fixed" : "bg-surface-container-high dark:bg-surface-container-high"}`}>
                                   {u.slice(0, 2).toUpperCase()}
                                 </span>
-                                <span className="truncate font-body text-xs font-medium">{u}{isOwner ? " ★" : isOperator ? " ◆" : ""}</span>
+                                <span className="min-w-0 flex-1 truncate font-body text-xs font-medium dark:text-inverse-primary">{u}{isOwner ? " ★" : isOperator ? " ◆" : ""}</span>
+                                {stats ? <span className="ml-auto shrink-0 text-[11px] font-normal text-outline dark:text-outline/70 tabular-nums">{stats.files.toLocaleString()} shares</span> : null}
                               </button>
                             );})
                           )}
