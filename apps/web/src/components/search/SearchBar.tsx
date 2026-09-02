@@ -52,9 +52,9 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
   const [showHelp, setShowHelp] = useState(false);
 
   return (
-    <div className="flex flex-col gap-2 px-3 py-3 max-w-full overflow-hidden">
+    <div className="flex flex-col gap-2 px-3 pt-2 pb-2 md:px-3 md:py-3 max-w-full overflow-hidden">
       {/* Card container — keeps everything inside viewport */}
-      <div className="flex flex-col gap-2.5 rounded-2xl bg-surface-container-lowest ghost-border p-2.5 sm:p-3 shadow-sm max-w-full overflow-hidden">
+      <div className="flex flex-col gap-2.5 rounded-2xl bg-surface-container-lowest ghost-border p-2 md:p-3 shadow-sm max-w-full overflow-hidden">
         {/* Row 1: query + actions */}
         <div className="flex items-center gap-1.5 sm:gap-2 max-w-full min-w-0">
           <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-surface-container-low px-3 sm:px-4 py-2.5 ghost-border transition-all focus-within:border-primary">

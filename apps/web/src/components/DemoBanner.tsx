@@ -19,10 +19,23 @@ export function DemoBanner() {
     }
   }, []);
 
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const upd = () => setIsMobile(mq.matches);
+    upd();
+    mq.addEventListener("change", upd);
+    return () => mq.removeEventListener("change", upd);
+  }, []);
+
   useEffect(() => {
     if (!isDemo) return;
     const html = document.documentElement;
     if (dismissed) {
+      html.style.setProperty("--demo-banner-h", "0px");
+      return;
+    }
+    if (isMobile) {
       html.style.setProperty("--demo-banner-h", "0px");
       return;
     }
@@ -45,7 +58,7 @@ export function DemoBanner() {
       ro.disconnect();
       window.removeEventListener("resize", set);
     };
-  }, [dismissed]);
+  }, [dismissed, isMobile]);
 
   if (!isDemo) return null;
   if (dismissed) {
@@ -57,14 +70,46 @@ export function DemoBanner() {
             localStorage.setItem(STORAGE_KEY, "0");
           } catch {}
           setDismissed(false);
-          // restore height on next effect cycle; set fallback immediately for snappy UI
-          document.documentElement.style.setProperty("--demo-banner-h", "32px");
+          if (!isMobile) document.documentElement.style.setProperty("--demo-banner-h", "32px");
         }}
         data-testid="demo-banner-restore"
         aria-label="Show demo banner"
         className="fixed bottom-[calc(76px+env(safe-area-inset-bottom,0px))] right-2 z-[60] flex items-center gap-1 rounded-full bg-tertiary-fixed px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-on-tertiary-fixed shadow-sm hover:brightness-95 md:bottom-auto md:top-2">
         <span className="material-symbols-outlined text-[14px]">science</span> Demo
       </button>
+    );
+  }
+  if (isMobile) {
+    return (
+      <div
+        ref={ref}
+        data-demo-banner
+        data-testid="demo-banner"
+        className="fixed top-[calc(56px+env(safe-area-inset-top,0px)+8px)] left-2 right-2 z-[60] flex items-center justify-center gap-2 rounded-xl bg-tertiary-fixed px-3 py-2 pr-10 text-center text-on-tertiary-fixed shadow-lg md:hidden"
+      >
+        <span className="material-symbols-outlined text-[16px] shrink-0">science</span>
+        <span className="font-label text-xs font-semibold uppercase tracking-widest">
+          Demo — 2 searches, 2 chats, 2 shares, 2 profiles, 2 buddies &amp; transfer preview mocked •{" "}
+          <a href="https://github.com/mlnl221/nicotineHub" target="_blank" rel="noopener noreferrer" className="underline hover:no-underline">
+            GitHub
+          </a>
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            try {
+              localStorage.setItem(STORAGE_KEY, "1");
+            } catch {}
+            setDismissed(true);
+            document.documentElement.style.setProperty("--demo-banner-h", "0px");
+          }}
+          data-testid="demo-banner-dismiss"
+          aria-label="Dismiss demo banner"
+          className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-on-tertiary-fixed hover:bg-black/10 active:scale-95"
+        >
+          <span className="material-symbols-outlined text-[18px]">close</span>
+        </button>
+      </div>
     );
   }
   return (

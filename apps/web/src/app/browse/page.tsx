@@ -94,7 +94,7 @@ function BrowseInner() {
 
         {/* Input + tabs bar */}
         <div className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-lowest/80 backdrop-blur-xl border-b border-surface-container-highest/20">
-          <div className="mx-auto w-full max-w-screen-2xl px-4 sm:px-6 md:px-10 py-3 flex flex-col gap-3">
+          <div className="mx-auto w-full max-w-screen-2xl px-3 py-2 md:px-10 md:py-3 flex flex-col gap-3">
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-outline">search</span>
