@@ -20,6 +20,8 @@ OFFSET ?=
 LISTEN_PORT ?=
 TAG ?= latest
 BRIDGE_TOKEN ?=
+# Build-time WS URL for web — defaults to ws://localhost:<bridgePort>/ws (dev.mjs computes per OFFSET)
+# Override e.g. NEXT_PUBLIC_BRIDGE_URL=wss://hub.example.com/ws make run-docker
 NEXT_PUBLIC_BRIDGE_URL ?=
 NEXT_PUBLIC_DEMO ?=
 
@@ -54,9 +56,11 @@ build: ## prod builds (stop dev first — else .next corrupts)
 verify: typecheck test build ## typecheck + test + build
 
 # dev: offset + listen port mirror scripts/dev.mjs:30 (PORT 3000/8787 LISTEN 62904)
+# NEXT_PUBLIC_BRIDGE_URL is auto-derived per OFFSET (ws://localhost:8787+OFFSET/ws) unless you override:
+#   NEXT_PUBLIC_BRIDGE_URL=wss://hub.example.com/ws make dev
 # ponytail: reuse dev.mjs, no duplicate port logic
 dev: ## run bridge+web (OFFSET=3 LISTEN_PORT=49127)
-	$(BUN) run dev $(if $(OFFSET),$(OFFSET)) $(if $(LISTEN_PORT),$(LISTEN_PORT))
+	NEXT_PUBLIC_BRIDGE_URL=$(NEXT_PUBLIC_BRIDGE_URL) $(BUN) run dev $(if $(OFFSET),$(OFFSET)) $(if $(LISTEN_PORT),$(LISTEN_PORT))
 
 run: dev ## alias for dev
 

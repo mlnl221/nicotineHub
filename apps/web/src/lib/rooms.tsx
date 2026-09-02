@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
 import { useConfig } from "@/lib/config/provider";
-import type { ChatEvent, RoomEvent } from "@/lib/protocol";
+import type { ChatEvent, RoomEvent, UserInfoEvent } from "@/lib/protocol";
 import { censorText, replaceText, truncateMessages } from "@/lib/chatFormat";
 
 export interface RoomMessage {
@@ -26,9 +26,10 @@ export interface JoinedRoom {
 export function useRooms() {
   const { send, subscribe, state } = useSession();
   const { settings } = useConfig();
-  const [roomList, setRoomList] = useState<{ name: string; users: number }[]>([]);
+  const [roomList, setRoomList] = useState<{ name: string; users: number; isPrivate?: boolean }[]>([]);
   const [joinedRooms, setJoinedRooms] = useState<Map<string, JoinedRoom>>(() => new Map());
   const [messages, setMessages] = useState<Map<string, RoomMessage[]>>(() => new Map());
+  const [userStats, setUserStats] = useState<Map<string, { files: number; dirs: number }>>(() => new Map());
   const [activeRoom, setActiveRoom] = useState<string | null>(() => {
     if (typeof window !== "undefined") {
       try {
@@ -49,8 +50,20 @@ export function useRooms() {
         const ev = (msg as unknown as { event: RoomEvent }).event;
         switch (ev.type) {
           case "room-list": {
-            const data = ev.data as { rooms?: { name: string; users: number }[] } | undefined;
-            if (data?.rooms) setRoomList(data.rooms);
+            const data = ev.data as { rooms?: { name: string; users: number }[]; owned?: { name: string; users: number }[]; member?: { name: string; users: number }[] } | undefined;
+            if (data?.rooms || (data as unknown as { owned?: unknown })?.owned || (data as unknown as { member?: unknown })?.member) {
+              const rooms = ((data as { rooms?: { name: string; users: number }[] })?.rooms || []) as { name: string; users: number }[];
+              const owned = ((data as unknown as { owned?: { name: string; users: number }[] }).owned || []) as { name: string; users: number }[];
+              const member = ((data as unknown as { member?: { name: string; users: number }[] }).member || []) as { name: string; users: number }[];
+              const privateNames = new Set([...owned, ...member].map((r) => r.name.toLowerCase()));
+              // Merge public + private, tag private for sorting offset like nicotine-plus PRIVATE_USERS_OFFSET=10M
+              const merged = [
+                ...rooms.map((r) => ({ ...r, isPrivate: privateNames.has(r.name.toLowerCase()) })),
+                ...owned.filter((r) => !rooms.some((x) => x.name.toLowerCase() === r.name.toLowerCase())).map((r) => ({ ...r, isPrivate: true })),
+                ...member.filter((r) => !rooms.some((x) => x.name.toLowerCase() === r.name.toLowerCase()) && !owned.some((x) => x.name.toLowerCase() === r.name.toLowerCase())).map((r) => ({ ...r, isPrivate: true })),
+              ];
+              setRoomList(merged);
+            }
             break;
           }
           case "join-room": {
@@ -260,10 +273,43 @@ export function useRooms() {
             return next;
           });
         }
+      } else if ((msg as unknown as { type: string }).type === "userinfo:event") {
+        const ev = (msg as unknown as { event: UserInfoEvent }).event;
+        if (ev.type === "user-stats" && ev.stats && ev.username) {
+          const u = ev.username.toLowerCase();
+          setUserStats((prev) => {
+            const next = new Map(prev);
+            next.set(u, { files: ev.stats!.files, dirs: ev.stats!.dirs });
+            return next;
+          });
+        } else if (ev.type === "watch-user" && ev.watchUser && ev.username) {
+          const u = ev.username.toLowerCase();
+          if (ev.watchUser.files !== undefined || ev.watchUser.dirs !== undefined) {
+            setUserStats((prev) => {
+              const next = new Map(prev);
+              next.set(u, { files: ev.watchUser!.files ?? prev.get(u)?.files ?? 0, dirs: ev.watchUser!.dirs ?? prev.get(u)?.dirs ?? 0 });
+              return next;
+            });
+          }
+        }
       }
     });
     return unsub;
   }, [state.status, subscribe, activeRoom, settings.words.censorwords, settings.words.censored, settings.logging.readroomlines]);
+
+  // Fetch UserStats (files count) for users in active room to show shares in right list
+  const requestedStats = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (state.status !== "connected" || !activeRoom) return;
+    const users = joinedRooms.get(activeRoom)?.users || [];
+    for (const u of users.slice(0, 80)) {
+      const lower = u.toLowerCase();
+      if (userStats.has(lower) || requestedStats.current.has(lower)) continue;
+      requestedStats.current.add(lower);
+      try { send({ type: "userinfo", action: "watch", username: u } as unknown as never); } catch {}
+      setTimeout(() => requestedStats.current.delete(lower), 60000);
+    }
+  }, [activeRoom, joinedRooms, state.status, send, userStats]);
 
   const joinRoom = useCallback(
     (room: string) => {
@@ -327,5 +373,5 @@ export function useRooms() {
     setActiveRoom(null);
   }, [joinedRooms, send]);
 
-  return { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, addOperator, removeOperator, cancelMembership, cancelOwnership, closeAll };
+  return { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, addOperator, removeOperator, cancelMembership, cancelOwnership, closeAll, userStats };
 }

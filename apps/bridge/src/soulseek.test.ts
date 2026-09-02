@@ -93,7 +93,7 @@ describe("packing primitives", () => {
 
 describe("buildLogin matches the documented hex example", () => {
   // From doc/SLSKPROTOCOL.md "Sending Login Example": username=username,
-  // password=password, major=177, minor=1.
+  // password=password, major=160, minor=3 (nicotine-plus current, was 177/1 experimental).
   test("produces the exact wire bytes", () => {
     const raw = buildLogin("username", "password");
     // Skip the first 8 bytes (len + code) to inspect the payload.
@@ -103,15 +103,15 @@ describe("buildLogin matches the documented hex example", () => {
     // len == payload + 4
     expect(len).toBe(raw.length - 4);
 
-    // Full hex stream from the docs:
+    // Full hex stream from the docs (updated to 160/3):
     const expected =
       "48000000" + // message length 72
       "01000000" + // code 1 (Login)
       "08000000757365726e616d65" + // string(username)
       "0800000070617373776f7264" + // string(password)
-      "b1000000" + // major version 177
+      "a0000000" + // major version 160
       "200000006435316339613765393335333734366136303230663936303264343532393239" + // string(md5hex) = d51c9a7e...
-      "01000000"; // minor version 1
+      "03000000"; // minor version 3
 
     expect(hex).toBe(expected);
   });
@@ -209,8 +209,8 @@ describe("describeRejection", () => {
 
 describe("constants", () => {
   test("experimental client version is used", () => {
-    expect(MAJOR_VERSION).toBe(177);
-    expect(MINOR_VERSION).toBeGreaterThanOrEqual(1);
+    expect(MAJOR_VERSION).toBe(160);
+    expect(MINOR_VERSION).toBe(3);
   });
 });
 

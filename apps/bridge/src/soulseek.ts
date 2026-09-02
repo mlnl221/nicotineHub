@@ -195,8 +195,8 @@ export const LOGIN_REJECT_REASONS = {
   SERVER_PRIVATE: "SVRPRIVATE",
 } as const;
 
-export const MAJOR_VERSION = 177;
-export const MINOR_VERSION = 1;
+export const MAJOR_VERSION = 160;
+export const MINOR_VERSION = 3;
 // Nicotine+ stable reserved version (for reference / fallback). Experimental 177 is kept as default per AGENTS.md — use MAJOR_VERSION.
 // See SLSKPROTOCOL.md Reserved 160 = Nicotine+, 177 = Experimental.
 export const NICOTINE_MAJOR_VERSION = 160;
@@ -434,7 +434,9 @@ export function frameDistribMessage(code: number, payload: Buffer): Buffer {
 /* Builders — server */
 
 export function buildLogin(username: string, password: string): Buffer {
-  const hash = Bun.CryptoHasher.hash("md5", `${username}${password}`, "hex");
+  // Use node:crypto to match pynicotine hashlib.md5((user+pass).encode()).hexdigest() exactly (utf-8)
+  const { createHash } = require("node:crypto") as typeof import("node:crypto");
+  const hash = createHash("md5").update(`${username}${password}`, "utf8").digest("hex");
   const payload = Buffer.concat([
     packString(username), packString(password),
     packUint32(MAJOR_VERSION), packString(hash), packUint32(MINOR_VERSION),

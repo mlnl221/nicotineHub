@@ -39,6 +39,16 @@ const ProfileTabsContext = createContext<ProfileTabsApi | null>(null);
 const STORAGE_KEY = "nicotineHub.profileTabs";
 const MAX_TABS = 10;
 
+// Module-level cache survives provider remount (e.g. navigating away from /profile and back)
+// so we don't redo the slsk UserInfo/Interests/Stats calls until user hits Refresh.
+const profileCache = new Map<string, UserProfile>();
+function getCachedProfile(username: string): UserProfile | undefined {
+  return profileCache.get(username.toLowerCase());
+}
+function setCachedProfile(username: string, profile: UserProfile) {
+  profileCache.set(username.toLowerCase(), profile);
+}
+
 function loadPersisted(): { tabs: Array<{ id: string; username: string }>; activeId: string | null } | null {
   if (typeof window === "undefined") return null;
   try {
@@ -63,13 +73,13 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const [tabs, setTabs] = useState<ProfileTab[]>(() => {
     const p = loadPersisted();
     if (p && p.tabs.length) {
-      return p.tabs.map((t) => ({
-        id: t.id,
-        username: t.username,
-        profile: { username: t.username },
-        loading: true,
-        error: null,
-      }));
+      return p.tabs.map((t) => {
+        const cached = getCachedProfile(t.username);
+        if (cached) {
+          return { id: t.id, username: t.username, profile: cached, loading: false, error: null };
+        }
+        return { id: t.id, username: t.username, profile: { username: t.username }, loading: true, error: null };
+      });
     }
     return [];
   });
@@ -97,6 +107,15 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const pendingOpenRef = useRef<Set<string>>(new Set());
 
   useEffect(() => { persist(tabs, activeId); }, [tabs, activeId]);
+
+  // Cache profiles in module Map so remount (navigate away/back) doesn't refetch slsk
+  useEffect(() => {
+    for (const t of tabs) {
+      if (!t.loading && !t.error && t.profile && (t.profile.info || t.profile.stats || t.profile.interests || t.profile.status)) {
+        setCachedProfile(t.username, t.profile);
+      }
+    }
+  }, [tabs]);
 
   // Demo: seed 2 fake profiles (jazzcat + vinyl_hunter) with mocked data
   useEffect(() => {
@@ -131,6 +150,12 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     setActiveId(null);
     counter.current = 0;
     try { sessionStorage.removeItem("__demoProfileSeeded"); } catch {}
+  }, [state.status]);
+
+  // Clear module cache on logout (all modes) so next login starts fresh
+  useEffect(() => {
+    if (state.status !== "idle") return;
+    profileCache.clear();
   }, [state.status]);
 
   // Subscribe to userinfo events
@@ -243,6 +268,25 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     if (tabsRef.current.length >= MAX_TABS) return;
     pendingOpenRef.current.add(lower);
     const id = `p${++counter.current}`;
+    // If we have a cached profile, restore instantly without slsk round-trip
+    const cached = getCachedProfile(username);
+    if (cached) {
+      const tab: ProfileTab = { id, username, profile: cached, loading: false, error: null };
+      setTabs((prev) => {
+        if (prev.some((t) => t.username.toLowerCase() === lower)) return prev;
+        return [...prev, tab];
+      });
+      setActiveId(id);
+      try {
+        const key = "nicotineHub.recentProfiles";
+        const raw = (localStorage.getItem(key) ?? localStorage.getItem(key.replace ? key.replace("nicotineHub.", "nicotine.") : key));
+        const list: string[] = raw ? JSON.parse(raw) : [];
+        const next = [username, ...list.filter((x: string) => x.toLowerCase() !== lower)].slice(0, 20);
+        localStorage.setItem(key, JSON.stringify(next));
+      } catch {}
+      setTimeout(() => pendingOpenRef.current.delete(lower), 600);
+      return;
+    }
     const tab: ProfileTab = { id, username, profile: { username }, loading: true, error: null };
     setTabs((prev) => {
       // Re-check inside functional update in case another call slipped between tabsRef check and setTabs
