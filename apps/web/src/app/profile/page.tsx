@@ -7,7 +7,7 @@ import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
-import { ProfileProvider, useProfileTabs } from "@/lib/profile-tabs";
+import { useProfileTabs } from "@/lib/profile-tabs";
 import { ProfileTabs } from "@/components/profile/ProfileTabs";
 import { ProfileView } from "@/components/profile/ProfileView";
 
@@ -150,9 +150,5 @@ export default function ProfileLookup() {
   useEffect(() => { if (state.status === "failed") router.replace("/"); }, [state.status, router]);
   if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
   if (state.status !== "connected") return null;
-  return (
-    <ProfileProvider>
-      <TabbedProfileInner />
-    </ProfileProvider>
-  );
+  return <TabbedProfileInner />;
 }
