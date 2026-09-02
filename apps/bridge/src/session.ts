@@ -522,6 +522,13 @@ export class SoulseekSession {
   setNetworkInterface(iface: string) {
     const norm = String(iface || "").trim();
     if (norm === this._interface) return;
+    if (this.reconnectPending) {
+      // Debounce — config sync burst after login can fire interface + portrange together
+      const old = this._interface;
+      this._interface = norm;
+      logger.debug("server", "interface change debounced (reconnect pending)", { from: old, to: norm || "default" });
+      return;
+    }
     const old = this._interface;
     const oldIp = this._localIpAddress;
     this._interface = norm;
@@ -1031,6 +1038,8 @@ export class SoulseekSession {
     this.distribParentMinSpeed = PARENT_MIN_SPEED_DEFAULT;
     this.distribParentSpeedRatio = PARENT_SPEED_RATIO_DEFAULT;
     this.uploadSpeed = 0;
+    // Clear serverBuffer — stale bytes from prior conn would desync framing (privilegedUsers 69 misparse)
+    this.serverBuffer = Buffer.alloc(0);
     // Peer listener will be rebound on next login success; stop old now to free port for immediate retry
     try { this.listener?.stop(); } catch {}
     this.listener = undefined;
@@ -1057,6 +1066,8 @@ export class SoulseekSession {
   }
 
   private connectServer() {
+    // Ensure clean framing for new TCP — old bytes would cause code 69 vs 1 desync
+    this.serverBuffer = Buffer.alloc(0);
     logger.info("server", `connecting to ${this.opts.host || "server.slsknet.org"}:${this.opts.port || 2242}`, { username: this.username });
     Bun.connect({
       hostname: this.opts.host || "server.slsknet.org",
@@ -1086,6 +1097,8 @@ export class SoulseekSession {
             // Portmapper cleanup mirrors pynicotine _server_disconnect remove_port_mapping
             try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}
           }
+          // Clear stale framing immediately — next connect must start clean
+          this.serverBuffer = Buffer.alloc(0);
           if (!this.loggedIn && this.loginReject) {
             const err = new Error("Connection closed before login completed.");
             this.loginReject(err);
