@@ -262,6 +262,13 @@ export function handleDemoSend(
     return true;
   }
 
+  if ((anyMsg.type as string) === "shares:rescan") {
+    setTimeout(() => {
+      emit(listeners, { type: "shares:rescanned", folders: [], counts: { dirs: 2, files: 42 } } as unknown as BridgeOutboundMessage);
+    }, 650);
+    return true;
+  }
+
   // Room list on connect: send initial list after short delay for rooms page
   // We use a side effect: when login succeeds, roomList will be requested implicitly? For now handle any unknown as noop.
   return false;

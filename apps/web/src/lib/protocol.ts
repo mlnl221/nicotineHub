@@ -549,6 +549,22 @@ export interface ServerReconnectedMessage {
 }
 
 /* ------------------------------------------------------------------ *
+ * Shares rescan
+ * ------------------------------------------------------------------ */
+
+export interface SharesRescanRequest {
+  type: "shares:rescan";
+}
+
+export interface SharesRescannedMessage {
+  type: "shares:rescanned";
+  folders: BrowseFolder[];
+  counts: { dirs: number; files: number };
+  /** Roots not found on bridge FS (e.g. /data/Music not mounted / WSL path wrong) */
+  unavailable?: [string, string][];
+}
+
+/* ------------------------------------------------------------------ *
  * Heartbeat (bridge <-> web keepalive, 25s)
  * ------------------------------------------------------------------ */
 
@@ -758,6 +774,7 @@ export type BridgeOutboundMessage =
   | SpectrumStatusMessage
   | SpectrumReadyMessage
   | SpectrumErrorMessage
+  | SharesRescannedMessage
   | PongMessage;
 
 export interface SpectrumRequest {
@@ -801,4 +818,5 @@ export type BridgeInboundMessage =
   | PluginInstallGithubTsRequest
   | SpectrumRequest
   | SpectrumStatusRequest
+  | SharesRescanRequest
   | PingRequest;

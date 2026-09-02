@@ -21,6 +21,7 @@ export default function ChatRoomsPage() {
   const { settings } = useConfig();
   const router = useRouter();
   const { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, closeAll } = useRooms();
+  const { buddies } = useBuddies();
   const [joinInput, setJoinInput] = useState("");
   const [sayInput, setSayInput] = useState("");
   const [filter, setFilter] = useState("");
@@ -29,13 +30,6 @@ export default function ChatRoomsPage() {
   const [showWall, setShowWall] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
 
-  useEffect(() => {
-    if (state.status === "failed") router.replace("/");
-  }, [state.status, router]);
-
-  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
-  if (state.status !== "connected") return null;
-
   const activeMessages = activeRoom ? messages.get(activeRoom) || [] : [];
   const joinedArray = Array.from(joinedRooms.values());
   const filteredRooms = filter
@@ -43,7 +37,6 @@ export default function ChatRoomsPage() {
     : roomList;
   const activeUsers = activeRoom ? joinedRooms.get(activeRoom)?.users || [] : [];
   const activeTickers = activeRoom ? joinedRooms.get(activeRoom)?.tickers || [] : [];
-  const { buddies } = useBuddies();
   const CORE_COMMANDS = ["help","plugin","clear","me","now","join","leave","say","pm","close","msg","ctcp","add","rem","browse","whois","ip","ban","unban","ignore","unignore","share","unshare","shares","rescan","search","rsearch","bsearch","usearch","connect","disconnect","away","quit"];
   const completion = useCompletion({
     login: state.status === "connected" ? (state as unknown as { username?: string }).username : undefined,
@@ -54,6 +47,13 @@ export default function ChatRoomsPage() {
   });
   const showUserList = (settings as unknown as { chatrooms?: { user_list_visible?: boolean } }).chatrooms?.user_list_visible ?? true;
   const allTickers = Array.from(joinedRooms.values()).flatMap(r => (r.tickers || []).map(t => ({ ...t, room: r.name })));
+
+  useEffect(() => {
+    if (state.status === "failed") router.replace("/");
+  }, [state.status, router]);
+
+  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
+  if (state.status !== "connected") return null;
 
   const handleJoin = () => {
     const r = joinInput.trim();

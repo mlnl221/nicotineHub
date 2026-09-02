@@ -20,22 +20,11 @@ import { useSearchesOptional } from "@/lib/search";
 import { isDemo } from "@/lib/demo";
 import { useSpectrum } from "@/lib/spectrum";
 import { SpectrumHoverCard } from "@/components/transfers/SpectrumHoverCard";
+import { humanSize, humanSpeed as _humanSpeed } from "@/lib/format";
 
 function humanSpeed(bps: number): string {
   if (!bps) return "—";
-  const mb = bps / (1024 * 1024);
-  if (mb >= 1) return `${mb.toFixed(1)} MB/s`;
-  const kb = bps / 1024;
-  return `${kb.toFixed(0)} KB/s`;
-}
-
-function humanSize(n: number): string {
-  if (!n) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let i = 0;
-  let v = n;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+  return _humanSpeed(bps) || "—";
 }
 
 function getFolder(vp: string): string {

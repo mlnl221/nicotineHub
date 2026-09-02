@@ -208,21 +208,15 @@ export const REMOVED_SEARCH_CHARACTERS = [
   "‐", "’", "“", "”", "…",
 ];
 const REMOVED_SET = new Set(REMOVED_SEARCH_CHARACTERS);
-const PUNCTUATION_CHARS = [
-  "!", '"', "#", "$", "%", "&", "'", "(", ")", "*", "+", ",", "-", ".", "/", ":", ";",
-  "<", "=", ">", "?", "@", "[", "\\", "]", "^", "_", "`", "{", "|", "}", "~",
-];
-const PUNCTUATION_SET = new Set(PUNCTUATION_CHARS);
-function translateRemoved(s: string): string {
+// ponytail: PUNCTUATION is REMOVED minus unicode dashes/quotes/ellipsis; single source
+const PUNCTUATION_SET = new Set(REMOVED_SEARCH_CHARACTERS.filter((c) => !["–", "—", "‐", "’", "“", "”", "…"].includes(c)));
+function translateWithSet(s: string, set: Set<string>): string {
   let out = "";
-  for (const ch of s) out += REMOVED_SET.has(ch) ? " " : ch;
+  for (const ch of s) out += set.has(ch) ? " " : ch;
   return out;
 }
-function translatePunct(s: string): string {
-  let out = "";
-  for (const ch of s) out += PUNCTUATION_SET.has(ch) ? " " : ch;
-  return out;
-}
+const translateRemoved = (s: string) => translateWithSet(s, REMOVED_SET);
+const translatePunct = (s: string) => translateWithSet(s, PUNCTUATION_SET);
 /** Tokenize respecting quoted phrases — like shlex with " quotes */
 function tokenizeSearchTerm(term: string): string[] {
   const tokens: string[] = [];
@@ -355,7 +349,8 @@ export function packIp(value: string): Buffer {
   if (parts.length !== 4) throw new Error(`Invalid IP: ${value}`);
   const nums = parts.map((p) => parseInt(p, 10));
   if (!nums.every((n) => n >= 0 && n <= 255)) throw new Error(`Invalid IP: ${value}`);
-  return Buffer.from(nums);
+  // wire is LE (reversed inet_aton): 192.168.1.1 -> [1,1,168,192]
+  return Buffer.from([nums[3]!, nums[2]!, nums[1]!, nums[0]!]);
 }
 
 /** Cursor reader — mirrors SlskMessage. */
@@ -371,8 +366,13 @@ export class SlskReader {
   uint64(): bigint { const v = this.buf.readBigUInt64LE(this.offset); this.offset += 8; return v; }
   string(): string {
     const len = this.uint32();
-    const v = this.buf.subarray(this.offset, this.offset + len).toString("utf8");
-    this.offset += len; return v;
+    const raw = this.buf.subarray(this.offset, this.offset + len);
+    this.offset += len;
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(raw);
+    } catch {
+      return raw.toString("latin1");
+    }
   }
   bytes(): Buffer {
     const len = this.uint32();
@@ -385,15 +385,12 @@ export class SlskReader {
     // wire: little-endian reversed inet_aton
     return `${b[3]}.${b[2]}.${b[1]}.${b[0]}`;
   }
-  ipLE(): string {
-    const v = this.uint32();
-    return `${(v >>> 0) & 0xff}.${(v >>> 8) & 0xff}.${(v >>> 16) & 0xff}.${(v >>> 24) & 0xff}`;
-  }
 }
 
 export function readUint32(buf: Buffer, offset: number): number { return buf.readUInt32LE(offset); }
 export function uint32ToIp(value: number): string {
-  return `${(value >>> 0) & 0xff}.${(value >>> 8) & 0xff}.${(value >>> 16) & 0xff}.${(value >>> 24) & 0xff}`;
+  // LE wire integer -> dotted (high byte is first octet)
+  return `${(value >>> 24) & 0xff}.${(value >>> 16) & 0xff}.${(value >>> 8) & 0xff}.${(value >>> 0) & 0xff}`;
 }
 
 /* Framing */
@@ -498,7 +495,7 @@ export function buildJoinRoom(room: string, priv = false): Buffer {
 export function buildLeaveRoom(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.leaveRoom, packString(room)); }
 export function buildChangePassword(password: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.changePassword, packString(password)); }
 export function buildCheckPrivileges(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.checkPrivileges, Buffer.alloc(0)); }
-export function buildRoomTickers(room: string): Buffer { return Buffer.alloc(0); } // not sent — server pushes
+export function buildRoomTickers(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.roomTickers, packString(room)); }
 export function buildSetRoomTicker(room: string, msg: string): Buffer {
   return frameMessage(SERVER_MESSAGE_CODES.setRoomTicker, Buffer.concat([packString(room), packString(msg)]));
 }
@@ -512,7 +509,7 @@ export function buildRemoveRoomOperator(room: string, username: string): Buffer 
 export function buildRecommendationsEmpty(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.recommendations, Buffer.alloc(0)); }
 export function buildGlobalRecommendationsEmpty(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.globalRecommendations, Buffer.alloc(0)); }
 export function buildSimilarUsersEmpty(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.similarUsers, Buffer.alloc(0)); }
-export function buildHaveNoParent(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.haveNoParent, Buffer.alloc(0)); }
+export function buildHaveNoParent(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.haveNoParent, packBool(true)); }
 export function buildBranchLevel(level: number): Buffer { return frameMessage(SERVER_MESSAGE_CODES.branchLevel, packUint32(level >>> 0)); }
 export function buildBranchRoot(root: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.branchRoot, packString(root)); }
 export function buildAcceptChildren(accept: boolean): Buffer { return frameMessage(SERVER_MESSAGE_CODES.acceptChildren, packBool(accept)); }
@@ -560,7 +557,7 @@ export function buildFileOffset(offset: number | bigint): Buffer { return packUi
 export interface PierceFireWall { token: number; }
 export function parsePierceFireWall(payload: Buffer): PierceFireWall { return { token: payload.readUInt32LE(0) }; }
 export function uint32ToIp(value: number): string {
-  return `${(value >>> 0) & 0xff}.${(value >>> 8) & 0xff}.${(value >>> 16) & 0xff}.${(value >>> 24) & 0xff}`;
+  return `${(value >>> 24) & 0xff}.${(value >>> 16) & 0xff}.${(value >>> 8) & 0xff}.${(value >>> 0) & 0xff}`;
 }
 
 export interface ConnectToPeer {
@@ -571,7 +568,7 @@ export function parseConnectToPeer(payload: Buffer): ConnectToPeer {
   const r = new SlskReader(payload);
   const username = r.string();
   const connType = r.string();
-  const ip = r.ipLE();
+  const ip = r.ip();
   const port = r.uint32();
   const token = r.uint32();
   const privileged = r.bool();
@@ -597,7 +594,12 @@ export function parseLoginResponse(payload: Buffer): LoginResponse {
   let offset = 0;
   const readBool = (): boolean => { const v = payload[offset] !== 0; offset += 1; return v; };
   const readUint32 = (): number => { const v = payload.readUInt32LE(offset); offset += 4; return v; };
-  const readString = (): string => { const len = readUint32(); const v = payload.subarray(offset, offset + len).toString("utf8"); offset += len; return v; };
+  const readString = (): string => {
+    const len = readUint32();
+    const raw = payload.subarray(offset, offset + len);
+    offset += len;
+    try { return new TextDecoder("utf-8", { fatal: true }).decode(raw); } catch { return raw.toString("latin1"); }
+  };
   const success = readBool();
   if (!success) {
     const rejectionReason = readString();
@@ -606,7 +608,7 @@ export function parseLoginResponse(payload: Buffer): LoginResponse {
   }
   const banner = readString();
   const ipBytes = payload.subarray(offset, offset + 4); offset += 4;
-  const ipAddress = `${ipBytes[0]}.${ipBytes[1]}.${ipBytes[2]}.${ipBytes[3]}`;
+  const ipAddress = `${ipBytes[3]}.${ipBytes[2]}.${ipBytes[1]}.${ipBytes[0]}`;
   const checksum = readString(); const isSupporter = readBool();
   return { success: true, banner, ipAddress, checksum, isSupporter };
 }
@@ -679,7 +681,11 @@ function readFileSize(buf: Buffer, offset: number): { size: number; next: number
 export function parseFileSearchResponse(payload: Buffer): FileSearchResult {
   const buf = inflateWithCap(payload);
   let offset = 0;
-  const readString = (): string => { const len = buf.readUInt32LE(offset); offset += 4; const v = buf.subarray(offset, offset + len).toString("utf8"); offset += len; return v; };
+  const readString = (): string => {
+    const len = buf.readUInt32LE(offset); offset += 4;
+    const raw = buf.subarray(offset, offset + len); offset += len;
+    try { return new TextDecoder("utf-8", { fatal: true }).decode(raw); } catch { return raw.toString("latin1"); }
+  };
   const readUint32 = (): number => { const v = buf.readUInt32LE(offset); offset += 4; return v; };
   const readBool = (): boolean => { const v = buf[offset] !== 0; offset += 1; return v; };
   const readUint8 = (): number => { const v = buf[offset]; offset += 1; return v; };
@@ -704,6 +710,13 @@ export function parseFileSearchResponse(payload: Buffer): FileSearchResult {
   };
   for (let i = 0; i < nfiles; i++) readOne(false);
   const freeUploadSlots = readBool(); const uploadSpeed = readUint32(); const inQueue = readUint32();
+  // unknown 0 separator before private block (Peer Code 9 step 8)
+  if (offset + 4 <= buf.length && buf.readUInt32LE(offset) === 0) {
+    // if next value is 0 and there's still data, treat as unknown and consume
+    const afterUnknown = offset + 4;
+    if (afterUnknown + 4 <= buf.length || afterUnknown === buf.length) offset += 4;
+    else if (buf.readUInt32LE(afterUnknown) <= 10000) offset += 4;
+  }
   if (offset + 4 <= buf.length) {
     try {
       const npriv = buf.readUInt32LE(offset); offset += 4;
@@ -757,7 +770,7 @@ export function parseSimilarUsers(payload: Buffer): SimilarUser[] {
 }
 export function parseItemRecommendations(payload: Buffer): { thing: string; recommendations: Recommendation[] } {
   const r = new SlskReader(payload); const thing = r.string(); const recommendations: Recommendation[] = []; const n = r.uint32();
-  for (let i = 0; i < n; i++) { const recThing = r.string(); const rating = r.uint32(); recommendations.push({ thing: recThing, rating }); }
+  for (let i = 0; i < n; i++) { const recThing = r.string(); const rating = r.int32(); recommendations.push({ thing: recThing, rating }); }
   return { thing, recommendations };
 }
 export function parseItemSimilarUsers(payload: Buffer): { thing: string; users: SimilarUser[] } {
@@ -768,8 +781,7 @@ export function parseItemSimilarUsers(payload: Buffer): { thing: string; users: 
 export interface PeerAddress { username: string; ip: string; port: number; obfuscationType?: number; obfuscatedPort?: number; }
 export function parsePeerAddress(payload: Buffer): PeerAddress {
   const r = new SlskReader(payload);
-  const username = r.string(); const ipInt = r.uint32();
-  const ip = `${(ipInt >>> 0) & 0xff}.${(ipInt >>> 8) & 0xff}.${(ipInt >>> 16) & 0xff}.${(ipInt >>> 24) & 0xff}`;
+  const username = r.string(); const ip = r.ip();
   const port = r.uint32();
   let obfuscationType: number | undefined; let obfuscatedPort: number | undefined;
   if (r.remaining >= 8) { obfuscationType = r.uint32(); obfuscatedPort = r.uint32(); }
@@ -998,7 +1010,10 @@ export function parseFolderContentsResponse(payload: Buffer): { token: number; d
 export function parseDistribSearch(payload: Buffer): { username: string; token: number; query: string } {
   const r = new SlskReader(payload);
   // DistribSearch layout: uint32 unknown (49) | string username | uint32 token | string query
-  if (r.remaining >= 4) r.uint32(); // 49
+  if (r.remaining >= 4) {
+    const ident = r.uint32();
+    if (ident !== 49) throw new Error(`DistribSearch identifier !=49: ${ident}`);
+  }
   const username = r.string(); const token = r.uint32(); const query = r.string();
   return { username, token, query };
 }

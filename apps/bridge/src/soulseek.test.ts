@@ -89,8 +89,8 @@ describe("packing primitives", () => {
     expect(packUint32(0x04030201).toString("hex")).toBe("01020304");
   });
 
-  test("packIp packs 4 bytes", () => {
-    expect(packIp("192.168.1.1").toString("hex")).toBe("c0a80101");
+  test("packIp packs 4 bytes LE", () => {
+    expect(packIp("192.168.1.1").toString("hex")).toBe("0101a8c0");
   });
 });
 

@@ -18,6 +18,7 @@ import type {
 import { isDemo } from "@/lib/demo";
 import { emitRoomList, handleDemoSend } from "@/lib/demo/mock";
 import { clearDemoStorage, seedDemoStorage } from "@/lib/demo/seed";
+import { getLocal, getSession } from "@/lib/storage";
 
 export type SessionStatus = "idle" | "connecting" | "connected" | "failed";
 
@@ -40,8 +41,7 @@ interface SessionApi {
 const SessionContext = createContext<SessionApi | null>(null);
 
 function bridgeToken(): string | null {
-  if (typeof window === "undefined") return null;
-  const ls = (window.localStorage.getItem("nicotineHub.bridgeToken") ?? window.localStorage.getItem("nicotine.bridgeToken"));
+  const ls = getLocal("nicotineHub.bridgeToken");
   if (ls) return ls;
   const env = process.env.NEXT_PUBLIC_BRIDGE_TOKEN;
   if (env) return env;
@@ -50,7 +50,7 @@ function bridgeToken(): string | null {
 
 function bridgeUrl(): string {
   if (typeof window === "undefined") return "";
-  const override = (window.localStorage.getItem("nicotineHub.bridgeUrl") ?? window.localStorage.getItem("nicotine.bridgeUrl"));
+  const override = getLocal("nicotineHub.bridgeUrl");
   if (override) {
     const tok = bridgeToken();
     if (tok && !override.includes("token=")) return override.includes("?") ? `${override}&token=${encodeURIComponent(tok)}` : `${override}?token=${encodeURIComponent(tok)}`;
@@ -100,7 +100,7 @@ function saveCreds(req: Omit<LoginRequest, "type">) {
 }
 function loadCreds(): Omit<LoginRequest, "type"> | null {
   try {
-    const raw = (sessionStorage.getItem(EPHEMERAL_KEY) ?? sessionStorage.getItem(EPHEMERAL_KEY.replace("nicotineHub.", "nicotine.")));
+    const raw = getSession(EPHEMERAL_KEY);
     if (raw) {
       try {
         const parsed = JSON.parse(raw) as Omit<LoginRequest, "type">;
