@@ -207,6 +207,16 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
             >
               View Profile
             </button>
+            <button
+              data-testid="browse-reload"
+              onClick={() => retry(tab.id)}
+              disabled={loading}
+              title="Reload from network"
+              aria-label="Reload"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-container-high hover:bg-surface-variant disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[18px]">refresh</span>
+            </button>
             <div className="relative flex-1 sm:flex-none min-w-0">
               <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-outline">search</span>
               <input
@@ -237,7 +247,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
               />
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-2 space-y-1" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
+          <div className="flex-1 overflow-y-auto overflow-x-auto overscroll-contain min-h-0 p-2 space-y-1" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
             {loading && folders.length === 0 ? (
               <div className="space-y-2 p-2">
                 <div className="h-10 animate-pulse rounded-lg bg-surface-container-high" />
@@ -253,10 +263,10 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                   const hasChildren = meta?.hasChildren ?? false;
                   const isExpanded = expandedPaths.has(f.name);
                   const isSelected = selectedFolder === f.name;
-                  return (
+                    return (
                     <div
                       key={f.name}
-                      className={`flex w-full items-center gap-1 rounded-lg text-left transition-colors ${isSelected ? "bg-primary-fixed/20 text-primary border border-primary/10" : "hover:bg-surface-container-low text-on-surface-variant"}`}
+                      className={`flex w-full min-w-max items-center gap-1 rounded-lg text-left transition-colors ${isSelected ? "bg-primary-fixed/20 text-primary border border-primary/10" : "hover:bg-surface-container-low text-on-surface-variant"}`}
                       style={{ paddingLeft: `${8 + depth * 16}px`, paddingRight: '8px', paddingTop: '6px', paddingBottom: '6px' }}
                     >
                       {hasChildren ? (
@@ -292,7 +302,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                       >
                         <span className="material-symbols-outlined text-[20px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>{hasChildren ? (isExpanded ? "folder_open" : "folder") : "folder"}</span>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate font-body text-sm font-medium">{f.name.split("\\").pop() || f.name}</p>
+                          <p className="whitespace-nowrap font-body text-sm font-medium" title={f.name.split("\\").pop() || f.name}>{f.name.split("\\").pop() || f.name}</p>
                           <p className="truncate font-label text-[11px] text-on-surface-variant">{f.files.length} files</p>
                         </div>
                       </button>
@@ -387,14 +397,15 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                   <p className="p-6 font-body text-sm text-outline">No files match &quot;{fileQuery}&quot; in this folder.</p>
                 ) : (
                   <>
-                    <ul className="divide-y divide-surface-container-highest/30">
-                      {pagedFiles.map((file) => {
+                    <ul className="divide-y divide-surface-container-highest/20 bg-surface-container-lowest">
+                      {pagedFiles.map((file, idx) => {
                         const shortName = file.name.split(/[\\\/]/).pop() || file.name;
                         const attrsMap = new Map(file.attrs);
                         const bitrate = attrsMap.get(0);
                         const length = attrsMap.get(1);
+                        const isEven = idx % 2 === 0;
                         return (
-                          <li key={file.name} onContextMenu={(e) => { e.preventDefault(); const shortName = file.name.split(/[\\\/]/).pop() || file.name; const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : `${activeFolder!.name}\\${shortName}`; setMenuAnchor({ x: e.clientX, y: e.clientY, items: browseFileMenu(username, { path: vp, filename: shortName }, false) }); }} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-container-low/60">
+                          <li key={file.name} onContextMenu={(e) => { e.preventDefault(); const shortName = file.name.split(/[\\\/]/).pop() || file.name; const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : `${activeFolder!.name}\\${shortName}`; setMenuAnchor({ x: e.clientX, y: e.clientY, items: browseFileMenu(username, { path: vp, filename: shortName }, false) }); }} className={`flex items-center gap-3 px-4 py-3 ${isEven ? "bg-surface-container-lowest dark:bg-surface-container-high" : "bg-surface-container-low dark:bg-surface-container-highest/40"} hover:bg-surface-container-high/40 dark:hover:bg-surface-variant/40`}>
                             <span className="material-symbols-outlined text-outline text-[20px]">audio_file</span>
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-body text-sm font-medium text-on-surface" title={file.name}>

@@ -237,7 +237,7 @@ export default function SettingsPage() {
               {isPending ? (
                 <TabSwitchLoader />
               ) : null}
-              <div className={isPending ? "opacity-60 pointer-events-none transition-opacity duration-150" : "opacity-100 transition-opacity duration-150"}>
+              <div className={isPending ? "opacity-60 pointer-events-none transition-opacity duration-150 flex flex-col gap-6" : "opacity-100 transition-opacity duration-150 flex flex-col gap-6"}>
                 {tab === "network" ? (
                   <NetworkSection />
                 ) : tab === "appearance" ? (

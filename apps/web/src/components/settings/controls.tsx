@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { InfoTooltip, useInfoSplit } from "@/components/ui/InfoTooltip";
 
 /**
  * Reusable settings controls bound to the config store. All are mobile-first,
@@ -16,15 +17,18 @@ function Row({
   description?: string;
   children: ReactNode;
 }) {
+  const { isLong, first, full } = useInfoSplit(description);
+  const testId = `setting-info-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <div className="flex items-center justify-between gap-4 py-4">
       <div className="min-w-0">
-        <div className="font-label text-sm font-medium text-on-surface dark:text-inverse-on-surface">
-          {label}
+        <div className="flex items-center gap-1.5 font-label text-sm font-medium text-on-surface dark:text-inverse-on-surface">
+          <span>{label}</span>
+          {isLong ? <InfoTooltip text={full} testId={testId} /> : null}
         </div>
         {description ? (
           <div className="mt-0.5 font-body text-xs text-on-surface-variant dark:text-outline">
-            {description}
+            {isLong ? first : description}
           </div>
         ) : null}
       </div>
@@ -105,11 +109,14 @@ export function TextFieldControl({
     />
   );
 
+  const { isLong: isLongTf, first: firstTf, full: fullTf } = useInfoSplit(description);
+  const testIdTf = `setting-info-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <div className="py-4">
       <div className="mb-2 flex items-center justify-between">
-        <span className="font-label text-sm font-medium text-on-surface dark:text-inverse-on-surface">
-          {label}
+        <span className="flex items-center gap-1.5 font-label text-sm font-medium text-on-surface dark:text-inverse-on-surface">
+          <span>{label}</span>
+          {isLongTf ? <InfoTooltip text={fullTf} testId={testIdTf} /> : null}
         </span>
         {onReset ? (
           <button
@@ -123,7 +130,7 @@ export function TextFieldControl({
       </div>
       {description ? (
         <div className="mb-2 font-body text-xs text-on-surface-variant dark:text-outline">
-          {description}
+          {isLongTf ? firstTf : description}
         </div>
       ) : null}
       {field}
@@ -153,11 +160,14 @@ export function NumberControl({
   hideSlider?: boolean;
 }) {
   const clamp = (v: number) => Math.min(max ?? v, Math.max(min ?? v, v));
+  const { isLong: isLongNum, first: firstNum, full: fullNum } = useInfoSplit(description);
+  const testIdNum = `setting-info-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <div className="py-4">
       <div className="mb-2 flex items-center justify-between">
-        <span className="font-label text-sm font-medium text-on-surface dark:text-inverse-on-surface">
-          {label}
+        <span className="flex items-center gap-1.5 font-label text-sm font-medium text-on-surface dark:text-inverse-on-surface">
+          <span>{label}</span>
+          {isLongNum ? <InfoTooltip text={fullNum} testId={testIdNum} /> : null}
         </span>
         {onReset ? (
           <button
@@ -171,7 +181,7 @@ export function NumberControl({
       </div>
       {description ? (
         <div className="mb-2 font-body text-xs text-on-surface-variant dark:text-outline">
-          {description}
+          {isLongNum ? firstNum : description}
         </div>
       ) : null}
       <div className="flex items-center gap-3">
@@ -252,14 +262,17 @@ export function RadioGroupControl<T extends string | number>({
   description?: string;
   options: { value: T; label: string }[];
 }) {
+  const { isLong: isLongRadio, first: firstRadio, full: fullRadio } = useInfoSplit(description);
+  const testIdRadio = `setting-info-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <div className="py-4">
-      <div className="font-label text-sm font-medium text-on-surface dark:text-inverse-on-surface">
-        {label}
+      <div className="flex items-center gap-1.5 font-label text-sm font-medium text-on-surface dark:text-inverse-on-surface">
+        <span>{label}</span>
+        {isLongRadio ? <InfoTooltip text={fullRadio} testId={testIdRadio} /> : null}
       </div>
       {description ? (
         <div className="mt-0.5 font-body text-xs text-on-surface-variant dark:text-outline">
-          {description}
+          {isLongRadio ? firstRadio : description}
         </div>
       ) : null}
       <div className="mt-3 flex flex-wrap gap-2">

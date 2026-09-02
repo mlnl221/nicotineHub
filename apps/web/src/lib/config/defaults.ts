@@ -240,7 +240,7 @@ export const defaults: Settings = {
     tabclosers: true,
     tab_select_previous: true,
     buddylistinchatrooms: "tab",
-    exitdialog: 1,
+    exitdialog: 0,
     modes_visible: {
       search: true,
       browse: true,

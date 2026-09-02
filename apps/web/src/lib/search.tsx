@@ -48,15 +48,40 @@ interface SearchApi {
 
 const SearchContext = createContext<SearchApi | null>(null);
 
+const SEARCH_STORAGE_KEY = "nicotineHub.searchTabs";
+
+function loadSearchPersisted(): { tabs: SearchTab[]; activeId: string | null; maxId: number } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(SEARCH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { tabs?: SearchTab[]; activeId?: string | null };
+    if (!parsed || !Array.isArray(parsed.tabs)) return null;
+    const tabs = parsed.tabs.filter((t) => typeof t.query === "string").slice(0, 20);
+    const maxId = tabs.reduce((m, t) => {
+      const n = parseInt(String(t.id).replace(/^s/, ""), 10);
+      return Number.isFinite(n) && n > m ? n : m;
+    }, 0);
+    return { tabs, activeId: typeof parsed.activeId === "string" ? parsed.activeId : tabs[0]?.id ?? null, maxId };
+  } catch { return null; }
+}
+
+function persistSearch(tabs: SearchTab[], activeId: string | null) {
+  try { sessionStorage.setItem(SEARCH_STORAGE_KEY, JSON.stringify({ tabs, activeId })); } catch {}
+}
+
 export function SearchProvider({ children }: { children: ReactNode }) {
   const { send, subscribe, state } = useSession();
   const { settings, setSection } = useConfig();
-  const [tabs, setTabs] = useState<SearchTab[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const counter = useRef(0);
+  const persisted = typeof window !== "undefined" ? loadSearchPersisted() : null;
+  const [tabs, setTabs] = useState<SearchTab[]>(() => persisted?.tabs ?? []);
+  const [activeId, setActiveId] = useState<string | null>(() => persisted?.activeId ?? null);
+  const counter = useRef(persisted?.maxId ?? 0);
   const tabsRef = useRef<SearchTab[]>([]);
   tabsRef.current = tabs;
   const lastQuery = useRef<Map<string, number>>(new Map());
+
+  useEffect(() => { persistSearch(tabs, activeId); }, [tabs, activeId]);
 
   // Demo: default to 2 fake searches with results "linux iso" + "tails 5.2 iso" (ended)
   // SearchProvider is per-page (not global) so we seed on every mount when empty+connected,
