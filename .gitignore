@@ -13,6 +13,11 @@ apps/web/.next/
 *.local
 compose.override.yaml
 
+# local data dirs (bridge DATA_DIR fallback: ./data, /tmp; holds
+# worker.json with secret tokens when saved via Settings → Worker)
+data/
+apps/bridge/data/
+
 # bun / npm
 bun.lockb
 
