@@ -813,7 +813,9 @@ export function parseRoomList(payload: Buffer): { rooms: RoomListEntry[]; owned:
     const n = r.uint32(); const names: string[] = [];
     for (let i = 0; i < n; i++) names.push(r.string());
     if (!hasCount) return names;
-    const counts: number[] = []; for (let i = 0; i < n; i++) counts.push(r.uint32());
+    // wire repeats the count before the user-count array (SLSKPROTOCOL server code 64)
+    const m = r.uint32();
+    const counts: number[] = []; for (let i = 0; i < m; i++) counts.push(r.uint32());
     return names.map((name, i) => ({ name, users: counts[i] ?? 0 }));
   };
   const rooms = parseRooms(true) as RoomListEntry[];

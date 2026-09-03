@@ -24,8 +24,10 @@ function useBridgeListenPort(): { current: number | null; bridgeUrl: string; set
       setBridgeUrl(`${scheme}//${window.location.hostname}:8787`);
     }
     const fetchPort = async () => {
-      const base = ls
-        ? (() => { try { return new URL(ls.replace(/^ws/, "http")).origin; } catch { return ""; } })()
+      // Same resolution as the WS connection (override → build-time env → hostname:8787):
+      // never show another bridge's listen port (e.g. :8787 while on a worktree bridge).
+      const base = url
+        ? (() => { try { return new URL(url.replace(/^ws/, "http")).origin; } catch { return ""; } })()
         : typeof window !== "undefined"
           ? `${window.location.protocol === "https:" ? "https:" : "http:"}//${window.location.hostname}:8787`
           : "";
