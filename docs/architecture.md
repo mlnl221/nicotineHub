@@ -16,7 +16,7 @@ The browser cannot open raw TCP; the bridge is the only SLSK speaker. JSON over 
 Bridge peer legs: `--P--> peers (messages)`, `--F--> file (raw bytes)`, `--D--> distrib (leaf only)`.
 ```
 
-Reference: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plus/nicotine-plus) (GPL-3.0-or-later) and `apps/bridge/src/soulseek.ts` (102 server / 18 peer / 6 distrib / 2 file codes). See `ATTRIBUTION.md` and `COPYING` — this bridge is a port of `pynicotine/slskmessages.py`/`slskproto.py` under GPL-3.0-or-later.
+Reference: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plus/nicotine-plus) (GPL-3.0-or-later) and `apps/bridge/src/soulseek.ts` (102 server / 18 peer / 6 distrib / 2 file codes). See `ATTRIBUTION.md` and `LICENSE` — this bridge is a port of `pynicotine/slskmessages.py`/`slskproto.py` under GPL-3.0-or-later.
 
 ## Login
 
@@ -91,7 +91,7 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 | Env | Default | Notes |
 |-----|---------|-------|
 | `PORT` | `8787` | WS port (`apps/bridge/src/server.ts:196`) |
-| `LISTEN_PORT` | `60754` | Peer listener — **default 60754** (`DEFAULT_LISTEN_PORT` `apps/web/src/lib/config/defaults.ts:210`). Editable via `server.portrange` in Settings → Network (`NetworkSection.tsx:82`), persists to `DATA_DIR/listen_port` (env `LISTEN_PORT` wins on boot), triggers `SetWaitPort 2` + `PortMapper.setPort` + reconnect. `compose.yaml` maps `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` TCP+UDP (no `network_mode` key — bridge ports). Gluetun users: use `compose.gluetun.yaml` (`network_mode: service:gluetun`). |
+| `LISTEN_PORT` | `60754` | Peer listener — **default 60754** (`DEFAULT_LISTEN_PORT` `apps/web/src/lib/config/defaults.ts:210`). Editable via `server.portrange` in Settings → Network (`NetworkSection.tsx:82`), persists to `DATA_DIR/listen_port` (env `LISTEN_PORT` wins on boot), triggers `SetWaitPort 2` + `PortMapper.setPort` + reconnect. `compose.yaml` maps `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` TCP+UDP (no `network_mode` key — bridge ports). |
 | `UPNP_ENABLED` | `1` | `0` disables UPnP at boot (overridden by `DATA_DIR/upnp_enabled` persisted from Settings → Network toggle `server.upnp`, default true; UPnP-only lease 43200 / renew 7200). |
 | `DATA_DIR` | `/data` | Volume (`/data` in compose; dev falls back to `./data` or `/tmp/nicotine-hub` if `/data` not writable) |
 | `BRIDGE_TOKEN` | *(open)* | `?token` / `Bearer` / `Sec-WebSocket-Protocol` → 401 on `/ws`, `/files/:token`, `/api/files`, `/spectrum/*`, `/logs`, `/diagnostics`, `/plugins`, `/upnp/status`, `/interfaces` (`/portchecker` stays open; `/health?json` returns limited fields without token) |

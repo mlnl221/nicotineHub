@@ -14,19 +14,10 @@ docker compose up --build  # http://localhost:3000 + ws://localhost:8787/ws
 - `worker` — `apps/worker/Dockerfile` → `:8789`, volumes `bridge-data:/data:ro` + `spectrum-cache:/tmp/hub-spectrum`
 - `web` — `apps/web/Dockerfile` → `PORT=3000`
 
-**Network mode — bridge ports (default) vs host vs Gluetun**
+**Network mode — bridge ports (default) vs host**
 
 - **Bridge ports (default `compose.yaml`)**: `bridge` publishes `8787:8787` + `60754:60754` TCP+UDP. `LISTEN_PORT` host mapping is static at create time — changing the peer port in Settings → Network hot-swaps `Bun.listen` + `SetWaitPort` inside the container, but the *host* mapping needs `LISTEN_PORT=NEW docker compose up -d` to match. UPnP inside bridge-network sees the container IP — prefer manual port-forward or host mode for UPnP.
-- **Host mode**: add `network_mode: host` to `bridge` (and drop its `ports:`) — it binds directly to host `8787` + `LISTEN_PORT`, UPnP sees the host LAN IP, and Settings → Network port changes apply without `docker compose up -d`. This is the correct mode for homelab UPnP or VPN-without-Gluetun.
-- **Gluetun**: don't add `network_mode: host` — it conflicts with `network_mode: service:gluetun`. Use the provided `compose.gluetun.yaml`:
-
-```bash
-docker compose -f compose.yaml -f compose.gluetun.yaml up -d
-# or permanently:
-cp compose.gluetun.yaml compose.override.yaml && docker compose up -d
-```
-
-No second Docker build is needed — same image, only compose network differs. See [`compose.gluetun.yaml`](../compose.gluetun.yaml) for a full `gluetun` service template. Details in [Gluetun](#gluetun) below.
+- **Host mode**: add `network_mode: host` to `bridge` (and drop its `ports:`) — it binds directly to host `8787` + `LISTEN_PORT`, UPnP sees the host LAN IP, and Settings → Network port changes apply without `docker compose up -d`.
 
 Port-forwarding is parameterized: `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` (TCP+UDP) when in bridge mode; in host mode the port is host-direct. To use a different peer port, set `LISTEN_PORT` (see `docs/architecture.md#env-full` for `DATA_DIR/listen_port` persistence):
 
@@ -117,14 +108,4 @@ gh workflow run promote.yml                      # or wait for Monday schedule
 
 See `AGENTS.md#git-worktrees` for per-worktree port isolation (`3000/8787/60754/8789` → `3001/8788/60755/8789` …) and `compose.override.yaml` usage for local port overrides.
 
-## Gluetun
 
-Gluetun ([qdm12/gluetun](https://github.com/qdm12/gluetun)) runs a VPN and exposes forwarded ports. **Do not combine `network_mode: host` with Gluetun** — Docker only allows one `network_mode` per container (default `compose.yaml` uses bridge `ports:`, so just add the gluetun file).
-
-| Setup | `compose.yaml` default | Correct file | Ports defined on |
-|-------|------------------------|--------------|------------------|
-| Homelab LAN / manual forward | bridge `ports:` | `compose.yaml` alone | `bridge` |
-| Homelab UPnP | add `network_mode: host` | `compose.yaml` + host key | host-direct |
-| Gluetun VPN | add gluetun file | `compose.gluetun.yaml` | `gluetun` service |
-
-For Gluetun, forwarded Soulseek port comes from your VPN provider (e.g. Mullvad `VPN_PORT_FORWARDING=on`). `compose.gluetun.yaml` routes bridge's `LISTEN_PORT` + `8787` through `gluetun`, so UPnP is unnecessary but Settings → Network port must match your VPN's forwarded port. No second Docker image is needed — `ghcr.io/mlnl221/nicotinehub-bridge` is identical; only compose networking changes.

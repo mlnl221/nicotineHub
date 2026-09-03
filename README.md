@@ -8,7 +8,7 @@
   <a href="AI-DECLARATION.md"><img src="https://img.shields.io/badge/䷼%20AI--DECLARATION-pair-ffedd5?labelColor=ffedd5" alt="AI-DECLARATION: pair" /></a>
   <a href="https://github.com/mlnl221/nicotineHub/actions/workflows/ci.yml"><img src="https://github.com/mlnl221/nicotineHub/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://github.com/mlnl221/nicotineHub/releases"><img src="https://img.shields.io/github/v/release/mlnl221/nicotineHub" alt="Latest release" /></a>
-  <a href="COPYING"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later" /></a>
 </p>
 
 <p align="center">
@@ -138,6 +138,6 @@ PRs welcome! Please read [`CONTRIBUTING.md`](./CONTRIBUTING.md) first — target
 
 ## Legal
 
-**License:** [`GPL-3.0-or-later`](./COPYING). © 2001–2026 Nicotine+, PySoulSeek; © 2025–2026 Nicotine Hub. See [`ATTRIBUTION.md`](./ATTRIBUTION.md) (upstream `8d81e66`) and [`COPYING`](COPYING).
+**License:** [`GPL-3.0-or-later`](./LICENSE). © 2001–2026 Nicotine+, PySoulSeek; © 2025–2026 Nicotine Hub. See [`ATTRIBUTION.md`](./ATTRIBUTION.md) (upstream `8d81e66`) and [`LICENSE`](LICENSE).
 
 **Soulseek** network / `server.slsknet.org` is volunteer-operated and not affiliated with this project. By connecting you agree to the [Soulseek rules](https://www.slsknet.org/news/node/681) and [Terms](https://www.slsknet.org/news/node/682). Soulseek is unencrypted; see Security above.

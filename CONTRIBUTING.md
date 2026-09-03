@@ -2,14 +2,13 @@
 
 Thanks for your interest in contributing! This project is a mobile-first Soulseek web client (Bun bridge + Next.js PWA), derived from [nicotine-plus](https://github.com/nicotine-plus/nicotine-plus). See [`ATTRIBUTION.md`](./ATTRIBUTION.md).
 
-> **License:** all contributions are under [`GPL-3.0-or-later`](./COPYING). By opening a PR you agree your work is original (or compatibly licensed) and may be distributed under the GPL. No CLA to sign.
+> **License:** all contributions are under [`GPL-3.0-or-later`](./LICENSE). By opening a PR you agree your work is original (or compatibly licensed) and may be distributed under the GPL. No CLA to sign.
 
 ## Ground rules
 
 - **Discuss first.** For anything beyond a trivial bug fix, open an issue before a PR so it can be checked against the project direction. Unannounced large PRs will likely be rejected (same policy as upstream).
 - **One maintainer approves everything.** [@mlnl221](https://github.com/mlnl221) is the sole code owner (`CODEOWNERS`). Expect review latency; rebasing on `stage` speeds things up.
 - **Soulseek rules apply.** By connecting you agree to the [Soulseek rules](https://www.slsknet.org/news/node/681) and [Terms](https://www.slsknet.org/news/node/682). Never commit credentials — the app never stores passwords (Soulseek sends them in plaintext), and neither should you.
-- **Be kind.** See [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).
 
 ## AI-assisted contributions
 

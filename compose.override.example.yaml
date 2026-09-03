@@ -7,10 +7,7 @@
 #   #   network_mode: host  # (and drop ports:)
 #   docker compose up -d
 #
-# For Gluetun VPN: use compose.gluetun.yaml instead:
-#   docker compose -f compose.yaml -f compose.gluetun.yaml up -d
-# See docs/deployment.md#gluetun
-#
+# For VPN with custom routing, add your own override file.
 # Host network example (UPnP works, no port remap):
 services:
   bridge:
