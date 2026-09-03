@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     environment:
       PORT: "8787"
-      LISTEN_PORT: "60754"
+      LISTEN_PORT: "33852"
       CONFIG_DIR: "/config"
       DATA_DIR: "/data"
       BRIDGE_TOKEN: "${BRIDGE_TOKEN:-}"
@@ -19,8 +19,8 @@ services:
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
     ports:
       - "8787:8787"
-      - "60754:60754"
-      - "60754:60754/udp"
+      - "33852:33852"
+      - "33852:33852/udp"
     # Homelab: bridge ports are published so the browser can ws://nas:8787/ws directly.
     # LISTEN_PORT is the host port — changing it in Settings → Network (portrange) writes CONFIG_DIR/listen_port (+ CONFIG_DIR/host.env for .env sync) and hot-swaps Bun.listen + reconnects Soulseek (SetWaitPort) without WS restart; UI stays up, Save triggers fresh connect. The *host* mapping is static at create time: `LISTEN_PORT=NEW docker compose up -d` to change it.
     # UPnP auto-maps if `server.upnp` is enabled (default true, toggle in Network) but sees the container IP in bridge mode — prefer manual forward, or add `network_mode: host` (then drop `ports:`) so UPnP sees the host LAN IP.

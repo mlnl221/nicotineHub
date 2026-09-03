@@ -1904,6 +1904,7 @@ export class SoulseekSession {
         const ghost = !st.username && idle > GHOST_IDLE_MS;
         const dead = idle > CONNECTION_MAX_IDLE_MS;
         if (initTimeout || ghost || dead) {
+          logger.debug("peer", "idle sweep close", { username: st.username, connType: st.connType, initDone: st.initDone, bytes: (st as unknown as { bytesReceived?: number }).bytesReceived ?? st.buf.length, msgs: (st as unknown as { msgsParsed?: number }).msgsParsed ?? 0, reason: initTimeout ? "initTimeout" : ghost ? "ghost" : "dead" });
           try { sock.end(); } catch {}
           this.peerStates.delete(sock);
           if (st.username && st.connType === "D") this._removeChildPeerConnection(st.username);
@@ -2117,12 +2118,36 @@ export class SoulseekSession {
 
   private processPeer(peer: Socket, chunk: ArrayBuffer | Uint8Array, initDone: boolean) {
     const bytes = chunk instanceof Uint8Array ? Uint8Array.from(chunk) : new Uint8Array(chunk);
-    const state = this.peerStates.get(peer) ?? { buf: Buffer.alloc(0), initDone, lastActive: Date.now(), createdAt: Date.now() };
+    const state = this.peerStates.get(peer) ?? { buf: Buffer.alloc(0), initDone, lastActive: Date.now(), createdAt: Date.now(), bytesReceived: 0, msgsParsed: 0 } as PeerState as unknown as { buf: Buffer; initDone: boolean; lastActive: number; createdAt: number; bytesReceived: number; msgsParsed: number } & PeerState;
     if (!state.createdAt) state.createdAt = Date.now();
+    if ((state as unknown as { bytesReceived?: number }).bytesReceived === undefined) (state as unknown as { bytesReceived: number }).bytesReceived = 0;
+    if ((state as unknown as { msgsParsed?: number }).msgsParsed === undefined) (state as unknown as { msgsParsed: number }).msgsParsed = 0;
     state.lastActive = Date.now();
-    // Enforce per-conn max before appending
-    const maxForState = state.connType === "D" ? MAX_INCOMING.server16K : (state.isFileConn ? MAX_INCOMING.server16M : MAX_INCOMING.server1M);
-    if (state.buf.length + bytes.length > maxForState) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
+    (state as unknown as { bytesReceived: number }).bytesReceived += bytes.length;
+    // Per-conn cap: declared-length gated (n+ parity), not blind 1M pre-append.
+    // P shares can be 448M compressed; blind cap was silently killing Donald-sized libraries.
+    {
+      const maxForState = state.connType === "D" ? MAX_INCOMING.server16K : (state.isFileConn ? MAX_INCOMING.server16M : MAX_INCOMING.server1M);
+      if (state.buf.length + bytes.length > maxForState && state.buf.length >= 4) {
+        const declared = state.buf.readUInt32LE(0);
+        const hintedMax = (() => {
+          // Before initDone, first message is PeerInit/Pierce (5+len framing) — always ≤1M
+          if (!state.initDone) return 1024 * 1024;
+          // After init, peek peer message code (framed as [len][code][payload])
+          // Need at least 8 bytes (len+code) buffered; otherwise conservatively allow append
+          if (state.buf.length < 8) return maxForState;
+          try { const c = state.buf.readUInt32LE(4); return c === PEER_MESSAGE_CODES.sharedFileListResponse || c === PEER_MESSAGE_CODES.folderContentsResponse ? MAX_INCOMING.server448M : c === PEER_MESSAGE_CODES.fileSearchResponse ? MAX_INCOMING.server16M : MAX_INCOMING.server1M; } catch { return maxForState; }
+        })();
+        if (declared > hintedMax || state.buf.length + bytes.length > hintedMax) {
+          logger.warn("peer", "cap kill (declared-length gated)", { declared, hintedMax, buf: state.buf.length, incoming: bytes.length, connType: state.connType, username: state.username, isFileConn: state.isFileConn });
+          try { peer.end(); } catch {} this.peerStates.delete(peer); return;
+        }
+      } else if (state.buf.length + bytes.length > MAX_INCOMING.server448M) {
+        // Absolute ceiling even during init buffering
+        logger.warn("peer", "cap kill absolute 448M", { buf: state.buf.length, incoming: bytes.length, username: state.username });
+        try { peer.end(); } catch {} this.peerStates.delete(peer); return;
+      }
+    }
     state.buf = Buffer.concat([state.buf, Buffer.from(bytes)]);
     while (true) {
       if (!state.initDone) {
@@ -2780,28 +2805,52 @@ export class SoulseekSession {
     const hasPending = this.peerAddressRequests.has(username);
     const cachedCheck = this.userAddresses.get(username);
     const code = msg.length >= 8 ? msg.readUInt32LE(4) : -1;
-    logger.info("browse", "ensurePeerAndSend", { username, connType, code, msgLen: msg.length, hasCached: !!cachedCheck, hasPending, pendingSize: this.pendingBrowseShares.size });
+    // Coalesce rapid re-clicks: one pending dial per user, extra messages just queue
+    const keyLower = username.toLowerCase();
+    const reusingDial = this.peerAddressRequests.has(username) || (cachedCheck && Date.now() - cachedCheck.updated < USER_ADDRESS_TTL_MS && this.peerStates.size > 0) || this.pendingPeerQueue.some((p) => p.username.toLowerCase() === keyLower) || (this.pendingPeerMessages.get(keyLower)?.length ?? 0) > 0;
+    // Light dedupe log only when coalescing, not on every click
+    if (reusingDial) logger.debug("browse", "ensurePeerAndSend coalesced (in-flight dial)", { username, connType, code, pendingSize: this.pendingBrowseShares.size });
+    else logger.info("browse", "ensurePeerAndSend", { username, connType, code, msgLen: msg.length, hasCached: !!cachedCheck, hasPending, pendingSize: this.pendingBrowseShares.size });
     if (!this.loggedIn) {
       logger.warn("browse", "ensurePeerAndSend aborted — not logged in", { username, connType, code });
       return;
     }
     // Queue for indirect fallback (peer connects to us via PierceFirewall)
     this.queuePendingPeerMessage(username, connType, msg);
+    const queuedNow = (this.pendingPeerMessages.get(keyLower)?.length ?? 0) === 1 && !reusingDial;
     logger.debug("browse", "queued pending peer message", { username, connType, code, queueLen: (this.pendingPeerMessages.get(username.toLowerCase())?.length ?? 0) });
-    // Indirect first — nicotine sends ConnectToPeer before direct
-    this.sendConnectToPeerFallback(username, connType);
+    // Indirect + direct: only emit fresh ConnectToPeer/GetPeerAddress on first dial, not on coalesced clicks
+    if (queuedNow || !reusingDial) this.sendConnectToPeerFallback(username, connType);
     const cached = this.userAddresses.get(username);
     if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) {
-      logger.debug("browse", "using cached peer address", { username, ip: cached.addr.ip, port: cached.addr.port });
-      this.connectToPeerViaAddress(username, cached.addr, connType, msg);
+      // Reuse path still needs to flush the newly-queued message to the existing/new socket
+      if (reusingDial) {
+        const peer = (() => {
+          for (const [sock, st] of this.peerStates) if (st.username?.toLowerCase() === keyLower && st.connType === connType) return sock;
+          return undefined;
+        })();
+        if (peer) this.flushPendingPeerMessages(username, connType);
+        else logger.debug("browse", "using cached peer address (coalesced)", { username, ip: cached.addr.ip, port: cached.addr.port });
+        // Still attempt direct if no existing socket
+        if (!peer) this.connectToPeerViaAddress(username, cached.addr, connType, msg);
+      } else {
+        logger.debug("browse", "using cached peer address", { username, ip: cached.addr.ip, port: cached.addr.port });
+        this.connectToPeerViaAddress(username, cached.addr, connType, msg);
+      }
       return;
     }
     const existing = this.peerAddressRequests.get(username);
     if (existing) {
       logger.debug("browse", "reusing pending GetPeerAddress", { username });
+      // coalesced: just attach the new msg, the pending GetPeerAddress already covers this user
       existing.cbs.push((addr) => {
         this.connectToPeerViaAddress(username, addr, connType, msg);
       });
+      return;
+    }
+    if (reusingDial) {
+      // Already have an outbound dial in flight — the new msg is queued and will flush on that socket's open/pierce
+      logger.debug("browse", "coalesced: queued msg will flush on in-flight dial", { username });
       return;
     }
     logger.info("browse", "requesting peer address", { username });

@@ -175,7 +175,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const pagedFolders = useMemo(() => visibleTreeFolders.slice(0, visibleFolderCount), [visibleTreeFolders, visibleFolderCount]);
   const pagedFiles = useMemo(() => sortedFiles.slice(0, visibleFileCount), [sortedFiles, visibleFileCount]);
 
-  // Download helpers (reuse stagger pattern to avoid MAX_SOCKETS burst)
+  // Download helpers — always recursive per user request
   const downloadFolder = (folderName: string) => {
     if (isDemo) return;
     const targetFolders = folders.filter((f) => f.name === folderName || f.name.startsWith(folderName + "\\"));

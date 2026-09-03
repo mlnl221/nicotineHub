@@ -32,7 +32,7 @@ Bridge URL override: `NEXT_PUBLIC_BRIDGE_URL` (build-time) or `localStorage.nico
 
 - **Bun only** — use `bun`, not `npm`/`yarn`/`npx`. `bun.lock` is committed.
 - No password persistence (`README` security note). Search results require a reachable inbound peer listener; `LISTEN_PORT` (default 60754, `server.portrange`) must be port-forwarded TCP+UDP on the homelab. Changing via Settings → Network triggers bridge reconnect and writes `CONFIG_DIR/listen_port` (`CONFIG_DIR` autobrr-style, default `/config`); Docker host mapping uses `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` so also `LISTEN_PORT=... docker compose up -d`.
-- Client version is experimental `177/1` — do not reuse reserved major versions.
+- Client version is `160/3` (nicotine-plus current; `177/1` is the experimental pool — do not reuse reserved majors).
 - Shares on WSL `bun` dev vs Docker: `CONFIG_DIR` defaults to `/config` and `DATA_DIR` to `/data` but on WSL fall back to `./config`/`./data` or `/tmp/nicotine-hub-*` if not writable (see `apps/bridge/src/server.ts:205`). **WSL `bun`**: add shares with absolute WSL paths like `/home/magnus/Music` or `/mnt/c/Users/you/Music` (must `existsSync` on bridge FS) — Docker `Browse /data` (`/data/Music`) only works when host path is mounted (`-v /home/you/Music:/data/Music:ro` then share `/data/Music`). Rescan warns `unavailable: [v→p]` when path not found (1 dirs 0 files). `CONFIG_DIR` holds `worker.json` 0600, `shares.json`, `downloads.json`, `plugins.json` etc.; `DATA_DIR` holds `downloads/`, `incomplete/`, `uploads/`.
 - Mobile-first UI: touch targets, safe-area insets, PWA `manifest.webmanifest`.
 - Verify after changes: `bun test && bun run build`.
