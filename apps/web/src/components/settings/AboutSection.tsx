@@ -98,7 +98,7 @@ export function AboutSection() {
             </a>
             <span className="opacity-30">•</span>
             <a
-              href="https://github.com/mlnl221/nicotineHub/blob/main/COPYING"
+              href="https://github.com/mlnl221/nicotineHub/blob/main/LICENSE"
               target="_blank"
               rel="noopener noreferrer"
               className="underline decoration-dotted underline-offset-4 hover:text-primary"
@@ -142,7 +142,7 @@ export function AboutSection() {
           <div className="rounded-xl bg-surface-container-lowest dark:bg-surface-container p-4 ghost-border">
             <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant mb-2">License</h4>
             <p className="font-body text-sm leading-relaxed text-on-surface-variant">
-              GPL-3.0-or-later — see <a href="https://github.com/mlnl221/nicotineHub/blob/main/COPYING" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">COPYING</a> and <a href="https://github.com/mlnl221/nicotineHub/blob/main/ATTRIBUTION.md" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">ATTRIBUTION.md</a> for full notices. This project is not affiliated with Soulseek.
+              GPL-3.0-or-later — see <a href="https://github.com/mlnl221/nicotineHub/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">LICENSE</a> and <a href="https://github.com/mlnl221/nicotineHub/blob/main/ATTRIBUTION.md" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">ATTRIBUTION.md</a> for full notices. This project is not affiliated with Soulseek.
             </p>
           </div>
         </div>
