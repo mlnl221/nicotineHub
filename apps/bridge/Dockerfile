@@ -59,8 +59,8 @@ RUN mkdir -p ./dist/data && \
 COPY COPYING ./COPYING
 COPY LICENSES ./LICENSES
 COPY ATTRIBUTION.md ./ATTRIBUTION.md
-# Spectrum: sox + flac + ffmpeg (aac/m4a/mp3) + oxipng (port of smoked-salmon sox spectrogram)
-RUN apk add --no-cache sox flac ffmpeg oxipng && mkdir -p /tmp/hub-spectrum && chmod 777 /tmp/hub-spectrum || true
+# Spectrum/synth binaries (sox/flac/ffmpeg/oxipng) live in the worker image now;
+# the bridge stays minimal (SLSK-only). transfers.ts synth falls back gracefully.
 RUN mkdir -p $DATA_DIR $DATA_DIR/incomplete $DATA_DIR/downloads $DATA_DIR/uploads && chown -R bun:bun $DATA_DIR || chown -R 1000:1000 $DATA_DIR || true
 # default LISTEN_PORT 60754; host mapping uses LISTEN_PORT env
 EXPOSE 8787 60754

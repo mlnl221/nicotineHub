@@ -37,6 +37,10 @@
         "typescript": "^5.7.3",
       },
     },
+    "apps/worker": {
+      "name": "@nicotine/worker",
+      "version": "0.1.0",
+    },
   },
   "packages": {
     "@alloc/quick-lru": ["@alloc/quick-lru@5.2.0", "", {}, "sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw=="],
@@ -128,6 +132,8 @@
     "@nicotine/bridge": ["@nicotine/bridge@workspace:apps/bridge"],
 
     "@nicotine/web": ["@nicotine/web@workspace:apps/web"],
+
+    "@nicotine/worker": ["@nicotine/worker@workspace:apps/worker"],
 
     "@playwright/test": ["@playwright/test@1.62.1", "", { "dependencies": { "playwright": "1.62.1" }, "bin": { "playwright": "cli.js" } }, "sha512-DTcUc8qii+cpHvtOwggMtBRMjKZHXYWdw8syRYu2vtzuq4Wxphqq4NfCs5Zt44L6mA8rfDfj+PHnxFc/FeK6mQ=="],
 

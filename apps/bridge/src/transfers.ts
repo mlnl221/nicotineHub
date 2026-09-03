@@ -16,9 +16,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, statSync, writeFileSync, readFileSync, unlinkSync, readdirSync, copyFileSync } from "node:fs";
-import { join, basename, dirname } from "node:path";
-import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, renameSync, statSync, writeFileSync, readFileSync, unlinkSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import type { Socket } from "bun";
 import {
   buildPlaceInQueueRequest,
@@ -1130,6 +1129,8 @@ export class TransferManager {
     }
     if (t._statusTimer) { clearTimeout(t._statusTimer); t._statusTimer = undefined; }
     if (t._timer) { clearInterval(t._timer); t._timer = undefined; }
+    // Real F owns progress from here — the pre-F progress stub stands down (see startProgressStub).
+    (t as unknown as { _hadRealF?: boolean })._hadRealF = true;
     t.status = "Transferring";
     t._startTime = Date.now();
     const startOffset = await this.prepareIncompleteFile(t);
@@ -1471,90 +1472,23 @@ export class TransferManager {
         if (cur?._timer) clearInterval(cur._timer);
         return;
       }
+      // Real F connection owns progress once bytes flow — never fake those.
+      if ((cur as unknown as { _hadRealF?: boolean })._hadRealF) {
+        if (cur._timer) { clearInterval(cur._timer); cur._timer = undefined; }
+        return;
+      }
       const chunk = 2_000_000 + Math.random() * 3_000_000;
-      const step = Math.min(chunk * 0.5, cur.size - cur.current);
+      // Never complete or touch size: stub is pre-F eye-candy only (rebased when F arrives).
+      const step = Math.min(chunk * 0.5, Math.max(0, cur.size - cur.current - 1));
       cur.current += step;
       const elapsed = (Date.now() - (cur._startTime ?? Date.now())) / 1000;
       const dlLimit = this.getDownloadLimit();
       cur.speed = dlLimit ? Math.min(step * 2, dlLimit) : step * 2;
       cur.avgSpeed = elapsed > 0 ? cur.current / elapsed : cur.speed;
       cur.timeLeft = cur.speed > 0 ? Math.ceil((cur.size - cur.current) / cur.speed) : null;
-      if (cur.current >= cur.size) {
-        cur.current = cur.size;
-        cur.status = "Finished";
-        cur.speed = 0;
-        cur.timeLeft = null;
-        clearInterval(cur._timer!);
-        cur._timer = undefined;
-        // Materialize actual file for spectrum / /files (ponytail: copy shared source if exists, else synth valid audio)
-        try {
-          const dest = this.deriveDestination(cur.virtualPath, cur.username);
-          if (!existsSync(dest)) {
-            try { mkdirSync(dirname(dest), { recursive: true }); } catch {}
-            let src: string | null = null;
-            const scan = (dir: string, target: string, depth = 2): string | null => {
-              try {
-                const cand = join(dir, target);
-                if (existsSync(cand)) return cand;
-                if (depth <= 0 || !existsSync(dir)) return null;
-                for (const ent of readdirSync(dir)) {
-                  const p = join(dir, ent);
-                  try { if (statSync(p).isDirectory()) { const r = scan(p, target, depth - 1); if (r) return r; } } catch {}
-                }
-              } catch {}
-              return null;
-            };
-            // quick candidates (including DJSplash folder you share on WSL)
-            for (const c of [join(this.dataDir, cur.fileName), join(this.dataDir, "DJSplash", cur.fileName), join(this.downloadsDir, cur.fileName)]) {
-              if (existsSync(c)) { src = c; break; }
-            }
-            if (!src) src = scan(this.dataDir, cur.fileName, 2);
-            if (src && existsSync(src)) {
-              try { copyFileSync(src, dest); } catch { try { writeFileSync(dest, readFileSync(src)); } catch {} }
-            } else {
-              // No source — generate valid audio so sox spectrum works (not zero-byte)
-              const ext = (cur.fileName.split(".").pop() || "").toLowerCase();
-              const isAudio = ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus"].includes(ext);
-              if (isAudio) {
-                let generated = false;
-                // Try ffmpeg (handles m4a/aac/mp3) — silent 2s tone
-                try {
-                  const ffCmd = ext === "mp3" ? ["-y","-f","lavfi","-i","sine=frequency=440:duration=2","-c:a","libmp3lame","-q:a","2",dest]
-                    : ext === "m4a" || ext === "aac" ? ["-y","-f","lavfi","-i","sine=frequency=440:duration=2","-c:a","aac","-b:a","128k",dest]
-                    : ext === "flac" ? ["-y","-f","lavfi","-i","sine=frequency=440:duration=2","-c:a","flac",dest]
-                    : ext === "ogg" || ext === "opus" ? ["-y","-f","lavfi","-i","sine=frequency=440:duration=2","-c:a","libvorbis",dest]
-                    : ["-y","-f","lavfi","-i","anullsrc=r=44100:cl=stereo","-t","2","-c:a","pcm_s16le",dest];
-                  const r = spawnSync("ffmpeg", ffCmd, { stdio: "ignore", timeout: 8000 });
-                  if (r.status === 0 && existsSync(dest)) generated = true;
-                } catch {}
-                if (!generated) {
-                  try {
-                    const soxR = spawnSync("sox", ["-n","-r","44100","-b","16",dest,"synth","2","sine","440"], { stdio: "ignore", timeout: 5000 });
-                    if (soxR.status === 0 && existsSync(dest)) generated = true;
-                  } catch {}
-                }
-                if (!generated) { try { writeFileSync(dest, Buffer.alloc(0)); } catch {} }
-              } else {
-                try { writeFileSync(dest, Buffer.alloc(0)); } catch {}
-              }
-            }
-          }
-          (cur as any)._incompletePath = dest;
-        } catch {}
-        cur._downloadUrl = `/files/${cur.token}`;
-        this.statsManager.recordDownloadCompleted(cur.size);
-        this.emitFinished(cur);
-        if (this.config.autoclear_downloads) {
-          setTimeout(() => {
-            if (this.transfers.has(cur.id) && cur.status === "Finished") {
-              this.transfers.delete(cur.id);
-              this.onRemoved(cur.id);
-              this.emitStats();
-              this.persist();
-            }
-          }, 100);
-        }
-      }
+      // NOTE: the stub never completes transfers. Only real F bytes via
+      // finishDownload() may mark Finished — a stub finish once shipped a
+      // synth sine tone as the user's download (data loss). See mistakes.md.
       this.emit(cur);
       this.emitStats();
     }, 500);

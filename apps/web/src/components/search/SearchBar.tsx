@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { SearchMode } from "@/lib/search";
 import { useConfig } from "@/lib/config/provider";
 import { useRooms } from "@/lib/rooms";
+import { scrapeRelease } from "@/lib/worker";
 
 interface SearchBarProps {
   onSearch: (query: string, opts?: { mode: SearchMode; target?: string }) => void;
@@ -28,11 +29,12 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
   const [mode, setMode] = useState<SearchMode>("global");
   const [target, setTarget] = useState("");
   const [roomError, setRoomError] = useState("");
+  const [scraping, setScraping] = useState(false);
 
   const submit = () => {
     const q = query.trim();
     const min = settings.searches.min_search_chars ?? 3;
-    if (q.length < min) return;
+    if (q.length < min || scraping) return;
     if (mode === "user" && !target.trim()) return;
     if (mode === "room" && !target.trim()) return;
     if (mode === "room" && target.trim()) {
@@ -44,6 +46,17 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
         return;
       }
       setRoomError("");
+    }
+    // Paste-link scrape: a release URL in global mode goes through the worker
+    // first (Discogs/Bandcamp/Apple/...) and searches the identified release.
+    // Falls back to a raw query search when the worker is unreachable.
+    if (mode === "global" && /^https?:\/\//i.test(q)) {
+      setScraping(true);
+      scrapeRelease(q)
+        .then((res) => onSearch(res.query || q, { mode, target: target.trim() || undefined }))
+        .catch(() => onSearch(q, { mode, target: target.trim() || undefined }))
+        .finally(() => setScraping(false));
+      return;
     }
     onSearch(q, { mode, target: target.trim() || undefined });
   };
@@ -68,10 +81,11 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
                 if (e.key === "Enter") submit();
               }}
               placeholder={
-                mode === "user" ? "Search term…"
+                scraping ? "Identifying release…"
+                : mode === "user" ? "Search term…"
                 : mode === "room" ? "Search term…"
                 : mode === "wishlist" ? "Wishlist term…"
-                : "Search the Soulseek network…"
+                : "Search the Soulseek network or paste a release link…"
               }
               autoCapitalize="none"
               autoCorrect="off"

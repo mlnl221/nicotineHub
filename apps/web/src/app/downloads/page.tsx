@@ -18,7 +18,7 @@ import { transferMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
 import { useSearchesOptional } from "@/lib/search";
 import { isDemo } from "@/lib/demo";
-import { useSpectrum } from "@/lib/spectrum";
+import { useSpectrum, parseDownloadToken } from "@/lib/spectrum";
 import { SpectrumHoverCard } from "@/components/transfers/SpectrumHoverCard";
 import { humanSize, humanSpeed as _humanSpeed } from "@/lib/format";
 
@@ -237,7 +237,11 @@ function DownloadsInner() {
               onAnalyzeSpectrum: menuAnchor.isUpload
                 ? undefined
                 : isAudioForSpectrum(menuAnchor.transfer.fileName) && menuAnchor.transfer.status === "Finished"
-                  ? () => requestSpectrum(menuAnchor.transfer.id)
+                  ? () => requestSpectrum(menuAnchor.transfer.id, {
+                      fileName: menuAnchor.transfer.fileName,
+                      size: menuAnchor.transfer.size,
+                      token: parseDownloadToken(menuAnchor.transfer as unknown as { downloadUrl?: string }),
+                    })
                   : undefined,
               hasSpectrum: !!getEntry(menuAnchor.transfer.id) && getEntry(menuAnchor.transfer.id)?.status === "done",
             }

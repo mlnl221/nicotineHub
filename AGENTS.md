@@ -42,21 +42,25 @@ Bridge URL override: `NEXT_PUBLIC_BRIDGE_URL` (build-time) or `localStorage.nico
 
 Every `git worktree` must run on its own ports so it never collides with `main` or other worktrees (see `mistakes.md 2026-08-28 — Port conflict`). Do not commit port changes.
 
-- **Defaults (main):** `web:3000`, `bridge:8787` (`PORT`), peer `LISTEN_PORT:60754` — see `compose.yaml:8` / `apps/bridge/src/server.ts:185` / `apps/web/package.json:6` (`portrange` `[60754,60754]`).
-- **On `git worktree add`:** pick the next free triplet (e.g. `3001/8788/60755`, `3002/8789/60756`, …). Check availability first: `ss -tlnp | grep -E '3000|8787|60754'` or `lsof -i :3000 -i :8787 -i :60754` and `curl -sf http://localhost:<port>/health`.
+- **Defaults (main):** `web:3000`, `bridge:8787` (`PORT`), peer `LISTEN_PORT:60754`, `worker:8789` — see `compose.yaml` / `apps/bridge/src/server.ts:185` / `apps/web/package.json:6` (`portrange` `[60754,60754]`).
+- **On `git worktree add`:** pick the next free quad (e.g. `3001/8788/60755/8789`, `3002/8790/60756/8791`, … — bridge even, worker odd, never reuse). Check availability first: `ss -tlnp | grep -E '3000|8787|8789|60754'` or `lsof -i :3000 -i :8787 -i :8789 -i :60754` and `curl -sf http://localhost:<port>/health`.
 - **Override locally only (gitignored, never commit `compose.yaml`/`package.json` port edits):**
   ```bash
   # bridge (Bun) — PORT and LISTEN_PORT are read from env in apps/bridge/src/server.ts:185
   PORT=8788 LISTEN_PORT=60755 bun run --cwd apps/bridge dev   # -> ws://localhost:8788/ws
 
   # web (Next.js) — PORT env overrides the -p 3000 in apps/web/package.json:6
-  PORT=3001 NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws bun run --cwd apps/web dev  # -> http://localhost:3001
+  PORT=3001 NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws NEXT_PUBLIC_WORKER_URL=http://localhost:8789 bun run --cwd apps/web dev  # -> http://localhost:3001
   # or: echo "NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws" > apps/web/.env  (.env is gitignored)
+
+  # worker (Python) — run from apps/worker with system python + PYTHONPATH, or docker
+  PORT=8789 DATA_DIR=./data uvicorn app:app --host 0.0.0.0 --port 8789  # run with workdir apps/worker
 
   # docker — use an untracked compose.override.yaml instead of editing compose.yaml
   # compose.override.yaml (gitignored):
   # services:
   #   bridge: { ports: ["8788:8788", "60755:60755", "60755:60755/udp"], environment: { PORT: "8788", LISTEN_PORT: "60755" } }
-  #   web: { ports: ["3001:3000"], environment: { PORT: "3000", NEXT_PUBLIC_BRIDGE_URL: "ws://localhost:8788/ws" } }
+  #   web: { ports: ["3001:3000"], environment: { PORT: "3000", NEXT_PUBLIC_BRIDGE_URL: "ws://localhost:8788/ws", NEXT_PUBLIC_WORKER_URL: "http://localhost:8789" } }
+  #   worker: { ports: ["8789:8789"] }
   ```
 - **Verify before starting worktree services:** `ps aux | grep -E "next|bun"` + `curl -sf http://localho

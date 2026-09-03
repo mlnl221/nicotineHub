@@ -17,6 +17,13 @@ How to avoid: ...
 
 ---
 
+## 2026-09-03 — pkill/kill %1 hangs persistent shell, use pidfiles
+
+What happened: Two bash calls ending in `kill %1; pkill -f "<pattern>"; sleep 1` timed out at 30-60s even though the target died (ports freed). `pkill -f` with a pattern contained in the tool call's own command line can match the invoking shell; `kill %1` job refs leak across persistent-shell calls.
+Why: Reused ad-hoc kill chains instead of tracking PIDs; didn't consider pkill -f self-match in a persistent shell session.
+How to avoid: Start daemons with `echo $! > /tmp/<name>.pid`, stop with `kill $(cat /tmp/<name>.pid)`. If pkill is needed use bracket trick `pkill -f "[p]attern"`. Verify with `ss -tlnp | grep <port>`, not ps output parsing.
+
+
 ## 2026-08-28 — Playwright MCP --extension fails without Chrome extension
 
 What happened: Ran `playwright_browser_navigate` to test search worktree but got `Playwright Extension not found in "/home/magnus/.config/google-chrome"`. `~/.config/opencode/opencode.jsonc` was configured as `["npx","@playwright/mcp@latest","--extension"]` which requires Chrome extension and `google-chrome` installed — neither present in WSL.
