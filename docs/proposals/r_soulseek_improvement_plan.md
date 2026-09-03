@@ -1,7 +1,7 @@
-# r/Soulseek → Nicotine Hub Improvement Plan — 2026-09-02 (updated 2026-09-02 + worker)
+# r/Soulseek → Nicotine Hub Improvement Plan — 2026-09-02 (moved to proposals 2026-09-03)
 
-> **Status:** Plan — no code changes yet. Read `mistakes.md` before implementing.
-> **Decisions locked 2026-09-02:** scope **Full P0–P2** (P3 deferred), ProveIt `hash(user+week)` rotating, **worker = separate Python FastAPI service `apps/worker`** for scraping/tagging/spectrum (bridge stays SLSK-only), final doc at `docs/improvements/r_soulseek_improvement_plan.md`.
+> **Status: PROPOSAL — partial.** Worker scaffold + scrape/spectrum/tag/verify/analyze landed in `5c65ea9` (record: `docs/architecture.md` `## Worker`); worker plan doc deleted. Unbuilt backlog below: share safety, ProveIt, wildcard bans, webhook, HoneyPot.
+> **Decisions locked 2026-09-02:** scope **Full P0–P2** (P3 deferred), ProveIt `hash(user+week)` rotating.
 > **Sources:** `r_soulseek_posts.jsonl` (4763) + `r_soulseek_comments.jsonl` (50604) in `~/projects/improvement_docs/`
 > **Snapshot:** retrieved_on up to 2026, covers 2002–2026 nostalgia through TikTok + vibe-coded slop era.
 > **Hub reference:** `apps/bridge` (`server.slsknet.org:2242` TCP, `ws://:8787/ws`, `/health`, `/files/:token`, volume `DATA_DIR`) + `apps/web` Next.js 15 PWA (`apps/web/src/lib/session.tsx`, `apps/bridge/src/session.ts:102`, `apps/bridge/src/soulseek.ts` `[uint32 len][uint32 code][payload]`) + **new `apps/worker`** (Python FastAPI — implement own code guided by `~/projects/smoked-salmon/src/salmon/sources/base.py:26` `BaseScraper` pattern, **do not import/copy smoked-salmon code**), parity `docs/porting-status.md:5`, `docs/settings-plan.md:12`, `apps/web/src/lib/config/defaults.ts:27`.
@@ -29,7 +29,7 @@ Reddit pain clusters on **quality**, **slop/leech automation**, **share safety**
 
 ## 0.1 Worker architecture — extracted
 
-**Big architectural change → see dedicated plan [`worker_service_plan.md`](worker_service_plan.md) (also `docs/improvements/worker_service_plan.md`).**
+**Big architectural change → worker landed in `5c65ea9`; record is `docs/architecture.md` (`## Worker`).**
 
 Summary: separate Python FastAPI service `apps/worker:8789` (own code, guided by smoked-salmon `BaseScraper`/`spectrals.py` but **do not copy**) owns scrape/spectrum/tag/verify. Bridge stays `SLSK`-only (`apps/bridge/src/spectrum.ts:12` → worker, no `fetch()` egress). Worker endpoints `POST /scrape`, `POST /spectrum`, `POST /tag|verify|analyze`, `GET /health`, volumes `bridge-data:/data:ro` + `/tmp/hub-spectrum`. Full design + cleanup checklist in `worker_service_plan.md:0`.
 
@@ -190,7 +190,7 @@ Each phase: git worktree → `bun test && bun run build` → `docker compose up 
 4. **Spectrum migrated to worker** — own reimplementation guided by `src/salmon/uploader/spectrals.py` (not copied), bridge strips `sox`/`ffmpeg`/`oxipng`, web points at worker. Bridge stays SLSK-only per your “keep it clean”.
 5. **Tag/verify in worker when added** — no new JS libs in web/bridge.
 6. **Exclusions = glob** `**/node_modules/**` via `*`→`.*`; `share_filters` stays regex.
-7. **Doc location** `docs/improvements/r_soulseek_improvement_plan.md` (canonical) + working copy `~/projects/improvement_docs/r_soulseek_improvement_plan.md`. `docs/improvements/` already created.
+7. **Doc location** `docs/proposals/r_soulseek_improvement_plan.md`.
 
 Minor: `MEDIA_SCAN_URL` → `MEDIA_SCAN_TOKEN` Bearer if needed; `WORKER_TOKEN` env for web→worker.
 
