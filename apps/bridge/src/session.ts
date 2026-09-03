@@ -2672,7 +2672,22 @@ export class SoulseekSession {
   unwatchUser(username: string) { this.serverSocket?.write(buildUnwatchUser(username)); }
   getUserStatus(username: string): number | undefined { return this.userStatusCache.get(username.toLowerCase())?.status; }
   getCachedUserStatus(username: string): number | undefined { return this.getUserStatus(username); }
-  requestPeerAddress(username: string) { this.serverSocket?.write(buildGetPeerAddress(username)); }
+  requestPeerAddress(username: string) {
+    // Self needs no server lookup — answer locally via listener address
+    if (username.trim().toLowerCase() === this.username.trim().toLowerCase()) {
+      try {
+        const addr = this.userAddresses.get(this.username)?.addr;
+        if (addr) this.emit({ type: "peer-address", username, peerAddress: addr });
+        else {
+          const ip = this._localIpAddress || this.findLocalIpAddress() || "127.0.0.1";
+          const port = this._listenPort || 60754;
+          this.emit({ type: "peer-address", username, peerAddress: { ip, port } as never });
+        }
+      } catch {}
+      return;
+    }
+    this.serverSocket?.write(buildGetPeerAddress(username));
+  }
   requestUserInterests(username: string) { this.serverSocket?.write(buildUserInterests(username)); }
   requestRecommendations() { this.serverSocket?.write(frameMessage(SERVER_MESSAGE_CODES.recommendations, Buffer.alloc(0))); }
   requestGlobalRecommendations() { this.serverSocket?.write(frameMessage(SERVER_MESSAGE_CODES.globalRecommendations, Buffer.alloc(0))); }
@@ -2826,6 +2841,19 @@ export class SoulseekSession {
   }
 
   requestUserInfo(username: string): Promise<UserInfoResponseMessage> {
+    // Local shortcut for own profile — never traverse peer path for self
+    if (username.trim().toLowerCase() === this.username.trim().toLowerCase()) {
+      try {
+        let queuesize = this.profile.queuesize;
+        let slotsavail = this.profile.slotsavail;
+        try {
+          const getter = (this.opts as unknown as { getTransferStats?: () => { queuedUploads: number; activeUploads: number } }).getTransferStats;
+          if (getter) { const st = getter(); queuesize = st.queuedUploads; slotsavail = st.activeUploads < 3; }
+        } catch {}
+        return Promise.resolve({ ...this.profile, queuesize, slotsavail });
+      } catch {}
+      return Promise.resolve({ ...this.profile });
+    }
     return new Promise((resolve, reject) => {
       if (this.userInfoRequests.has(username)) { reject(new Error("Already requesting this user.")); return; }
       this.userInfoRequests.set(username, resolve);

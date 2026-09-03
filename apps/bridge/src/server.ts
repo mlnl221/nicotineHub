@@ -1586,6 +1586,25 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           case "watch": session.watchUser(msg.username); break;
           case "unwatch": session.unwatchUser(msg.username); break;
           case "get": {
+            // Local shortcut for own profile — Soulseek never needs a peer round-trip to self
+            // (nicotine userinfo.py serves locally). Avoids sendConnectToPeerFallback to self.
+            if (msg.username.trim().toLowerCase() === session.username.trim().toLowerCase()) {
+              try {
+                const p = (session as unknown as { profile: { username: string; descr: string; pic: Buffer | null; totalupl: number; queuesize: number; slotsavail: boolean; uploadallowed: number } }).profile;
+                let queuesize = p.queuesize;
+                let slotsavail = p.slotsavail;
+                try {
+                  const getter = (session as unknown as { opts?: { getTransferStats?: () => { queuedUploads: number; activeUploads: number } } }).opts?.getTransferStats;
+                  if (getter) { const st = getter(); queuesize = st.queuedUploads; slotsavail = st.activeUploads < 3; }
+                } catch {}
+                const payload = { type: "user-info-response" as const, username: p.username, descr: p.descr, pic: p.pic ? p.pic.toString("base64") : null, totalupl: p.totalupl, queuesize, slotsavail, uploadallowed: p.uploadallowed };
+                userInfoCache.set(msg.username.toLowerCase(), { data: payload, ts: Date.now() });
+                ws.send(JSON.stringify(payload));
+              } catch (e) {
+                ws.send(JSON.stringify({ type: "user-info-failed", username: msg.username }));
+              }
+              break;
+            }
             const cached = userInfoCache.get(msg.username.toLowerCase());
             if (cached && Date.now() - cached.ts < USERINFO_CACHE_TTL_MS) {
               ws.send(JSON.stringify(cached.data));

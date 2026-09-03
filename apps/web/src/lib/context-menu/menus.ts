@@ -182,7 +182,7 @@ export function transferMenu(t: { user: string; fileName: string; path?: string;
   ];
 }
 
-export function browseFolderMenu(username: string, folder: string, isSelf: boolean): MenuItem[] {
+export function browseFolderMenu(username: string, folder: string, isSelf: boolean, opts?: { onDownloadFolder?: (folder: string) => void }): MenuItem[] {
   if (isSelf) {
     return [
       { id: "upload", label: "Upload Folder…", icon: "upload", action: () => toast("Upload folder — file picker") },
@@ -197,8 +197,7 @@ export function browseFolderMenu(username: string, folder: string, isSelf: boole
     ];
   }
   return [
-    { id: "download", label: "Download Folder", icon: "download", action: () => toast(`Download ${folder}`) },
-    { id: "download-rec", label: "Download Folder & Subfolders…", icon: "download", action: () => toast(`Download recursive ${folder}`) },
+    { id: "download", label: "Download Folder", icon: "download", action: opts?.onDownloadFolder ? () => opts.onDownloadFolder!(folder) : () => toast(`Download ${folder}`) },
     { id: "sep", label: "---", icon: "" },
     { id: "props", label: "File Properties", icon: "info", action: () => toast(folder) },
     { id: "sep2", label: "---", icon: "" },
@@ -209,7 +208,7 @@ export function browseFolderMenu(username: string, folder: string, isSelf: boole
   ];
 }
 
-export function browseFileMenu(username: string, file: { path: string; filename: string }, isSelf: boolean): MenuItem[] {
+export function browseFileMenu(username: string, file: { path: string; filename: string }, isSelf: boolean, opts?: { onDownload?: () => void; onDownloadFolder?: (folder: string) => void; selectedCount?: number; onDownloadSelected?: () => void }): MenuItem[] {
   if (isSelf) {
     return [
       { id: "hdr", label: "1 File Selected", icon: "description", disabled: true },
@@ -226,11 +225,14 @@ export function browseFileMenu(username: string, file: { path: string; filename:
       { id: "user-actions", label: "User Actions", icon: "person", submenu: userMenu(username, "userbrowse") },
     ];
   }
+  const folder = file.path.includes("\\") ? file.path.slice(0, file.path.lastIndexOf("\\")) : "";
+  const dlSelected = opts?.selectedCount !== undefined && opts.selectedCount > 1 && opts.onDownloadSelected;
   return [
-    { id: "hdr", label: "1 File Selected", icon: "description", disabled: true },
+    { id: "hdr", label: dlSelected ? `${opts!.selectedCount} Files Selected` : "1 File Selected", icon: "description", disabled: true },
     { id: "sep", label: "---", icon: "" },
-    { id: "download", label: "Download File", icon: "download", action: () => toast(`Download ${file.filename}`) },
-    { id: "download-to", label: "Download File To…", icon: "download", action: () => toast("Download To…") },
+    { id: "download", label: "Download File", icon: "download", action: opts?.onDownload ? opts.onDownload : () => toast(`Download ${file.filename}`) },
+    ...(dlSelected ? [{ id: "download-selected", label: `Download ${opts!.selectedCount} Selected`, icon: "download", action: opts!.onDownloadSelected! } as MenuItem] : []),
+    { id: "download-folder", label: "Download Folder", icon: "folder_download", action: opts?.onDownloadFolder && folder ? () => opts.onDownloadFolder!(folder) : () => toast("Download Folder — unavailable") },
     { id: "sep2", label: "---", icon: "" },
     { id: "props", label: "File Properties", icon: "info", action: () => toast(file.filename) },
     { id: "sep3", label: "---", icon: "" },
