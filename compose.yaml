@@ -50,7 +50,9 @@ services:
       # Optional per-service scraper tokens (env first; see apps/worker for names)
       DISCOGS_TOKEN: "${DISCOGS_TOKEN:-}"
       QOBUZ_APP_ID: "${QOBUZ_APP_ID:-}"
+      QOBUZ_USER_AUTH_TOKEN: "${QOBUZ_USER_AUTH_TOKEN:-}"
       TIDAL_TOKEN: "${TIDAL_TOKEN:-}"
+      TIDAL_COUNTRY: "${TIDAL_COUNTRY:-US}"
     ports:
       - "8789:8789"
     volumes:

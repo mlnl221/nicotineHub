@@ -31,6 +31,7 @@ from sources.musicbrainz import MusicBrainzScraper
 from sources.qobuz import QobuzScraper
 from sources.tidal import TidalScraper
 import spectrals
+import tokens
 
 VERSION = os.environ.get("APP_VERSION", "0.1.0")
 STARTED = time.monotonic()
@@ -83,6 +84,7 @@ async def health():
         "version": VERSION,
         "sources": sorted(s.source for s in SCRAPERS),
         "queueDepth": len(spectrals._in_flight),
+        "auth": tokens.configured(),  # booleans only, never values
     }
 
 
@@ -91,7 +93,7 @@ class ScrapeIn(BaseModel):
 
 
 def _confidence(source: str) -> float:
-    return 1.0 if source in ("discogs", "musicbrainz", "deezer", "apple") else 0.8
+    return 1.0 if source in ("discogs", "musicbrainz", "deezer", "apple", "qobuz", "tidal") else 0.8
 
 
 @app.post("/scrape", dependencies=[Depends(require_auth)])

@@ -14,7 +14,7 @@
  *   client -> server: { type:"chat:private", action:"send", username, message }
  */
 
-import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { SoulseekSession } from "./session.ts";
@@ -1382,6 +1382,29 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           } else if (section === "plugins" && key === "enable") {
             (pluginManager as unknown as { setGlobalEnable?: (b: boolean) => void }).setGlobalEnable?.(Boolean(value));
             logger.info("bridge", `plugins ${Boolean(value) ? "enabled" : "disabled"} via config`, { enable: Boolean(value) });
+          } else if (section === "worker" && ["discogs_token", "tidal_token", "tidal_country", "qobuz_app_id", "qobuz_user_auth_token"].includes(key)) {
+            // Worker metadata tokens — write-only API. Merged into DATA_DIR/worker.json
+            // (0600), read by the worker (env wins). Values never logged or returned.
+            if (typeof value !== "string" || value.length > 512) {
+              ws.send(errorMessage("Worker token must be a string ≤512 chars (empty clears it)."));
+              return;
+            }
+            try {
+              const p = join(DATA_DIR, "worker.json");
+              let cur: Record<string, string> = {};
+              try {
+                const raw = JSON.parse(readFileSync(p, "utf8")) as unknown;
+                if (raw && typeof raw === "object") cur = raw as Record<string, string>;
+              } catch {}
+              if (value) cur[key] = value;
+              else delete cur[key];
+              writeFileSync(p, JSON.stringify(cur, null, 2), { mode: 0o600 });
+              try { chmodSync(p, 0o600); } catch {}
+              logger.info("server", "worker token updated", { key, set: Boolean(value) });
+            } catch (e) {
+              ws.send(errorMessage(`Cannot write worker.json: ${(e as Error).message}`));
+              return;
+            }
           } else if (section === "server" && (key === "server" || key === "auto_connect_startup")) {
             // Stored for login defaults; web handles auto_connect_startup gate, bridge just acks.
             logger.debug("bridge", "server config stored", { key, value: typeof value === "object" ? JSON.stringify(value).slice(0,120) : String(value).slice(0,80) });

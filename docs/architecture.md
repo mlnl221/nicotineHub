@@ -104,6 +104,8 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 | `WORKER_TOKEN` | *(open)* | `Bearer` / `?token` → 401 on worker routes except `/health` (`hmac.compare_digest`) |
 | `NEXT_PUBLIC_WORKER_URL` | `http://host:8789` | Build-time worker override; runtime `localStorage.nicotineHub.workerUrl` wins |
 | `DISCOGS_TOKEN` / `QOBUZ_APP_ID` / `TIDAL_TOKEN` | *(unset)* | Optional scraper tokens (worker env); Qobuz/Tidal scrape returns a clear error without theirs |
+| `QOBUZ_USER_AUTH_TOKEN` / `TIDAL_COUNTRY` | *(unset)* | Qobuz `X-User-Auth-Token` header; Tidal `countrycode` (default `US`) |
+| `DATA_DIR/worker.json` | *(absent)* | Same tokens via Settings → Worker (write-only, `0600`, never shown back). Env wins when both set. `GET /health` reports `auth:{discogs,tidal,qobuz}` booleans only. |
 
 ## Worker (`apps/worker` — FastAPI `:8789`, `python:3.11-slim`)
 

@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import app as worker_app
 import spectrals
+import tokens
 
 
 @pytest.fixture()
@@ -31,6 +32,22 @@ def test_health(client):
     assert body["ok"] is True
     for src in ("discogs", "bandcamp", "apple", "qobuz", "tidal", "musicbrainz", "deezer", "beatport"):
         assert src in body["sources"]
+    assert set(body["auth"]) == {"discogs", "tidal", "qobuz"}
+
+
+def test_tokens_env_wins_and_json_fallback(monkeypatch, tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "worker.json").write_text('{"discogs_token": "from-json", "tidal_token": "t-json"}')
+    monkeypatch.setenv("DATA_DIR", str(data))
+    monkeypatch.delenv("DISCOGS_TOKEN", raising=False)
+    monkeypatch.delenv("TIDAL_TOKEN", raising=False)
+    tokens._cache, tokens._cache_mtime = {}, -1.0
+    assert tokens.get("DISCOGS_TOKEN") == "from-json"
+    monkeypatch.setenv("DISCOGS_TOKEN", "from-env")
+    assert tokens.get("DISCOGS_TOKEN") == "from-env"
+    assert tokens.configured() == {"discogs": True, "tidal": True, "qobuz": False}
+    tokens._cache, tokens._cache_mtime = {}, -1.0
 
 
 def test_scrape_rejects_non_url(client):

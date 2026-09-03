@@ -76,7 +76,9 @@ export async function requestWorkerSpectrum(opts: { fileName: string; size?: num
   return body as SpectrumRequestResult;
 }
 
-export async function getWorkerHealth(): Promise<{ ok: boolean; version?: string; sources?: string[] } | null> {
+export async function getWorkerHealth(): Promise<{
+  ok: boolean; version?: string; sources?: string[]; auth?: { discogs: boolean; tidal: boolean; qobuz: boolean };
+} | null> {
   try {
     const base = getWorkerHttpBase();
     const res = await fetch(`${base}/health`, { cache: "no-store" });

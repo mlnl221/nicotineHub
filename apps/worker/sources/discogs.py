@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import re
 
+import tokens
 from .base import BaseScraper, IdentData
 
 
@@ -16,8 +16,8 @@ class DiscogsScraper(BaseScraper):
         m = self.match(url)
         rid = m.group(1) if m else ""
         headers = {"Accept": "application/json"}
-        if os.environ.get("DISCOGS_TOKEN"):
-            headers["Authorization"] = f"Discogs token={os.environ['DISCOGS_TOKEN']}"
+        if tokens.get("DISCOGS_TOKEN"):
+            headers["Authorization"] = f"Discogs token={tokens.get('DISCOGS_TOKEN')}"
         data = await self.get_json(f"https://api.discogs.com/releases/{rid}", headers=headers)
         artists = ", ".join(a.get("name", "") for a in data.get("artists", []) if a.get("name")) or "Unknown"
         tracks = [t for t in data.get("tracklist", []) if t.get("type_") == "track"]

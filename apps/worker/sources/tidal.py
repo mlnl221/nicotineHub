@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import re
 
+import tokens
 from .base import BaseScraper, IdentData, ScrapeError
 
 
@@ -14,15 +14,17 @@ class TidalScraper(BaseScraper):
 
     async def scrape(self, url: str) -> IdentData:
         m = self.match(url)
-        token = os.environ.get("TIDAL_TOKEN", "")
+        token = tokens.get("TIDAL_TOKEN")
         if not m:
             raise ScrapeError("tidal: unrecognized URL")
         if not token:
-            raise ScrapeError("tidal: needs TIDAL_TOKEN env (see worker README section)")
+            raise ScrapeError("tidal: needs TIDAL_TOKEN (Settings → Worker)")
         data = await self.get_json(
-            f"https://api.tidal.com/v1/albums/{m.group(1)}",
-            params={"countryCode": os.environ.get("TIDAL_COUNTRY", "US")},
-            headers={"Authorization": f"Bearer {token}"},
+            f"https://api.tidalhifi.com/v1/albums/{m.group(1)}",
+            params={
+                "token": token,
+                "countrycode": (tokens.get("TIDAL_COUNTRY") or "US").upper(),
+            },
         )
         artists = ", ".join(a.get("name", "") for a in data.get("artists", [])) or "Unknown"
         return IdentData(
