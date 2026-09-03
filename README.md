@@ -84,17 +84,17 @@ After a download finishes, right-click the card on **`/downloads`** → **Analyz
 - **Full** `2000×513` `-z 120` Kaiser (`remix 1`) — whole file
 - **Zoom** `500×1025` `-z 120` Kaiser `-S <mid> -d 0:02` — 2-second slice from the middle (like salmon’s `calculateZoomStartpoint`)
 
-Images are `oxipng -o 2 --strip all` compressed and stored **only in `/tmp/hub-spectrum`** in the shared `spectrum-cache` volume (wiped on reboot / `docker restart`). The web shows a **badge `SPECTRUM ✓`** on the card, **hover preview** (desktop, Full) with instant cache via blob URL / `ETag`, and a **modal** with tabs for Full + Zoom, downloads, and a tip about lossy cutoffs (~16 kHz). While generating you see `Generating spectrum…`; on error the card shows the reason. See [`docs/spectrum.md`](docs/spectrum.md) and [`docs/architecture.md#transfers--spectrum`](docs/architecture.md#transfers--spectrum).
+Images are `oxipng -o 2 --strip all` compressed and stored **only in `/tmp/hub-spectrum`** (ephemeral, regenerated on demand — worker serves via `GET /spectrum/...` so no shared volume needed). The web shows a **badge `SPECTRUM ✓`** on the card, **hover preview** (desktop, Full) with instant cache via blob URL / `ETag`, and a **modal** with tabs for Full + Zoom, downloads, and a tip about lossy cutoffs (~16 kHz). While generating you see `Generating spectrum…`; on error the card shows the reason. See [`docs/spectrum.md`](docs/spectrum.md) and [`docs/architecture.md#transfers--spectrum`](docs/architecture.md#transfers--spectrum).
 
 ---
 
 ## Repo layout
 
 ```
-apps/bridge  — Bun bridge  (WebSocket `/ws` + `/health` + `/files/:token` + volume `DATA_DIR`, SLSK-only)
-apps/worker  — Python FastAPI (scrape/spectrum/tag on `:8789`, `bridge-data:/data:ro` + `spectrum-cache`)
+apps/bridge  — Bun bridge  (WebSocket `/ws` + `/health` + `/files/:token` + volumes `CONFIG_DIR`/`DATA_DIR`, SLSK-only)
+apps/worker  — Python FastAPI (scrape/spectrum/tag on `:8789`, `config:/config:ro` + `data:/data`, spectra in ephemeral `/tmp/hub-spectrum`)
 apps/web     — Next.js 15 PWA
-compose.yaml — web:3000 + bridge:8787/60754 + worker:8789 → bridge-data:/data + spectrum-cache
+compose.yaml — web:3000 + bridge:8787/60754 + worker:8789 → config:/config + data:/data (+ ephemeral spectra)
 ```
 
 ---
@@ -108,7 +108,7 @@ bun test && bun run build
 docker compose up --build  # http://localhost:3000 (build from source)
 ```
 
-Bridge URL: `NEXT_PUBLIC_BRIDGE_URL` (build) or `localStorage.nicotineHub.bridgeUrl` (runtime). All env vars are documented in [`docs/architecture.md#env-full`](docs/architecture.md#env-full) — including `BRIDGE_TOKEN`, `DATA_DIR`, `LISTEN_PORT` (60754, editable in Settings → Network), `SHARED_DIRS`, `UPLOAD_LIMIT`, etc.
+Bridge URL: `NEXT_PUBLIC_BRIDGE_URL` (build) or `localStorage.nicotineHub.bridgeUrl` (runtime). All env vars are documented in [`docs/architecture.md#env-full`](docs/architecture.md#env-full) — including `BRIDGE_TOKEN`, `CONFIG_DIR`/`DATA_DIR`, `LISTEN_PORT` (60754, editable in Settings → Network), `SHARED_DIRS`, `UPLOAD_LIMIT`, etc.
 
 For prebuilt images and release workflow, see [`docs/deployment.md`](docs/deployment.md).
 
@@ -118,7 +118,7 @@ Modify accordingly if running with unRAID or setting up with Portainer.
 
 - Logging is optional
 - Host port mapping might need to be changed to not collide with other apps
-- Change `BASE_DOCKER_DATA_PATH` to match your setup. Can be simply `./data`
+- Change `CONFIG_DIR`/`DATA_DIR` to match your setup. Can be simply `./config`/`./data`
 - Set a custom network if needed
 - Forward `LISTEN_PORT` `60754` TCP+UDP on your router for Soulseek searches (or use `network_mode: host` for UPnP)
 
@@ -135,7 +135,8 @@ services:
       - 60754:60754
       - 60754:60754/udp
     volumes:
-      - ${BASE_DOCKER_DATA_PATH:-./data}:/data
+      - ${CONFIG_DIR:-./config}:/config
+      - ${DATA_DIR:-./data}:/data
       # - /home/you/Music:/data/Music:ro  # add shares via Settings → Shares
     environment:
       - LISTEN_PORT=60754
@@ -148,7 +149,8 @@ services:
     ports:
       - 8789:8789
     volumes:
-      - ${BASE_DOCKER_DATA_PATH:-./data}:/data
+      - ${CONFIG_DIR:-./config}:/config:ro
+      - ${DATA_DIR:-./data}:/data
 
   web:
     container_name: nicotinehub-web

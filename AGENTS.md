@@ -8,9 +8,9 @@ This file is for AI coding agents working in this repo. See https://agents.md fo
 
 Mobile-first / browser-first Soulseek web client (beyond MVP — full 1:1 bridge). Monorepo with Bun workspaces.
 
-- `apps/bridge` — Bun: Soulseek 1:1 bridge over raw TCP (`server.slsknet.org:2242`, P/F/D leaf) + WebSocket at `ws://host:8787/ws` + `/health` + `/files/:token` + volume `DATA_DIR`
+- `apps/bridge` — Bun: Soulseek 1:1 bridge over raw TCP (`server.slsknet.org:2242`, P/F/D leaf) + WebSocket at `ws://host:8787/ws` + `/health` + `/files/:token` + volumes `CONFIG_DIR` (`/config`, autobrr parity) + `DATA_DIR` (`/data`)
 - `apps/web` — Next.js 15 (App Router) + Tailwind v4 PWA, mobile shell `TopBar`/`BottomNav`, pages for search (multi-mode), downloads/uploads (F streaming), browse, chat, buddies, interests, profiles
-- `compose.yaml` — `web:3000` + `bridge:8787/60754` (no reverse proxy; `LISTEN_PORT` default 60754, editable in Settings → Network)
+- `compose.yaml` — `web:3000` + `bridge:8787/60754` + `worker:8789` (no reverse proxy; `LISTEN_PORT` default 60754, editable in Settings → Network)
 
 Reference protocol: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plus/nicotine-plus) and `apps/bridge/src/soulseek.ts` (framing: `[uint32 len][uint32 code][payload]`).
 
@@ -31,9 +31,9 @@ Bridge URL override: `NEXT_PUBLIC_BRIDGE_URL` (build-time) or `localStorage.nico
 ## Conventions
 
 - **Bun only** — use `bun`, not `npm`/`yarn`/`npx`. `bun.lock` is committed.
-- No password persistence (`README` security note). Search results require a reachable inbound peer listener; `LISTEN_PORT` (default 60754, `server.portrange`) must be port-forwarded TCP+UDP on the homelab. Changing via Settings → Network triggers bridge reconnect and writes `DATA_DIR/listen_port`; Docker host mapping uses `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` so also `LISTEN_PORT=... docker compose up -d`.
+- No password persistence (`README` security note). Search results require a reachable inbound peer listener; `LISTEN_PORT` (default 60754, `server.portrange`) must be port-forwarded TCP+UDP on the homelab. Changing via Settings → Network triggers bridge reconnect and writes `CONFIG_DIR/listen_port` (`CONFIG_DIR` autobrr-style, default `/config`); Docker host mapping uses `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` so also `LISTEN_PORT=... docker compose up -d`.
 - Client version is experimental `177/1` — do not reuse reserved major versions.
-- Shares on WSL `bun` dev vs Docker: `DATA_DIR` defaults to `/data` but on WSL falls back to `./data` or `/tmp/nicotine-hub` if `/data` not writable (see `apps/bridge/src/server.ts:300`). **WSL `bun`**: add shares with absolute WSL paths like `/home/magnus/Music` or `/mnt/c/Users/you/Music` (must `existsSync` on bridge FS) — Docker `Browse /data` (`/data/Music`) only works when host path is mounted (`-v /home/you/Music:/data/Music:ro` then share `/data/Music`). Rescan warns `unavailable: [v→p]` when path not found (1 dirs 0 files).
+- Shares on WSL `bun` dev vs Docker: `CONFIG_DIR` defaults to `/config` and `DATA_DIR` to `/data` but on WSL fall back to `./config`/`./data` or `/tmp/nicotine-hub-*` if not writable (see `apps/bridge/src/server.ts:205`). **WSL `bun`**: add shares with absolute WSL paths like `/home/magnus/Music` or `/mnt/c/Users/you/Music` (must `existsSync` on bridge FS) — Docker `Browse /data` (`/data/Music`) only works when host path is mounted (`-v /home/you/Music:/data/Music:ro` then share `/data/Music`). Rescan warns `unavailable: [v→p]` when path not found (1 dirs 0 files). `CONFIG_DIR` holds `worker.json` 0600, `shares.json`, `downloads.json`, `plugins.json` etc.; `DATA_DIR` holds `downloads/`, `incomplete/`, `uploads/`.
 - Mobile-first UI: touch targets, safe-area insets, PWA `manifest.webmanifest`.
 - Verify after changes: `bun test && bun run build`.
 - Browser/UI testing uses the Playwright MCP server (configured in opencode). Before driving the UI, always copy the env file into place (e.g. `cp apps/web/.env.example apps/web/.env`) so the `PLAYWRIGHT_MCP_EXTENSION_TOKEN` and other vars are present for the Playwright MCP browser session.
@@ -54,7 +54,7 @@ Every `git worktree` must run on its own ports so it never collides with `main` 
   # or: echo "NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws" > apps/web/.env  (.env is gitignored)
 
   # worker (Python) — run from apps/worker with system python + PYTHONPATH, or docker
-  PORT=8789 DATA_DIR=./data uvicorn app:app --host 0.0.0.0 --port 8789  # run with workdir apps/worker
+  PORT=8789 CONFIG_DIR=./config DATA_DIR=./data uvicorn app:app --host 0.0.0.0 --port 8789  # run with workdir apps/worker
 
   # docker — use an untracked compose.override.yaml instead of editing compose.yaml
   # compose.override.yaml (gitignored):

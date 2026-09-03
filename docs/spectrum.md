@@ -1,6 +1,6 @@
 # Analyze Spectrum
 
-> Right-click a **Finished** audio download on `/downloads` → **Analyze Spectrum**. The **worker** (`apps/worker`, FastAPI `:8789`) renders two PNG spectrograms with `sox` (`oxipng` recompress when present in the image — currently skipped, PNGs served raw) (own implementation; output semantics match the old bridge port of [`smoked-salmon`](https://github.com/smokin-salmon/smoked-salmon) `src/salmon/uploader/spectrals.py`, Apache-2.0) and the web shows them on hover / modal. Images live only in `/tmp/hub-spectrum` in the shared `spectrum-cache` volume — wiped on reboot.
+> Right-click a **Finished** audio download on `/downloads` → **Analyze Spectrum**. The **worker** (`apps/worker`, FastAPI `:8789`) renders two PNG spectrograms with `sox` (`oxipng` recompress when present in the image — currently skipped, PNGs served raw) (own implementation; output semantics match the old bridge port of [`smoked-salmon`](https://github.com/smokin-salmon/smoked-salmon) `src/salmon/uploader/spectrals.py`, Apache-2.0) and the web shows them on hover / modal. Images live only in ephemeral `/tmp/hub-spectrum` (no volume, served via worker HTTP `GET /spectrum/...`) — regenerated on demand, wiped on reboot/restart.
 
 ## UX
 
@@ -49,7 +49,7 @@ POST /spectrum/request {fileName, size?, token?} → resolve file → stat mtime
 RUN apt-get install -y sox flac ffmpeg curl && pip install -r requirements.txt
 ```
 
-`compose.yaml` shares `bridge-data:/data:ro` (worker reads finished downloads) + `spectrum-cache:/tmp/hub-spectrum`. The bridge image no longer installs audio tooling.
+`compose.yaml` shares `config:/config:ro` + `data:/data` (worker reads `worker.json` + finished downloads). Spectra in ephemeral `/tmp/hub-spectrum` (no volume, served via HTTP). The bridge image no longer installs audio tooling.
 
 ## Attribution
 
