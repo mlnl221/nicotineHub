@@ -5,7 +5,7 @@
 
 /**
  * ShareDB — peer shares DB, Phase 3.
- * In-memory, persisted under CONFIG_DIR/shares.json (or SHARES_DIR if set).
+ * In-memory, persisted under CONFIG_DIR/shares.json ().
  * Handles SharedFileList 4/5 and FolderContents 36/37, respects ExcludedSearchPhrases.
  * Also handles inbound FileSearch (server 26) filtering.
  */
@@ -483,7 +483,7 @@ export class ShareDB {
 
   private resolveSharedDirs(): string[] {
     // Env SHARED_DIRS=" /data/shared:/data/music" or SHARES_DIR
-    const env = process.env.SHARED_DIRS || process.env.SHARES_DIR || "";
+    const env = process.env.SHARED_DIRS || "";
     if (env) return env.split(":").map(s => s.trim()).filter(Boolean);
     const candidates = [join(this.dataDir, "shared"), join(this.dataDir, "shares"), "/data/shared"];
     return candidates.filter(p => existsSync(p));
