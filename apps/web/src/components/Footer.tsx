@@ -17,7 +17,7 @@ export function Footer() {
         </a>
         <span className="opacity-30">•</span>
         <a
-          href="https://github.com/mlnl221/nicotineHub/blob/main/COPYING"
+          href="https://github.com/mlnl221/nicotineHub/blob/main/LICENSE"
           target="_blank"
           rel="noopener noreferrer"
           className="underline decoration-dotted underline-offset-4 hover:text-primary"

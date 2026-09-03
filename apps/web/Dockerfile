@@ -51,7 +51,7 @@ COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
 # Keep license visible in runtime image (context is repo root)
-COPY COPYING ./COPYING
+COPY LICENSE ./LICENSE
 COPY LICENSES ./LICENSES
 COPY ATTRIBUTION.md ./ATTRIBUTION.md
 EXPOSE 3000

@@ -163,7 +163,7 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
             <div className="space-y-3">
               <p className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">License</p>
               <p className="font-body text-sm leading-relaxed text-on-surface-variant">
-                GPL-3.0-or-later — see <a href="https://github.com/mlnl221/nicotineHub/blob/main/COPYING" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">COPYING</a> and{" "}
+                GPL-3.0-or-later — see <a href="https://github.com/mlnl221/nicotineHub/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">LICENSE</a> and{" "}
                 <a href="https://github.com/mlnl221/nicotineHub/blob/main/ATTRIBUTION.md" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">ATTRIBUTION.md</a> for full notices.
                 This project is not affiliated with Soulseek. Based on Nicotine+ — thanks to the Nicotine+ Team.
               </p>

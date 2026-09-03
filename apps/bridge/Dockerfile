@@ -56,7 +56,7 @@ RUN mkdir -p ./dist/data && \
     (curl -fsSL https://raw.githubusercontent.com/nicotine-plus/nicotine-plus/master/pynicotine/external/data/ip_country_data.csv -o ./dist/data/ip_country_data.csv || \
      wget -qO ./dist/data/ip_country_data.csv https://raw.githubusercontent.com/nicotine-plus/nicotine-plus/master/pynicotine/external/data/ip_country_data.csv || \
      echo "GeoIP fetch failed — geoblock will be no-op" && rm -f ./dist/data/ip_country_data.csv)
-COPY COPYING ./COPYING
+COPY LICENSE ./LICENSE
 COPY LICENSES ./LICENSES
 COPY ATTRIBUTION.md ./ATTRIBUTION.md
 # Spectrum/synth binaries (sox/flac/ffmpeg/oxipng) live in the worker image now;
