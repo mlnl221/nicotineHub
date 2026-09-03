@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest an enhancement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What can't you do today? Who does this help?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Rough idea is fine — no need for a full design. (For large changes, open this first and wait for maintainer feedback before writing code.)
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [bridge, web, docs, infra, not sure]
+    validations:
+      required: false
