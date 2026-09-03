@@ -18,6 +18,7 @@ import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync, chmodSync }
 import { join } from "node:path";
 import { z } from "zod";
 import { SoulseekSession } from "./session.ts";
+import { PermissionLevel } from "./shares.ts";
 import { TransferManager } from "./transfers.ts";
 import { diagClear, diagLog, diagTail, diagSubscribe, logger, type LogLevel } from "./logger.ts";
 import { PluginManager } from "./plugins/manager.ts";
@@ -880,12 +881,13 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                 const all = (event.folders as unknown[]) || [];
                 const page = all.slice(0, 200);
                 const hasMore = all.length > 200;
-                ws.send(JSON.stringify({ type: "browse:shares", username: event.username, folders: page as never, total: all.length, hasMore, offset: 0 }));
+                const lockedCount = Array.isArray(event.lockedFolders) ? event.lockedFolders.length : 0;
+                ws.send(JSON.stringify({ type: "browse:shares", username: event.username, folders: page as never, total: all.length, hasMore, offset: 0, lockedCount }));
                 // stash full result on ws for browse:page
                 (ws.data as unknown as Record<string, unknown>)._browseFull = all;
                 (ws.data as unknown as Record<string, unknown>)._browseUser = event.username;
               }
-              else if (event.type === "browse-folder") ws.send(JSON.stringify({ type: "browse:folder", username: event.username, folder: event.folder, token: event.token, files: event.files }));
+              else if (event.type === "browse-folder") ws.send(JSON.stringify({ type: "browse:folder", username: event.username, folder: event.folder, token: event.token, files: event.files, folders: event.folders }));
               else if (event.type === "browse-error") {
                 const isFolder = (event as { token?: number }).token !== undefined;
                 ws.send(JSON.stringify({
@@ -1249,15 +1251,25 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (data.type === "browse") {
         const result = BrowseSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid browse message.")); return; }
-        const session = requireLogin(); if (!session) return;
+        const reqUser = typeof (parsed as { username?: unknown }).username === "string" ? (parsed as { username: string }).username : result.data.username;
+        const session = requireLogin();
+        if (!session) {
+          // Fail fast on the browse channel too — generic errors are ignored by
+          // browse receivers, which would otherwise spin until the 32s timeout.
+          try { ws.send(JSON.stringify({ type: "browse:shares", username: reqUser, folders: [] as never, total: 0, hasMore: false, offset: 0, error: "Not logged in." })); } catch {}
+          return;
+        }
+        const isSelf = result.data.username.trim().toLowerCase() === session.username.trim().toLowerCase();
         if (result.data.action === "shares") {
-          // Local browse — as reported by slsk (ShareDB) — no peer round-trip when browsing own shares
-          if (result.data.username.toLowerCase() === session.username.toLowerCase()) {
+          // Local browse — nicotine-plus userbrowse.py:browse_user serves own shares
+          // locally (self→PUBLIC view + reveal flags); no peer round-trip to self.
+          if (isSelf) {
             try {
-              const folders = session.shareDBInstance.getFolders() as unknown[];
+              const folders = session.shareDBInstance.getFoldersForPermission(PermissionLevel.PUBLIC) as unknown[];
               const all = folders || [];
               const page = all.slice(0, 200);
               const hasMore = all.length > 200;
+              logger.info("browse", "local self-shares", { username: result.data.username, dirs: all.length });
               try { browseCache.set(result.data.username.toLowerCase(), { folders: all as unknown[], ts: Date.now() }); } catch {}
               (ws.data as unknown as Record<string, unknown>)._browseFull = all;
               (ws.data as unknown as Record<string, unknown>)._browseUser = result.data.username;
@@ -1270,12 +1282,15 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           session.requestSharedFileList(result.data.username);
         } else if (result.data.action === "folder" && result.data.folder) {
           // Local folder contents — from ShareDB when browsing own shares
-          if (result.data.username.toLowerCase() === session.username.toLowerCase()) {
+          if (isSelf) {
             const tok = result.data.token ?? Math.floor(Math.random() * 1e9);
             try {
-              const allFolders = session.shareDBInstance.getFolders();
-              const match = allFolders.find((f) => f.name === result.data.folder);
+              const allFolders = session.shareDBInstance.getFoldersForPermission(PermissionLevel.PUBLIC);
+              const want = result.data.folder;
+              const match = allFolders.find((f) => f.name === want)
+                ?? allFolders.find((f) => f.name.toLowerCase() === want.toLowerCase());
               const files = match ? (match.files as unknown[]) : [];
+              logger.info("browse", "local self-folder", { username: result.data.username, folder: want.slice(0, 80), files: files.length, matched: match?.name.slice(0, 80) ?? null });
               ws.send(JSON.stringify({ type: "browse:folder", username: result.data.username, folder: result.data.folder, token: tok, files: files as never }));
             } catch (e) {
               ws.send(JSON.stringify({ type: "browse:folder", username: result.data.username, folder: result.data.folder!, token: tok, files: [] as never, error: (e as Error).message }));

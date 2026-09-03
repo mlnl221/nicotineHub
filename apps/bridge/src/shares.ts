@@ -880,26 +880,34 @@ export class ShareDB {
     return frameMessage(PEER_MESSAGE_CODES.sharedFileListResponse, compressed);
   }
 
-  /** Build FolderContentsResponse 37 — respects PermissionLevel */
+  /** Build FolderContentsResponse 37 — respects PermissionLevel.
+   * SLSKPROTOCOL.md Peer Code 37: token + folder + nfolders + [dir + nfiles + files].
+   * The response covers the folder "with all subfolders", so include descendant
+   * virtual paths (dir + "\\" prefix) alongside the exact match. */
   buildFolderContentsResponse(token: number, dir: string, permission: PermissionLevel = PermissionLevel.PUBLIC): Buffer {
     const folders = this.getFoldersForPermission(permission);
-    const folder = folders.find(f => f.name === dir);
-    const files = folder ? [...folder.files].sort((a,b)=> a.name.localeCompare(b.name)) : [];
+    const matches = folders.filter((f) => f.name === dir || f.name.startsWith(dir + "\\"))
+      .sort((a, b) => a.name.localeCompare(b.name));
     const parts: Buffer[] = [];
     parts.push(packUint32(token >>> 0));
     parts.push(packString(dir));
-    parts.push(packUint32(files.length));
-    for (const f of files) {
-      parts.push(Buffer.from([1]));
-      parts.push(packString(f.name));
-      const sz = typeof f.size === "bigint" ? f.size : BigInt(f.size);
-      parts.push(packUint64(sz));
-      parts.push(packString(f.ext || ""));
-      const attrs = f.attrs || [];
-      parts.push(packUint32(attrs.length));
-      for (const [type,val] of attrs) {
-        parts.push(packUint32(type));
-        parts.push(packUint32(val));
+    parts.push(packUint32(matches.length));
+    for (const folder of matches) {
+      const files = [...folder.files].sort((a, b) => a.name.localeCompare(b.name));
+      parts.push(packString(folder.name));
+      parts.push(packUint32(files.length));
+      for (const f of files) {
+        parts.push(Buffer.from([1]));
+        parts.push(packString(f.name));
+        const sz = typeof f.size === "bigint" ? f.size : BigInt(f.size);
+        parts.push(packUint64(sz));
+        parts.push(packString(f.ext || ""));
+        const attrs = f.attrs || [];
+        parts.push(packUint32(attrs.length));
+        for (const [type, val] of attrs) {
+          parts.push(packUint32(type));
+          parts.push(packUint32(val));
+        }
       }
     }
     const inner = Buffer.concat(parts);

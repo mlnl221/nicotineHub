@@ -66,8 +66,12 @@ import {
   parseFileTransferInit,
   parseFileOffset,
   parseRoomList,
+  parseSharedFileListResponse,
+  parseFolderContentsResponse,
+  packUint64,
   SlskReader,
 } from "./soulseek.ts";
+import { ShareDB, PermissionLevel } from "./shares.ts";
 
 describe("packing primitives", () => {
   test("packString length-prefixes UTF-8", () => {
@@ -677,5 +681,114 @@ describe("transfers — protocol shims (Phase 0)", () => {
     expect(rl.owned).toEqual([]);
     expect(rl.member).toEqual([]);
     expect(rl.operator).toEqual([]);
+  });
+});
+
+describe("browse shares parity (SLSKPROTOCOL.md Peer Codes 4/5/36/37)", () => {
+  function packFile(name: string, size: number): Buffer {
+    return Buffer.concat([
+      Buffer.from([1]), // code
+      packString(name),
+      packUint64(size),
+      packString("mp3"),
+      packUint32(2),
+      packUint32(0), packUint32(320),
+      packUint32(1), packUint32(210),
+    ]);
+  }
+
+  test("parseSharedFileListResponse retains private (locked) dirs block", () => {
+    // doc Peer Code 5: ndirs + dirs + unknown(0) + nprivate + privatedirs, zlib
+    const inner = Buffer.concat([
+      packUint32(1),
+      packString("Music"), packUint32(1), packFile("Music\\a.mp3", 100),
+      packUint32(0), // unknown
+      packUint32(1),
+      packString("Secret"), packUint32(1), packFile("Secret\\b.mp3", 200),
+    ]);
+    const parsed = parseSharedFileListResponse(deflateSync(inner));
+    expect(parsed.folders).toHaveLength(1);
+    expect(parsed.folders[0].name).toBe("Music");
+    expect(parsed.folders[0].files).toHaveLength(1);
+    expect(parsed.lockedFolders).toHaveLength(1);
+    expect(parsed.lockedFolders[0].name).toBe("Secret");
+    expect(parsed.lockedFolders[0].files[0].size).toBe(200);
+  });
+
+  test("parseFolderContentsResponse reads wrapped nfolders shape", () => {
+    // doc Peer Code 37: token + folder + nfolders + [dir + nfiles + files], zlib
+    const inner = Buffer.concat([
+      packUint32(42),
+      packString("Music"),
+      packUint32(2),
+      packString("Music"), packUint32(1), packFile("Music\\a.mp3", 100),
+      packString("Music\\Sub"), packUint32(1), packFile("Music\\Sub\\b.mp3", 200),
+    ]);
+    const parsed = parseFolderContentsResponse(deflateSync(inner));
+    expect(parsed.token).toBe(42);
+    expect(parsed.dir).toBe("Music");
+    expect(parsed.folders).toHaveLength(2);
+    // files = exact-dir match (UI back-compat)
+    expect(parsed.files).toHaveLength(1);
+    expect(parsed.files[0].name).toBe("Music\\a.mp3");
+  });
+
+  test("ShareDB buildSharedFileListResponse round-trips with locked buddy dirs", () => {
+    const { mkdtempSync } = require("node:fs") as typeof import("node:fs");
+    const { tmpdir } = require("node:os") as typeof import("node:os");
+    const { join } = require("node:path") as typeof import("node:path");
+    const cfg = mkdtempSync(join(tmpdir(), "nh-cfg-"));
+    const prev = process.env.CONFIG_DIR;
+    process.env.CONFIG_DIR = cfg;
+    try {
+      const db = new ShareDB({ dataDir: cfg });
+      db.setFolders(
+        [{ name: "Pub", files: [{ name: "Pub\\a.mp3", size: 10, ext: "mp3", attrs: [] }] }],
+        PermissionLevel.PUBLIC,
+      );
+      db.setFolders(
+        [{ name: "Bud", files: [{ name: "Bud\\b.mp3", size: 20, ext: "mp3", attrs: [] }] }],
+        PermissionLevel.BUDDY,
+      );
+      const framed = db.buildSharedFileListResponse(PermissionLevel.PUBLIC);
+      const msg = tryParseMessage(framed, MAX_INCOMING.server448M)!;
+      expect(msg.code).toBe(PEER_MESSAGE_CODES.sharedFileListResponse);
+      const parsed = parseSharedFileListResponse(msg.payload);
+      expect(parsed.folders.map((f) => f.name)).toEqual(["Pub"]);
+      expect(parsed.lockedFolders.map((f) => f.name)).toEqual(["Bud"]);
+    } finally {
+      if (prev === undefined) delete process.env.CONFIG_DIR;
+      else process.env.CONFIG_DIR = prev;
+    }
+  });
+
+  test("ShareDB buildFolderContentsResponse emits wrapped shape incl. subfolders", () => {
+    const { mkdtempSync } = require("node:fs") as typeof import("node:fs");
+    const { tmpdir } = require("node:os") as typeof import("node:os");
+    const { join } = require("node:path") as typeof import("node:path");
+    const cfg = mkdtempSync(join(tmpdir(), "nh-cfg-"));
+    const prev = process.env.CONFIG_DIR;
+    process.env.CONFIG_DIR = cfg;
+    try {
+      const db = new ShareDB({ dataDir: cfg });
+      db.setFolders(
+        [
+          { name: "Music", files: [{ name: "Music\\a.mp3", size: 10, ext: "mp3", attrs: [] }] },
+          { name: "Music\\Sub", files: [{ name: "Music\\Sub\\b.mp3", size: 20, ext: "mp3", attrs: [] }] },
+        ],
+        PermissionLevel.PUBLIC,
+      );
+      const framed = db.buildFolderContentsResponse(7, "Music", PermissionLevel.PUBLIC);
+      const msg = tryParseMessage(framed, MAX_INCOMING.server448M)!;
+      expect(msg.code).toBe(PEER_MESSAGE_CODES.folderContentsResponse);
+      const parsed = parseFolderContentsResponse(msg.payload);
+      expect(parsed.token).toBe(7);
+      expect(parsed.dir).toBe("Music");
+      expect(parsed.folders.map((f) => f.name).sort()).toEqual(["Music", "Music\\Sub"]);
+      expect(parsed.files.map((f) => f.name)).toEqual(["Music\\a.mp3"]);
+    } finally {
+      if (prev === undefined) delete process.env.CONFIG_DIR;
+      else process.env.CONFIG_DIR = prev;
+    }
   });
 });

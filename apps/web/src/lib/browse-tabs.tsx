@@ -135,22 +135,35 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
       // legacy browse-error with token is actually a folder error
       const isLegacyFolderError = rawType === "browse-error" && (msg as unknown as { token?: number }).token !== undefined;
       if (isSharesMsg && !isLegacyFolderError) {
-        const m = msg as unknown as { username: string; folders?: BrowseFolder[]; error?: string };
+        const m = msg as unknown as { username: string; folders?: BrowseFolder[]; error?: string; total?: number; hasMore?: boolean; offset?: number };
         // treat legacy browse-error as error even if no explicit error field
         const hasError = !!m.error || rawType === "browse-error";
         const errMsg = m.error || (rawType === "browse-error" ? "Timed out fetching shares" : undefined);
         console.log("[browse-tabs] shares recv", m.username, "error", errMsg || "none", "isDemo", isDemo, "rawType", rawType);
         const lower = m.username.toLowerCase();
-        const existingTimer = [...timersRef.current.entries()].find(([id]) => {
-          const t = tabsRef.current.find((x) => x.id === id);
-          return t?.username.toLowerCase() === lower;
-        });
+        const off = m.offset ?? 0;
+        const more = !!m.hasMore && !hasError;
+        const pageFolders = m.folders || [];
+        if (more) {
+          // More pages cached server-side — fetch next before clearing the timeout.
+          // Offset = already-held folders + this page (pages arrive in WS order).
+          const held = tabsRef.current
+            .filter((t) => t.username.toLowerCase() === lower)
+            .reduce((n, t) => Math.max(n, t.folders.length), 0);
+          try { send({ type: "browse:page", username: m.username, offset: held + pageFolders.length, limit: 200 }); } catch {}
+        }
         setTabs((prev) => prev.map((t) => {
           if (t.username.toLowerCase() !== lower) return t;
+          if (hasError) {
+            const timer = timersRef.current.get(t.id);
+            if (timer) { clearTimeout(timer); timersRef.current.delete(t.id); }
+            return { ...t, loading: false, error: errMsg || "Failed to fetch shares" };
+          }
+          const merged = off > 0 ? [...t.folders, ...pageFolders] : pageFolders;
+          if (more) return { ...t, loading: true, error: null, folders: merged };
           const timer = timersRef.current.get(t.id);
           if (timer) { clearTimeout(timer); timersRef.current.delete(t.id); }
-          if (hasError) return { ...t, loading: false, error: errMsg || "Failed to fetch shares" };
-          return { ...t, loading: false, error: null, folders: m.folders || [] };
+          return { ...t, loading: false, error: null, folders: merged };
         }));
       } else if (isFolderMsg || isLegacyFolderError) {
         const m = msg as unknown as { username: string; folder: string; token: number; files: BrowseFile[]; error?: string };
@@ -171,7 +184,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
       }
     });
     return unsub;
-  }, [subscribe]);
+  }, [subscribe, send]);
 
   // On connected, re-trigger pending loads for persisted tabs that are still loading
   const pendingRefetch = useRef<Set<string>>(new Set());
@@ -205,6 +218,23 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
     timersRef.current.clear();
   }, []);
 
+  const requestShares = useCallback((id: string, username: string) => {
+    setTabs((prev) => prev.map((t) => t.id === id ? { ...t, loading: true, error: null } : t));
+    const existingTimer = timersRef.current.get(id);
+    if (existingTimer) { clearTimeout(existingTimer); timersRef.current.delete(id); }
+    if (state.status !== "connected") return;
+    send({ type: "browse", action: "shares", username });
+    const timer = setTimeout(() => {
+      setTabs((prev) => prev.map((x) => {
+        if (x.id !== id || !x.loading) return x;
+        if (x.folders.length) return { ...x, loading: false, error: null };
+        return { ...x, loading: false, error: "Timed out — user may be offline or not sharing." };
+      }));
+      timersRef.current.delete(id);
+    }, 32000);
+    timersRef.current.set(id, timer);
+  }, [send, state.status]);
+
   const openBrowse = useCallback((usernameRaw: string) => {
     const username = usernameRaw.trim();
     if (!username) return;
@@ -215,7 +245,12 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
       return;
     }
     const existing = tabsRef.current.find((t) => t.username.toLowerCase() === lower);
-    if (existing) { setActiveId(existing.id); return; }
+    // Re-selecting a dead tab retries it — persisted error tabs otherwise stay dead forever.
+    if (existing) {
+      setActiveId(existing.id);
+      if (existing.error && !existing.loading) requestShares(existing.id, existing.username);
+      return;
+    }
     if (tabsRef.current.length >= MAX_TABS) return;
     pendingOpenRef.current.add(lower);
     const id = `b${++counter.current}`;
@@ -225,20 +260,9 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
       return [...prev, tab];
     });
     setActiveId(id);
-    if (state.status === "connected") {
-      send({ type: "browse", action: "shares", username });
-      const timer = setTimeout(() => {
-        setTabs((prev) => prev.map((x) => {
-          if (x.id !== id || !x.loading) return x;
-          if (x.folders.length) return { ...x, loading: false, error: null };
-          return { ...x, loading: false, error: "Timed out — user may be offline or not sharing." };
-        }));
-        timersRef.current.delete(id);
-      }, 32000);
-      timersRef.current.set(id, timer);
-    }
+    requestShares(id, username);
     setTimeout(() => pendingOpenRef.current.delete(lower), 600);
-  }, [send, state.status]);
+  }, [requestShares]);
 
   const closeBrowse = useCallback((id: string) => {
     const timer = timersRef.current.get(id);
@@ -287,20 +311,8 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   const retry = useCallback((id: string) => {
     const tab = tabsRef.current.find((t) => t.id === id);
     if (!tab) return;
-    setTabs((prev) => prev.map((t) => t.id === id ? { ...t, loading: true, error: null } : t));
-    const existingTimer = timersRef.current.get(id);
-    if (existingTimer) { clearTimeout(existingTimer); timersRef.current.delete(id); }
-    send({ type: "browse", action: "shares", username: tab.username });
-    const timer = setTimeout(() => {
-      setTabs((prev) => prev.map((x) => {
-        if (x.id !== id || !x.loading) return x;
-        if (x.folders.length) return { ...x, loading: false, error: null };
-        return { ...x, loading: false, error: "Timed out — user may be offline or not sharing." };
-      }));
-      timersRef.current.delete(id);
-    }, 32000);
-    timersRef.current.set(id, timer);
-  }, [send]);
+    requestShares(id, tab.username);
+  }, [requestShares]);
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) ?? null, [tabs, activeId]);
 

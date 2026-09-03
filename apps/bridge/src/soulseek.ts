@@ -639,9 +639,11 @@ export interface FileSearchResult { token: number; username: string; freeUploadS
 
 const MAX_SEARCH_DECOMPRESSED = 128 * 1024 * 1024; // 128 MiB guard
 const MAX_SEARCH_COMPRESSED = 16 * 1024 * 1024;
+// Shares/browse payloads are capped at 448M on the wire (MAX_INCOMING.server448M) — same cap post-inflate
+const MAX_SHARES_DECOMPRESSED = 469762048;
 
-export function inflateWithCap(payload: Buffer, max = MAX_SEARCH_DECOMPRESSED): Buffer {
-  if (payload.length > MAX_SEARCH_COMPRESSED) throw new Error("Search response too large");
+export function inflateWithCap(payload: Buffer, max = MAX_SEARCH_DECOMPRESSED, maxCompressed = MAX_SEARCH_COMPRESSED): Buffer {
+  if (payload.length > maxCompressed) throw new Error("Search response too large");
   let buf: Buffer;
   try {
     buf = inflateSync(payload) as Buffer;
@@ -987,8 +989,8 @@ function parseBrowseFile(r: SlskReader): BrowseFileEntry {
   return { name, size, ext, attrs };
 }
 
-export function parseSharedFileListResponse(payload: Buffer): { folders: BrowseFolderEntry[] } {
-  const buf = inflateSync(payload) as Buffer;
+export function parseSharedFileListResponse(payload: Buffer): { folders: BrowseFolderEntry[]; lockedFolders: BrowseFolderEntry[] } {
+  const buf = inflateWithCap(payload, MAX_SHARES_DECOMPRESSED, MAX_SHARES_DECOMPRESSED) as Buffer;
   const r = new SlskReader(Buffer.from(buf));
   const ndirs = r.uint32();
   const folders: BrowseFolderEntry[] = [];
@@ -999,19 +1001,46 @@ export function parseSharedFileListResponse(payload: Buffer): { folders: BrowseF
     for (let j = 0; j < nfiles; j++) files.push(parseBrowseFile(r));
     folders.push({ name: dirName, files });
   }
-  // optional unknown int and private block — ignore remaining
-  return { folders };
+  // trailing unknown int 0 + private (locked) dirs block — retain instead of dropping
+  // (SLSKPROTOCOL.md Peer Code 5 steps 3-5; nicotine _parse_result_list keeps privatelist)
+  const lockedFolders: BrowseFolderEntry[] = [];
+  try {
+    if (r.remaining >= 4) {
+      r.uint32(); // unknown, official clients send 0
+      if (r.remaining >= 4) {
+        const npriv = r.uint32();
+        for (let i = 0; i < npriv; i++) {
+          const dirName = r.string();
+          const nfiles = r.uint32();
+          const files: BrowseFileEntry[] = [];
+          for (let j = 0; j < nfiles; j++) files.push(parseBrowseFile(r));
+          lockedFolders.push({ name: dirName, files });
+        }
+      }
+    }
+  } catch { /* truncated private block — keep what we parsed */ }
+  return { folders, lockedFolders };
 }
 
-export function parseFolderContentsResponse(payload: Buffer): { token: number; dir: string; files: BrowseFileEntry[] } {
-  const buf = inflateSync(payload) as Buffer;
+export function parseFolderContentsResponse(payload: Buffer): { token: number; dir: string; folders: BrowseFolderEntry[]; files: BrowseFileEntry[] } {
+  const buf = inflateWithCap(payload, MAX_SHARES_DECOMPRESSED, MAX_SHARES_DECOMPRESSED) as Buffer;
   const r = new SlskReader(Buffer.from(buf));
   const token = r.uint32();
   const dir = r.string();
-  const nfiles = r.uint32();
-  const files: BrowseFileEntry[] = [];
-  for (let i = 0; i < nfiles; i++) files.push(parseBrowseFile(r));
-  return { token, dir, files };
+  // SLSKPROTOCOL.md Peer Code 37: token + folder + nfolders + [dir + nfiles + files]
+  // (response covers the folder "with all subfolders", not a flat file list)
+  const nfolders = r.uint32();
+  const folders: BrowseFolderEntry[] = [];
+  for (let i = 0; i < nfolders; i++) {
+    const dirName = r.string();
+    const nfiles = r.uint32();
+    const files: BrowseFileEntry[] = [];
+    for (let j = 0; j < nfiles; j++) files.push(parseBrowseFile(r));
+    folders.push({ name: dirName, files });
+  }
+  const exact = folders.find((f) => f.name === dir);
+  const files = exact ? exact.files : folders.flatMap((f) => f.files);
+  return { token, dir, folders, files };
 }
 
 /* Distrib */

@@ -148,6 +148,8 @@ export interface BrowseEvent {
   type: "browse-shares" | "browse-folder" | "browse-error";
   username: string;
   folders?: import("./soulseek.ts").BrowseFolderEntry[];
+  /** Locked (private) dirs from SharedFileListResponse trailing block */
+  lockedFolders?: import("./soulseek.ts").BrowseFolderEntry[];
   folder?: string;
   token?: number;
   files?: import("./soulseek.ts").BrowseFileEntry[];
@@ -2403,8 +2405,8 @@ export class SoulseekSession {
           const parsed = parseSharedFileListResponse(msg.payload);
           const pending = this.pendingBrowseShares.get(username.toLowerCase());
           if (pending) { clearTimeout(pending.timer); this.pendingBrowseShares.delete(username.toLowerCase()); }
-          logger.info("browse", "sharedFileListResponse success", { username, folders: parsed.folders.length });
-          this.emitBrowse({ type: "browse-shares", username, folders: parsed.folders });
+          logger.info("browse", "sharedFileListResponse success", { username, folders: parsed.folders.length, locked: parsed.lockedFolders.length });
+          this.emitBrowse({ type: "browse-shares", username, folders: parsed.folders, lockedFolders: parsed.lockedFolders });
           try { (peer as Socket).end(); } catch {}
           this.dequeuePendingSockets();
         } catch (e) { logger.warn("browse", "sharedFileListResponse parse fail", { username, error: (e as Error).message }); }
@@ -2420,7 +2422,7 @@ export class SoulseekSession {
           this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.folderContentsResponse);
           const pending = this.pendingBrowseFolder.get(parsed.token);
           if (pending) { clearTimeout(pending.timer); this.pendingBrowseFolder.delete(parsed.token); }
-          this.emitBrowse({ type: "browse-folder", username, token: parsed.token, folder: parsed.dir, files: parsed.files });
+          this.emitBrowse({ type: "browse-folder", username, token: parsed.token, folder: parsed.dir, files: parsed.files, folders: parsed.folders });
           try { (peer as Socket).end(); } catch {}
           this.dequeuePendingSockets();
         } catch {}
