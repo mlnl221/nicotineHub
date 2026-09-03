@@ -13,6 +13,7 @@ import { bulkVerify, bulkAnalyze, bulkRequestSpectrum, verifyFile, analyzeFile, 
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { fileExplorerMenu } from "@/lib/context-menu/menus";
 import { useSpectrum } from "@/lib/spectrum";
+import { createPortal } from "react-dom";
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return "—";
@@ -66,6 +67,8 @@ export function FileExplorer({
   const { requestSpectrum, getEntry } = useSpectrum();
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; file: BridgeFileEntry } | null>(null);
   const [spectrumModal, setSpectrumModal] = useState<{ file: BridgeFileEntry; activeTab: "full" | "zoom" } | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const fetchDir = useCallback(async (path: string) => {
     if (isDemo) {
@@ -198,21 +201,19 @@ export function FileExplorer({
     }
   };
   const handleSingleSpectrum = async (filePath: string) => {
-    // request via provider (key = filePath) and also show queued result
-    setBulkResult({ title: "Spectrum queue started", rows: [{ fileName: filePath, status: "queued" }] });
+    setBulkResult({ title: "Spectrum — queued", rows: [{ fileName: filePath, status: "queued" }] });
     try {
       requestSpectrum(filePath, { fileName: filePath });
-      // also do direct bulkRequest for immediate feedback in modal
       const res = await bulkRequestSpectrum([{ fileName: filePath }]);
-      setBulkResult({ title: `Spectrum — ${filePath.split("/").pop()}`, rows: res as unknown as Array<Record<string, unknown>> });
-      // if done, open modal automatically after short delay to allow provider to fetch blobs
-      setTimeout(() => {
-        const entry = getEntry(filePath);
-        if (entry?.status === "done") {
-          const file = files.find((f) => f.path === filePath);
-          if (file) setSpectrumModal({ file, activeTab: "full" });
-        }
-      }, 1500);
+      const ok = res[0]?.ok;
+      const name = filePath.split("/").pop() ?? filePath;
+      if (ok) {
+        setBulkResult({ title: `Done — ${name}`, rows: res as unknown as Array<Record<string, unknown>> });
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Done", body: `${name} spectrum ready — click the pill to view` } }));
+        setTimeout(() => setBulkResult(null), 1400);
+      } else {
+        setBulkResult({ title: `Spectrum — ${name}`, rows: res as unknown as Array<Record<string, unknown>> });
+      }
     } catch (e) {
       setBulkResult({ title: "Spectrum error", rows: [{ fileName: filePath, error: e instanceof Error ? e.message : String(e) }] });
     }
@@ -458,8 +459,8 @@ export function FileExplorer({
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} onSaved={() => fetchDir(current)} /> : null}
       {bulkEditor ? <BulkTagEditor open={bulkEditor} files={Array.from(bulk.selected)} onClose={() => setBulkEditor(false)} onSaved={() => { bulk.clear(); fetchDir(current); }} /> : null}
       {bulkScrape || singleScrapeFile ? <BulkScrapeModal open={!!(bulkScrape || singleScrapeFile)} files={singleScrapeFile ? [singleScrapeFile] : Array.from(bulk.selected)} onClose={() => { setBulkScrape(false); setSingleScrapeFile(null); }} /> : null}
-      {bulkResult ? (
-        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
+      {bulkResult && mounted ? createPortal(
+        <div className="fixed inset-0 z-[100] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
           <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col overflow-hidden rounded-t-2xl md:rounded-2xl bg-surface-container-lowest shadow-xl ghost-border" onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-outline-variant/10 flex justify-between gap-3">
               <h3 className="font-headline font-bold">{bulkResult.title}</h3>
@@ -477,7 +478,8 @@ export function FileExplorer({
               <button onClick={() => setBulkResult(null)} className="rounded-full bg-primary px-5 py-2 font-label text-xs font-bold text-on-primary">Close</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
       {menuAnchor ? (
         <ContextMenu
@@ -502,62 +504,64 @@ export function FileExplorer({
           onClose={() => setMenuAnchor(null)}
         />
       ) : null}
-      {spectrumModal ? (() => {
-        const entry = getEntry(spectrumModal.file.path);
-        const base = getWorkerHttpBase();
-        const abs = (u?: string) => (u ? (u.startsWith("blob:") || u.startsWith("http") ? u : `${base}${u}`) : null);
-        const fullSrc = entry?.fullBlobUrl || abs(entry?.fullUrl) || null;
-        const zoomSrc = entry?.zoomBlobUrl || abs(entry?.zoomUrl) || null;
-        const hasSpectrum = !!fullSrc || !!zoomSrc;
-        if (!hasSpectrum) {
-          // if not yet generated, trigger and show loading
+      {spectrumModal && mounted ? createPortal(
+        (() => {
+          const entry = getEntry(spectrumModal.file.path);
+          const base = getWorkerHttpBase();
+          const abs = (u?: string) => (u ? (u.startsWith("blob:") || u.startsWith("http") ? u : `${base}${u}`) : null);
+          const fullSrc = entry?.fullBlobUrl || abs(entry?.fullUrl) || null;
+          const zoomSrc = entry?.zoomBlobUrl || abs(entry?.zoomUrl) || null;
+          const hasSpectrum = !!fullSrc || !!zoomSrc;
+          if (!hasSpectrum) {
+            return (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={() => setSpectrumModal(null)}>
+                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+                <div className="relative bg-surface-container-lowest rounded-2xl p-6 shadow-2xl max-w-md w-full ghost-border" onClick={(e) => e.stopPropagation()}>
+                  <h3 className="font-headline font-bold">Spectrum — {spectrumModal.file.name}</h3>
+                  <p className="font-body text-sm text-outline mt-2">No spectrum yet. Right-click → Spectrum to generate.</p>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button onClick={() => { handleSingleSpectrum(spectrumModal.file.path); setSpectrumModal(null); }} className="rounded-full bg-primary px-5 py-2 font-label text-xs font-bold text-on-primary">Generate now</button>
+                    <button onClick={() => setSpectrumModal(null)} className="rounded-full bg-surface-container-high px-5 py-2 font-label text-xs">Close</button>
+                  </div>
+                </div>
+              </div>
+            );
+          }
           return (
-            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" onClick={() => setSpectrumModal(null)}>
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-4" onClick={() => setSpectrumModal(null)}>
               <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-              <div className="relative bg-surface-container-lowest rounded-2xl p-6 shadow-2xl max-w-md w-full ghost-border" onClick={(e) => e.stopPropagation()}>
-                <h3 className="font-headline font-bold">Spectrum — {spectrumModal.file.name}</h3>
-                <p className="font-body text-sm text-outline mt-2">No spectrum yet. Right-click → Spectrum to generate.</p>
-                <div className="mt-4 flex justify-end gap-2">
-                  <button onClick={() => { handleSingleSpectrum(spectrumModal.file.path); setSpectrumModal(null); }} className="rounded-full bg-primary px-5 py-2 font-label text-xs font-bold text-on-primary">Generate now</button>
-                  <button onClick={() => setSpectrumModal(null)} className="rounded-full bg-surface-container-high px-5 py-2 font-label text-xs">Close</button>
+              <div className="relative bg-surface-container-lowest rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden ghost-border" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20 shrink-0">
+                  <div className="min-w-0">
+                    <h3 className="font-headline text-sm font-semibold truncate">Spectrum — {spectrumModal.file.name}</h3>
+                    <p className="font-mono text-[10px] text-outline truncate">{spectrumModal.file.path}</p>
+                  </div>
+                  <button onClick={() => setSpectrumModal(null)} className="ml-3 p-2 rounded-full hover:bg-surface-container-high min-h-11 min-w-11 flex items-center justify-center"><span className="material-symbols-outlined">close</span></button>
+                </div>
+                <div className="flex gap-1 p-2 bg-surface-container-low shrink-0">
+                  <button onClick={() => setSpectrumModal({ ...spectrumModal, activeTab: "full" })} className={`flex-1 py-2.5 rounded-xl font-label text-xs font-semibold ${spectrumModal.activeTab === "full" ? "bg-primary text-on-primary shadow" : "bg-surface-container-high text-on-surface-variant"}`}>Full</button>
+                  <button onClick={() => setSpectrumModal({ ...spectrumModal, activeTab: "zoom" })} className={`flex-1 py-2.5 rounded-xl font-label text-xs font-semibold ${spectrumModal.activeTab === "zoom" ? "bg-primary text-on-primary shadow" : "bg-surface-container-high text-on-surface-variant"}`}>Zoom</button>
+                </div>
+                <div className="flex-1 overflow-auto bg-black flex items-center justify-center p-2 min-h-0">
+                  {spectrumModal.activeTab === "full" ? (
+                    fullSrc ? <img src={fullSrc} alt={`Full spectrum ${spectrumModal.file.name}`} className="max-w-full h-auto object-contain" /> : <span className="font-label text-sm text-on-surface-variant">No Full image</span>
+                  ) : (
+                    zoomSrc ? <img src={zoomSrc} alt={`Zoom spectrum ${spectrumModal.file.name}`} className="max-w-full h-auto object-contain" /> : <span className="font-label text-sm text-on-surface-variant">No Zoom image</span>
+                  )}
+                </div>
+                <div className="px-4 py-2.5 flex flex-wrap gap-2 justify-between items-center bg-surface-container-low shrink-0">
+                  <span className="font-label text-[11px] text-outline">sox Kaiser • -z 120 • cached in /tmp (wiped on reboot)</span>
+                  <div className="flex gap-2">
+                    {fullSrc ? <a href={fullSrc} download={`${spectrumModal.file.name}-Full.png`} className="px-3 py-2 rounded-full bg-surface-container-high font-label text-xs font-semibold">Download Full</a> : null}
+                    {zoomSrc ? <a href={zoomSrc} download={`${spectrumModal.file.name}-Zoom.png`} className="px-3 py-2 rounded-full bg-primary text-on-primary font-label text-xs font-semibold">Download Zoom</a> : null}
+                  </div>
                 </div>
               </div>
             </div>
           );
-        }
-        return (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center p-2 sm:p-4" onClick={() => setSpectrumModal(null)}>
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-            <div className="relative bg-surface-container-lowest rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden ghost-border" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20 shrink-0">
-                <div className="min-w-0">
-                  <h3 className="font-headline text-sm font-semibold truncate">Spectrum — {spectrumModal.file.name}</h3>
-                  <p className="font-mono text-[10px] text-outline truncate">{spectrumModal.file.path}</p>
-                </div>
-                <button onClick={() => setSpectrumModal(null)} className="ml-3 p-2 rounded-full hover:bg-surface-container-high min-h-11 min-w-11 flex items-center justify-center"><span className="material-symbols-outlined">close</span></button>
-              </div>
-              <div className="flex gap-1 p-2 bg-surface-container-low shrink-0">
-                <button onClick={() => setSpectrumModal({ ...spectrumModal, activeTab: "full" })} className={`flex-1 py-2.5 rounded-xl font-label text-xs font-semibold ${spectrumModal.activeTab === "full" ? "bg-primary text-on-primary shadow" : "bg-surface-container-high text-on-surface-variant"}`}>Full</button>
-                <button onClick={() => setSpectrumModal({ ...spectrumModal, activeTab: "zoom" })} className={`flex-1 py-2.5 rounded-xl font-label text-xs font-semibold ${spectrumModal.activeTab === "zoom" ? "bg-primary text-on-primary shadow" : "bg-surface-container-high text-on-surface-variant"}`}>Zoom</button>
-              </div>
-              <div className="flex-1 overflow-auto bg-black flex items-center justify-center p-2 min-h-0">
-                {spectrumModal.activeTab === "full" ? (
-                  fullSrc ? <img src={fullSrc} alt={`Full spectrum ${spectrumModal.file.name}`} className="max-w-full h-auto object-contain" /> : <span className="font-label text-sm text-on-surface-variant">No Full image</span>
-                ) : (
-                  zoomSrc ? <img src={zoomSrc} alt={`Zoom spectrum ${spectrumModal.file.name}`} className="max-w-full h-auto object-contain" /> : <span className="font-label text-sm text-on-surface-variant">No Zoom image</span>
-                )}
-              </div>
-              <div className="px-4 py-2.5 flex flex-wrap gap-2 justify-between items-center bg-surface-container-low shrink-0">
-                <span className="font-label text-[11px] text-outline">sox Kaiser • -z 120 • cached in /tmp (wiped on reboot)</span>
-                <div className="flex gap-2">
-                  {fullSrc ? <a href={fullSrc} download={`${spectrumModal.file.name}-Full.png`} className="px-3 py-2 rounded-full bg-surface-container-high font-label text-xs font-semibold">Download Full</a> : null}
-                  {zoomSrc ? <a href={zoomSrc} download={`${spectrumModal.file.name}-Zoom.png`} className="px-3 py-2 rounded-full bg-primary text-on-primary font-label text-xs font-semibold">Download Zoom</a> : null}
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })() : null}
+        })(),
+        document.body
+      ) : null}
     </div>
   );
 }
