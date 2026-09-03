@@ -138,6 +138,7 @@ export class TransferManager {
   private onFinished?: TransferFinishedCb;
   private statsTimer: Timer | null = null;
   private dataDir: string;
+  private configDir: string;
   private incompleteDir: string;
   private downloadsDir: string;
   private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
@@ -206,9 +207,10 @@ export class TransferManager {
     this.onFinished = opts.onFinished;
     this.sessionGetter = opts.getSession;
     this.dataDir = opts.dataDir || process.env.DATA_DIR || "/data";
+    this.configDir = process.env.CONFIG_DIR || opts.dataDir || process.env.DATA_DIR || "/config";
     this.incompleteDir = process.env.INCOMPLETE_DIR || join(this.dataDir, "incomplete");
     this.downloadsDir = process.env.DOWNLOADS_DIR || join(this.dataDir, "downloads");
-    this.statsManager = new StatsManager({ dataDir: this.dataDir });
+    this.statsManager = new StatsManager({ dataDir: this.configDir });
 
     try {
       for (const p of [this.dataDir, this.incompleteDir, this.downloadsDir, join(this.dataDir, "uploads")]) {
@@ -300,18 +302,18 @@ export class TransferManager {
   private persist() {
     try {
       const serial = [...this.transfers.values()].map(({ _timer: _t, _pollTimer: _p, _statusTimer: _s, _retryTimer: _r, _fileHandle: _f, ...rest }) => rest);
-      const tmp = join(this.dataDir, "downloads.json.tmp");
-      const dest = join(this.dataDir, "downloads.json");
+      const tmp = join(this.configDir, "downloads.json.tmp");
+      const dest = join(this.configDir, "downloads.json");
       writeFileSync(tmp, JSON.stringify(serial, null, 2));
       renameSync(tmp, dest);
       // also keep transfers.json for backwards compat (stub)
-      try { writeFileSync(join(this.dataDir, "transfers.json"), JSON.stringify(serial, null, 2)); } catch {}
+      try { writeFileSync(join(this.configDir, "transfers.json"), JSON.stringify(serial, null, 2)); } catch {}
     } catch {}
   }
 
   private loadFromDisk() {
     try {
-      const candidates = [join(this.dataDir, "downloads.json"), join(this.dataDir, "transfers.json")];
+      const candidates = [join(this.configDir, "downloads.json"), join(this.configDir, "transfers.json"), join(this.dataDir, "downloads.json"), join(this.dataDir, "transfers.json")];
       let raw: BridgeTransfer[] | null = null;
       for (const p of candidates) {
         if (existsSync(p)) {
@@ -741,7 +743,7 @@ export class TransferManager {
     } catch {}
     if (!shared) {
       try {
-        const sharesPath = join(this.dataDir, "shares.json");
+        const sharesPath = join(this.configDir, "shares.json");
         if (existsSync(sharesPath)) {
           shareCheckedViaJson = true;
           const raw = JSON.parse(readFileSync(sharesPath, "utf8")) as Record<string, unknown>;

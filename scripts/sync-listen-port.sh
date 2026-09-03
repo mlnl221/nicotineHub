@@ -1,26 +1,36 @@
 #!/usr/bin/env bash
-# Watches DATA_DIR/listen_port (or bridge-data volume) and syncs host .env + recreates bridge
+# Watches CONFIG_DIR/listen_port (or config volume) and syncs host .env + recreates bridge
 # For users who keep bridge network (ports mapping) instead of network_mode: host.
 # With host mode (compose.override.example.yaml) this script is NOT needed – Save hot-swaps.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DATA_DIR="${DATA_DIR:-/var/lib/docker/volumes/nicotine_mobile_bridge-data/_data}"
-# Try to auto-detect volume mountpoint if DATA_DIR not set and we're in project dir with ./data bind
+CONFIG_DIR="${CONFIG_DIR:-${DATA_DIR:-}}"
+if [ -z "$CONFIG_DIR" ]; then
+  CONFIG_DIR="/var/lib/docker/volumes/nicotine_mobile_config/_data"
+  # fallback to old bridge-data for migration
+  if [ ! -f "$CONFIG_DIR/listen_port" ]; then
+    OLD="/var/lib/docker/volumes/nicotine_mobile_bridge-data/_data"
+    if [ -f "$OLD/listen_port" ]; then CONFIG_DIR="$OLD"; fi
+  fi
+fi
+# Try to auto-detect volume mountpoint if CONFIG_DIR not set and we're in project dir with ./config bind
 if [ ! -f "$ROOT/.env" ] && [ -f "$ROOT/compose.yaml" ]; then
-  # fallback: try named volume inspect
+  # fallback: try named volume inspect (new + old)
   if command -v docker >/dev/null 2>&1; then
-    VOL="$(docker volume inspect nicotine_mobile_bridge-data --format '{{.Mountpoint}}' 2>/dev/null || echo "")"
+    VOL="$(docker volume inspect nicotine_mobile_config --format '{{.Mountpoint}}' 2>/dev/null || docker volume inspect nicotine_mobile-config_config --format '{{.Mountpoint}}' 2>/dev/null || docker volume inspect nicotine_mobile_bridge-data --format '{{.Mountpoint}}' 2>/dev/null || echo "")"
     if [ -n "$VOL" ] && [ -f "$VOL/listen_port" ]; then
-      DATA_DIR="$VOL"
+      CONFIG_DIR="$VOL"
+    elif [ -d "$ROOT/config" ]; then
+      CONFIG_DIR="$ROOT/config"
     elif [ -d "$ROOT/data" ]; then
-      DATA_DIR="$ROOT/data"
+      CONFIG_DIR="$ROOT/data"
     fi
   fi
 fi
-LISTEN_FILE="$DATA_DIR/listen_port"
+LISTEN_FILE="$CONFIG_DIR/listen_port"
 ENV_FILE="$ROOT/.env"
 
-echo "[sync] watching $LISTEN_FILE → $ENV_FILE (DATA_DIR=$DATA_DIR)"
+echo "[sync] watching $LISTEN_FILE → $ENV_FILE (CONFIG_DIR=$CONFIG_DIR)"
 mkdir -p "$(dirname "$ENV_FILE")"
 touch "$ENV_FILE" 2>/dev/null || true
 
@@ -57,7 +67,7 @@ sync_once
 
 if command -v inotifywait >/dev/null 2>&1; then
   echo "[sync] inotifywait watching $LISTEN_FILE"
-  while inotifywait -e close_write,create,move "$DATA_DIR" 2>/dev/null; do
+  while inotifywait -e close_write,create,move "$CONFIG_DIR" 2>/dev/null; do
     sleep 0.5
     sync_once
   done

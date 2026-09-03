@@ -1,4 +1,4 @@
-"""Token loading for metadata services — env first, DATA_DIR/worker.json second.
+"""Token loading for metadata services — env first, CONFIG_DIR/worker.json second.
 
 ``worker.json`` is written by the bridge on Settings save (``config:update``
 section ``worker``) and never read back by clients — the Settings UI only
@@ -26,7 +26,16 @@ _cache_mtime: float = -1.0
 
 
 def _json_path() -> Path:
-    return Path(os.environ.get("DATA_DIR", "/data")) / "worker.json"
+    # CONFIG_DIR holds worker.json (autobrr parity) — fallback to DATA_DIR for migration
+    cfg = os.environ.get("CONFIG_DIR") or os.environ.get("DATA_DIR") or "/config"
+    p = Path(cfg) / "worker.json"
+    if p.exists():
+        return p
+    # fallback to old DATA_DIR location
+    old = Path(os.environ.get("DATA_DIR", "/data")) / "worker.json"
+    if old.exists():
+        return old
+    return p
 
 
 def _load_file() -> dict[str, str]:
