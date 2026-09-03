@@ -19,6 +19,8 @@ import { SpectrumProvider } from "@/lib/spectrum";
 import { SearchProvider } from "@/lib/search";
 import { BrowseProvider } from "@/lib/browse-tabs";
 import { ProfileProvider } from "@/lib/profile-tabs";
+import { RoomsProvider } from "@/lib/rooms";
+import { PrivateChatProvider } from "@/lib/privateChat";
 import { ReconnectBanner } from "@/components/ReconnectBanner";
 
 export const metadata: Metadata = {
@@ -84,27 +86,31 @@ export default function RootLayout({
           <ConfigProvider>
             <SessionProvider>
               <ReconnectBanner />
-              <SearchProvider>
-                <BrowseProvider>
-                  <ProfileProvider>
-                    <WishlistProvider>
-                      <StatisticsProvider>
-                        <TransfersProvider>
-                          <SpectrumProvider>
-                            <ConfigBridgeSync />
-                            <ExitDialogHandler />
-                            <WindowGeometrySync />
-                            <NowPlayingSync />
-                            {children}
-                    <ToastHost />
-                    <GlobalContextMenu />
-                    </SpectrumProvider>
-                  </TransfersProvider>
-                </StatisticsProvider>
-              </WishlistProvider>
-                  </ProfileProvider>
-                </BrowseProvider>
-              </SearchProvider>
+              <RoomsProvider>
+                <PrivateChatProvider>
+                  <SearchProvider>
+                    <BrowseProvider>
+                      <ProfileProvider>
+                        <WishlistProvider>
+                          <StatisticsProvider>
+                            <TransfersProvider>
+                              <SpectrumProvider>
+                                <ConfigBridgeSync />
+                                <ExitDialogHandler />
+                                <WindowGeometrySync />
+                                <NowPlayingSync />
+                                {children}
+                                <ToastHost />
+                                <GlobalContextMenu />
+                              </SpectrumProvider>
+                            </TransfersProvider>
+                          </StatisticsProvider>
+                        </WishlistProvider>
+                      </ProfileProvider>
+                    </BrowseProvider>
+                  </SearchProvider>
+                </PrivateChatProvider>
+              </RoomsProvider>
             </SessionProvider>
           </ConfigProvider>
         </ThemeProvider>

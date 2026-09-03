@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSession } from "@/lib/session";
 import { useConfig } from "@/lib/config/provider";
 import type { ChatEvent, RoomEvent, UserInfoEvent } from "@/lib/protocol";
@@ -23,30 +23,125 @@ export interface JoinedRoom {
   operators: string[];
 }
 
-export function useRooms() {
+interface RoomsApi {
+  roomList: { name: string; users: number; isPrivate?: boolean }[];
+  joinedRooms: Map<string, JoinedRoom>;
+  messages: Map<string, RoomMessage[]>;
+  activeRoom: string | null;
+  setActiveRoom: (r: string | null) => void;
+  joinRoom: (room: string) => void;
+  leaveRoom: (room: string) => void;
+  say: (room: string, message: string) => void;
+  setTicker: (room: string, msg: string) => void;
+  addOperator: (room: string, username: string) => void;
+  removeOperator: (room: string, username: string) => void;
+  cancelMembership: (room: string) => void;
+  cancelOwnership: (room: string) => void;
+  closeAll: () => void;
+  userStats: Map<string, { files: number; dirs: number }>;
+  refreshRoomList: () => void;
+}
+
+const RoomsContext = createContext<RoomsApi | null>(null);
+
+const JOINED_KEY = "nicotineHub.rooms.joined";
+const ACTIVE_KEY = "nicotineHub.rooms.active";
+
+function loadPersistedJoined(): string[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(JOINED_KEY) ?? localStorage.getItem(JOINED_KEY.replace("nicotineHub.", "nicotine."));
+    if (!raw) return null;
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return null;
+    return arr.filter((x) => typeof x === "string" && x.trim()).slice(0, 20) as string[];
+  } catch { return null; }
+}
+function loadPersistedActive(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const ls = localStorage.getItem(ACTIVE_KEY) ?? sessionStorage.getItem("nicotineHub.activeRoom") ?? sessionStorage.getItem("nicotine.activeRoom");
+    if (ls && typeof ls === "string" && (ls as string).trim()) {
+      try { sessionStorage.removeItem("nicotineHub.activeRoom"); } catch {}
+      return ls as string;
+    }
+  } catch {}
+  return null;
+}
+function persistJoined(rooms: Map<string, JoinedRoom>) {
+  try { localStorage.setItem(JOINED_KEY, JSON.stringify(Array.from(rooms.keys()).slice(0, 20))); } catch {}
+}
+function persistActive(room: string | null) {
+  try {
+    if (room) localStorage.setItem(ACTIVE_KEY, room);
+    else localStorage.removeItem(ACTIVE_KEY);
+    // also keep sessionStorage for legacy
+    if (room) try { sessionStorage.setItem("nicotineHub.activeRoom", room); } catch {}
+  } catch {}
+}
+
+export function RoomsProvider({ children }: { children: ReactNode }) {
   const { send, subscribe, state } = useSession();
   const { settings } = useConfig();
   const [roomList, setRoomList] = useState<{ name: string; users: number; isPrivate?: boolean }[]>([]);
-  const [joinedRooms, setJoinedRooms] = useState<Map<string, JoinedRoom>>(() => new Map());
+  const [joinedRooms, setJoinedRooms] = useState<Map<string, JoinedRoom>>(() => {
+    const persisted = loadPersistedJoined();
+    if (persisted && persisted.length) {
+      const m = new Map<string, JoinedRoom>();
+      for (const name of persisted) m.set(name, { name, users: [], tickers: [], operators: [] });
+      return m;
+    }
+    return new Map();
+  });
   const [messages, setMessages] = useState<Map<string, RoomMessage[]>>(() => new Map());
   const [userStats, setUserStats] = useState<Map<string, { files: number; dirs: number }>>(() => new Map());
-  const [activeRoom, setActiveRoom] = useState<string | null>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = (sessionStorage.getItem("nicotineHub.activeRoom") ?? sessionStorage.getItem("nicotine.activeRoom"));
-        if (saved) {
-          sessionStorage.removeItem("nicotineHub.activeRoom");
-          return saved;
-        }
-      } catch {}
+  const [activeRoom, setActiveRoomState] = useState<string | null>(() => loadPersistedActive());
+
+  const joinedRoomsRef = useRef(joinedRooms);
+  joinedRoomsRef.current = joinedRooms;
+  const activeRoomRef = useRef(activeRoom);
+  activeRoomRef.current = activeRoom;
+
+  const setActiveRoom = useCallback((r: string | null) => {
+    setActiveRoomState(r);
+    persistActive(r);
+  }, []);
+
+  // persist joined rooms
+  useEffect(() => { persistJoined(joinedRooms); }, [joinedRooms]);
+  useEffect(() => { persistActive(activeRoom); }, [activeRoom]);
+
+  // clear on logout (both demo and real) — not on initial mount
+  const hasConnectedRef = useRef(false);
+  useEffect(() => {
+    if (state.status === "connected") hasConnectedRef.current = true;
+    if (state.status !== "idle") return;
+    if (!hasConnectedRef.current) return;
+    setJoinedRooms(new Map());
+    setMessages(new Map());
+    setActiveRoomState(null);
+    try { localStorage.removeItem(JOINED_KEY); localStorage.removeItem(ACTIVE_KEY); } catch {}
+    try { sessionStorage.removeItem("nicotineHub.activeRoom"); } catch {}
+  }, [state.status]);
+
+  // Rejoin persisted rooms on reconnect (like browse tabs)
+  const rejoinRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (state.status !== "connected") return;
+    const toJoin = Array.from(joinedRoomsRef.current.keys());
+    for (const room of toJoin) {
+      if (rejoinRef.current.has(room.toLowerCase())) continue;
+      rejoinRef.current.add(room.toLowerCase());
+      // stagger to avoid burst
+      const idx = toJoin.indexOf(room);
+      setTimeout(() => {
+        try { send({ type: "chat:room", action: "join", room }); } catch {}
+        setTimeout(() => rejoinRef.current.delete(room.toLowerCase()), 2000);
+      }, idx * 250);
     }
-    return null;
-  });
+  }, [state.status, send]);
 
   useEffect(() => {
-    // Subscribe from mount (not only when connected): the server sends room-list
-    // once right after login, before React re-renders on login:result — gating on
-    // `connected` systematically drops it and the room list stays empty forever.
     const unsub = subscribe((msg) => {
       if (msg.type === "room:event") {
         const ev = (msg as unknown as { event: RoomEvent }).event;
@@ -58,7 +153,6 @@ export function useRooms() {
               const owned = ((data as unknown as { owned?: { name: string; users: number }[] }).owned || []) as { name: string; users: number }[];
               const member = ((data as unknown as { member?: { name: string; users: number }[] }).member || []) as { name: string; users: number }[];
               const privateNames = new Set([...owned, ...member].map((r) => r.name.toLowerCase()));
-              // Merge public + private, tag private for sorting offset like nicotine-plus PRIVATE_USERS_OFFSET=10M
               const merged = [
                 ...rooms.map((r) => ({ ...r, isPrivate: privateNames.has(r.name.toLowerCase()) })),
                 ...owned.filter((r) => !rooms.some((x) => x.name.toLowerCase() === r.name.toLowerCase())).map((r) => ({ ...r, isPrivate: true })),
@@ -70,7 +164,7 @@ export function useRooms() {
           }
           case "join-room": {
             const data = ev.data as { room?: string; users?: { username?: string }[]; owner?: string; operators?: string[] } | undefined;
-            const roomName = (ev.room || data?.room || activeRoom || "").toString();
+            const roomName = (ev.room || data?.room || activeRoomRef.current || "").toString();
             if (!roomName) break;
             const users = (data as unknown as { users?: Array<{ username: string }> })?.users?.map((u) => u.username) || [];
             const owner = (data as { owner?: string })?.owner;
@@ -80,7 +174,7 @@ export function useRooms() {
               next.set(roomName, { name: roomName, users, tickers: next.get(roomName)?.tickers || [], owner, isPrivate: (data as { isPrivate?: boolean })?.isPrivate, operators });
               return next;
             });
-            if (!activeRoom) setActiveRoom(roomName);
+            if (!activeRoomRef.current) setActiveRoom(roomName);
             break;
           }
           case "user-joined-room":
@@ -112,7 +206,7 @@ export function useRooms() {
             break;
           }
           case "room-members": {
-            const room = ev.room || activeRoom;
+            const room = ev.room || activeRoomRef.current;
             const members = (ev.data as string[] | undefined) || [];
             if (!room) break;
             setJoinedRooms((prev) => {
@@ -147,7 +241,7 @@ export function useRooms() {
             break;
           }
           case "room-operators": {
-            const room = ev.room || activeRoom;
+            const room = ev.room || activeRoomRef.current;
             const ops = (ev.data as string[] | undefined) || [];
             if (!room) break;
             setJoinedRooms((prev) => {
@@ -297,9 +391,8 @@ export function useRooms() {
       }
     });
     return unsub;
-  }, [subscribe, activeRoom, settings.words.censorwords, settings.words.censored, settings.logging.readroomlines]);
+  }, [subscribe, settings.words.censorwords, settings.words.censored, settings.logging.readroomlines]);
 
-  // Fetch UserStats (files count) for users in active room to show shares in right list
   const requestedStats = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (state.status !== "connected" || !activeRoom) return;
@@ -324,7 +417,7 @@ export function useRooms() {
         return next;
       });
     },
-    [send],
+    [send, setActiveRoom],
   );
 
   const leaveRoom = useCallback(
@@ -340,9 +433,9 @@ export function useRooms() {
         next.delete(room);
         return next;
       });
-      if (activeRoom === room) setActiveRoom(null);
+      if (activeRoomRef.current === room) setActiveRoom(null);
     },
-    [send, activeRoom],
+    [send, setActiveRoom],
   );
 
   const say = useCallback(
@@ -365,8 +458,6 @@ export function useRooms() {
     send({ type: "chat:room", action: "refreshList" });
   }, [send]);
 
-  // Fetch-on-mount: room-list events that arrived before this hook subscribed
-  // (e.g. login happened on another page) are lost — re-request when empty.
   const listRequested = useRef(false);
   useEffect(() => {
     if (state.status !== "connected" || roomList.length > 0 || listRequested.current) return;
@@ -380,13 +471,22 @@ export function useRooms() {
   const cancelOwnership = useCallback((room: string) => send({ type: "chat:room", action: "cancelOwnership", room } as unknown as never), [send]);
 
   const closeAll = useCallback(() => {
-    joinedRooms.forEach((_, room) => {
+    joinedRoomsRef.current.forEach((_, room) => {
       send({ type: "chat:room", action: "leave", room });
     });
     setJoinedRooms(new Map());
     setMessages(new Map());
     setActiveRoom(null);
-  }, [joinedRooms, send]);
+  }, [send, setActiveRoom]);
 
-  return { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, addOperator, removeOperator, cancelMembership, cancelOwnership, closeAll, userStats, refreshRoomList };
+  const value: RoomsApi = { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, addOperator, removeOperator, cancelMembership, cancelOwnership, closeAll, userStats, refreshRoomList };
+  return <RoomsContext.Provider value={value}>{children}</RoomsContext.Provider>;
 }
+
+export function useRooms(): RoomsApi {
+  const ctx = useContext(RoomsContext);
+  if (!ctx) throw new Error("useRooms must be used within RoomsProvider");
+  return ctx;
+}
+
+// Keep hook name stable for pages; they import useRooms from @/lib/rooms

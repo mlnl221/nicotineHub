@@ -62,9 +62,11 @@ export async function resolveSafePath(requestedPath: string, dataDirOverride?: s
   const joined = join(DATA_DIR, rel);
   const resolved = resolve(joined);
   const dataResolved = resolve(DATA_DIR);
-  // Containment check
-  if (resolved !== dataResolved && !resolved.startsWith(dataResolved + sep)) {
-    throw new Error(`Path traversal detected: ${requestedPath}`);
+  // Containment check — dataResolved "/" means host root, everything under "/" is allowed
+  if (dataResolved !== sep) {
+    if (resolved !== dataResolved && !resolved.startsWith(dataResolved + sep)) {
+      throw new Error(`Path traversal detected: ${requestedPath}`);
+    }
   }
   // If path exists and is symlink, check realpath containment as well
   try {
@@ -73,8 +75,10 @@ export async function resolveSafePath(requestedPath: string, dataDirOverride?: s
       if (lst.isSymbolicLink()) {
         const real = await realpath(resolved);
         const realResolved = resolve(real);
-        if (realResolved !== dataResolved && !realResolved.startsWith(dataResolved + sep)) {
-          throw new Error(`Symlink escapes browse root`);
+        if (dataResolved !== sep) {
+          if (realResolved !== dataResolved && !realResolved.startsWith(dataResolved + sep)) {
+            throw new Error(`Symlink escapes browse root`);
+          }
         }
         // Return real path's resolved? We keep resolved (logical) but ensure real is contained
       }
