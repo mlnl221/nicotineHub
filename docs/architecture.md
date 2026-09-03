@@ -10,7 +10,7 @@ The browser cannot open raw TCP; the bridge is the only SLSK speaker. JSON over 
 [ Browser (Next.js PWA) ] --WS JSON--> [ Bun bridge :8787 ] --TCP--> server.slsknet.org:2242
          |                    --HTTP--> [ Python worker :8789 ] --HTTP--> Discogs/Bandcamp/Apple/…
           |                                sox/flac/ffmpeg/numpy/mutagen (oxipng recompress skipped — not in image)
-         |                              \--volumes--> bridge-data:/data (RO) + spectrum-cache:/tmp/hub-spectrum
+         |                              \--volumes--> bridge-data:/data (RO)
          \--HTTP--> bridge GET /files/:token (finished downloads)
 
 Bridge peer legs: `--P--> peers (messages)`, `--F--> file (raw bytes)`, `--D--> distrib (leaf only)`.
@@ -80,7 +80,7 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 - `session.ts` — server socket + `startListener` (`P` vs `F` strict demux via `pendingFileTokens` only, no heuristic), peer states (`buf/initDone/isFileConn/fileToken`), idle sweep (2s init, 10s ghost, 60s max), `GetPeerAddress` cache 30m, search/browses, distributed leaf bootstrap (`HaveNoParent 71`, `PossibleParents 102` 10 dials, `BranchLevel/Root`, 15m watchdog), `PortMapper` (`portmapper.ts`, UPnP-only) on login/disconnect/port change
 - `shares.ts` — `ShareDB` (`DATA_DIR/shares.json`, in-memory folders, search, `buildSharedFileListResponse 5`/`FolderContents 36/37` zlib lvl4, `shouldThrottle` 400 ms)
 - `transfers.ts` — `TransferManager` (Map `id→Transfer`, queued/active, 2s `transfer:stats`, 300s `PlaceInQueue` poll, `INCOMPLETE<md5>` + atomic `downloads.json` + `GET /files/:token`)
-- `spectrum.ts` — **deleted (migrated to worker)**. Was: `SpectrumManager` (sox `2000×513` Full + `500×1025` Zoom, Kaiser `-z 120`, `oxipng -o 2`, `/tmp/hub-spectrum`, 2-concurrent queue, `sha256(token:mtime:size)` etag). Now: `apps/worker/spectrals.py` (own implementation, same output semantics).
+- `spectrum.ts` — **deleted (migrated to worker)**. Was: `SpectrumManager` (sox `2000×513` Full + `500×1025` Zoom, Kaiser `-z 120`, `oxipng -o 2`, `/tmp/spectrals`, 2-concurrent queue, `sha256(token:mtime:size)` etag). Now: `apps/worker/spectrals.py` (own implementation, same output semantics).
 - `portmapper.ts` — UPnP-only `PortMapper` (NATPMP removed; UPnP is the homelab default): SSDP multicast `239.255.255.250:1900`, SOAP `AddPortMapping`/`DeletePortMapping`, lease 43200 s / renewal 7200 s, `setPort`/`add`/`remove` like `pynicotine/portmapper.py:PortMapper`, `status` `{active,port,ip,error,lastSuccessAt}` for diagnostics
 - `portchecker.ts` — `PortChecker` external host `https://www.slsknet.org/porttest.php?port=%s` (like `pynicotine/portchecker.py`, timeout 5 s, checks `"port/tcp open"` vs `"closed"`), singleton `portChecker`, `/api/portchecker?port=` endpoint
 - `server.ts` — `Bun.serve` (`/ws` zod, `/health` (plain vs `?json`), `/logs`, `/diagnostics`, `/files/:token` sanitized `Content-Disposition`, `/api/files` host-root browser, `/spectrum/*` → `410 moved to worker`, `/plugins` list only, `/portchecker` (open), `/api/upnp/status`) + token via `?token`/`Authorization`/`Sec-WebSocket-Protocol` + CORS/CSP (`getCorsHeaders`, `SECURITY_HEADERS`) + 1 MB WS guard + 5-min `browseCache` (search cache disabled). No audio tooling, no external fetch (SLSK-only).
@@ -96,7 +96,6 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 | `DATA_DIR` | `/data` | Volume (`/data` in compose; dev falls back to `./data` or `/tmp/nicotine-hub` if `/data` not writable) |
 | `BRIDGE_TOKEN` | *(open)* | `?token` / `Bearer` / `Sec-WebSocket-Protocol` → 401 on `/ws`, `/files/:token`, `/api/files`, `/spectrum/*`, `/logs`, `/diagnostics`, `/plugins`, `/upnp/status`, `/interfaces` (`/portchecker` stays open; `/health?json` returns limited fields without token) |
 | `SHARED_DIRS` | *(unset)* | `:` list auto-scanned via `ShareDB.scanFsShares` (falls back to `DATA_DIR/shared` when unset) |
-| `SHARES_DIR` | `DATA_DIR` | Persist path for `shares.json` |
 | `UPLOAD_LIMIT`/`DOWNLOAD_LIMIT` | `0` | KB/s (`0` = unlimited), aliases `UPLOADLIMIT`/`DOWNLOADLIMIT`; TokenBucket shaping split per active transfer + `DOWNLOAD_LIMIT` stored in `transfer:stats` 2 s |
 | `ENABLE_SERVER_PING` | `1` | `0` disables `ServerPing 32` fallback |
 | `ALLOWED_ORIGINS` | *(open)* | CSV — if set, `getCorsHeaders` (`server.ts:336`) only allows listed `Origin` (homelab lock-down) |
@@ -113,7 +112,7 @@ Keeps CPU/IO-heavy work off the SLSK event loop. Own code throughout (scraper *p
 
 - `GET /health` (open) → `{ok, ts, uptime, version, sources:[discogs,bandcamp,apple,qobuz,tidal,musicbrainz,deezer,beatport], queueDepth}`
 - `POST /scrape {url}` → `{artist, album, year, track_count, query, source, confidence, url}` (`422` no-scraper/unreachable, SSRF private-IP reject, 10 s timeout, random UA, Qobuz/Tidal need env tokens). Web `SearchBar` paste-link calls this, then `search:global` on `query`.
-- `POST /spectrum/request {fileName, size?, token?}` → `{etag, hash, urls:{full,zoom}, fromCache}`; `GET /spectrum/{stem}/full|zoom` (PNG, `ETag`, `If-None-Match` → 304); `GET /spectrum/{stem}` (JSON). Reads `bridge-data:/data` RO, writes shared `spectrum-cache:/tmp/hub-spectrum`. See `docs/spectrum.md`.
+- `POST /spectrum/request {fileName, size?, token?}` → `{etag, hash, urls:{full,zoom}, fromCache}`; `GET /spectrum/{stem}/full|zoom` (PNG, `ETag`, `If-None-Match` → 304); `GET /spectrum/{stem}` (JSON). Reads `bridge-data:/data` RO, writes ephemeral `/tmp/spectrals` (no volume). See `docs/spectrum.md`.
 - `POST /tag {fileName}` → `{tags, coverArtApplied, tracklist}` (mutagen read, full TinyTag parity: artist/album/title/track/disc/genre/year/composer/albumartist + audio props). `POST /tag/write {fileName, tags, coverArt?}` edits via mutagen; `POST /tag/scrape {fileName, url}` scrapes then writes; `POST /tag/bulk {files[]}` for own-file browser.
 - `POST /verify {fileName}` → `{flacOk, upconvert, mqa, logScore, logChecksum, durationMismatch}` (honest subset today: `flacOk` + MQA tag sniff; the rest `null` until spectral checks land).
 - `POST /analyze {fileName}` → `{bitrate, vbr, sampleRate, bitDepth, cutoffHz, likelyTranscode, confidence}` (mutagen + ffmpeg-snippet FFT knee when `numpy` present, else `null`s). `POST /analyze/bulk` for share-scan enrichment.

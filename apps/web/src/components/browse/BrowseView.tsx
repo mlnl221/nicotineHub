@@ -9,6 +9,7 @@ import { isDemo } from "@/lib/demo";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { browseFolderMenu, browseFileMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
+import { useBulkSelection } from "@/lib/bulkSelection";
 
 const PAGE_SIZE = 50;
 
@@ -38,6 +39,8 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const [propsFile, setPropsFile] = useState<null | { name: string; size: number; ext: string; attrs: Array<[number, number]>; folder: string }>(null);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const bulk = useBulkSelection();
+  const [selectMode, setSelectMode] = useState(false);
 
   // auto-select first folder when folders load — respects userbrowse.expand_folders (nicotine parity)
   useEffect(() => {
@@ -55,9 +58,9 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   }, [folders, selectedFolder]);
 
   const filteredFolders = useMemo(() => {
-    if (!query) return folders;
-    const q = query.toLowerCase();
-    return folders.filter((f) => f.name.toLowerCase().includes(q) || f.files.some((file) => file.name.toLowerCase().includes(q)));
+    const base = !query ? folders : folders.filter((f) => f.name.toLowerCase().includes(query.toLowerCase()) || f.files.some((file) => file.name.toLowerCase().includes(query.toLowerCase())));
+    // Parent above children (lexicographic) — filesystem walk order can emit child before parent, making tree illogical
+    return [...base].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
   }, [folders, query]);
 
   // Subdirectory tree: depth + parent collapse (minimal + optional tree)
@@ -119,6 +122,8 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
 
   useEffect(() => { setVisibleFolderCount(PAGE_SIZE); }, [visibleTreeFolders.length, filteredFolders.length, query, expandedPaths.size]);
   useEffect(() => { setVisibleFileCount(PAGE_SIZE); }, [visibleFiles.length, activeFolder?.name, fileQuery]);
+  // Reset selection when folder changes (prevents stale selection across folders)
+  useEffect(() => { bulk.clear(); }, [activeFolder?.name]);
 
   useEffect(() => {
     if (visibleFolderCount >= visibleTreeFolders.length) return;
@@ -169,6 +174,31 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
 
   const pagedFolders = useMemo(() => visibleTreeFolders.slice(0, visibleFolderCount), [visibleTreeFolders, visibleFolderCount]);
   const pagedFiles = useMemo(() => sortedFiles.slice(0, visibleFileCount), [sortedFiles, visibleFileCount]);
+
+  // Download helpers (reuse stagger pattern to avoid MAX_SOCKETS burst)
+  const downloadFolder = (folderName: string) => {
+    if (isDemo) return;
+    const targetFolders = folders.filter((f) => f.name === folderName || f.name.startsWith(folderName + "\\"));
+    const files = targetFolders.flatMap((f) => f.files);
+    files.forEach((file, idx) => {
+      const shortName = file.name.split(/[\\\/]/).pop() || file.name;
+      const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : `${folderName}\\${shortName}`;
+      setTimeout(() => requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName }), idx * 150);
+    });
+  };
+  const downloadSelected = () => {
+    if (isDemo || !bulk.selected.size) return;
+    const filesByPath = new Map<string, typeof visibleFiles[0]>();
+    for (const f of folders) for (const file of f.files) filesByPath.set(file.name, file);
+    let i = 0;
+    for (const path of bulk.selected) {
+      const file = filesByPath.get(path);
+      if (!file) continue;
+      const shortName = file.name.split(/[\\\/]/).pop() || file.name;
+      const vp = file.name;
+      setTimeout(() => requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName }), i++ * 150);
+    }
+  };
 
   const totalSize = folders.reduce((acc, f) => acc + f.files.reduce((a, file) => a + (file.size || 0), 0), 0);
   const totalFiles = folders.reduce((acc, f) => acc + f.files.length, 0);
@@ -264,8 +294,9 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                   const isExpanded = expandedPaths.has(f.name);
                   const isSelected = selectedFolder === f.name;
                     return (
-                    <div
+                      <div
                       key={f.name}
+                      title={f.name}
                       className={`flex w-full min-w-max items-center gap-1 rounded-lg text-left transition-colors ${isSelected ? "bg-primary-fixed/20 text-primary border border-primary/10" : "hover:bg-surface-container-low text-on-surface-variant"}`}
                       style={{ paddingLeft: `${8 + depth * 16}px`, paddingRight: '8px', paddingTop: '6px', paddingBottom: '6px' }}
                     >
@@ -296,13 +327,13 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                         }}
                         onContextMenu={(e) => {
                           e.preventDefault();
-                          setMenuAnchor({ x: e.clientX, y: e.clientY, items: browseFolderMenu(username, f.name, false) });
+                          setMenuAnchor({ x: e.clientX, y: e.clientY, items: browseFolderMenu(username, f.name, false, { onDownloadFolder: downloadFolder }) });
                         }}
                         className="flex flex-1 items-center gap-3 min-w-0 text-left"
                       >
                         <span className="material-symbols-outlined text-[20px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>{hasChildren ? (isExpanded ? "folder_open" : "folder") : "folder"}</span>
                         <div className="min-w-0 flex-1">
-                          <p className="whitespace-nowrap font-body text-sm font-medium" title={f.name.split("\\").pop() || f.name}>{f.name.split("\\").pop() || f.name}</p>
+                          <p className="whitespace-nowrap font-body text-sm font-medium" title={f.name}>{f.name.split("\\").pop() || f.name}</p>
                           <p className="truncate font-label text-[11px] text-on-surface-variant">{f.files.length} files</p>
                         </div>
                       </button>
@@ -329,6 +360,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
           <div className="border-b border-surface-container-highest/20 bg-surface-container-lowest p-3 md:hidden">
             <select
               value={selectedFolder || ""}
+              title={selectedFolder || undefined}
               onChange={(e) => {
                 setSelectedFolder(e.target.value);
                 openFolder(tab.id, e.target.value);
@@ -366,20 +398,31 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
           ) : (
             <div className="flex flex-1 flex-col overflow-hidden min-h-0">
               <div className="flex items-center justify-between border-b border-surface-container-highest/20 bg-surface-container-low px-4 py-3 gap-2">
-                <h2 className="truncate font-label text-xs uppercase tracking-widest text-on-surface font-bold">{activeFolder.name}</h2>
+                <h2 className="truncate font-label text-xs uppercase tracking-widest text-on-surface font-bold" title={activeFolder.name}>{activeFolder.name}</h2>
                 <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => setSelectMode((v) => !v)}
+                    className={`shrink-0 rounded-full px-3 py-1.5 font-label text-xs font-bold ${selectMode ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant"}`}
+                    aria-pressed={selectMode}
+                  >
+                    {selectMode ? "Done" : "Select"}
+                  </button>
                   <span className="font-label text-xs text-on-surface-variant hidden sm:inline">{visibleFiles.length} files</span>
+                  {selectMode && bulk.size > 0 ? (
+                    <button
+                      disabled={isDemo}
+                      onClick={downloadSelected}
+                      className={`shrink-0 rounded-full px-3 py-1.5 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline cursor-not-allowed" : "bg-primary text-on-primary hover:bg-primary-container"}`}
+                    >
+                      Download {bulk.size} Selected
+                    </button>
+                  ) : null}
                   <button
                     disabled={isDemo}
-                    title={isDemo ? "Disabled in demo" : `Download all ${visibleFiles.length} files`}
+                    title={isDemo ? "Disabled in demo" : `Download all ${visibleFiles.length} files (incl. subfolders)`}
                     onClick={() => {
                       if (isDemo) return;
-                      // batch with small delay to avoid MAX_SOCKETS burst
-                      visibleFiles.forEach((file, idx) => {
-                        const shortName = file.name.split(/[\\\/]/).pop() || file.name;
-                        const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : `${activeFolder.name}\\${shortName}`;
-                        setTimeout(() => requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName }), idx * 150);
-                      });
+                      downloadFolder(activeFolder.name);
                     }}
                     className={`rounded-full px-3 py-1.5 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline cursor-not-allowed" : "bg-primary text-on-primary hover:bg-primary-container"}`}
                   >
@@ -392,6 +435,24 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                   </div>
                 </div>
               </div>
+              {selectMode && visibleFiles.length > 0 ? (
+                <div className="flex items-center gap-3 px-4 py-2 bg-surface-container-low border-b border-surface-container-highest/20">
+                  <input
+                    type="checkbox"
+                    checked={visibleFiles.length > 0 && visibleFiles.every((f) => bulk.has(f.name))}
+                    ref={(el) => { if (el) (el as HTMLInputElement).indeterminate = bulk.size > 0 && !visibleFiles.every((f) => bulk.has(f.name)) && visibleFiles.some((f) => bulk.has(f.name)); }}
+                    onChange={() => {
+                      const all = visibleFiles.every((f) => bulk.has(f.name)) ? bulk.clear() : bulk.selectAll(visibleFiles.map((f) => f.name));
+                      void all;
+                    }}
+                    className="h-4 w-4 shrink-0 accent-primary"
+                    aria-label="Select all"
+                  />
+                  <span className="font-label text-xs">Select all displayed ({visibleFiles.length})</span>
+                  <span className="ml-auto font-label text-[11px] text-on-surface-variant">{bulk.size} selected</span>
+                  <button onClick={() => bulk.clear()} className="rounded-full bg-surface-container-high px-3 py-1 text-[11px]">Clear</button>
+                </div>
+              ) : null}
               <div key={activeFolder.name} className="flex-1 overflow-y-auto overscroll-contain min-h-0" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
                 {visibleFiles.length === 0 ? (
                   <p className="p-6 font-body text-sm text-outline">No files match &quot;{fileQuery}&quot; in this folder.</p>
@@ -404,8 +465,39 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                         const bitrate = attrsMap.get(0);
                         const length = attrsMap.get(1);
                         const isEven = idx % 2 === 0;
+                        const checked = bulk.has(file.name);
                         return (
-                          <li key={file.name} onContextMenu={(e) => { e.preventDefault(); const shortName = file.name.split(/[\\\/]/).pop() || file.name; const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : `${activeFolder!.name}\\${shortName}`; setMenuAnchor({ x: e.clientX, y: e.clientY, items: browseFileMenu(username, { path: vp, filename: shortName }, false) }); }} className={`flex items-center gap-3 px-4 py-3 ${isEven ? "bg-surface-container-lowest dark:bg-surface-container-high" : "bg-surface-container-low dark:bg-surface-container-highest/40"} hover:bg-surface-container-high/40 dark:hover:bg-surface-variant/40`}>
+                          <li
+                            key={file.name}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              const shortName2 = file.name.split(/[\\\/]/).pop() || file.name;
+                              const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : `${activeFolder!.name}\\${shortName2}`;
+                              setMenuAnchor({
+                                x: e.clientX, y: e.clientY,
+                                items: browseFileMenu(username, { path: vp, filename: shortName2 }, false, {
+                                  onDownload: () => requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName2 }),
+                                  onDownloadFolder: downloadFolder,
+                                  selectedCount: bulk.size,
+                                  onDownloadSelected: downloadSelected,
+                                }),
+                              });
+                            }}
+                            className={`flex items-center gap-3 px-4 py-3 ${checked ? "bg-primary-fixed/15 border-l-2 border-primary" : isEven ? "bg-surface-container-lowest dark:bg-surface-container-high" : "bg-surface-container-low dark:bg-surface-container-highest/40"} hover:bg-surface-container-high/40 dark:hover:bg-surface-variant/40`}
+                          >
+                            {selectMode ? (
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => bulk.toggle(file.name)}
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  // Shift+click range like FileExplorer — ev has shiftKey
+                                  if ((ev as unknown as { shiftKey?: boolean }).shiftKey) bulk.toggleRange(file.name, visibleFiles.map((f) => f.name));
+                                }}
+                                className="h-4 w-4 shrink-0 accent-primary"
+                              />
+                            ) : null}
                             <span className="material-symbols-outlined text-outline text-[20px]">audio_file</span>
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-body text-sm font-medium text-on-surface" title={file.name}>

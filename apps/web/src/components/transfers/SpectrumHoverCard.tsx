@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSpectrum } from "@/lib/spectrum";
+import { getWorkerHttpBase } from "@/lib/worker";
 
 type Props = {
   transferId: string;
@@ -40,9 +41,11 @@ export function SpectrumHoverCard({ transferId, fileName, children }: Props) {
     if (hasSpectrum) setModal(true);
   };
 
-  const imgSrc = entry?.fullBlobUrl || (entry?.fullUrl ? entry.fullUrl : null);
-  const fullSrc = entry?.fullBlobUrl || null;
-  const zoomSrc = entry?.zoomBlobUrl || null;
+  const base = getWorkerHttpBase();
+  const abs = (u?: string) => (u ? (u.startsWith("blob:") || u.startsWith("http") ? u : `${base}${u}`) : null);
+  const imgSrc = entry?.fullBlobUrl || abs(entry?.fullUrl);
+  const fullSrc = entry?.fullBlobUrl || abs(entry?.fullUrl);
+  const zoomSrc = entry?.zoomBlobUrl || abs(entry?.zoomUrl);
 
   // Preload on hover open
   useEffect(() => {

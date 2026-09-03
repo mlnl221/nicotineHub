@@ -5,7 +5,7 @@
 
 /**
  * ShareDB — peer shares DB, Phase 3.
- * In-memory, persisted under DATA_DIR/shares.json (or SHARES_DIR if set).
+ * In-memory, persisted under CONFIG_DIR/shares.json ().
  * Handles SharedFileList 4/5 and FolderContents 36/37, respects ExcludedSearchPhrases.
  * Also handles inbound FileSearch (server 26) filtering.
  */
@@ -37,8 +37,11 @@ export enum PermissionLevel {
 function defaultDataDir(): string {
   return process.env.DATA_DIR || "/data";
 }
+function defaultConfigDir(): string {
+  return process.env.CONFIG_DIR || "/config";
+}
 function sharesPath(): string {
-  const base = process.env.SHARES_DIR || process.env.DATA_DIR || "/data";
+  const base = process.env.CONFIG_DIR || "/config";
   try { mkdirSync(base, { recursive: true }); } catch {}
   return join(base, "shares.json");
 }
@@ -124,32 +127,6 @@ export class ShareDB {
   private load() {
     const p = sharesPath();
     if (!existsSync(p)) {
-      // fallback DATA_DIR/shares.json
-      const alt = join(this.dataDir, "shares.json");
-      if (existsSync(alt)) {
-        try {
-          const raw = JSON.parse(readFileSync(alt, "utf8"));
-          if (Array.isArray(raw.folders)) {
-            this.folders = raw.folders;
-            // legacy file has no split — treat as public
-            this.publicFolders = raw.folders;
-            if (Array.isArray(raw.publicFolders)) this.publicFolders = raw.publicFolders;
-            if (Array.isArray(raw.buddyFolders)) this.buddyFolders = raw.buddyFolders;
-            if (Array.isArray(raw.trustedFolders)) this.trustedFolders = raw.trustedFolders;
-            if (typeof raw.revealBuddyShares === "boolean") this.revealBuddyShares = raw.revealBuddyShares;
-            if (typeof raw.revealTrustedShares === "boolean") this.revealTrustedShares = raw.revealTrustedShares;
-            if (Array.isArray(raw.shareFilters)) { this.shareFilters = raw.shareFilters; this.compileShareFilters(); }
-            this.loadCustomRoots(raw);
-          } else if (Array.isArray(raw.publicFolders)) {
-            this.publicFolders = raw.publicFolders;
-            this.buddyFolders = raw.buddyFolders || [];
-            this.trustedFolders = raw.trustedFolders || [];
-            this.loadCustomRoots(raw);
-          } else {
-            this.loadCustomRoots(raw);
-          }
-        } catch {}
-      }
       return;
     }
     try {
@@ -199,9 +176,7 @@ export class ShareDB {
       mkdirSync(join(p, ".."), { recursive: true });
       const payload = { folders: this.folders, publicFolders: this.publicFolders, buddyFolders: this.buddyFolders, trustedFolders: this.trustedFolders, shareFilters: this.shareFilters, revealBuddyShares: this.revealBuddyShares, revealTrustedShares: this.revealTrustedShares, customRoots: this.serializeCustomRoots() };
       writeFileSync(p, JSON.stringify(payload, null, 2));
-      // also mirror to DATA_DIR/shares.json
-      const alt = join(this.dataDir, "shares.json");
-      if (alt !== p) writeFileSync(alt, JSON.stringify(payload, null, 2));
+      // strict: no mirror to DATA_DIR
     } catch {}
   }
 
@@ -483,7 +458,7 @@ export class ShareDB {
 
   private resolveSharedDirs(): string[] {
     // Env SHARED_DIRS=" /data/shared:/data/music" or SHARES_DIR
-    const env = process.env.SHARED_DIRS || process.env.SHARES_DIR || "";
+    const env = process.env.SHARED_DIRS || "";
     if (env) return env.split(":").map(s => s.trim()).filter(Boolean);
     const candidates = [join(this.dataDir, "shared"), join(this.dataDir, "shares"), "/data/shared"];
     return candidates.filter(p => existsSync(p));
@@ -897,7 +872,7 @@ export class ShareDB {
     const compressed = deflateSync(inner, { level: 4 });
     // Raw cache for BrowseResponse (Soulseek.NET RawBrowseResponse disk-cache) — persist compressed
     try {
-      const cachePath = join(this.dataDir, "browse.cache");
+      const cachePath = join(defaultConfigDir(), "browse.cache");
       writeFileSync(cachePath + ".tmp", compressed);
       // atomic rename? keep simple
       try { const { renameSync } = require("node:fs") as typeof import("node:fs"); renameSync(cachePath + ".tmp", cachePath); } catch { try { writeFileSync(cachePath, compressed); } catch {} }
@@ -905,26 +880,34 @@ export class ShareDB {
     return frameMessage(PEER_MESSAGE_CODES.sharedFileListResponse, compressed);
   }
 
-  /** Build FolderContentsResponse 37 — respects PermissionLevel */
+  /** Build FolderContentsResponse 37 — respects PermissionLevel.
+   * SLSKPROTOCOL.md Peer Code 37: token + folder + nfolders + [dir + nfiles + files].
+   * The response covers the folder "with all subfolders", so include descendant
+   * virtual paths (dir + "\\" prefix) alongside the exact match. */
   buildFolderContentsResponse(token: number, dir: string, permission: PermissionLevel = PermissionLevel.PUBLIC): Buffer {
     const folders = this.getFoldersForPermission(permission);
-    const folder = folders.find(f => f.name === dir);
-    const files = folder ? [...folder.files].sort((a,b)=> a.name.localeCompare(b.name)) : [];
+    const matches = folders.filter((f) => f.name === dir || f.name.startsWith(dir + "\\"))
+      .sort((a, b) => a.name.localeCompare(b.name));
     const parts: Buffer[] = [];
     parts.push(packUint32(token >>> 0));
     parts.push(packString(dir));
-    parts.push(packUint32(files.length));
-    for (const f of files) {
-      parts.push(Buffer.from([1]));
-      parts.push(packString(f.name));
-      const sz = typeof f.size === "bigint" ? f.size : BigInt(f.size);
-      parts.push(packUint64(sz));
-      parts.push(packString(f.ext || ""));
-      const attrs = f.attrs || [];
-      parts.push(packUint32(attrs.length));
-      for (const [type,val] of attrs) {
-        parts.push(packUint32(type));
-        parts.push(packUint32(val));
+    parts.push(packUint32(matches.length));
+    for (const folder of matches) {
+      const files = [...folder.files].sort((a, b) => a.name.localeCompare(b.name));
+      parts.push(packString(folder.name));
+      parts.push(packUint32(files.length));
+      for (const f of files) {
+        parts.push(Buffer.from([1]));
+        parts.push(packString(f.name));
+        const sz = typeof f.size === "bigint" ? f.size : BigInt(f.size);
+        parts.push(packUint64(sz));
+        parts.push(packString(f.ext || ""));
+        const attrs = f.attrs || [];
+        parts.push(packUint32(attrs.length));
+        for (const [type, val] of attrs) {
+          parts.push(packUint32(type));
+          parts.push(packUint32(val));
+        }
       }
     }
     const inner = Buffer.concat(parts);

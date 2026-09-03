@@ -84,7 +84,7 @@ After a download finishes, right-click the card on **`/downloads`** → **Analyz
 - **Full** `2000×513` `-z 120` Kaiser (`remix 1`) — whole file
 - **Zoom** `500×1025` `-z 120` Kaiser `-S <mid> -d 0:02` — 2-second slice from the middle (like salmon’s `calculateZoomStartpoint`)
 
-Images are `oxipng -o 2 --strip all` compressed and stored **only in `/tmp/hub-spectrum`** in the shared `spectrum-cache` volume (wiped on reboot / `docker restart`). The web shows a **badge `SPECTRUM ✓`** on the card, **hover preview** (desktop, Full) with instant cache via blob URL / `ETag`, and a **modal** with tabs for Full + Zoom, downloads, and a tip about lossy cutoffs (~16 kHz). While generating you see `Generating spectrum…`; on error the card shows the reason. See [`docs/spectrum.md`](docs/spectrum.md) and [`docs/architecture.md#transfers--spectrum`](docs/architecture.md#transfers--spectrum).
+Images are `oxipng -o 2 --strip all` compressed and stored **only in `/tmp/spectrals`** (ephemeral `/tmp/spectrals`, no volume — regenerated on demand, wiped on reboot/restart). The web shows a **badge `SPECTRUM ✓`** on the card, **hover preview** (desktop, Full) with instant cache via blob URL / `ETag`, and a **modal** with tabs for Full + Zoom, downloads, and a tip about lossy cutoffs (~16 kHz). While generating you see `Generating spectrum…`; on error the card shows the reason. See [`docs/spectrum.md`](docs/spectrum.md) and [`docs/architecture.md#transfers--spectrum`](docs/architecture.md#transfers--spectrum).
 
 ---
 
@@ -92,9 +92,9 @@ Images are `oxipng -o 2 --strip all` compressed and stored **only in `/tmp/hub-s
 
 ```
 apps/bridge  — Bun bridge  (WebSocket `/ws` + `/health` + `/files/:token` + volume `DATA_DIR`, SLSK-only)
-apps/worker  — Python FastAPI (scrape/spectrum/tag on `:8789`, `bridge-data:/data:ro` + `spectrum-cache`)
+apps/worker  — Python FastAPI (scrape/spectrum/tag on `:8789`, `bridge-data:/data:ro`)
 apps/web     — Next.js 15 PWA
-compose.yaml — web:3000 + bridge:8787/60754 + worker:8789 → bridge-data:/data + spectrum-cache
+compose.yaml — web:3000 + bridge:8787/60754 + worker:8789 → bridge-data:/data
 ```
 
 ---

@@ -148,6 +148,8 @@ export interface BrowseEvent {
   type: "browse-shares" | "browse-folder" | "browse-error";
   username: string;
   folders?: import("./soulseek.ts").BrowseFolderEntry[];
+  /** Locked (private) dirs from SharedFileListResponse trailing block */
+  lockedFolders?: import("./soulseek.ts").BrowseFolderEntry[];
   folder?: string;
   token?: number;
   files?: import("./soulseek.ts").BrowseFileEntry[];
@@ -2403,8 +2405,8 @@ export class SoulseekSession {
           const parsed = parseSharedFileListResponse(msg.payload);
           const pending = this.pendingBrowseShares.get(username.toLowerCase());
           if (pending) { clearTimeout(pending.timer); this.pendingBrowseShares.delete(username.toLowerCase()); }
-          logger.info("browse", "sharedFileListResponse success", { username, folders: parsed.folders.length });
-          this.emitBrowse({ type: "browse-shares", username, folders: parsed.folders });
+          logger.info("browse", "sharedFileListResponse success", { username, folders: parsed.folders.length, locked: parsed.lockedFolders.length });
+          this.emitBrowse({ type: "browse-shares", username, folders: parsed.folders, lockedFolders: parsed.lockedFolders });
           try { (peer as Socket).end(); } catch {}
           this.dequeuePendingSockets();
         } catch (e) { logger.warn("browse", "sharedFileListResponse parse fail", { username, error: (e as Error).message }); }
@@ -2420,7 +2422,7 @@ export class SoulseekSession {
           this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.folderContentsResponse);
           const pending = this.pendingBrowseFolder.get(parsed.token);
           if (pending) { clearTimeout(pending.timer); this.pendingBrowseFolder.delete(parsed.token); }
-          this.emitBrowse({ type: "browse-folder", username, token: parsed.token, folder: parsed.dir, files: parsed.files });
+          this.emitBrowse({ type: "browse-folder", username, token: parsed.token, folder: parsed.dir, files: parsed.files, folders: parsed.folders });
           try { (peer as Socket).end(); } catch {}
           this.dequeuePendingSockets();
         } catch {}
@@ -2670,7 +2672,22 @@ export class SoulseekSession {
   unwatchUser(username: string) { this.serverSocket?.write(buildUnwatchUser(username)); }
   getUserStatus(username: string): number | undefined { return this.userStatusCache.get(username.toLowerCase())?.status; }
   getCachedUserStatus(username: string): number | undefined { return this.getUserStatus(username); }
-  requestPeerAddress(username: string) { this.serverSocket?.write(buildGetPeerAddress(username)); }
+  requestPeerAddress(username: string) {
+    // Self needs no server lookup — answer locally via listener address
+    if (username.trim().toLowerCase() === this.username.trim().toLowerCase()) {
+      try {
+        const addr = this.userAddresses.get(this.username)?.addr;
+        if (addr) this.emit({ type: "peer-address", username, peerAddress: addr });
+        else {
+          const ip = this._localIpAddress || this.findLocalIpAddress() || "127.0.0.1";
+          const port = this._listenPort || 60754;
+          this.emit({ type: "peer-address", username, peerAddress: { ip, port } as never });
+        }
+      } catch {}
+      return;
+    }
+    this.serverSocket?.write(buildGetPeerAddress(username));
+  }
   requestUserInterests(username: string) { this.serverSocket?.write(buildUserInterests(username)); }
   requestRecommendations() { this.serverSocket?.write(frameMessage(SERVER_MESSAGE_CODES.recommendations, Buffer.alloc(0))); }
   requestGlobalRecommendations() { this.serverSocket?.write(frameMessage(SERVER_MESSAGE_CODES.globalRecommendations, Buffer.alloc(0))); }
@@ -2824,6 +2841,19 @@ export class SoulseekSession {
   }
 
   requestUserInfo(username: string): Promise<UserInfoResponseMessage> {
+    // Local shortcut for own profile — never traverse peer path for self
+    if (username.trim().toLowerCase() === this.username.trim().toLowerCase()) {
+      try {
+        let queuesize = this.profile.queuesize;
+        let slotsavail = this.profile.slotsavail;
+        try {
+          const getter = (this.opts as unknown as { getTransferStats?: () => { queuedUploads: number; activeUploads: number } }).getTransferStats;
+          if (getter) { const st = getter(); queuesize = st.queuedUploads; slotsavail = st.activeUploads < 3; }
+        } catch {}
+        return Promise.resolve({ ...this.profile, queuesize, slotsavail });
+      } catch {}
+      return Promise.resolve({ ...this.profile });
+    }
     return new Promise((resolve, reject) => {
       if (this.userInfoRequests.has(username)) { reject(new Error("Already requesting this user.")); return; }
       this.userInfoRequests.set(username, resolve);

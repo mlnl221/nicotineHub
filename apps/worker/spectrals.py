@@ -22,7 +22,7 @@ SOX_TIMEOUT = 90
 
 
 def spectrum_dir() -> Path:
-    return Path(os.environ.get("SPECTRUM_DIR", "/tmp/hub-spectrum"))
+    return Path(os.environ.get("SPECTRUM_DIR", "/tmp/spectrals"))
 
 
 def data_dir() -> Path:

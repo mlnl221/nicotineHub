@@ -43,6 +43,7 @@ LABEL org.opencontainers.image.source="https://github.com/mlnl221/nicotineHub"
 LABEL org.opencontainers.image.description="Nicotine Hub — GPL-3.0-or-later Soulseek bridge (port of Nicotine+)"
 LABEL org.opencontainers.image.version="${BUILD_TAG:-$TAG}"
 ENV NODE_ENV=production
+ENV CONFIG_DIR=/config
 ENV DATA_DIR=/data
 ENV TAG=${TAG}
 ENV BUILD_TAG=${BUILD_TAG:-$TAG}
@@ -61,7 +62,7 @@ COPY LICENSES ./LICENSES
 COPY ATTRIBUTION.md ./ATTRIBUTION.md
 # Spectrum/synth binaries (sox/flac/ffmpeg/oxipng) live in the worker image now;
 # the bridge stays minimal (SLSK-only). transfers.ts synth falls back gracefully.
-RUN mkdir -p $DATA_DIR $DATA_DIR/incomplete $DATA_DIR/downloads $DATA_DIR/uploads && chown -R bun:bun $DATA_DIR || chown -R 1000:1000 $DATA_DIR || true
+RUN mkdir -p $CONFIG_DIR $DATA_DIR $DATA_DIR/incomplete $DATA_DIR/downloads $DATA_DIR/uploads && chown -R bun:bun $CONFIG_DIR $DATA_DIR || chown -R 1000:1000 $CONFIG_DIR $DATA_DIR || true
 # default LISTEN_PORT 60754; host mapping uses LISTEN_PORT env
 EXPOSE 8787 60754
 CMD ["bun", "run", "dist/server.js"]

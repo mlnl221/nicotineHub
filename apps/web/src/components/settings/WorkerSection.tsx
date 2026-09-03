@@ -131,7 +131,7 @@ export function WorkerSection() {
     <div className="flex flex-col gap-6">
       <SectionCard
         title="Worker"
-        description="Metadata tokens for the worker service (paste-link scrape). Stored write-only in DATA_DIR/worker.json (0600) on the bridge host — values are never shown back. Service env vars win when set. Without tokens, Discogs/MusicBrainz/Bandcamp/Apple/Deezer still work anonymously; Qobuz/Tidal need theirs."
+        description="Metadata tokens for the worker service (paste-link scrape). Stored write-only in CONFIG_DIR/worker.json (0600) on the bridge host — values are never shown back. Service env vars win when set. Without tokens, Discogs/MusicBrainz/Bandcamp/Apple/Deezer still work anonymously; Qobuz/Tidal need theirs."
       >
         <div className="py-4 font-body text-xs text-on-surface-variant dark:text-outline">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">

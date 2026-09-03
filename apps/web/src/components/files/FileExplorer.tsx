@@ -9,7 +9,11 @@ import { BulkBar } from "@/components/tag/BulkBar";
 import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
 import { BulkScrapeModal } from "@/components/tag/BulkScrapeModal";
 import { useBulkSelection } from "@/lib/bulkSelection";
-import { bulkVerify, bulkAnalyze, bulkRequestSpectrum } from "@/lib/worker";
+import { bulkVerify, bulkAnalyze, bulkRequestSpectrum, verifyFile, analyzeFile, getWorkerHttpBase } from "@/lib/worker";
+import { ContextMenu } from "@/components/ui/ContextMenu";
+import { fileExplorerDirMenu, fileExplorerMenu } from "@/lib/context-menu/menus";
+import { useSpectrum } from "@/lib/spectrum";
+import { createPortal } from "react-dom";
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return "—";
@@ -56,9 +60,17 @@ export function FileExplorer({
   const bulk = useBulkSelection();
   const [bulkEditor, setBulkEditor] = useState(false);
   const [bulkScrape, setBulkScrape] = useState(false);
+  const [singleScrapeFile, setSingleScrapeFile] = useState<string | null>(null);
+  const [dirScrapeFiles, setDirScrapeFiles] = useState<string[] | null>(null);
+  const [dirLoading, setDirLoading] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ title: string; rows: Array<Record<string, unknown>> } | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const [focusedIdx, setFocusedIdx] = useState<number>(-1);
+  const { requestSpectrum, getEntry } = useSpectrum();
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; file: BridgeFileEntry } | null>(null);
+  const [spectrumModal, setSpectrumModal] = useState<{ file: BridgeFileEntry; activeTab: "full" | "zoom" } | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const fetchDir = useCallback(async (path: string) => {
     if (isDemo) {
@@ -98,6 +110,34 @@ export function FileExplorer({
   }, []);
 
   useEffect(() => { fetchDir(initialPath); }, [fetchDir, initialPath]);
+
+  const handleDirScrape = async (dir: BridgeFileEntry) => {
+    if (isDemo) {
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Demo", body: "Scrape Directory is disabled in demo" } }));
+      return;
+    }
+    setDirLoading(true);
+    try {
+      const url = bridgeFetchUrl(`/api/files?path=${encodeURIComponent(dir.path)}`);
+      const res = await fetch(url, { headers: bridgeFetchHeaders(), cache: "no-store" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error || `HTTP ${res.status}`);
+      }
+      const data = await res.json() as { entries: BridgeFileEntry[] };
+      const AUDIO = new Set(["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"]);
+      const audio = data.entries.filter((e) => e.type === "file" && AUDIO.has(e.name.split(".").pop()?.toLowerCase() ?? "")).map((e) => e.path).slice(0, 50);
+      if (!audio.length) {
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "No audio files", body: `No audio files in ${dir.name}` } }));
+        return;
+      }
+      setDirScrapeFiles(audio);
+    } catch (e) {
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Scrape Directory failed", body: e instanceof Error ? e.message : String(e) } }));
+    } finally {
+      setDirLoading(false);
+    }
+  };
 
   const breadcrumbs = (() => {
     if (current === "/") return [{ label: "⌂ /", path: "/" }];
@@ -172,6 +212,41 @@ export function FileExplorer({
     setBulkResult({ title: "Spectrum queue started", rows: ids.map((f) => ({ fileName: f, status: "queued" })) });
     const res = await bulkRequestSpectrum(ids.map((f) => ({ fileName: f })));
     setBulkResult({ title: `Spectrum — ${ids.length} files`, rows: res as unknown as Array<Record<string, unknown>> });
+  };
+
+  const handleSingleVerify = async (filePath: string) => {
+    try {
+      const r = await verifyFile(filePath);
+      setBulkResult({ title: `Verify — ${filePath.split("/").pop()}`, rows: [{ fileName: filePath, ...(r as Record<string, unknown>) }] });
+    } catch (e) {
+      setBulkResult({ title: "Verify error", rows: [{ fileName: filePath, error: e instanceof Error ? e.message : String(e) }] });
+    }
+  };
+  const handleSingleAnalyze = async (filePath: string) => {
+    try {
+      const r = await analyzeFile(filePath);
+      setBulkResult({ title: `Analyze — ${filePath.split("/").pop()}`, rows: [{ fileName: filePath, ...(r as Record<string, unknown>) }] });
+    } catch (e) {
+      setBulkResult({ title: "Analyze error", rows: [{ fileName: filePath, error: e instanceof Error ? e.message : String(e) }] });
+    }
+  };
+  const handleSingleSpectrum = async (filePath: string) => {
+    setBulkResult({ title: "Spectrum — queued", rows: [{ fileName: filePath, status: "queued" }] });
+    try {
+      requestSpectrum(filePath, { fileName: filePath });
+      const res = await bulkRequestSpectrum([{ fileName: filePath }]);
+      const ok = res[0]?.ok;
+      const name = filePath.split("/").pop() ?? filePath;
+      if (ok) {
+        setBulkResult({ title: `Done — ${name}`, rows: res as unknown as Array<Record<string, unknown>> });
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Done", body: `${name} spectrum ready — click the pill to view` } }));
+        setTimeout(() => setBulkResult(null), 1400);
+      } else {
+        setBulkResult({ title: `Spectrum — ${name}`, rows: res as unknown as Array<Record<string, unknown>> });
+      }
+    } catch (e) {
+      setBulkResult({ title: "Spectrum error", rows: [{ fileName: filePath, error: e instanceof Error ? e.message : String(e) }] });
+    }
   };
 
   return (
@@ -263,7 +338,7 @@ export function FileExplorer({
       </div>
 
       {/* Content */}
-      <div ref={listRef as unknown as React.RefObject<HTMLDivElement>} tabIndex={selectMode ? 0 : -1} onKeyDown={handleKeyDown} className="min-h-[280px] flex-1 overflow-auto bg-surface-container-lowest dark:bg-surface-container-high/40 outline-none">
+      <div ref={listRef as unknown as React.RefObject<HTMLDivElement>} tabIndex={selectMode ? 0 : -1} onKeyDown={handleKeyDown} data-custom-menu className="min-h-[280px] flex-1 overflow-auto bg-surface-container-lowest dark:bg-surface-container-high/40 outline-none">
         {loading && (
           <div className="space-y-2 p-3">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -284,7 +359,7 @@ export function FileExplorer({
               </div>
             </div>
             <div className="mt-3 rounded-xl bg-surface-container-high px-3 py-2 font-body text-xs text-on-surface-variant dark:bg-surface-variant/40 dark:text-outline">
-              Docker tip: ensure bridge is running on <span className="font-mono">:8787</span> and <span className="font-mono">DATA_DIR=/data</span> is mounted (volume <span className="font-mono">bridge-data:/data</span> or bind mount). If <span className="font-mono">BRIDGE_TOKEN</span> is set, add it in Settings → Network or <span className="font-mono">localStorage.nicotineHub.bridgeToken</span>.
+              Docker tip: ensure bridge is running on <span className="font-mono">:8787</span> and <span className="font-mono">CONFIG_DIR=/config + DATA_DIR=/data</span> is mounted (volume <span className="font-mono">config:/config + data:/data</span> or bind mount). If <span className="font-mono">BRIDGE_TOKEN</span> is set, add it in Settings → Network or <span className="font-mono">localStorage.nicotineHub.bridgeToken</span>.
             </div>
           </div>
         )}
@@ -298,12 +373,36 @@ export function FileExplorer({
           </div>
         )}
         {!loading && !error && entries.length > 0 && (
-          <div className="divide-y divide-outline-variant/10">
-            {dirs.map((e) => (
+          <>
+            {selectMode && audioIds.length > 0 && (() => {
+              const isAllSelected = audioIds.length > 0 && (audioIds.length <= 50 ? audioIds.every((id) => bulk.has(id)) : bulk.size === 50);
+              const isIndeterminate = bulk.size > 0 && !isAllSelected && audioIds.some((id) => bulk.has(id));
+              return (
+                <div className="flex items-center gap-2 px-3 py-2 bg-surface-container-low border-b border-outline-variant/10">
+                  <input
+                    type="checkbox"
+                    checked={isAllSelected}
+                    ref={(el) => { if (el) (el as HTMLInputElement).indeterminate = isIndeterminate; }}
+                    onChange={() => (isAllSelected ? bulk.clear() : bulk.selectAll(audioIds))}
+                    className="h-4 w-4 accent-primary"
+                    aria-label="Select all displayed"
+                  />
+                  <span className="font-label text-xs">Select all displayed ({audioIds.length})</span>
+                  <span className="ml-auto font-body text-[11px] text-outline">{bulk.size} selected</span>
+                </div>
+              );
+            })()}
+            <div className="divide-y divide-outline-variant/10">
+              {dirs.map((e) => (
               <button
                 key={e.path}
                 type="button"
                 onClick={() => fetchDir(e.path)}
+                onContextMenu={(ev) => {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  setMenuAnchor({ x: ev.clientX, y: ev.clientY, file: e });
+                }}
                 className="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-surface-container-high/60 dark:hover:bg-surface-variant/30"
               >
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-container text-on-primary-container">
@@ -340,8 +439,21 @@ export function FileExplorer({
               const isAudio = !isDemo && ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"].includes(ext);
               const checked = bulk.has(e.path);
               const isFocused = focusedIdx === audioIds.indexOf(e.path);
+              const spectrumEntry = getEntry(e.path);
+              const hasSpectrum = spectrumEntry?.status === "done" && (!!spectrumEntry.fullBlobUrl || !!spectrumEntry.fullUrl);
+              const isGenerating = spectrumEntry?.status === "queued" || spectrumEntry?.status === "generating";
               return (
-              <div key={e.path} onClick={() => selectMode && isAudio && (isFocused ? bulk.toggleRange(e.path, audioIds) : bulk.toggle(e.path, audioIds))} className={`flex items-center gap-3 px-3 py-3 hover:bg-surface-container-high/40 ${checked ? "bg-primary-fixed/20" : "opacity-90"} ${isFocused ? "ring-1 ring-primary" : ""} ${selectMode && isAudio ? "cursor-pointer" : ""}`}>
+              <div
+                key={e.path}
+                onClick={() => selectMode && isAudio && (isFocused ? bulk.toggleRange(e.path, audioIds) : bulk.toggle(e.path, audioIds))}
+                onContextMenu={(ev) => {
+                  if (selectMode) return;
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  setMenuAnchor({ x: ev.clientX, y: ev.clientY, file: e });
+                }}
+                className={`flex items-center gap-3 px-3 py-3 hover:bg-surface-container-high/40 ${checked ? "bg-primary-fixed/20" : "opacity-90"} ${isFocused ? "ring-1 ring-primary" : ""} ${selectMode && isAudio ? "cursor-pointer" : ""}`}
+              >
                 {selectMode && isAudio ? (
                   <input type="checkbox" checked={checked} onChange={() => bulk.toggle(e.path)} onClick={(ev) => ev.stopPropagation()} className="h-4 w-4 shrink-0 accent-primary" />
                 ) : null}
@@ -349,7 +461,24 @@ export function FileExplorer({
                   <span className="material-symbols-outlined text-[18px]">{isAudio ? "audio_file" : "description"}</span>
                 </span>
                 <div className="min-w-0 flex-1" onClick={() => selectMode && isAudio && bulk.toggle(e.path)}>
-                  <div className="truncate font-body text-sm text-on-surface dark:text-inverse-on-surface">{e.name}</div>
+                  <div className="truncate font-body text-sm text-on-surface dark:text-inverse-on-surface flex items-center gap-1.5">
+                    <span className="truncate">{e.name}</span>
+                    {isAudio && hasSpectrum ? (
+                      <button
+                        type="button"
+                        onClick={(ev) => { ev.stopPropagation(); setSpectrumModal({ file: e, activeTab: "full" }); }}
+                        className="shrink-0 inline-flex items-center gap-1 rounded-full bg-primary-container/70 px-2 py-0.5 font-label text-[10px] font-semibold text-on-primary-container hover:bg-primary-container"
+                        title="View spectrum (Full + Zoom)"
+                      >
+                        <span className="material-symbols-outlined text-[12px]">graphic_eq</span> spectrum
+                      </button>
+                    ) : null}
+                    {isAudio && isGenerating ? (
+                      <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 font-label text-[10px] text-primary animate-pulse">
+                        <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" /> generating
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="truncate font-mono text-[11px] text-on-surface-variant dark:text-outline">{formatSize(e.size)} · {formatMtime(e.mtime)}</div>
                 </div>
                 {isAudio && !selectMode ? (
@@ -369,6 +498,7 @@ export function FileExplorer({
               );
             })}
           </div>
+          </>
         )}
       </div>
 
@@ -383,9 +513,9 @@ export function FileExplorer({
       </div>
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} onSaved={() => fetchDir(current)} /> : null}
       {bulkEditor ? <BulkTagEditor open={bulkEditor} files={Array.from(bulk.selected)} onClose={() => setBulkEditor(false)} onSaved={() => { bulk.clear(); fetchDir(current); }} /> : null}
-      {bulkScrape ? <BulkScrapeModal open={bulkScrape} files={Array.from(bulk.selected)} onClose={() => setBulkScrape(false)} /> : null}
-      {bulkResult ? (
-        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
+      {bulkScrape || singleScrapeFile || dirScrapeFiles ? <BulkScrapeModal open={!!(bulkScrape || singleScrapeFile || dirScrapeFiles)} files={dirScrapeFiles ?? (singleScrapeFile ? [singleScrapeFile] : Array.from(bulk.selected))} onClose={() => { setBulkScrape(false); setSingleScrapeFile(null); setDirScrapeFiles(null); }} /> : null}
+      {bulkResult && mounted ? createPortal(
+        <div className="fixed inset-0 z-[100] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
           <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col overflow-hidden rounded-t-2xl md:rounded-2xl bg-surface-container-lowest shadow-xl ghost-border" onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-4 border-b border-outline-variant/10 flex justify-between gap-3">
               <h3 className="font-headline font-bold">{bulkResult.title}</h3>
@@ -403,7 +533,94 @@ export function FileExplorer({
               <button onClick={() => setBulkResult(null)} className="rounded-full bg-primary px-5 py-2 font-label text-xs font-bold text-on-primary">Close</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
+      ) : null}
+      {menuAnchor ? (
+        <ContextMenu
+          x={menuAnchor.x}
+          y={menuAnchor.y}
+          items={(() => {
+            const e = menuAnchor.file;
+            if (e.type === "directory") {
+              return fileExplorerDirMenu(e, {
+                onScrapeDir: isDemo || dirLoading ? undefined : () => handleDirScrape(e),
+              });
+            }
+            const ext = e.name.toLowerCase().split(".").pop() ?? "";
+            const isAudio = !isDemo && ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"].includes(ext);
+            const entry = getEntry(e.path);
+            const hasSpectrum = entry?.status === "done" && (!!entry.fullBlobUrl || !!entry.fullUrl);
+            return fileExplorerMenu(e, {
+              isAudio,
+              hasSpectrum,
+              onEditTags: isAudio ? () => setTagFile(e.path) : undefined,
+              onScrape: isAudio ? () => setSingleScrapeFile(e.path) : undefined,
+              onVerify: isAudio ? () => handleSingleVerify(e.path) : undefined,
+              onAnalyze: isAudio ? () => handleSingleAnalyze(e.path) : undefined,
+              onSpectrum: isAudio ? () => handleSingleSpectrum(e.path) : undefined,
+            });
+          })()}
+          onClose={() => setMenuAnchor(null)}
+        />
+      ) : null}
+      {spectrumModal && mounted ? createPortal(
+        (() => {
+          const entry = getEntry(spectrumModal.file.path);
+          const base = getWorkerHttpBase();
+          const abs = (u?: string) => (u ? (u.startsWith("blob:") || u.startsWith("http") ? u : `${base}${u}`) : null);
+          const fullSrc = entry?.fullBlobUrl || abs(entry?.fullUrl) || null;
+          const zoomSrc = entry?.zoomBlobUrl || abs(entry?.zoomUrl) || null;
+          const hasSpectrum = !!fullSrc || !!zoomSrc;
+          if (!hasSpectrum) {
+            return (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={() => setSpectrumModal(null)}>
+                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+                <div className="relative bg-surface-container-lowest rounded-2xl p-6 shadow-2xl max-w-md w-full ghost-border" onClick={(e) => e.stopPropagation()}>
+                  <h3 className="font-headline font-bold">Spectrum — {spectrumModal.file.name}</h3>
+                  <p className="font-body text-sm text-outline mt-2">No spectrum yet. Right-click → Spectrum to generate.</p>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button onClick={() => { handleSingleSpectrum(spectrumModal.file.path); setSpectrumModal(null); }} className="rounded-full bg-primary px-5 py-2 font-label text-xs font-bold text-on-primary">Generate now</button>
+                    <button onClick={() => setSpectrumModal(null)} className="rounded-full bg-surface-container-high px-5 py-2 font-label text-xs">Close</button>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-4" onClick={() => setSpectrumModal(null)}>
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+              <div className="relative bg-surface-container-lowest rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden ghost-border" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20 shrink-0">
+                  <div className="min-w-0">
+                    <h3 className="font-headline text-sm font-semibold truncate">Spectrum — {spectrumModal.file.name}</h3>
+                    <p className="font-mono text-[10px] text-outline truncate">{spectrumModal.file.path}</p>
+                  </div>
+                  <button onClick={() => setSpectrumModal(null)} className="ml-3 p-2 rounded-full hover:bg-surface-container-high min-h-11 min-w-11 flex items-center justify-center"><span className="material-symbols-outlined">close</span></button>
+                </div>
+                <div className="flex gap-1 p-2 bg-surface-container-low shrink-0">
+                  <button onClick={() => setSpectrumModal({ ...spectrumModal, activeTab: "full" })} className={`flex-1 py-2.5 rounded-xl font-label text-xs font-semibold ${spectrumModal.activeTab === "full" ? "bg-primary text-on-primary shadow" : "bg-surface-container-high text-on-surface-variant"}`}>Full</button>
+                  <button onClick={() => setSpectrumModal({ ...spectrumModal, activeTab: "zoom" })} className={`flex-1 py-2.5 rounded-xl font-label text-xs font-semibold ${spectrumModal.activeTab === "zoom" ? "bg-primary text-on-primary shadow" : "bg-surface-container-high text-on-surface-variant"}`}>Zoom</button>
+                </div>
+                <div className="flex-1 overflow-auto bg-black flex items-center justify-center p-2 min-h-0">
+                  {spectrumModal.activeTab === "full" ? (
+                    fullSrc ? <img src={fullSrc} alt={`Full spectrum ${spectrumModal.file.name}`} className="max-w-full h-auto object-contain" /> : <span className="font-label text-sm text-on-surface-variant">No Full image</span>
+                  ) : (
+                    zoomSrc ? <img src={zoomSrc} alt={`Zoom spectrum ${spectrumModal.file.name}`} className="max-w-full h-auto object-contain" /> : <span className="font-label text-sm text-on-surface-variant">No Zoom image</span>
+                  )}
+                </div>
+                <div className="px-4 py-2.5 flex flex-wrap gap-2 justify-between items-center bg-surface-container-low shrink-0">
+                  <span className="font-label text-[11px] text-outline">sox Kaiser • -z 120 • cached in /tmp (wiped on reboot)</span>
+                  <div className="flex gap-2">
+                    {fullSrc ? <a href={fullSrc} download={`${spectrumModal.file.name}-Full.png`} className="px-3 py-2 rounded-full bg-surface-container-high font-label text-xs font-semibold">Download Full</a> : null}
+                    {zoomSrc ? <a href={zoomSrc} download={`${spectrumModal.file.name}-Zoom.png`} className="px-3 py-2 rounded-full bg-primary text-on-primary font-label text-xs font-semibold">Download Zoom</a> : null}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })(),
+        document.body
       ) : null}
     </div>
   );

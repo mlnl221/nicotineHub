@@ -112,14 +112,17 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
       if (e.key === "Escape") onClose();
     };
     const onClick = () => onClose();
+    const onCtx = () => onClose();
     const onScroll = () => onClose();
     window.addEventListener("keydown", onKey);
     window.addEventListener("click", onClick);
+    window.addEventListener("contextmenu", onCtx);
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onClose);
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("click", onClick);
+      window.removeEventListener("contextmenu", onCtx);
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onClose);
     };
@@ -129,10 +132,11 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
   return createPortal(
     <div
       ref={ref}
+      data-custom-menu
       className="fixed z-[100] animate-in fade-in zoom-in-95 duration-100"
       style={{ left: pos.left, top: pos.top }}
       onClick={(e) => e.stopPropagation()}
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
     >
       <MenuPanel items={items} onClose={onClose} />
     </div>,

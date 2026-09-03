@@ -67,12 +67,18 @@ export function SpectrumProvider({ children }: { children: ReactNode }) {
 
   const fetchAndCache = useCallback(async (id: string, etag: string, urls: { full: string; zoom: string }) => {
     const base = getWorkerHttpBase();
-    const headers = { "If-None-Match": etag, ...workerFetchHeaders() };
+    // ponytail: no If-None-Match on first fetch — 304 would leave blobUrls empty and fallback to relative /spectrum (web 404)
+    const headers = { ...workerFetchHeaders() } as Record<string, string>;
+    const fetchPair = async (hdrs: Record<string, string>) => Promise.all([
+      fetch(`${base}${urls.full}`, { headers: hdrs }),
+      fetch(`${base}${urls.zoom}`, { headers: hdrs }),
+    ]);
     try {
-      const [fullRes, zoomRes] = await Promise.all([
-        fetch(`${base}${urls.full}`, { headers }),
-        fetch(`${base}${urls.zoom}`, { headers }),
-      ]);
+      let [fullRes, zoomRes] = await fetchPair(headers);
+      // If worker returns 304 (etag match), retry without If-None-Match to actually get the pngs
+      if (fullRes.status === 304 || zoomRes.status === 304) {
+        [fullRes, zoomRes] = await fetchPair({ ...workerFetchHeaders() } as Record<string, string>);
+      }
       if (fullRes.ok && zoomRes.ok) {
         const [fullBlob, zoomBlob] = await Promise.all([fullRes.blob(), zoomRes.blob()]);
         const fullBlobUrl = URL.createObjectURL(fullBlob);
@@ -86,6 +92,17 @@ export function SpectrumProvider({ children }: { children: ReactNode }) {
           const next = new Map(prev);
           const cur = next.get(id);
           if (cur) next.set(id, { ...cur, fullBlobUrl, zoomBlobUrl });
+          return next;
+        });
+      } else if (fullRes.status === 304 || zoomRes.status === 304) {
+        // 304 without blob — keep existing blob if any, otherwise mark done with absolute URLs as fallback
+        setEntries((prev) => {
+          const next = new Map(prev);
+          const cur = next.get(id);
+          if (cur && !cur.fullBlobUrl) {
+            const base2 = getWorkerHttpBase();
+            next.set(id, { ...cur, fullBlobUrl: `${base2}${urls.full}`, zoomBlobUrl: `${base2}${urls.zoom}` } as unknown as SpectrumEntry);
+          }
           return next;
         });
       }
