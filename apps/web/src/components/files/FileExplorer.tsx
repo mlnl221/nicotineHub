@@ -374,20 +374,24 @@ export function FileExplorer({
         )}
         {!loading && !error && entries.length > 0 && (
           <>
-            {selectMode && audioIds.length > 0 && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-surface-container-low border-b border-outline-variant/10">
-                <input
-                  type="checkbox"
-                  checked={audioIds.length > 0 && audioIds.every((id) => bulk.has(id))}
-                  ref={(el) => { if (el) (el as HTMLInputElement).indeterminate = audioIds.some((id) => bulk.has(id)) && !audioIds.every((id) => bulk.has(id)); }}
-                  onChange={(e) => (e.target as HTMLInputElement).checked ? bulk.selectAll(audioIds) : bulk.clear()}
-                  className="h-4 w-4 accent-primary"
-                  aria-label="Select all displayed"
-                />
-                <span className="font-label text-xs">Select all displayed ({audioIds.length})</span>
-                <span className="ml-auto font-body text-[11px] text-outline">{bulk.size} selected</span>
-              </div>
-            )}
+            {selectMode && audioIds.length > 0 && (() => {
+              const isAllSelected = audioIds.length > 0 && (audioIds.length <= 50 ? audioIds.every((id) => bulk.has(id)) : bulk.size === 50);
+              const isIndeterminate = bulk.size > 0 && !isAllSelected && audioIds.some((id) => bulk.has(id));
+              return (
+                <div className="flex items-center gap-2 px-3 py-2 bg-surface-container-low border-b border-outline-variant/10">
+                  <input
+                    type="checkbox"
+                    checked={isAllSelected}
+                    ref={(el) => { if (el) (el as HTMLInputElement).indeterminate = isIndeterminate; }}
+                    onChange={() => (isAllSelected ? bulk.clear() : bulk.selectAll(audioIds))}
+                    className="h-4 w-4 accent-primary"
+                    aria-label="Select all displayed"
+                  />
+                  <span className="font-label text-xs">Select all displayed ({audioIds.length})</span>
+                  <span className="ml-auto font-body text-[11px] text-outline">{bulk.size} selected</span>
+                </div>
+              );
+            })()}
             <div className="divide-y divide-outline-variant/10">
               {dirs.map((e) => (
               <button
