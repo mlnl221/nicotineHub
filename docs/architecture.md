@@ -96,7 +96,6 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 | `DATA_DIR` | `/data` | Volume (`/data` in compose; dev falls back to `./data` or `/tmp/nicotine-hub` if `/data` not writable) |
 | `BRIDGE_TOKEN` | *(open)* | `?token` / `Bearer` / `Sec-WebSocket-Protocol` → 401 on `/ws`, `/files/:token`, `/api/files`, `/spectrum/*`, `/logs`, `/diagnostics`, `/plugins`, `/upnp/status`, `/interfaces` (`/portchecker` stays open; `/health?json` returns limited fields without token) |
 | `SHARED_DIRS` | *(unset)* | `:` list auto-scanned via `ShareDB.scanFsShares` (falls back to `DATA_DIR/shared` when unset) |
-| `SHARES_DIR` | `DATA_DIR` | Persist path for `shares.json` |
 | `UPLOAD_LIMIT`/`DOWNLOAD_LIMIT` | `0` | KB/s (`0` = unlimited), aliases `UPLOADLIMIT`/`DOWNLOADLIMIT`; TokenBucket shaping split per active transfer + `DOWNLOAD_LIMIT` stored in `transfer:stats` 2 s |
 | `ENABLE_SERVER_PING` | `1` | `0` disables `ServerPing 32` fallback |
 | `ALLOWED_ORIGINS` | *(open)* | CSV — if set, `getCorsHeaders` (`server.ts:336`) only allows listed `Origin` (homelab lock-down) |
