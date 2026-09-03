@@ -337,6 +337,17 @@ export function fileExplorerMenu(entry: { path: string; name: string }, opts: { 
   ];
 }
 
+export function fileExplorerDirMenu(entry: { path: string; name: string }, opts: { onScrapeDir?: () => void }): MenuItem[] {
+  return [
+    { id: "hdr", label: entry.name, icon: "folder", disabled: true },
+    { id: "sep", label: "---", icon: "" },
+    { id: "scrape-dir", label: "Scrape Directory", icon: "auto_awesome", disabled: !opts.onScrapeDir, action: opts.onScrapeDir ?? (() => toast("Scrape Directory — unavailable")) },
+    { id: "sep2", label: "---", icon: "" },
+    { id: "copy-path", label: "Copy Folder Path", icon: "content_copy", action: () => copy(entry.path) },
+    { id: "copy-name", label: "Copy Folder Name", icon: "content_copy", action: () => copy(entry.name) },
+  ];
+}
+
 export function genericPageMenu(): MenuItem[] {
   return [
     { id: "copy-link", label: "Copy Link", icon: "link", action: () => copy(window.location.href) },

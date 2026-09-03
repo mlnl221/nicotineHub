@@ -11,7 +11,7 @@ import { BulkScrapeModal } from "@/components/tag/BulkScrapeModal";
 import { useBulkSelection } from "@/lib/bulkSelection";
 import { bulkVerify, bulkAnalyze, bulkRequestSpectrum, verifyFile, analyzeFile, getWorkerHttpBase } from "@/lib/worker";
 import { ContextMenu } from "@/components/ui/ContextMenu";
-import { fileExplorerMenu } from "@/lib/context-menu/menus";
+import { fileExplorerDirMenu, fileExplorerMenu } from "@/lib/context-menu/menus";
 import { useSpectrum } from "@/lib/spectrum";
 import { createPortal } from "react-dom";
 
@@ -61,6 +61,8 @@ export function FileExplorer({
   const [bulkEditor, setBulkEditor] = useState(false);
   const [bulkScrape, setBulkScrape] = useState(false);
   const [singleScrapeFile, setSingleScrapeFile] = useState<string | null>(null);
+  const [dirScrapeFiles, setDirScrapeFiles] = useState<string[] | null>(null);
+  const [dirLoading, setDirLoading] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ title: string; rows: Array<Record<string, unknown>> } | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const [focusedIdx, setFocusedIdx] = useState<number>(-1);
@@ -108,6 +110,34 @@ export function FileExplorer({
   }, []);
 
   useEffect(() => { fetchDir(initialPath); }, [fetchDir, initialPath]);
+
+  const handleDirScrape = async (dir: BridgeFileEntry) => {
+    if (isDemo) {
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Demo", body: "Scrape Directory is disabled in demo" } }));
+      return;
+    }
+    setDirLoading(true);
+    try {
+      const url = bridgeFetchUrl(`/api/files?path=${encodeURIComponent(dir.path)}`);
+      const res = await fetch(url, { headers: bridgeFetchHeaders(), cache: "no-store" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error || `HTTP ${res.status}`);
+      }
+      const data = await res.json() as { entries: BridgeFileEntry[] };
+      const AUDIO = new Set(["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"]);
+      const audio = data.entries.filter((e) => e.type === "file" && AUDIO.has(e.name.split(".").pop()?.toLowerCase() ?? "")).map((e) => e.path).slice(0, 50);
+      if (!audio.length) {
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "No audio files", body: `No audio files in ${dir.name}` } }));
+        return;
+      }
+      setDirScrapeFiles(audio);
+    } catch (e) {
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Scrape Directory failed", body: e instanceof Error ? e.message : String(e) } }));
+    } finally {
+      setDirLoading(false);
+    }
+  };
 
   const breadcrumbs = (() => {
     if (current === "/") return [{ label: "⌂ /", path: "/" }];
@@ -343,12 +373,32 @@ export function FileExplorer({
           </div>
         )}
         {!loading && !error && entries.length > 0 && (
-          <div className="divide-y divide-outline-variant/10">
-            {dirs.map((e) => (
+          <>
+            {selectMode && audioIds.length > 0 && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-surface-container-low border-b border-outline-variant/10">
+                <input
+                  type="checkbox"
+                  checked={audioIds.length > 0 && audioIds.every((id) => bulk.has(id))}
+                  ref={(el) => { if (el) (el as HTMLInputElement).indeterminate = audioIds.some((id) => bulk.has(id)) && !audioIds.every((id) => bulk.has(id)); }}
+                  onChange={(e) => (e.target as HTMLInputElement).checked ? bulk.selectAll(audioIds) : bulk.clear()}
+                  className="h-4 w-4 accent-primary"
+                  aria-label="Select all displayed"
+                />
+                <span className="font-label text-xs">Select all displayed ({audioIds.length})</span>
+                <span className="ml-auto font-body text-[11px] text-outline">{bulk.size} selected</span>
+              </div>
+            )}
+            <div className="divide-y divide-outline-variant/10">
+              {dirs.map((e) => (
               <button
                 key={e.path}
                 type="button"
                 onClick={() => fetchDir(e.path)}
+                onContextMenu={(ev) => {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  setMenuAnchor({ x: ev.clientX, y: ev.clientY, file: e });
+                }}
                 className="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-surface-container-high/60 dark:hover:bg-surface-variant/30"
               >
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-container text-on-primary-container">
@@ -444,6 +494,7 @@ export function FileExplorer({
               );
             })}
           </div>
+          </>
         )}
       </div>
 
@@ -458,7 +509,7 @@ export function FileExplorer({
       </div>
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} onSaved={() => fetchDir(current)} /> : null}
       {bulkEditor ? <BulkTagEditor open={bulkEditor} files={Array.from(bulk.selected)} onClose={() => setBulkEditor(false)} onSaved={() => { bulk.clear(); fetchDir(current); }} /> : null}
-      {bulkScrape || singleScrapeFile ? <BulkScrapeModal open={!!(bulkScrape || singleScrapeFile)} files={singleScrapeFile ? [singleScrapeFile] : Array.from(bulk.selected)} onClose={() => { setBulkScrape(false); setSingleScrapeFile(null); }} /> : null}
+      {bulkScrape || singleScrapeFile || dirScrapeFiles ? <BulkScrapeModal open={!!(bulkScrape || singleScrapeFile || dirScrapeFiles)} files={dirScrapeFiles ?? (singleScrapeFile ? [singleScrapeFile] : Array.from(bulk.selected))} onClose={() => { setBulkScrape(false); setSingleScrapeFile(null); setDirScrapeFiles(null); }} /> : null}
       {bulkResult && mounted ? createPortal(
         <div className="fixed inset-0 z-[100] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
           <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col overflow-hidden rounded-t-2xl md:rounded-2xl bg-surface-container-lowest shadow-xl ghost-border" onClick={(e) => e.stopPropagation()}>
@@ -487,6 +538,11 @@ export function FileExplorer({
           y={menuAnchor.y}
           items={(() => {
             const e = menuAnchor.file;
+            if (e.type === "directory") {
+              return fileExplorerDirMenu(e, {
+                onScrapeDir: isDemo || dirLoading ? undefined : () => handleDirScrape(e),
+              });
+            }
             const ext = e.name.toLowerCase().split(".").pop() ?? "";
             const isAudio = !isDemo && ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"].includes(ext);
             const entry = getEntry(e.path);
