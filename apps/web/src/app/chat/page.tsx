@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
@@ -32,6 +32,9 @@ export default function ChatRoomsPage() {
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
 
   const activeMessages = activeRoom ? messages.get(activeRoom) || [] : [];
+  const systemMessages = activeMessages.filter((m) => m.username === "system");
+  const userMessages = activeMessages.filter((m) => m.username !== "system");
+  const sysLogRef = useRef<HTMLDivElement>(null);
   const joinedArray = Array.from(joinedRooms.values());
   const sortedRooms = (() => {
     const list = roomList.length ? roomList : isDemo ? DEMO_ROOMS.map((r) => ({ name: r.name, users: r.users, isPrivate: false })) : [];
@@ -57,6 +60,10 @@ export default function ChatRoomsPage() {
   useEffect(() => {
     if (state.status === "failed") router.replace("/");
   }, [state.status, router]);
+
+  useEffect(() => {
+    sysLogRef.current?.scrollTo({ top: sysLogRef.current.scrollHeight });
+  }, [systemMessages.length, activeRoom]);
 
   if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
   if (state.status !== "connected") return null;
@@ -242,7 +249,7 @@ export default function ChatRoomsPage() {
               y: e.clientY,
               items: chatRoomMenu(activeRoom, activeRoom ? "chat" : "activity", {
                 onFind: () => {},
-                onCopyAll: () => navigator.clipboard.writeText(activeMessages.map((m) => `${m.username}: ${m.message}`).join("\n")),
+                onCopyAll: () => navigator.clipboard.writeText(userMessages.map((m) => `${m.username}: ${m.message}`).join("\n")),
                 onClear: () => {},
                 onLeave: () => activeRoom && leaveRoom(activeRoom),
               }),
@@ -362,28 +369,29 @@ export default function ChatRoomsPage() {
 
                 <div className="flex flex-1 overflow-hidden min-h-0">
                   <div className="flex flex-1 flex-col overflow-hidden min-h-0">
+                    {systemMessages.length > 0 ? (
+                    <div ref={sysLogRef} data-testid="system-log" aria-label="System events" className="shrink-0 max-h-[10%] overflow-y-auto overscroll-contain border-b border-outline-variant/15 bg-surface-container-low/60 px-4 md:px-6 py-1">
+                      {systemMessages.map((m) => (
+                        <div key={m.id} className="flex justify-center py-0.5 max-w-full overflow-hidden">
+                          <span className="truncate whitespace-nowrap font-body text-xs italic text-on-surface-variant max-w-full overflow-hidden">
+                            {m.message}
+                            <span className="ml-2 font-mono text-[10px] text-outline">
+                              {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    ) : null}
                     <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-4 md:p-6 space-y-2 max-w-full overflow-x-hidden">
-                      {activeMessages.length === 0 ? (
+                      {userMessages.length === 0 ? (
                         <div className="py-10 text-center">
                           <p className="font-body text-sm text-outline">No messages yet. Start the conversation.</p>
                         </div>
                       ) : (
-                        activeMessages.map((m) => {
-                          const isSystem = m.username === "system";
-                          const isSelf = !isSystem && state.user !== undefined && state.user !== null && m.username === (state as unknown as { user?: string }).user;
-                          const isIgnored = m.username !== "system" && (settings.server.ignorelist.includes(m.username) || !!settings.server.ipignorelist[m.username]);
-                          if (isSystem) {
-                            return (
-                              <div key={m.id} className="flex justify-center px-4 md:px-6 py-1 max-w-full overflow-hidden">
-                                <span className="truncate whitespace-nowrap font-body text-xs italic text-on-surface-variant max-w-full overflow-hidden">
-                                  {m.message}
-                                  <span className="ml-2 font-mono text-[10px] text-outline">
-                                    {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                                  </span>
-                                </span>
-                              </div>
-                            );
-                          }
+                        userMessages.map((m) => {
+                          const isSelf = state.user !== undefined && state.user !== null && m.username === (state as unknown as { user?: string }).user;
+                          const isIgnored = settings.server.ignorelist.includes(m.username) || !!settings.server.ipignorelist[m.username];
                           if (isSelf) {
                             return (
                               <div key={m.id} className={`group flex justify-end gap-3 px-4 md:px-6 py-1.5 max-w-full overflow-hidden ${isIgnored ? "opacity-40" : ""}`}>
@@ -411,9 +419,9 @@ export default function ChatRoomsPage() {
                           return (
                           <div key={m.id} className={`group flex gap-3 hover:bg-surface-container-low/40 -mx-4 md:-mx-6 px-4 md:px-6 py-1.5 max-w-full overflow-hidden ${isIgnored ? "opacity-40" : ""}`}>
                             <span
-                              className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-xs font-bold ${m.username === "system" ? "bg-surface-container-high text-outline" : "bg-primary-container text-on-primary-container"}`}
+                              className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-xs font-bold bg-primary-container text-on-primary-container"
                             >
-                              {m.username === "system" ? "·" : m.username.slice(0, 2).toUpperCase()}
+                              {m.username.slice(0, 2).toUpperCase()}
                             </span>
                             <div className="min-w-0 flex-1">
                               <p className="font-body text-sm leading-relaxed">
