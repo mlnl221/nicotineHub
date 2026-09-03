@@ -6,7 +6,7 @@
  *
  * Requirements (hybrid spec):
  * - visible to all logged-in users
- * - persistent (survives restart) via DATA_DIR/diagnostics.log (JSONL)
+ * - persistent (survives restart) via CONFIG_DIR/diagnostics.log (JSONL)
  * - 500 lines shown (cap stored at 2000, tail 500)
  * - covers everything: bridge server, Soulseek session, transfers, search, WS
  * - WS broadcast throttled, file append atomic
@@ -31,7 +31,7 @@ const LEVEL_ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, erro
 const MAX_MEMORY = 2000;
 const MAX_PERSIST = 2000;
 
-let dataDir = process.env.DATA_DIR || "/data";
+let dataDir = process.env.CONFIG_DIR || "/config";
 let filePath = join(dataDir, "diagnostics.log");
 
 const ring: LogEntry[] = [];
@@ -46,7 +46,7 @@ function isTestEnv(): boolean {
 function ensureLoaded() {
   if (loaded) return;
   loaded = true;
-  dataDir = process.env.DATA_DIR || "/data";
+  dataDir = process.env.CONFIG_DIR || "/config";
   filePath = join(dataDir, "diagnostics.log");
   if (isTestEnv()) {
     // isolated in-memory only for tests; don't read/ pollute /data

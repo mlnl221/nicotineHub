@@ -5,7 +5,7 @@
 
 /**
  * ShareDB — peer shares DB, Phase 3.
- * In-memory, persisted under DATA_DIR/shares.json (or SHARES_DIR if set).
+ * In-memory, persisted under CONFIG_DIR/shares.json (or SHARES_DIR if set).
  * Handles SharedFileList 4/5 and FolderContents 36/37, respects ExcludedSearchPhrases.
  * Also handles inbound FileSearch (server 26) filtering.
  */
@@ -37,8 +37,11 @@ export enum PermissionLevel {
 function defaultDataDir(): string {
   return process.env.DATA_DIR || "/data";
 }
+function defaultConfigDir(): string {
+  return process.env.CONFIG_DIR || "/config";
+}
 function sharesPath(): string {
-  const base = process.env.SHARES_DIR || process.env.DATA_DIR || "/data";
+  const base = process.env.CONFIG_DIR || "/config";
   try { mkdirSync(base, { recursive: true }); } catch {}
   return join(base, "shares.json");
 }
@@ -124,8 +127,7 @@ export class ShareDB {
   private load() {
     const p = sharesPath();
     if (!existsSync(p)) {
-      // fallback DATA_DIR/shares.json
-      const alt = join(this.dataDir, "shares.json");
+      return;
       if (existsSync(alt)) {
         try {
           const raw = JSON.parse(readFileSync(alt, "utf8"));
@@ -199,9 +201,7 @@ export class ShareDB {
       mkdirSync(join(p, ".."), { recursive: true });
       const payload = { folders: this.folders, publicFolders: this.publicFolders, buddyFolders: this.buddyFolders, trustedFolders: this.trustedFolders, shareFilters: this.shareFilters, revealBuddyShares: this.revealBuddyShares, revealTrustedShares: this.revealTrustedShares, customRoots: this.serializeCustomRoots() };
       writeFileSync(p, JSON.stringify(payload, null, 2));
-      // also mirror to DATA_DIR/shares.json
-      const alt = join(this.dataDir, "shares.json");
-      if (alt !== p) writeFileSync(alt, JSON.stringify(payload, null, 2));
+      // strict: no mirror to DATA_DIR
     } catch {}
   }
 
@@ -897,7 +897,7 @@ export class ShareDB {
     const compressed = deflateSync(inner, { level: 4 });
     // Raw cache for BrowseResponse (Soulseek.NET RawBrowseResponse disk-cache) — persist compressed
     try {
-      const cachePath = join(this.dataDir, "browse.cache");
+      const cachePath = join(defaultConfigDir(), "browse.cache");
       writeFileSync(cachePath + ".tmp", compressed);
       // atomic rename? keep simple
       try { const { renameSync } = require("node:fs") as typeof import("node:fs"); renameSync(cachePath + ".tmp", cachePath); } catch { try { writeFileSync(cachePath, compressed); } catch {} }

@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { BasePlugin, returncode, type CommandDef, type PluginManifest, type PluginCoreShim, type PluginReturn } from "./types.ts";
 import { logger } from "../logger.ts";
 
-// ---- persistence file DATA_DIR/plugins.json ----
+// ---- persistence file CONFIG_DIR/plugins.json ----
 type PluginsFile = {
   enable: boolean;
   enabled: string[];
@@ -24,7 +24,7 @@ type PluginsFile = {
 const DEFAULT_PLUGINS_FILE: PluginsFile = { enable: true, enabled: [], plugins: {} };
 
 function dataDir(): string {
-  return process.env.DATA_DIR || "/data";
+  return process.env.CONFIG_DIR || "/config";
 }
 function pluginsFilePath(): string {
   return join(dataDir(), "plugins.json");

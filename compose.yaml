@@ -14,7 +14,6 @@ services:
       # Host paths must be mounted into the container to be scannable (e.g. /home/user/Music:/data/Music:ro).
       # You can also set SHARED_DIRS=/data/Music:/data/shared to auto-scan on startup.
       SHARED_DIRS: "${SHARED_DIRS:-}"
-      SHARES_DIR: "${SHARES_DIR:-}"
       # Homelab hardening: optionally restrict browser origins (e.g. ALLOWED_ORIGINS=https://hub.example.com,http://nas:3000)
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
     ports:
