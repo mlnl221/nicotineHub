@@ -112,6 +112,42 @@ Bridge URL: `NEXT_PUBLIC_BRIDGE_URL` (build) or `localStorage.nicotineHub.bridge
 
 For prebuilt images and release workflow, see [`docs/deployment.md`](docs/deployment.md).
 
+### Docker Compose install (prebuilt GHCR images)
+
+No `bun` needed — run the published images:
+
+```bash
+# 1. get compose file
+git clone https://github.com/mlnl221/nicotineHub && cd nicotineHub
+# or: curl -O https://raw.githubusercontent.com/mlnl221/nicotineHub/main/compose.yaml
+
+# 2. optional .env (tokens, ports, shares)
+cat > .env <<'EOF'
+TAG=latest          # or pin: v0.25.0 / 0.25 / sha-c3d4c1f
+BRIDGE_TOKEN=       # optional — protects /ws + /files/:token
+LISTEN_PORT=60754   # peer port — forward TCP+UDP on router
+# SHARED_DIRS=/data/Music:/data/shared
+EOF
+
+# 3. shares — mount host dirs read-only into /data (then add via Settings → Shares)
+# edit compose.yaml volumes or use compose.override.yaml:
+#   volumes:
+#     - /home/you/Music:/data/Music:ro
+
+# 4. pull + up (bridge :8787 + :60754, worker :8789, web :3000)
+docker compose pull   # bridge + web from GHCR (worker builds locally if not published)
+docker compose up -d --build
+docker compose ps && docker compose logs -f
+
+# 5. open http://localhost:3000 → Settings → Network check LISTEN_PORT,
+#    login with Soulseek creds (never stored)
+
+# 6. update
+TAG=latest docker compose pull && docker compose up -d
+```
+
+Health: `http://localhost:8787/health` (bridge), `http://localhost:8789/health` (worker). Persisted data in Docker volume `bridge-data` (`/data`). See `docs/deployment.md` for `TAG` pinning, `network_mode: host` (UPnP), and promotion flow.
+
 ---
 
 ## Porting status
