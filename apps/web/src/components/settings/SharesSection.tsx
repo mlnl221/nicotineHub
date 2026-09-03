@@ -111,9 +111,11 @@ export function SharesSection() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [browseOpen, setBrowseOpen] = useState(false);
 
-  function dataPathFromExplorer(relative: string): string {
-    if (!relative || relative === "/") return "/data";
-    return "/data" + relative;
+  function dataPathFromExplorer(p: string): string {
+    const n = normalizeFolderPath(p) || "/";
+    if (n === "/") return "/data";
+    if (n === "/data" || n.startsWith("/data/")) return n;
+    return "/data" + (n.startsWith("/") ? n : `/${n}`);
   }
   function basenameOfExplorerPath(p: string): string {
     if (!p || p === "/") return "Shared";
