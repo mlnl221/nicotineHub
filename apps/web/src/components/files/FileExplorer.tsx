@@ -9,7 +9,7 @@ import { BulkBar } from "@/components/tag/BulkBar";
 import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
 import { BulkScrapeModal } from "@/components/tag/BulkScrapeModal";
 import { useBulkSelection } from "@/lib/bulkSelection";
-import { bulkVerify, bulkAnalyze, bulkRequestSpectrum, verifyFile, analyzeFile } from "@/lib/worker";
+import { bulkVerify, bulkAnalyze, bulkRequestSpectrum, verifyFile, analyzeFile, getWorkerHttpBase } from "@/lib/worker";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { fileExplorerMenu } from "@/lib/context-menu/menus";
 import { useSpectrum } from "@/lib/spectrum";
@@ -504,8 +504,10 @@ export function FileExplorer({
       ) : null}
       {spectrumModal ? (() => {
         const entry = getEntry(spectrumModal.file.path);
-        const fullSrc = entry?.fullBlobUrl || entry?.fullUrl || null;
-        const zoomSrc = entry?.zoomBlobUrl || entry?.zoomUrl || null;
+        const base = getWorkerHttpBase();
+        const abs = (u?: string) => (u ? (u.startsWith("blob:") || u.startsWith("http") ? u : `${base}${u}`) : null);
+        const fullSrc = entry?.fullBlobUrl || abs(entry?.fullUrl) || null;
+        const zoomSrc = entry?.zoomBlobUrl || abs(entry?.zoomUrl) || null;
         const hasSpectrum = !!fullSrc || !!zoomSrc;
         if (!hasSpectrum) {
           // if not yet generated, trigger and show loading

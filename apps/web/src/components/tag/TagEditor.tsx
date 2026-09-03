@@ -88,9 +88,14 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
     try {
       const res = await requestWorkerSpectrum({ fileName });
       const base = getWorkerHttpBase();
-      const headers = { "If-None-Match": res.etag, ...workerFetchHeaders() } as Record<string, string>;
-      const [fullRes, zoomRes] = await Promise.all([fetch(`${base}${res.urls.full}`, { headers }), fetch(`${base}${res.urls.zoom}`, { headers })]);
-      if (!fullRes.ok || !zoomRes.ok) throw new Error(`Spectrum fetch failed`);
+      // ponytail: no If-None-Match on first fetch — would 304 and leave blob empty
+      const headers = { ...workerFetchHeaders() } as Record<string, string>;
+      let [fullRes, zoomRes] = await Promise.all([fetch(`${base}${res.urls.full}`, { headers }), fetch(`${base}${res.urls.zoom}`, { headers })]);
+      // worker returns 304 if If-None-Match matches; handle by retrying without cache header
+      if (fullRes.status === 304 || zoomRes.status === 304) {
+        [fullRes, zoomRes] = await Promise.all([fetch(`${base}${res.urls.full}`, { headers }), fetch(`${base}${res.urls.zoom}`, { headers })]);
+      }
+      if (!fullRes.ok || !zoomRes.ok) throw new Error(`Spectrum fetch failed (${fullRes.status}/${zoomRes.status})`);
       const [fullBlob, zoomBlob] = await Promise.all([fullRes.blob(), zoomRes.blob()]);
       const fullBlobUrl = URL.createObjectURL(fullBlob);
       const zoomBlobUrl = URL.createObjectURL(zoomBlob);
