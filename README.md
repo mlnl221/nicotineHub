@@ -88,7 +88,7 @@ For prebuilt images and release workflow, see [`docs/deployment.md`](docs/deploy
 
 ## Porting status
 
-Stage `d395cc6`+ — almost 1:1, mobile-friendly. See **[docs/porting-status.md](docs/porting-status.md)** for the full domain-by-domain matrix, **[docs/settings-mapping.md](docs/settings-mapping.md)** for the settings map, and **`docs/settings-plan.md`** for done vs next (Phases A–H done, `leech_detector` ported; `youtube_info` + fonts/colors/lastfm intentionally omitted, English-only).
+Stage `5c65ea9`+ — almost 1:1, mobile-friendly. See **[docs/porting-status.md](docs/porting-status.md)** for the full domain-by-domain matrix (settings port Phases A–N done, `leech_detector` ported; `youtube_info` + fonts/colors/lastfm intentionally omitted, English-only).
 
 ---
 
@@ -98,10 +98,8 @@ Stage `d395cc6`+ — almost 1:1, mobile-friendly. See **[docs/porting-status.md]
 - `docs/spectrum.md` — Analyze Spectrum pipeline (worker `sox` + `oxipng`, HTTP, caching, UI)
 - `docs/porting-status.md` — matrix vs nicotine-plus 3.3.x
 - `docs/deployment.md` — Docker & GHCR images, `TAG` pinning, promotion workflow (`stage` → `main`)
-- `docs/settings-mapping.md` — authoritative Nicotine+ settings map
-- `docs/settings-plan.md` — status (done A–G) vs next (H)
 - `docs/DESIGN.md` — UI tokens
-- `docs/plugins.md` — plugin system
+- `docs/proposals/` — future backlog (r/Soulseek improvements not yet built)
 - `AGENTS.md` — agent & worktree conventions
 
 ## Contributing

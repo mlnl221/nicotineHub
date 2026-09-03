@@ -1,8 +1,8 @@
 # Gluetun VPN compose override — use when your Soulseek port is forwarded via VPN (e.g. https://github.com/qdm12/gluetun).
 #
-# IMPORTANT: `network_mode: host` (default in compose.yaml) CONFLICTS with Gluetun's `network_mode: service:gluetun`.
-# You MUST pick one. For Gluetun, remove `network_mode: host` from the bridge — this file does that by
-# overriding bridge to `service:gluetun` and routing 8787/LISTEN_PORT through Gluetun.
+# IMPORTANT: `network_mode: host` (if you added it for UPnP) CONFLICTS with Gluetun's `network_mode: service:gluetun`.
+# You MUST pick one. For Gluetun, don't use host network — this file overrides
+# bridge to `service:gluetun` and routes 8787/LISTEN_PORT through Gluetun.
 #
 # Usage:
 #   # 1. Keep your gluetun service (example minimal gluetun — adjust VPN provider, creds, forwarded port):

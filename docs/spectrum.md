@@ -1,6 +1,6 @@
 # Analyze Spectrum
 
-> Right-click a **Finished** audio download on `/downloads` → **Analyze Spectrum**. The **worker** (`apps/worker`, FastAPI `:8789`) renders two PNG spectrograms with `sox` + `oxipng` (own implementation; output semantics match the old bridge port of [`smoked-salmon`](https://github.com/smokin-salmon/smoked-salmon) `src/salmon/uploader/spectrals.py`, Apache-2.0) and the web shows them on hover / modal. Images live only in `/tmp/hub-spectrum` in the shared `spectrum-cache` volume — wiped on reboot.
+> Right-click a **Finished** audio download on `/downloads` → **Analyze Spectrum**. The **worker** (`apps/worker`, FastAPI `:8789`) renders two PNG spectrograms with `sox` (`oxipng` recompress when present in the image — currently skipped, PNGs served raw) (own implementation; output semantics match the old bridge port of [`smoked-salmon`](https://github.com/smokin-salmon/smoked-salmon) `src/salmon/uploader/spectrals.py`, Apache-2.0) and the web shows them on hover / modal. Images live only in `/tmp/hub-spectrum` in the shared `spectrum-cache` volume — wiped on reboot.
 
 ## UX
 
@@ -39,7 +39,7 @@ POST /spectrum/request {fileName, size?, token?} → resolve file → stat mtime
 
 * `SpectrumProvider` keeps `Map<id,SpectrumEntry>` (`status`, `etag`, `fullUrl`/`zoomUrl`, `fullBlobUrl`/`zoomBlobUrl`). No WS involved.
 * `requestSpectrum(id, {fileName, size, token})` sets `queued`, `POST`s the worker, stores the result, then fetches both PNGs with `If-None-Match: etag` + `WORKER_TOKEN` Bearer, caching blob URLs for instant hover; revokes previous URLs.
-* Worker base URL from `NEXT_PUBLIC_WORKER_URL` / `localStorage.nicotineHub.workerUrl` → `http://host:8789` (worktree: web `3001` → worker `8789`).
+* Worker base URL from `NEXT_PUBLIC_WORKER_URL` / `localStorage.nicotineHub.workerUrl` → `http://host:8789` (worktree: web `3001` → worker `8789`, `3002` → `8791`).
 
 ## Docker
 
