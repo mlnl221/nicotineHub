@@ -1,0 +1,6 @@
+# CODEOWNERS — nicotineHub
+# Sole approver: @mlnl221. Every PR requires their review (enforced via
+# branch protection: "Require review from Code Owners" on stage + main).
+
+* @mlnl221
+/.github/ @mlnl221

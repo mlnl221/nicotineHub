@@ -6,6 +6,9 @@
 
 <p align="center">
   <a href="AI-DECLARATION.md"><img src="https://img.shields.io/badge/䷼%20AI--DECLARATION-pair-ffedd5?labelColor=ffedd5" alt="AI-DECLARATION: pair" /></a>
+  <a href="https://github.com/mlnl221/nicotineHub/actions/workflows/ci.yml"><img src="https://github.com/mlnl221/nicotineHub/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/mlnl221/nicotineHub/releases"><img src="https://img.shields.io/github/v/release/mlnl221/nicotineHub" alt="Latest release" /></a>
+  <a href="COPYING"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later" /></a>
 </p>
 
 <p align="center">
@@ -100,6 +103,10 @@ Stage `d395cc6`+ — almost 1:1, mobile-friendly. See **[docs/porting-status.md]
 - `docs/DESIGN.md` — UI tokens
 - `docs/plugins.md` — plugin system
 - `AGENTS.md` — agent & worktree conventions
+
+## Contributing
+
+PRs welcome! Please read [`CONTRIBUTING.md`](./CONTRIBUTING.md) first — target the `stage` branch, use Conventional Commits, and verify with `bun test && bun run build`. All PRs are reviewed by [@mlnl221](https://github.com/mlnl221). Bug reports and feature requests via [issues](https://github.com/mlnl221/nicotineHub/issues); security issues via [`SECURITY.md`](./SECURITY.md) (never public). Releases are cut from `main` — see [`docs/deployment.md`](docs/deployment.md).
 
 ---
 

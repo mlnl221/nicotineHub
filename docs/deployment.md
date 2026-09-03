@@ -84,6 +84,23 @@ feature/*  →  stage  (PR, dry-run docker build)  →  main  (promotion, builds
 
 Merging the promotion PR (push to `main`) triggers GHCR publish: `ghcr.io/mlnl221/nicotinehub-bridge|web:latest` + `sha-<short>` and on `v*.*.*` tags `0.2.0`/`0.2`/`0` + `latest` + `sha-`. Both services are versioned together; `compose.yaml` pins them via `${TAG:-latest}`.
 
+## GitHub Releases (release-please)
+
+Releases are automated with [release-please](https://github.com/googleapis/release-please) (`.github/workflows/release-please.yml`, runs on pushes to `main`):
+
+```
+stage → main (promotion PR, merged)
+  → GHCR :latest + :sha- published (docker.yml)
+  → release-please opens/updates a "chore: release X.Y.Z" PR with changelog from Conventional Commits
+  → maintainer merges the release PR
+    → tag vX.Y.Z + GitHub Release created
+    → docker.yml publishes semver tags (0.2.0/0.2/0) to GHCR
+```
+
+- Write Conventional Commits on feature PRs (`feat:` → minor, `fix:` → patch, `feat!:`/`BREAKING CHANGE:` → major) — they become the changelog.
+- Do **not** cut tags manually; merging the release PR is the release.
+- Prebuilt images and `TAG` pinning work exactly as in [GHCR](#ghcr--prebuilt-images-no-build-required) above; users can also follow [GitHub Releases](https://github.com/mlnl221/nicotineHub/releases) for notes.
+
 ```bash
 # contributor flow
 git checkout -b feat/my-change
@@ -95,7 +112,7 @@ gh workflow run promote.yml                      # or wait for Monday schedule
 # then merge the auto-created stage→main PR on GitHub
 ```
 
-> Tags `v*.*.*` should be cut from `main` after promotion (e.g. `git tag v0.2.0 && git push origin v0.2.0`).
+> Tags and GitHub Releases are created by merging the release-please PR — see [GitHub Releases](#github-releases-release-please). Do not tag manually.
 
 See `AGENTS.md#git-worktrees` for per-worktree port isolation (`3000/8787/60754` → `3001/8788/60755` …) and `compose.override.yaml` usage for local port overrides.
 
