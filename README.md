@@ -25,10 +25,11 @@ This is an almost 1:1 port of [nicotine-plus](https://nicotine-plus.org/) ([GitH
 
 ```
 [ Browser (Next.js PWA) ] --WS JSON--> [ Bun bridge :8787 ] --TCP--> server.slsknet.org:2242
-                                                         --P2P--> peers
+         |                    --HTTP--> [ Python worker :8789 ] --HTTP--> Discogs/Bandcamp/Apple/…
+                                                          --P2P--> peers
 ```
 
-The browser can't open raw TCP sockets, so the bridge translates JSON over WebSocket to Soulseek binary framing. See `docs/architecture.md` for protocol and env details.
+The browser can't open raw TCP sockets, so the bridge translates JSON over WebSocket to Soulseek binary framing. Heavy work (link scraping, spectrum rendering, tagging) lives in the worker so the SLSK event loop stays clean. See `docs/architecture.md` for protocol and env details.
 
 > **Security:** Soulseek sends passwords in plaintext. The app never stores them — use credentials you trust.
 
@@ -36,8 +37,9 @@ The browser can't open raw TCP sockets, so the bridge translates JSON over WebSo
 
 ## Features
 
-- **Search** — global, user, room, wishlist & buddies; tabs + live filters (size/bitrate/length/type/slot/country)
-- **Transfers** — queue, resume (`INCOMPLETE<md5>`), `GET /files/:token`, throttled streaming; **Analyze Spectrum** (see below) for finished audio via `sox` Full 2000×513 + Zoom 500×1025 (`oxipng`, ephemeral `/tmp` cache)
+- **Search** — global, user, room, wishlist & buddies; tabs + live filters (size/bitrate/length/type/slot/country); paste a Discogs/Bandcamp/Apple/Qobuz/Tidal/MusicBrainz/Deezer/Beatport link to auto-identify the release (worker `POST /scrape`)
+- **Transfers** — queue, resume (`INCOMPLETE<md5>`), `GET /files/:token`, throttled streaming; **Analyze Spectrum** (see below) for finished audio via worker `sox` Full 2000×513 + Zoom 500×1025 (`oxipng`, shared `/tmp` cache)
+- **Worker (scrape/spectrum/tag)** — separate Python FastAPI service `:8789` for CPU/IO-heavy ops; bridge stays SLSK-only
 - **Browse** — shares & folders via peers
 - **Chat** — rooms + private, tickers, owned/member lists
 - **Social** — buddies, interests/recommendations/similar users
@@ -46,21 +48,22 @@ The browser can't open raw TCP sockets, so the bridge translates JSON over WebSo
 
 ### Analyze Spectrum (FLAC / audio)
 
-After a download finishes, right-click the card on **`/downloads`** → **Analyze Spectrum** (only for finished audio: `flac`, `wav`, `aiff`, `mp3`, `ogg`, …). The bridge spawns `sox` (ported from [`smoked-salmon`](https://github.com/smokin-salmon/smoked-salmon) `uploader/spectrals.py`, Apache-2.0) to render two PNGs:
+After a download finishes, right-click the card on **`/downloads`** → **Analyze Spectrum** (only for finished audio: `flac`, `wav`, `aiff`, `mp3`, `ogg`, …). The worker renders two PNGs (own code; output semantics match the old bridge port of [`smoked-salmon`](https://github.com/smokin-salmon/smoked-salmon) `uploader/spectrals.py`, Apache-2.0):
 
 - **Full** `2000×513` `-z 120` Kaiser (`remix 1`) — whole file
 - **Zoom** `500×1025` `-z 120` Kaiser `-S <mid> -d 0:02` — 2-second slice from the middle (like salmon’s `calculateZoomStartpoint`)
 
-Images are `oxipng -o 2 --strip all` compressed and stored **only in `/tmp/hub-spectrum`** inside the bridge container (wiped on reboot / `docker restart`). The web shows a **badge `SPECTRUM ✓`** on the card, **hover preview** (desktop, Full) with instant cache via blob URL / `ETag`, and a **modal** with tabs for Full + Zoom, downloads, and a tip about lossy cutoffs (~16 kHz). While generating you see `Generating spectrum…`; on error the card shows the reason. See [`docs/spectrum.md`](docs/spectrum.md) and [`docs/architecture.md#transfers--spectrum`](docs/architecture.md#transfers--spectrum).
+Images are `oxipng -o 2 --strip all` compressed and stored **only in `/tmp/hub-spectrum`** in the shared `spectrum-cache` volume (wiped on reboot / `docker restart`). The web shows a **badge `SPECTRUM ✓`** on the card, **hover preview** (desktop, Full) with instant cache via blob URL / `ETag`, and a **modal** with tabs for Full + Zoom, downloads, and a tip about lossy cutoffs (~16 kHz). While generating you see `Generating spectrum…`; on error the card shows the reason. See [`docs/spectrum.md`](docs/spectrum.md) and [`docs/architecture.md#transfers--spectrum`](docs/architecture.md#transfers--spectrum).
 
 ---
 
 ## Repo layout
 
 ```
-apps/bridge  — Bun bridge  (WebSocket `/ws` + `/health` + `/files/:token` + `/spectrum/:token` + volume `DATA_DIR`, ephemeral `/tmp/hub-spectrum`)
+apps/bridge  — Bun bridge  (WebSocket `/ws` + `/health` + `/files/:token` + volume `DATA_DIR`, SLSK-only)
+apps/worker  — Python FastAPI (scrape/spectrum/tag on `:8789`, `bridge-data:/data:ro` + `spectrum-cache`)
 apps/web     — Next.js 15 PWA
-compose.yaml — web:3000 + bridge:8787/60754 → bridge-data:/data
+compose.yaml — web:3000 + bridge:8787/60754 + worker:8789 → bridge-data:/data + spectrum-cache
 ```
 
 ---
@@ -88,8 +91,8 @@ Stage `d395cc6`+ — almost 1:1, mobile-friendly. See **[docs/porting-status.md]
 
 ## Docs
 
-- `docs/architecture.md` — bridge, search & protocol, transfers + spectrum, WS JSON, `LISTEN_PORT`/`PortMapper`, env, tests
-- `docs/spectrum.md` — Analyze Spectrum pipeline (`sox` + `oxipng`, WS/HTTP, caching, UI)
+- `docs/architecture.md` — bridge, worker, search & protocol, transfers + spectrum, WS JSON, `LISTEN_PORT`/`PortMapper`, env, tests
+- `docs/spectrum.md` — Analyze Spectrum pipeline (worker `sox` + `oxipng`, HTTP, caching, UI)
 - `docs/porting-status.md` — matrix vs nicotine-plus 3.3.x
 - `docs/deployment.md` — Docker & GHCR images, `TAG` pinning, promotion workflow (`stage` → `main`)
 - `docs/settings-mapping.md` — authoritative Nicotine+ settings map

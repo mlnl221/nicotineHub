@@ -29,3 +29,9 @@ apps/bridge/dist/data/ip_country_data.csv
 .idea/
 .vscode/
 *.tsbuildinfo
+
+# python (worker)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/

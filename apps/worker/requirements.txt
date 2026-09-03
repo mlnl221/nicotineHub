@@ -1,0 +1,7 @@
+fastapi>=0.115
+uvicorn>=0.30
+aiohttp>=3.10
+beautifulsoup4[lxml]>=4.12
+mutagen>=1.45
+pillow>=10.0
+numpy>=1.26

@@ -1486,7 +1486,7 @@ export class TransferManager {
         cur.timeLeft = null;
         clearInterval(cur._timer!);
         cur._timer = undefined;
-        // Materialize actual file for spectrum / /files (ponytail: copy shared source if exists, else synth valid audio)
+        // Materialize actual file for /files serving (ponytail: copy shared source if exists, else synth valid audio so worker spectrum has real input)
         try {
           const dest = this.deriveDestination(cur.virtualPath, cur.username);
           if (!existsSync(dest)) {
@@ -1512,7 +1512,7 @@ export class TransferManager {
             if (src && existsSync(src)) {
               try { copyFileSync(src, dest); } catch { try { writeFileSync(dest, readFileSync(src)); } catch {} }
             } else {
-              // No source — generate valid audio so sox spectrum works (not zero-byte)
+              // No source — generate valid audio so the worker spectrum endpoint has real input (not zero-byte)
               const ext = (cur.fileName.split(".").pop() || "").toLowerCase();
               const isAudio = ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus"].includes(ext);
               if (isAudio) {
