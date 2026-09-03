@@ -349,22 +349,20 @@ export default function ChatRoomsPage() {
 
                 <div className="flex flex-1 overflow-hidden min-h-0">
                   <div className="flex flex-1 flex-col overflow-hidden min-h-0">
+                    {systemMessages.length > 0 ? (
                     <div ref={sysLogRef} data-testid="system-log" aria-label="System events" className="shrink-0 max-h-[10%] overflow-y-auto overscroll-contain border-b border-outline-variant/15 bg-surface-container-low/60 px-4 md:px-6 py-1">
-                      {systemMessages.length === 0 ? (
-                        <p className="py-1 text-center font-body text-[11px] italic text-outline">No system events</p>
-                      ) : (
-                        systemMessages.map((m) => (
-                          <div key={m.id} className="flex justify-center py-0.5 max-w-full overflow-hidden">
-                            <span className="truncate whitespace-nowrap font-body text-xs italic text-on-surface-variant max-w-full overflow-hidden">
-                              {m.message}
-                              <span className="ml-2 font-mono text-[10px] text-outline">
-                                {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                              </span>
+                      {systemMessages.map((m) => (
+                        <div key={m.id} className="flex justify-center py-0.5 max-w-full overflow-hidden">
+                          <span className="truncate whitespace-nowrap font-body text-xs italic text-on-surface-variant max-w-full overflow-hidden">
+                            {m.message}
+                            <span className="ml-2 font-mono text-[10px] text-outline">
+                              {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                             </span>
-                          </div>
-                        ))
-                      )}
+                          </span>
+                        </div>
+                      ))}
                     </div>
+                    ) : null}
                     <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-4 md:p-6 space-y-2 max-w-full overflow-x-hidden">
                       {userMessages.length === 0 ? (
                         <div className="py-10 text-center">
