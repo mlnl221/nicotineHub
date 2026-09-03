@@ -24,6 +24,7 @@ const BannedUsersSection = dynamic(() => import("@/components/settings/BannedUse
 const IgnoredUsersSection = dynamic(() => import("@/components/settings/IgnoredUsersSection").then((m) => m.IgnoredUsersSection), { loading: () => <SectionLoader /> });
 const UrlHandlersSection = dynamic(() => import("@/components/settings/UrlHandlersSection").then((m) => m.UrlHandlersSection), { loading: () => <SectionLoader /> });
 const PluginsSection = dynamic(() => import("@/components/settings/PluginsSection").then((m) => m.PluginsSection), { loading: () => <SectionLoader /> });
+const WorkerSection = dynamic(() => import("@/components/settings/WorkerSection").then((m) => m.WorkerSection), { loading: () => <SectionLoader /> });
 const AboutSection = dynamic(() => import("@/components/settings/AboutSection").then((m) => m.AboutSection), { loading: () => <SectionLoader /> });
 
 type TabId =
@@ -41,6 +42,7 @@ type TabId =
   | "ignored-users"
   | "url-handlers"
   | "plugins"
+  | "worker"
   | "notifications"
   | "about";
 
@@ -60,6 +62,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "ignored-users", label: "Ignored Users", icon: "person_off" },
   { id: "url-handlers", label: "URL Handlers", icon: "link" },
   { id: "plugins", label: "Plugins", icon: "extension" },
+  { id: "worker", label: "Worker", icon: "memory" },
   { id: "notifications", label: "Notifications", icon: "notifications" },
 ];
 
@@ -71,7 +74,7 @@ const TAB_GROUPS: TabGroup[] = [
   { label: "Transfers", tabs: ["shares", "downloads", "uploads"] },
   { label: "Search & Users", tabs: ["searches", "user-profile", "banned-users", "ignored-users"] },
   { label: "Chat & Playback", tabs: ["chats", "now-playing"] },
-  { label: "System", tabs: ["logging", "url-handlers", "plugins", "about"] },
+  { label: "System", tabs: ["logging", "url-handlers", "plugins", "worker", "about"] },
 ];
 
 const TAB_MAP = new Map(TABS.map((t) => [t.id, t] as const));
@@ -266,6 +269,8 @@ export default function SettingsPage() {
                   <UrlHandlersSection />
                 ) : tab === "plugins" ? (
                   <PluginsSection />
+                ) : tab === "worker" ? (
+                  <WorkerSection />
                 ) : tab === "about" ? (
                   <AboutSection />
                 ) : (

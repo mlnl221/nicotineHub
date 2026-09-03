@@ -6,6 +6,9 @@
 
 <p align="center">
   <a href="AI-DECLARATION.md"><img src="https://img.shields.io/badge/䷼%20AI--DECLARATION-pair-ffedd5?labelColor=ffedd5" alt="AI-DECLARATION: pair" /></a>
+  <a href="https://github.com/mlnl221/nicotineHub/actions/workflows/ci.yml"><img src="https://github.com/mlnl221/nicotineHub/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/mlnl221/nicotineHub/releases"><img src="https://img.shields.io/github/v/release/mlnl221/nicotineHub" alt="Latest release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later" /></a>
 </p>
 
 <p align="center">
@@ -21,14 +24,43 @@
   <em>Downloads/uploads are disabled in the demo.</em>
 </p>
 
+## Screenshots
+
+All captures from a local demo build (`NEXT_PUBLIC_DEMO=true`, mocked data) — desktop `1280×800`, mobile `390×844`.
+
+| Desktop: search → filters → downloads → spectrum | Mobile: search → browse → downloads |
+|---|---|
+| ![Desktop walkthrough: multi-tab search with filters, downloads with live throughput, Analyze Spectrum Full/Zoom modal](docs/screenshots/desktop-walkthrough.gif) | ![Mobile walkthrough: search results, More sheet, browse shares, downloads](docs/screenshots/mobile-walkthrough.gif) |
+
+### Desktop
+
+| Login | Search | Filters | Release-link paste |
+|---|---|---|---|
+| [![Login — any credentials in demo](docs/screenshots/01-login.png)](docs/screenshots/01-login.png) | [![Search — tabs, scope, grouped results (dark mode)](docs/screenshots/02-search.png)](docs/screenshots/02-search.png) | [![Search filters — size/bitrate/type/slot/country (dark mode)](docs/screenshots/03-search-filters.png)](docs/screenshots/03-search-filters.png) | [![Paste a Discogs/Bandcamp/Apple link to auto-identify the release via the worker](docs/screenshots/04-search-link.png)](docs/screenshots/04-search-link.png) |
+
+| Downloads | Spectrum Full | Spectrum Zoom | Browse shares |
+|---|---|---|---|
+| [![Downloads — live progress, stats, SPECTRUM badge on finished audio (dark mode)](docs/screenshots/05-downloads.png)](docs/screenshots/05-downloads.png) | [![Analyze Spectrum — Full 2000×513 sox render](docs/screenshots/06-spectrum.png)](docs/screenshots/06-spectrum.png) | [![Analyze Spectrum — 2-second Zoom slice](docs/screenshots/07-spectrum-zoom.png)](docs/screenshots/07-spectrum-zoom.png) | [![Browse — shares tree, folder search, per-file actions](docs/screenshots/08-browse.png)](docs/screenshots/08-browse.png) |
+
+| Chat rooms | Private chat |
+|---|---|
+| [![Chat rooms — room list, tickers, members](docs/screenshots/09-chat.png)](docs/screenshots/09-chat.png) | [![Private chat — 1:1 threads (dark mode)](docs/screenshots/10-private-chat.png)](docs/screenshots/10-private-chat.png) |
+
+### Mobile
+
+| Search | More sheet | Downloads | Private chat |
+|---|---|---|---|
+| [![Mobile search with bottom nav (dark mode)](docs/screenshots/m1-search.png)](docs/screenshots/m1-search.png) | [![Mobile More sheet — browse, buddies, uploads, rooms, profiles, interests, settings](docs/screenshots/m2-more-sheet.png)](docs/screenshots/m2-more-sheet.png) | [![Mobile downloads](docs/screenshots/m3-downloads.png)](docs/screenshots/m3-downloads.png) | [![Mobile private chat](docs/screenshots/m4-chat.png)](docs/screenshots/m4-chat.png) |
+
 This is an almost 1:1 port of [nicotine-plus](https://nicotine-plus.org/) ([GitHub](https://github.com/nicotine-plus/nicotine-plus)) to a modern Next.js web app. Built on `doc/SLSKPROTOCOL.md`.
 
 ```
 [ Browser (Next.js PWA) ] --WS JSON--> [ Bun bridge :8787 ] --TCP--> server.slsknet.org:2242
-                                                         --P2P--> peers
+         |                    --HTTP--> [ Python worker :8789 ] --HTTP--> Discogs/Bandcamp/Apple/…
+                                                          --P2P--> peers
 ```
 
-The browser can't open raw TCP sockets, so the bridge translates JSON over WebSocket to Soulseek binary framing. See `docs/architecture.md` for protocol and env details.
+The browser can't open raw TCP sockets, so the bridge translates JSON over WebSocket to Soulseek binary framing. Heavy work (link scraping, spectrum rendering, tagging) lives in the worker so the SLSK event loop stays clean. See `docs/architecture.md` for protocol and env details.
 
 > **Security:** Soulseek sends passwords in plaintext. The app never stores them — use credentials you trust.
 
@@ -36,8 +68,9 @@ The browser can't open raw TCP sockets, so the bridge translates JSON over WebSo
 
 ## Features
 
-- **Search** — global, user, room, wishlist & buddies; tabs + live filters (size/bitrate/length/type/slot/country)
-- **Transfers** — queue, resume (`INCOMPLETE<md5>`), `GET /files/:token`, throttled streaming; **Analyze Spectrum** (see below) for finished audio via `sox` Full 2000×513 + Zoom 500×1025 (`oxipng`, ephemeral `/tmp` cache)
+- **Search** — global, user, room, wishlist & buddies; tabs + live filters (size/bitrate/length/type/slot/country); paste a Discogs/Bandcamp/Apple/Qobuz/Tidal/MusicBrainz/Deezer/Beatport link to auto-identify the release (worker `POST /scrape`)
+- **Transfers** — queue, resume (`INCOMPLETE<md5>`), `GET /files/:token`, throttled streaming; **Analyze Spectrum** (see below) for finished audio via worker `sox` Full 2000×513 + Zoom 500×1025 (`oxipng`, shared `/tmp` cache)
+- **Worker (scrape/spectrum/tag)** — separate Python FastAPI service `:8789` for CPU/IO-heavy ops; bridge stays SLSK-only
 - **Browse** — shares & folders via peers
 - **Chat** — rooms + private, tickers, owned/member lists
 - **Social** — buddies, interests/recommendations/similar users
@@ -46,21 +79,22 @@ The browser can't open raw TCP sockets, so the bridge translates JSON over WebSo
 
 ### Analyze Spectrum (FLAC / audio)
 
-After a download finishes, right-click the card on **`/downloads`** → **Analyze Spectrum** (only for finished audio: `flac`, `wav`, `aiff`, `mp3`, `ogg`, …). The bridge spawns `sox` (ported from [`smoked-salmon`](https://github.com/smokin-salmon/smoked-salmon) `uploader/spectrals.py`, Apache-2.0) to render two PNGs:
+After a download finishes, right-click the card on **`/downloads`** → **Analyze Spectrum** (only for finished audio: `flac`, `wav`, `aiff`, `mp3`, `ogg`, …). The worker renders two PNGs (own code; output semantics match the old bridge port of [`smoked-salmon`](https://github.com/smokin-salmon/smoked-salmon) `uploader/spectrals.py`, Apache-2.0):
 
 - **Full** `2000×513` `-z 120` Kaiser (`remix 1`) — whole file
 - **Zoom** `500×1025` `-z 120` Kaiser `-S <mid> -d 0:02` — 2-second slice from the middle (like salmon’s `calculateZoomStartpoint`)
 
-Images are `oxipng -o 2 --strip all` compressed and stored **only in `/tmp/hub-spectrum`** inside the bridge container (wiped on reboot / `docker restart`). The web shows a **badge `SPECTRUM ✓`** on the card, **hover preview** (desktop, Full) with instant cache via blob URL / `ETag`, and a **modal** with tabs for Full + Zoom, downloads, and a tip about lossy cutoffs (~16 kHz). While generating you see `Generating spectrum…`; on error the card shows the reason. See [`docs/spectrum.md`](docs/spectrum.md) and [`docs/architecture.md#transfers--spectrum`](docs/architecture.md#transfers--spectrum).
+Images are `oxipng -o 2 --strip all` compressed and stored **only in `/tmp/hub-spectrum`** in the shared `spectrum-cache` volume (wiped on reboot / `docker restart`). The web shows a **badge `SPECTRUM ✓`** on the card, **hover preview** (desktop, Full) with instant cache via blob URL / `ETag`, and a **modal** with tabs for Full + Zoom, downloads, and a tip about lossy cutoffs (~16 kHz). While generating you see `Generating spectrum…`; on error the card shows the reason. See [`docs/spectrum.md`](docs/spectrum.md) and [`docs/architecture.md#transfers--spectrum`](docs/architecture.md#transfers--spectrum).
 
 ---
 
 ## Repo layout
 
 ```
-apps/bridge  — Bun bridge  (WebSocket `/ws` + `/health` + `/files/:token` + `/spectrum/:token` + volume `DATA_DIR`, ephemeral `/tmp/hub-spectrum`)
+apps/bridge  — Bun bridge  (WebSocket `/ws` + `/health` + `/files/:token` + volume `DATA_DIR`, SLSK-only)
+apps/worker  — Python FastAPI (scrape/spectrum/tag on `:8789`, `bridge-data:/data:ro` + `spectrum-cache`)
 apps/web     — Next.js 15 PWA
-compose.yaml — web:3000 + bridge:8787/60754 → bridge-data:/data
+compose.yaml — web:3000 + bridge:8787/60754 + worker:8789 → bridge-data:/data + spectrum-cache
 ```
 
 ---
@@ -82,26 +116,28 @@ For prebuilt images and release workflow, see [`docs/deployment.md`](docs/deploy
 
 ## Porting status
 
-Stage `d395cc6`+ — almost 1:1, mobile-friendly. See **[docs/porting-status.md](docs/porting-status.md)** for the full domain-by-domain matrix, **[docs/settings-mapping.md](docs/settings-mapping.md)** for the settings map, and **`docs/settings-plan.md`** for done vs next (Phases A–H done, `leech_detector` ported; `youtube_info` + fonts/colors/lastfm intentionally omitted, English-only).
+Stage `5c65ea9`+ — almost 1:1, mobile-friendly. See **[docs/porting-status.md](docs/porting-status.md)** for the full domain-by-domain matrix (settings port Phases A–N done, `leech_detector` ported; `youtube_info` + fonts/colors/lastfm intentionally omitted, English-only).
 
 ---
 
 ## Docs
 
-- `docs/architecture.md` — bridge, search & protocol, transfers + spectrum, WS JSON, `LISTEN_PORT`/`PortMapper`, env, tests
-- `docs/spectrum.md` — Analyze Spectrum pipeline (`sox` + `oxipng`, WS/HTTP, caching, UI)
+- `docs/architecture.md` — bridge, worker, search & protocol, transfers + spectrum, WS JSON, `LISTEN_PORT`/`PortMapper`, env, tests
+- `docs/spectrum.md` — Analyze Spectrum pipeline (worker `sox` + `oxipng`, HTTP, caching, UI)
 - `docs/porting-status.md` — matrix vs nicotine-plus 3.3.x
 - `docs/deployment.md` — Docker & GHCR images, `TAG` pinning, promotion workflow (`stage` → `main`)
-- `docs/settings-mapping.md` — authoritative Nicotine+ settings map
-- `docs/settings-plan.md` — status (done A–G) vs next (H)
 - `docs/DESIGN.md` — UI tokens
-- `docs/plugins.md` — plugin system
+- `docs/proposals/` — future backlog (r/Soulseek improvements not yet built)
 - `AGENTS.md` — agent & worktree conventions
+
+## Contributing
+
+PRs welcome! Please read [`CONTRIBUTING.md`](./CONTRIBUTING.md) first — target the `stage` branch, use Conventional Commits, and verify with `bun test && bun run build`. All PRs are reviewed by [@mlnl221](https://github.com/mlnl221). Bug reports and feature requests via [issues](https://github.com/mlnl221/nicotineHub/issues); security issues via [`SECURITY.md`](./SECURITY.md) (never public). Releases are cut from `main` — see [`docs/deployment.md`](docs/deployment.md).
 
 ---
 
 ## Legal
 
-**License:** [`GPL-3.0-or-later`](./COPYING). © 2001–2026 Nicotine+, PySoulSeek; © 2025–2026 Nicotine Hub. See [`ATTRIBUTION.md`](./ATTRIBUTION.md) (upstream `8d81e66`) and [`COPYING`](COPYING).
+**License:** [`GPL-3.0-or-later`](./LICENSE). © 2001–2026 Nicotine+, PySoulSeek; © 2025–2026 Nicotine Hub. See [`ATTRIBUTION.md`](./ATTRIBUTION.md) (upstream `8d81e66`) and [`LICENSE`](LICENSE).
 
 **Soulseek** network / `server.slsknet.org` is volunteer-operated and not affiliated with this project. By connecting you agree to the [Soulseek rules](https://www.slsknet.org/news/node/681) and [Terms](https://www.slsknet.org/news/node/682). Soulseek is unencrypted; see Security above.

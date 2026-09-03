@@ -1,6 +1,6 @@
 {
   "name": "@nicotine/bridge",
-  "version": "0.1.0",
+  "version": "0.25.0",
   "private": false,
   "license": "GPL-3.0-or-later",
   "type": "module",
@@ -14,7 +14,6 @@
     "typecheck": "bunx tsc --noEmit"
   },
   "dependencies": {
-    "music-metadata": "^11.15.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

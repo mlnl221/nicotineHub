@@ -40,6 +40,7 @@ import {
   buildRecommendationsEmpty,
   buildGlobalRecommendationsEmpty,
   buildSimilarUsersEmpty,
+  buildRoomListRequest,
   buildUserInfoResponse,
   parseUserInfoResponse,
   buildQueueUpload,
@@ -50,8 +51,6 @@ import {
   buildUploadFailed,
   buildUploadDenied,
   buildConnectToPeer,
-  buildCantConnectToPeer,
-  buildSendUploadSpeed,
   buildUserSearch,
   buildRoomSearch,
   buildWishlistSearch,
@@ -66,7 +65,7 @@ import {
   parsePlaceInQueueRequest,
   parseFileTransferInit,
   parseFileOffset,
-  PEER_MESSAGE_CODES,
+  parseRoomList,
   SlskReader,
 } from "./soulseek.ts";
 
@@ -490,6 +489,13 @@ describe("Phase 0 — recommendations empty + 1001 + 121", () => {
     expect(p.code).toBe(SERVER_MESSAGE_CODES.similarUsers);
     expect(p.payload.length).toBe(0);
   });
+  test("RoomList 64 request is code 64 with empty payload", () => {
+    const raw = buildRoomListRequest();
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(SERVER_MESSAGE_CODES.roomList);
+    expect(p.code).toBe(64);
+    expect(p.payload.length).toBe(0);
+  });
   test("CantConnectToPeer 1001 round-trip", () => {
     const raw = buildCantConnectToPeer(12345, "alice");
     const p = tryParseMessage(raw)!;
@@ -654,5 +660,22 @@ describe("transfers — protocol shims (Phase 0)", () => {
     expect(resp.code).toBe(44);
     expect(parsePlaceInQueueRequest(req.payload).file).toBe("file.mp3");
     expect(parsePlaceInQueueResponse(resp.payload).place).toBe(3);
+  });
+
+  test("parseRoomList reads wire layout incl. repeated user-count prefix (server code 64)", () => {
+    // Layout per doc/SLSKPROTOCOL.md: names, then count+user-counts per section.
+    const rooms: Array<[string, number]> = [["lobby", 12], ["nicotine", 34]];
+    const parts: Buffer[] = [packUint32(rooms.length)];
+    for (const [name] of rooms) parts.push(packString(name));
+    parts.push(packUint32(rooms.length));
+    for (const [, users] of rooms) parts.push(packUint32(users));
+    parts.push(packUint32(0), packUint32(0)); // owned: empty
+    parts.push(packUint32(0), packUint32(0)); // member: empty
+    parts.push(packUint32(0)); // operator: empty
+    const rl = parseRoomList(Buffer.concat(parts));
+    expect(rl.rooms).toEqual([{ name: "lobby", users: 12 }, { name: "nicotine", users: 34 }]);
+    expect(rl.owned).toEqual([]);
+    expect(rl.member).toEqual([]);
+    expect(rl.operator).toEqual([]);
   });
 });

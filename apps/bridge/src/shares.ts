@@ -81,13 +81,8 @@ export class ShareDB {
     } else {
       this.rebuildCombined();
     }
-    // Trigger async enrichment in background (buildAttrs sync is empty, async fills via music-metadata)
-    if (this.folders.length > 0) {
-      const hasEmptyAttrs = this.folders.some(f => f.files.some(file => !file.attrs || file.attrs.length === 0));
-      if (hasEmptyAttrs) {
-        this.rescanAsync().catch(() => {});
-      }
-    }
+    // Bridge is SLSK-only: local share attrs stay [] (peer attrs are authoritative).
+    // Worker owns audio analysis (mutagen/TinyTag parity) via POST /analyze if needed.
     // fs.watch incremental — debounce 2s, mirrors pynicotine Scanner rescanning
     try {
       const dirs = this.resolveSharedDirs();
@@ -533,7 +528,8 @@ export class ShareDB {
           continue;
         }
         this.fileMtimes.set(full, mtime);
-        const attrs = this.buildAttrs(full, ext, st.size);
+        // ponytail: attrs empty — bridge is SLSK-only, worker owns TinyTag/mutagen analysis (POST /analyze)
+        const attrs: Array<[number, number]> = [];
         files.push({ name: vName, size: st.size, ext, attrs });
         this.virtual2real.set(vName, full);
         this.real2virtual.set(full, vName);
@@ -542,22 +538,7 @@ export class ShareDB {
     if (files.length) out.push({ name: virtualPath, files: files.sort((a,b)=> a.name.localeCompare(b.name)) });
   }
 
-  private buildAttrs(full: string, ext: string, _size: number): Array<[number, number]> {
-    // Nicotine uses TinyTag for bitrate/length/sampleRate/bitDepth (slskmessages.py FileAttribute 0/1/2/4/5)
-    // Bridge tries music-metadata sync fallback; async rescan uses full parsing
-    // Keep sync fast — return empty here, async path fills via scanFsSharesAsync
-    if (["mp3","flac","ogg","m4a","wav","wma","aac","opus","aiff"].includes(ext)) {
-      try {
-        // Try quick header parse without async: attempt to read bitrate from file if tiny
-        // Fallback empty — async scanner will enrich via music-metadata
-        void full;
-      } catch {}
-      return [];
-    }
-    return [];
-  }
-
-  /** Async FS scanner with music-metadata enrichment (TinyTag parity) */
+  /** Async FS scanner (no local enrichment — bridge stays SLSK-only) */
   async scanFsSharesAsync(sharedDirs?: string[]): Promise<ShareFolder[]> {
     const dirs = sharedDirs || this.resolveSharedDirs();
     const folders: ShareFolder[] = [];
@@ -604,48 +585,14 @@ export class ShareDB {
           continue;
         }
         this.fileMtimes.set(full, mtime);
-        const attrs = await this.buildAttrsAsync(full, ext);
+        // ponytail: bridge stays SLSK-only — worker owns analysis
+        const attrs: Array<[number, number]> = [];
         files.push({ name: vName, size: st.size, ext, attrs });
         this.virtual2real.set(vName, full);
         this.real2virtual.set(full, vName);
       }
     }
     if (files.length) out.push({ name: virtualPath, files: files.sort((a,b)=> a.name.localeCompare(b.name)) });
-  }
-
-  private async buildAttrsAsync(full: string, ext: string): Promise<Array<[number, number]>> {
-    if (!["mp3","flac","ogg","m4a","wav","wma","aac","opus","aiff","wv"].includes(ext)) return [];
-    try {
-      const { parseFile } = await import("music-metadata");
-      const meta = await parseFile(full, { duration: true });
-      const attrs: Array<[number, number]> = [];
-      const bitrate = meta.format.bitrate ? Math.round(meta.format.bitrate / 1000) : undefined;
-      const duration = meta.format.duration ? Math.round(meta.format.duration) : undefined;
-      const sampleRate = meta.format.sampleRate;
-      const bitsPerSample = (meta.format as unknown as { bitsPerSample?: number }).bitsPerSample;
-      if (bitrate) attrs.push([0, bitrate]);
-      if (duration) attrs.push([1, duration]);
-      // VBR: attribute 2 — detect via codecProfile containing VBR/CBR or mode, else infer for mp3
-      if (["mp3", "m4a", "ogg", "opus", "wma", "aac"].includes(ext)) {
-        const profile = (meta.format.codecProfile as string | undefined) || "";
-        const isVbr = /vbr/i.test(profile) || (meta.format as unknown as { isVbr?: boolean }).isVbr === true;
-        const isCbr = /cbr/i.test(profile);
-        if (isVbr) attrs.push([2, 1]);
-        else if (isCbr) attrs.push([2, 0]);
-        else if (ext === "mp3" && bitrate) {
-          // Fallback: mp3 without profile — assume CBR if bitrate is standard (128/192/256/320), else VBR
-          // Homelab: treat unknown mp3 as CBR 0 to avoid false filtering
-          attrs.push([2, 0]);
-        } else if (profile) {
-          attrs.push([2, 0]);
-        }
-      }
-      if (sampleRate) attrs.push([4, sampleRate]);
-      if (bitsPerSample) attrs.push([5, bitsPerSample]);
-      return attrs;
-    } catch {
-      return [];
-    }
   }
 
   private async scanCustomRootsAsync(roots: [string, string][]): Promise<ShareFolder[]> {
@@ -675,7 +622,8 @@ export class ShareDB {
             folders.push({ name: vName, files: [{ ...prev, size: stats.size }] });
           } else {
             this.fileMtimes.set(rPath, mtime);
-            const attrs = await this.buildAttrsAsync(rPath, ext);
+            // ponytail: bridge SLSK-only — attrs empty, worker handles TinyTag
+            const attrs: Array<[number, number]> = [];
             folders.push({ name: vName, files: [{ name: fileName, size: stats.size, ext, attrs }] });
           }
           this.virtual2real.set(vName, rPath);
@@ -717,7 +665,8 @@ export class ShareDB {
             folders.push({ name: vName, files: [{ ...prev, size: stats.size }] });
           } else {
             this.fileMtimes.set(rPath, mtime);
-            const attrs = this.buildAttrs(rPath, ext, stats.size);
+            // ponytail: bridge SLSK-only — attrs empty, worker handles TinyTag
+            const attrs: Array<[number, number]> = [];
             folders.push({ name: vName, files: [{ name: fileName, size: stats.size, ext, attrs }] });
           }
           this.virtual2real.set(vName, rPath);

@@ -32,6 +32,28 @@ function formatTime(iso: string, fmt?: string): string {
   } catch { return iso; }
 }
 
+// Single source of truth for which bridge the UI talks to:
+// runtime localStorage override → build-time NEXT_PUBLIC_BRIDGE_URL.
+function configuredBridgeWsUrl(): string | null {
+  try {
+    const v = window.localStorage.getItem("nicotineHub.bridgeUrl") ?? window.localStorage.getItem("nicotine.bridgeUrl");
+    if (v) return v;
+  } catch {}
+  return process.env.NEXT_PUBLIC_BRIDGE_URL || null;
+}
+
+function bridgeHttpBase(): string {
+  const v = configuredBridgeWsUrl();
+  if (v) {
+    try {
+      const u = new URL(v.replace(/^ws/, "http"));
+      return `${u.protocol}//${u.host}`;
+    } catch {}
+  }
+  const scheme = window.location.protocol === "https:" ? "https:" : "http:";
+  return `${scheme}//${window.location.hostname}:8787`;
+}
+
 function HealthCard({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
   return (
     <div className="rounded-xl bg-surface p-4 ghost-border dark:bg-surface-container-low">
@@ -134,38 +156,9 @@ export default function DiagnosticsPage() {
     if (state.status !== "connected") return;
     let cancelled = false;
     const fetchLogs = async () => {
-      const bridgeHttpUrl = (() => {
-        try {
-          const override = (localStorage.getItem("nicotineHub.bridgeUrl") ?? localStorage.getItem("nicotine.bridgeUrl"));
-          if (override) {
-            const u = new URL(override);
-            const scheme = u.protocol === "wss:" ? "https:" : "http:";
-            const port = u.port || "8787";
-            return `${scheme}//${u.hostname}:${port}/logs?tail=500`;
-          }
-        } catch {}
-        const envUrl = process.env.NEXT_PUBLIC_BRIDGE_URL;
-        if (envUrl) {
-          try {
-            const u = new URL(envUrl);
-            const scheme = u.protocol === "wss:" ? "https:" : "http:";
-            const port = u.port || "8787";
-            return `${scheme}//${u.hostname}:${port}/logs?tail=500`;
-          } catch {}
-        }
-        const scheme = window.location.protocol === "https:" ? "https:" : "http:";
-        const port = window.location.port === "3001" ? "8789" : window.location.port === "3002" ? "8790" : "8787";
-        return `${scheme}//${window.location.hostname}:${port}/logs?tail=500`;
-      })();
-      // worktree bridge is on 8788, but http fetch above derives from bridgeUrl or hostname:8787
-      // if bridgeUrl override points to 8788, we will use it
+      const bridgeHttpUrl = `${bridgeHttpBase()}/logs?tail=500`;
       try {
-        // try primary
-        let res = await fetch(bridgeHttpUrl, { cache: "no-store" });
-        if (!res.ok && bridgeHttpUrl.includes(":8787")) {
-          // fallback to 8788 for worktree
-          res = await fetch(bridgeHttpUrl.replace(":8787", ":8788"), { cache: "no-store" });
-        }
+        const res = await fetch(bridgeHttpUrl, { cache: "no-store" });
         if (!res.ok) return;
         const data = await res.json() as { entries: DiagEntry[] };
         if (cancelled) return;
@@ -185,32 +178,7 @@ export default function DiagnosticsPage() {
     if (state.status !== "connected") return;
     let timer: ReturnType<typeof setInterval>;
     const fetchHealth = async () => {
-      const bridgeUrl = (() => {
-        try {
-          const override = (localStorage.getItem("nicotineHub.bridgeUrl") ?? localStorage.getItem("nicotine.bridgeUrl"));
-          if (override) {
-            try {
-              const u = new URL(override);
-              u.searchParams.delete("token");
-              // derive http url for /health
-              const scheme = u.protocol === "wss:" ? "https:" : "http:";
-              return `${scheme}//${u.hostname}:${u.port || (u.protocol==="wss:"?"8787":"8787")}/health?json=1`;
-            } catch { return null; }
-          }
-        } catch {}
-        const envUrl = process.env.NEXT_PUBLIC_BRIDGE_URL;
-        if (envUrl) {
-          try {
-            const u = new URL(envUrl);
-            u.searchParams.delete("token");
-            const scheme = u.protocol === "wss:" ? "https:" : "http:";
-            return `${scheme}//${u.hostname}:${u.port || "8787"}/health?json=1`;
-          } catch {}
-        }
-        const scheme = window.location.protocol === "https:" ? "https:" : "http:";
-        const port = window.location.port === "3001" ? "8789" : window.location.port === "3002" ? "8790" : "8787";
-        return `${scheme}//${window.location.hostname}:${port}/health?json=1`;
-      })();
+      const bridgeUrl = `${bridgeHttpBase()}/health?json=1`;
       if (!bridgeUrl) return;
       const start = performance.now();
       try {
@@ -294,10 +262,8 @@ export default function DiagnosticsPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    try {
-      const v = (window.localStorage.getItem("nicotineHub.bridgeUrl") ?? window.localStorage.getItem("nicotine.bridgeUrl"));
-      if (v) { setBridgeUrlDisplay(v.replace(/token=[^&]+/, "token=***")); return; }
-    } catch {}
+    const v = configuredBridgeWsUrl();
+    if (v) { setBridgeUrlDisplay(v.replace(/token=[^&]+/, "token=***")); return; }
     if (isDemo) { setBridgeUrlDisplay("demo (offline — no bridge)"); return; }
     try {
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";

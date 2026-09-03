@@ -14,7 +14,7 @@
  *   client -> server: { type:"chat:private", action:"send", username, message }
  */
 
-import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { SoulseekSession } from "./session.ts";
@@ -139,8 +139,8 @@ const UserInfoRequestSchema = z.object({ type: z.literal("userinfo") }).and(User
 
 const ChatRoomSchema = z.object({
   type: z.literal("chat:room"),
-  action: z.enum(["join", "leave", "say", "ticker", "setTicker", "addOperator", "removeOperator", "cancelMembership", "cancelOwnership"]),
-  room: z.string().min(1).max(64),
+  action: z.enum(["join", "leave", "say", "ticker", "setTicker", "addOperator", "removeOperator", "cancelMembership", "cancelOwnership", "refreshList"]),
+  room: z.string().min(1).max(64).optional(),
   message: z.string().max(5000).optional(),
   username: z.string().max(64).optional(),
 });
@@ -186,15 +186,6 @@ const StatsRequestSchema = z.object({
 });
 const StatsResetSchema = z.object({
   type: z.literal("statistics:reset"),
-});
-
-const SpectrumRequestSchema = z.object({
-  type: z.literal("spectrum:request"),
-  id: z.string().min(1).max(1024),
-});
-const SpectrumStatusRequestSchema = z.object({
-  type: z.literal("spectrum:status"),
-  id: z.string().min(1).max(1024),
 });
 
 function defaultProfile(username: string) {
@@ -355,23 +346,26 @@ function getCorsHeaders(req?: Request): Record<string, string> {
       base["access-control-allow-origin"] = origin;
       base["access-control-allow-credentials"] = "true";
     } else if (!origin) {
-      // non-browser (curl/healthcheck) — keep permissive for homelab
       base["access-control-allow-origin"] = allowed[0] || "*";
     }
-    // if origin present but not allowed → omit header (browser will block)
   } else {
     base["access-control-allow-origin"] = "*";
   }
   return base;
 }
-const CORS_HEADERS = getCorsHeaders();
-
 const SECURITY_HEADERS: Record<string, string> = {
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
   "referrer-policy": "strict-origin-when-cross-origin",
   "permissions-policy": "camera=(), microphone=(), geolocation=()",
 };
+// ponytail: deduped 9× auth blocks into one helper; re-split if per-route auth diverges
+function requireAuth(req: Request, cors: Record<string, string>): Response | null {
+  if (!BRIDGE_TOKEN) return null;
+  const tok = extractToken(req);
+  if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
+  return null;
+}
 
 function sanitizeFileNameForHeader(name: string): string {
   // Strict whitelist: strip CR/LF, quotes, slashes, control chars; fallback to "download"
@@ -436,10 +430,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     }
     // UPnP status endpoint (detailed, auth-gated like health json)
     if ((url.pathname === "/upnp/status" || url.pathname === "/api/upnp/status") && req.method === "GET") {
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const st = getGlobalPortMapperStatus();
       return new Response(JSON.stringify({ ...st, listenPort: LISTEN_PORT, ts: new Date().toISOString() }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
     }
@@ -464,10 +455,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       }
     }
     if ((url.pathname === "/interfaces" || url.pathname === "/api/interfaces") && req.method === "GET") {
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       try {
         const { networkInterfaces } = await import("node:os");
         const raw = networkInterfaces();
@@ -490,10 +478,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     }
     if (url.pathname === "/logs" && req.method === "GET") {
       // Simple auth check via token param/header (mirror /ws)
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const tail = Math.min(Math.max(Number(url.searchParams.get("tail") || "500"), 1), 2000);
       const level = (url.searchParams.get("level") as LogLevel) || "debug";
       const scope = url.searchParams.get("scope") || undefined;
@@ -503,10 +488,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       return new Response(JSON.stringify({ entries, total: entries.length }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
     }
     if (url.pathname === "/diagnostics" && req.method === "GET") {
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const tail = Math.min(Math.max(Number(url.searchParams.get("tail") || "500"), 1), 2000);
       const level = (url.searchParams.get("level") as LogLevel) || "debug";
       let entries = diagTail(2000, level as LogLevel);
@@ -519,10 +501,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     }
 
     if (url.pathname === "/plugins" && req.method === "GET") {
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const list = pluginManager.getInstalledPluginListWithStatus();
       // include meta for each + loaded settings/metasettings
       const enriched = list.map((p) => ({
@@ -533,10 +512,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       return new Response(JSON.stringify({ plugins: enriched, globalEnable: true }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
     }
     if (url.pathname === "/plugins/install" && req.method === "POST") {
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       // expect multipart or raw zip; handle raw body as zip bytes (content-type octet-stream) or JSON {url}
       const ct = req.headers.get("content-type") || "";
       // size guard: reject huge bodies before buffering (homelab: 20MB limit)
@@ -587,10 +563,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
 
     // GET /api/files?path=/subdir — browsing host root (starts at /data but can go up to /). See files.ts BROWSE_ROOT.
     if (url.pathname === "/api/files" && req.method === "GET") {
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const rawPath = url.searchParams.get("path") ?? "/";
       // Reject overly long or null-byte paths early (defense in depth, files.ts also handles)
       if (rawPath.length > 1024 || rawPath.includes("\0")) {
@@ -638,10 +611,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       const token = Number(tokenStr);
       if (!Number.isFinite(token)) return new Response("Not found", { status: 404, headers: secHeaders });
       // Auth gate — mirrors /ws when token enabled; never leak files without valid token
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       try {
         const { existsSync, readFileSync } = require("node:fs") as typeof import("node:fs");
         const { join, basename, resolve } = require("node:path") as typeof import("node:path");
@@ -717,65 +687,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       }
     }
 
-    // GET /spectrum/:token/full | /spectrum/:token/zoom | /api/spectrum/:token
-    // Serves sox-generated spectrograms from /tmp/hub-spectrum (ephemeral, wiped on reboot)
+    // Spectrum moved to the worker service (apps/worker). This stub tells
+    // stale web bundles where to go instead of a bare 404.
     if ((url.pathname.startsWith("/spectrum/") || url.pathname.startsWith("/api/spectrum/")) && req.method === "GET") {
-      if (BRIDGE_TOKEN) {
-        const tok = extractToken(req);
-        if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
-      }
-      try {
-        const { existsSync, readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
-        const { join, resolve } = require("node:path") as typeof import("node:path");
-        const { SPECTRUM_DIR, getSpectrumHash } = await import("./spectrum.ts");
-        // Parse /spectrum/:token/full or /spectrum/:token/zoom or /api/spectrum/:token
-        const prefix = url.pathname.startsWith("/api/spectrum/") ? "/api/spectrum/" : "/spectrum/";
-        const rest = url.pathname.slice(prefix.length);
-        const parts = rest.split("/").filter(Boolean);
-        const tokenStr = parts[0];
-        const variant = parts[1] || ""; // full | zoom | ""
-        const token = Number(tokenStr);
-        if (!Number.isFinite(token) || !Number.isInteger(token)) return new Response("Not found", { status: 404, headers: secHeaders });
-        // API JSON: return available variants
-        if (!variant && prefix === "/api/spectrum/") {
-          // find latest for token
-          const { spectrumManager } = await import("./spectrum.ts");
-          const latest = spectrumManager.findLatestForToken(token);
-          if (!latest) return new Response(JSON.stringify({ error: "no spectrum" }), { status: 404, headers: { "content-type": "application/json", ...cors } });
-          return new Response(JSON.stringify({ token, etag: latest.etag, full: `/spectrum/${token}/full`, zoom: `/spectrum/${token}/zoom` }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
-        }
-        if (variant !== "full" && variant !== "zoom") return new Response("Not found", { status: 404, headers: secHeaders });
-        // Need to resolve file path for token to validate it exists and get hash
-        const tmAny = (globalThis as unknown as { __spectrumTransfers?: Map<string, unknown> }).__spectrumTransfers;
-        // Instead lookup via filesystem scan of SPECTRUM_DIR (ephemeral) – find latest matching token
-        const files = existsSync(SPECTRUM_DIR) ? readdirSync(SPECTRUM_DIR) : [];
-        const candidates = files.filter((f: string) => f.startsWith(`${token}-`) && f.endsWith(`-${variant === "full" ? "Full" : "Zoom"}.png`));
-        if (!candidates.length) return new Response("Not found", { status: 404, headers: secHeaders });
-        // pick newest
-        let best: string | null = null;
-        let bestMtime = 0;
-        for (const f of candidates) {
-          try {
-            const st = statSync(join(SPECTRUM_DIR, f));
-            if (st.mtimeMs > bestMtime) { bestMtime = st.mtimeMs; best = f; }
-          } catch {}
-        }
-        if (!best) return new Response("Not found", { status: 404, headers: secHeaders });
-        const abs = resolve(join(SPECTRUM_DIR, best));
-        const dirResolved = resolve(SPECTRUM_DIR);
-        if (!abs.startsWith(dirResolved + "/") && abs !== dirResolved) return new Response("Not found", { status: 404, headers: secHeaders });
-        if (!existsSync(abs)) return new Response("Not found", { status: 404, headers: secHeaders });
-        const etag = `"${best.slice(`${token}-`.length, -`-${variant === "full" ? "Full" : "Zoom"}.png`.length)}"`;
-        const ifNoneMatch = req.headers.get("if-none-match");
-        if (ifNoneMatch && ifNoneMatch === etag) {
-          return new Response(null, { status: 304, headers: { etag, "cache-control": "private, max-age=3600", ...cors } });
-        }
-        const file = Bun.file(abs);
-        return new Response(file as unknown as never, { headers: { "content-type": "image/png", etag, "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff", ...cors } });
-      } catch (e) {
-        logger.warn("bridge", "spectrum GET error", { error: (e as Error).message });
-        return new Response("Not found", { status: 404, headers: secHeaders });
-      }
+      return new Response(JSON.stringify({ error: "moved to worker: POST /spectrum/request on :8789" }), { status: 410, headers: { "content-type": "application/json", ...cors } });
     }
 
     return new Response("Not found", { status: 404 });
@@ -995,6 +910,15 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         return;
       }
 
+      if (data.type === "logout") {
+        // Explicit logoff: drop the Soulseek server session immediately
+        // (client closes the WS right after; close() is idempotent backup).
+        try { if (ws.data.session) activeSessions.delete(ws.data.session); } catch {}
+        try { ws.data.session?.close(); } catch {}
+        logger.info("auth", "logout — soulseek session closed");
+        return;
+      }
+
       // Helpers to enforce logged-in
       const requireLogin = (): SoulseekSession | null => {
         const s = ws.data.session;
@@ -1163,6 +1087,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid chat:room message.")); return; }
         const session = requireLogin(); if (!session) return;
         const { action, room, message } = result.data;
+        if (action === "refreshList") { session.requestRoomList(); return; }
+        if (!room) { ws.send(errorMessage("room is required.")); return; }
         if (action === "join") {
           pluginManager.joinChatroomNotification(room);
           session.joinRoom(room);
@@ -1467,6 +1393,29 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           } else if (section === "plugins" && key === "enable") {
             (pluginManager as unknown as { setGlobalEnable?: (b: boolean) => void }).setGlobalEnable?.(Boolean(value));
             logger.info("bridge", `plugins ${Boolean(value) ? "enabled" : "disabled"} via config`, { enable: Boolean(value) });
+          } else if (section === "worker" && ["discogs_token", "tidal_token", "tidal_country", "qobuz_app_id", "qobuz_user_auth_token"].includes(key)) {
+            // Worker metadata tokens — write-only API. Merged into DATA_DIR/worker.json
+            // (0600), read by the worker (env wins). Values never logged or returned.
+            if (typeof value !== "string" || value.length > 512) {
+              ws.send(errorMessage("Worker token must be a string ≤512 chars (empty clears it)."));
+              return;
+            }
+            try {
+              const p = join(DATA_DIR, "worker.json");
+              let cur: Record<string, string> = {};
+              try {
+                const raw = JSON.parse(readFileSync(p, "utf8")) as unknown;
+                if (raw && typeof raw === "object") cur = raw as Record<string, string>;
+              } catch {}
+              if (value) cur[key] = value;
+              else delete cur[key];
+              writeFileSync(p, JSON.stringify(cur, null, 2), { mode: 0o600 });
+              try { chmodSync(p, 0o600); } catch {}
+              logger.info("server", "worker token updated", { key, set: Boolean(value) });
+            } catch (e) {
+              ws.send(errorMessage(`Cannot write worker.json: ${(e as Error).message}`));
+              return;
+            }
           } else if (section === "server" && (key === "server" || key === "auto_connect_startup")) {
             // Stored for login defaults; web handles auto_connect_startup gate, bridge just acks.
             logger.debug("bridge", "server config stored", { key, value: typeof value === "object" ? JSON.stringify(value).slice(0,120) : String(value).slice(0,80) });
@@ -1506,96 +1455,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         return;
       }
 
-      if (data.type === "spectrum:request") {
-        const result = SpectrumRequestSchema.safeParse(parsed);
-        if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid spectrum:request")); return; }
-        const tm = ws.data.transfers as unknown as { get: (id: string) => { id: string; token?: number; fileName: string; status: string; size: number } | undefined; getFilePathForToken?: (t: number) => string | null } | undefined;
-        const tr = tm?.get?.(result.data.id);
-        if (!tr) { ws.send(JSON.stringify({ type: "spectrum:error", id: result.data.id, error: "Transfer not found" })); return; }
-        if (tr.status !== "Finished") { ws.send(JSON.stringify({ type: "spectrum:error", id: result.data.id, error: "File not finished" })); return; }
-        // Resolve file path
-        let filePath: string | null = null;
-        if (tr.token != null && tm?.getFilePathForToken) {
-          try { filePath = tm.getFilePathForToken(tr.token); } catch {}
-        }
-        if (!filePath) {
-          // Fallback: try downloads dir + recursive DATA_DIR scan (handles WSL DJSplash share + legacy stubs)
-          try {
-            const { existsSync } = require("node:fs") as typeof import("node:fs");
-            const { join, resolve } = require("node:path") as typeof import("node:path");
-            const cand = resolve(join(DATA_DIR, "downloads", tr.fileName.replace(/[/\\]/g, "_")));
-            if (existsSync(cand)) filePath = cand;
-            else {
-              const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
-              const dir = resolve(join(DATA_DIR, "downloads"));
-              try {
-                const ents = readdirSync(dir);
-                const m = ents.find((f) => f === tr.fileName);
-                if (m) filePath = join(dir, m);
-              } catch {}
-              if (!filePath) {
-                const scan = (d: string, target: string, depth = 2): string | null => {
-                  try {
-                    const c = resolve(join(d, target));
-                    if (c.startsWith(resolve(DATA_DIR) + "/") && existsSync(c)) return c;
-                    if (depth <= 0 || !existsSync(d)) return null;
-                    for (const ent of readdirSync(d)) {
-                      const p = resolve(join(d, ent));
-                      try { if (statSync(p).isDirectory() && p.startsWith(resolve(DATA_DIR) + "/")) { const r = scan(p, target, depth - 1); if (r) return r; } } catch {}
-                    }
-                  } catch {}
-                  return null;
-                };
-                filePath = scan(DATA_DIR, tr.fileName, 2) || scan(DATA_DIR, tr.fileName.replace(/[/\\]/g, "_"), 2);
-              }
-            }
-          } catch {}
-        }
-        if (!filePath) { ws.send(JSON.stringify({ type: "spectrum:error", id: result.data.id, error: "File not found on bridge" })); return; }
-        // stat
-        let mtimeMs = 0, size = tr.size, duration: number | undefined;
-        try {
-          const st = (require("node:fs") as typeof import("node:fs")).statSync(filePath);
-          mtimeMs = st.mtimeMs;
-          size = st.size;
-        } catch { mtimeMs = Date.now(); }
-        // try duration via music-metadata
-        try {
-          const { parseFile } = await import("music-metadata");
-          const md = await parseFile(filePath, { duration: true });
-          if (md.format.duration) duration = md.format.duration;
-        } catch {}
-        // Notify queued
-        ws.send(JSON.stringify({ type: "spectrum:status", id: result.data.id, phase: "queued", progress: 0 }));
-        try {
-          const { spectrumManager } = await import("./spectrum.ts");
-          ws.send(JSON.stringify({ type: "spectrum:status", id: result.data.id, phase: "generating", progress: 10 }));
-          const res = await spectrumManager.ensureSpectrum({ token: tr.token ?? 0, filePath, mtimeMs, size, duration });
-          const baseUrl = `/spectrum/${tr.token ?? 0}`;
-          ws.send(JSON.stringify({ type: "spectrum:ready", id: result.data.id, token: tr.token, etag: res.etag, hash: res.hash, urls: { full: `${baseUrl}/full`, zoom: `${baseUrl}/zoom` }, fromCache: res.fromCache }));
-          // also send compress status
-          ws.send(JSON.stringify({ type: "spectrum:status", id: result.data.id, phase: "done", progress: 100 }));
-        } catch (e) {
-          logger.warn("spectrum", "generation failed", { id: result.data.id, error: (e as Error).message });
-          ws.send(JSON.stringify({ type: "spectrum:error", id: result.data.id, error: (e as Error).message.slice(0, 500) }));
-        }
-        return;
-      }
-      if (data.type === "spectrum:status") {
-        const result = SpectrumStatusRequestSchema.safeParse(parsed);
-        if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid spectrum:status")); return; }
-        const tm = ws.data.transfers as unknown as { get: (id: string) => { token?: number } | undefined } | undefined;
-        const tr = tm?.get?.(result.data.id);
-        const token = tr?.token;
-        if (token == null) { ws.send(JSON.stringify({ type: "spectrum:error", id: result.data.id, error: "Transfer not found" })); return; }
-        try {
-          const { spectrumManager } = await import("./spectrum.ts");
-          const latest = spectrumManager.findLatestForToken(token);
-          if (!latest) { ws.send(JSON.stringify({ type: "spectrum:status", id: result.data.id, phase: "missing", progress: 0 })); return; }
-          ws.send(JSON.stringify({ type: "spectrum:ready", id: result.data.id, token, etag: latest.etag, hash: latest.hash, urls: { full: `/spectrum/${token}/full`, zoom: `/spectrum/${token}/zoom` }, fromCache: true }));
-        } catch (e) {
-          ws.send(JSON.stringify({ type: "spectrum:error", id: result.data.id, error: (e as Error).message }));
-        }
+      // Spectrum moved to the worker service (apps/worker POST /spectrum/request).
+      if (data.type === "spectrum:request" || data.type === "spectrum:status") {
+        const id = (parsed as { id?: string }).id ?? "";
+        ws.send(JSON.stringify({ type: "spectrum:error", id, error: "Spectrum moved to worker :8789 — update the web app." }));
         return;
       }
 

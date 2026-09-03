@@ -14,6 +14,11 @@ export interface LoginStartMessage {
   type: "login:start";
 }
 
+/** Explicit logoff — bridge drops the Soulseek server session immediately. */
+export interface LogoutRequest {
+  type: "logout";
+}
+
 export interface LoginResultSuccess {
   type: "login:result";
   ok: true;
@@ -327,8 +332,8 @@ export interface RoomEventMessage {
 
 export interface ChatRoomRequest {
   type: "chat:room";
-  action: "join" | "leave" | "say" | "ticker" | "setTicker" | "addOperator" | "removeOperator" | "cancelMembership" | "cancelOwnership";
-  room: string;
+  action: "join" | "leave" | "say" | "ticker" | "setTicker" | "addOperator" | "removeOperator" | "cancelMembership" | "cancelOwnership" | "refreshList";
+  room?: string;
   message?: string;
   username?: string;
 }
@@ -547,6 +552,11 @@ export interface ServerReconnectedMessage {
   ok: true;
   listenPort: number;
 }
+export interface ServerReconnectedAltMessage {
+  type: "server:reconnected";
+  ok?: true;
+  listenPort?: number;
+}
 
 /* ------------------------------------------------------------------ *
  * Shares rescan
@@ -761,6 +771,7 @@ export type BridgeOutboundMessage =
   | ServerReconnectMessage
   | ServerReconnectFailedMessage
   | ServerReconnectedMessage
+  | ServerReconnectedAltMessage
   | DiagnosticsInitMessage
   | DiagnosticsLogMessage
   | DiagnosticsHealthMessage
@@ -788,6 +799,7 @@ export interface SpectrumStatusRequest {
 
 export type BridgeInboundMessage =
   | LoginRequest
+  | LogoutRequest
   | SearchRequest
   | SearchUserRequest
   | SearchRoomRequest

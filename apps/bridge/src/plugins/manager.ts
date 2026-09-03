@@ -11,7 +11,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, statSync } from "node:fs";
 import { join, basename, resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { BasePlugin, returncode, type CommandDef, type PluginManifest, type PluginCoreShim } from "./types.ts";
+import { BasePlugin, returncode, type CommandDef, type PluginManifest, type PluginCoreShim, type PluginReturn } from "./types.ts";
 import { logger } from "../logger.ts";
 
 // ---- persistence file DATA_DIR/plugins.json ----
@@ -353,17 +353,17 @@ export class PluginManager {
     // expose manager as parent for command_source
     (plugin as unknown as { parent: PluginManager }).parent = manager;
     plugin.core = {
-      sendPublic: (room, text) => {
+      sendPublic: (room: string, text: string) => {
         try { session?.sayChatroom(room, text); } catch {}
       },
-      sendPrivate: (user, text) => {
+      sendPrivate: (user: string, text: string) => {
         try { session?.sendPrivateMessage(user, text); } catch {}
       },
-      echoPublic: (_room, _text) => {
+      echoPublic: (_room: string, _text: string) => {
         // echo is UI-only; bridge logs it for diagnostics
         logger.info("chat", `[echo public] ${_room}: ${_text}`);
       },
-      echoPrivate: (_user, _text) => {
+      echoPrivate: (_user: string, _text: string) => {
         logger.info("chat", `[echo private] ${_user}: ${_text}`);
       },
       // leech_detector helpers — delegate to session if available
@@ -507,33 +507,12 @@ export class PluginManager {
     await this.enablePlugin(name);
   }
 
-  // ---- plugin file operations (ponytail: stubbed — zip/github install removed, builtins only) ----
-  private async spawnUnzip(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-    return { stdout: "", stderr: "stubbed", exitCode: 1 };
-  }
-  private isSafeZipEntry(entry: string): boolean { return false; }
-  private static readonly ALLOWED_PLUGIN_EXTS = new Set([".ts", ".js"]);
-  private static readonly FORBIDDEN_EXTS = new Set([".py"]);
-  private isAllowedPluginFile(entry: string): boolean { return entry.endsWith(".ts") || entry.endsWith(".js"); }
-  private isPythonContent(text: string): boolean { return false; }
-  private validateTsJsContent(text: string, filename: string): void {
-    if (!/class\s+Plugin\s+extends\s+BasePlugin/.test(text)) throw new Error(`Missing Plugin class in ${filename}`);
-  }
-  private parseInlineManifest(text: string): PluginManifest | null { return null; }
-  async installPluginFromZip(zipPath: string): Promise<string | null> {
-    logger.warn("bridge", "plugin install via zip disabled (ponytail stub)");
-    return null;
-  }
-  async installFromGithubTs(url: string): Promise<string | null> {
-    logger.warn("bridge", "github TS install stubbed");
-    return null;
-  }
-  async installFromUrl(url: string): Promise<string | null> {
-    logger.warn("bridge", "plugin install via URL stubbed");
+  async installPluginFromZip(_zipPath: string): Promise<string | null> {
+    logger.warn("bridge", "plugin install via zip disabled — builtins only (ponytail: re-add zip/github fetch if user plugins needed)");
     return null;
   }
 
-    uninstallPlugin(name: string): boolean {
+  uninstallPlugin(name: string): boolean {
     if (this.isInternalPlugin(name)) return false;
     // disable first
     this.disablePlugin(name).catch(() => {});
@@ -658,9 +637,9 @@ export class PluginManager {
           const callback = ((data as CommandDef)[cbKey] as CommandDef["callback"]) ?? (data as CommandDef).callback;
           if (!callback) continue;
           let res: unknown;
-          if (ctx.room !== undefined) res = await (callback as (a: string, ctx: { room: string }) => unknown)(args, { room: ctx.room, interface: iface as "chatroom" });
-          else if (ctx.user !== undefined) res = await (callback as (a: string, ctx: { user: string }) => unknown)(args, { user: ctx.user, interface: iface as "private_chat" });
-          else res = await (callback as (a: string, ctx: { interface: "cli" }) => unknown)(args, { interface: "cli" as const });
+          if (ctx.room !== undefined) res = await (callback as any)(args, { room: ctx.room, interface: iface as "chatroom" });
+          else if (ctx.user !== undefined) res = await (callback as any)(args, { user: ctx.user, interface: iface as "private_chat" });
+          else res = await (callback as any)(args, { interface: "cli" as const });
           isSuccessful = res !== false;
           if (res === undefined) isSuccessful = true;
         }
@@ -852,173 +831,14 @@ export class PluginManager {
     // Note: core_commands hidden from list; handled separately if needed
   }
 
-  // GitHub index install (download zip) — homelab: only GitHub hosts, https, size/timeout capped
-  // GitHub single-file install (TS/JS only, Python forbidden) — strict mirror of nicotine-plus PLUGININFO + __init__.py for TS/JS
-  async installFromGithubTs(url: string): Promise<string | null> {
-    const ALLOWED_HOSTS = new Set(["github.com", "raw.githubusercontent.com", "objects.githubusercontent.com", "codeload.github.com", "api.github.com", "githubusercontent.com"]);
-    const isAllowedHost = (h: string) => {
-      if (ALLOWED_HOSTS.has(h)) return true;
-      if (h.endsWith(".githubusercontent.com")) return true;
-      if (h.endsWith(".github.com")) return true;
-      return false;
-    };
-    const normalizeGithubUrl = (input: string): string => {
-      try {
-        const u = new URL(input);
-        if (u.hostname === "github.com" && u.pathname.includes("/blob/")) {
-          const parts = u.pathname.split("/blob/");
-          if (parts.length === 2) {
-            return `https://raw.githubusercontent.com${parts[0]}/${parts[1]}`;
-          }
-        }
-      } catch {}
-      return input;
-    };
-    try {
-      const normalized = normalizeGithubUrl(url);
-      const parsed = new URL(normalized);
-      if (parsed.protocol !== "https:") throw new Error("only https:// URLs allowed for GitHub TS/JS install");
-      if (!isAllowedHost(parsed.hostname.toLowerCase())) throw new Error(`host not allowed: ${parsed.hostname} (only github.com and githubusercontent.com)`);
-      if (/^\d+\.\d+\.\d+\.\d+$/.test(parsed.hostname) || parsed.hostname === "localhost" || parsed.hostname === "::1") throw new Error("IP literals not allowed");
-      const pathname = parsed.pathname.toLowerCase();
-      const allowedExts = [".ts", ".mts", ".js", ".mjs"];
-      const hasAllowedExt = allowedExts.some((ext) => pathname.endsWith(ext));
-      if (!hasAllowedExt) {
-        if (pathname.endsWith(".py") || pathname.endsWith(".pyc") || pathname.endsWith(".pyo")) {
-          throw new Error("Python plugins (.py) are not allowed — only TypeScript/JavaScript (.ts/.js) plugins are supported");
-        }
-        throw new Error(`Only .ts/.js files allowed from GitHub (got ${basename(parsed.pathname)} — need .ts/.js)`);
-      }
-      const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), 10_000);
-      const res = await fetch(normalized, { redirect: "error", signal: controller.signal });
-      clearTimeout(t);
-      if (!res.ok) throw new Error(`fetch ${normalized} -> ${res.status}`);
-      const lenHeader = res.headers.get("content-length");
-      if (lenHeader && Number(lenHeader) > 200_000) throw new Error("remote TS/JS too large (max 200 KB)");
-      const buf = await res.arrayBuffer();
-      if (buf.byteLength > 200_000) throw new Error("remote TS/JS too large (max 200 KB)");
-      if (buf.byteLength === 0) throw new Error("empty response");
-      const text = new TextDecoder().decode(new Uint8Array(buf));
-      const filename = basename(parsed.pathname);
-      this.validateTsJsContent(text, filename);
-      let pluginName: string | null = null;
-      let manifest: PluginManifest | null = this.parseInlineManifest(text);
-      if (manifest && (manifest.Name || manifest.name)) {
-        const rawName = (manifest.Name as string) || (manifest.name as string);
-        pluginName = rawName.replace(/[^a-zA-Z0-9._\-]/g, "_").slice(0, 64);
-      }
-      if (!pluginName) {
-        const baseUrl = normalized.substring(0, normalized.lastIndexOf("/"));
-        const pluginJsonUrl = `${baseUrl}/plugin.json`;
-        for (const tryUrl of [pluginJsonUrl, `${baseUrl}/PLUGININFO`]) {
-          try {
-            const u2 = new URL(tryUrl);
-            if (!isAllowedHost(u2.hostname.toLowerCase())) continue;
-            const ctrl2 = new AbortController();
-            const t2 = setTimeout(() => ctrl2.abort(), 5000);
-            const r2 = await fetch(tryUrl, { signal: ctrl2.signal });
-            clearTimeout(t2);
-            if (r2.ok) {
-              const txt2 = await r2.text();
-              if (tryUrl.endsWith("plugin.json")) {
-                try { manifest = JSON.parse(txt2); } catch { manifest = null; }
-              } else {
-                manifest = {};
-                for (const line of txt2.split("\n")) {
-                  const trimmed = line.trim();
-                  if (!trimmed || trimmed.startsWith("#")) continue;
-                  const eq = trimmed.indexOf("=");
-                  if (eq === -1) continue;
-                  const k = trimmed.slice(0, eq).trim();
-                  let v = trimmed.slice(eq + 1).trim();
-                  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
-                  (manifest as Record<string, unknown>)[k] = v;
-                }
-              }
-              if (manifest && (manifest.Name || manifest.name)) {
-                const rawName2 = (manifest.Name as string) || (manifest.name as string) || "";
-                pluginName = rawName2.replace(/[^a-zA-Z0-9._\-]/g, "_").slice(0, 64);
-                break;
-              }
-            }
-          } catch {}
-        }
-      }
-      if (!pluginName) {
-        pluginName = basename(filename).replace(/\.(ts|mts|js|mjs)$/i, "").replace(/[^a-zA-Z0-9._\-]/g, "_").slice(0, 64);
-      }
-      if (!pluginName) throw new Error("Invalid plugin name derived from file");
-      if (pluginName.includes("=") || pluginName.includes("/") || pluginName.includes("\\") || pluginName.includes("\0")) throw new Error("Invalid plugin name");
-      if (this.isInternalPlugin(pluginName)) throw new Error(`Plugin ${pluginName} conflicts with builtin`);
-      pluginName = pluginName.replace(/[^a-zA-Z0-9._\-]/g, "_").slice(0, 64);
-      if (!pluginName) throw new Error("Invalid plugin name after sanitization");
-      this.ensureDirs();
-      const dest = join(userPluginsDir(), pluginName);
-      if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
-      mkdirSync(dest, { recursive: true });
-      const ext = filename.includes(".") ? filename.slice(filename.lastIndexOf(".")) : ".ts";
-      const entryName = `index${ext.toLowerCase() === ".mts" ? ".ts" : ext.toLowerCase() === ".mjs" ? ".js" : ext.toLowerCase()}`;
-      const destEntry = join(dest, entryName);
-      writeFileSync(destEntry, text, "utf8");
-      const pluginJsonPath = join(dest, "plugin.json");
-      if (manifest && Object.keys(manifest).length > 0) {
-        if (!manifest.Name && !manifest.name) manifest.Name = pluginName;
-        if (!manifest.Version && !manifest.version) manifest.Version = "1.0";
-        if (!manifest.Description && !manifest.description) manifest.Description = `Installed from ${normalized}`;
-        writeFileSync(pluginJsonPath, JSON.stringify(manifest, null, 2), "utf8");
-      } else {
-        const minimal = { Name: pluginName, Version: "1.0", Description: `Installed from ${normalized}`, entry: entryName };
-        writeFileSync(pluginJsonPath, JSON.stringify(minimal, null, 2), "utf8");
-      }
-      const written = readFileSync(destEntry, "utf8");
-      this.validateTsJsContent(written, basename(destEntry));
-      logger.info("bridge", `installed plugin ${pluginName} from GitHub`, { pluginName, url: normalized });
-      if (this.isPluginLoaded(pluginName)) await this.reloadPlugin(pluginName);
-      return pluginName;
-    } catch (e) {
-      const msg = (e as Error).name === "AbortError" ? "fetch timeout (10s)" : (e as Error).message;
-      logger.error("bridge", `installFromGithubTs failed`, { url: String(url).slice(0, 200), error: msg });
-      return null;
-    }
+  async installFromGithubTs(_url: string): Promise<string | null> {
+    logger.warn("bridge", "plugin install via GitHub TS disabled — builtins only (ponytail)");
+    return null;
   }
 
-  async installFromUrl(url: string): Promise<string | null> {
-    const ALLOWED_HOSTS = new Set(["github.com", "raw.githubusercontent.com", "objects.githubusercontent.com", "codeload.github.com", "api.github.com", "githubusercontent.com"]);
-    // also allow subdomains like *.githubusercontent.com
-    const isAllowedHost = (h: string) => {
-      if (ALLOWED_HOSTS.has(h)) return true;
-      if (h.endsWith(".githubusercontent.com")) return true;
-      if (h.endsWith(".github.com")) return true;
-      return false;
-    };
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol !== "https:") throw new Error("only https:// URLs allowed for plugin install");
-      if (!isAllowedHost(parsed.hostname.toLowerCase())) throw new Error(`host not allowed: ${parsed.hostname} (only github.com and githubusercontent.com)`);
-      // SSRF extra: block private IPs if hostname is IP literal (github should be DNS, not IP)
-      if (/^\d+\.\d+\.\d+\.\d+$/.test(parsed.hostname) || parsed.hostname === "localhost" || parsed.hostname === "::1") throw new Error("IP literals not allowed");
-      const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), 10_000);
-      const res = await fetch(url, { redirect: "error", signal: controller.signal });
-      clearTimeout(t);
-      if (!res.ok) throw new Error(`fetch ${url} -> ${res.status}`);
-      const lenHeader = res.headers.get("content-length");
-      if (lenHeader && Number(lenHeader) > 20_000_000) throw new Error("remote zip too large (max 20MB)");
-      const buf = await res.arrayBuffer();
-      if (buf.byteLength > 20_000_000) throw new Error("remote zip too large (max 20MB)");
-      if (buf.byteLength === 0) throw new Error("empty response");
-      const tmp = join(userPluginsDir(), `.dl_${Date.now()}.zip`);
-      this.ensureDirs();
-      writeFileSync(tmp, Buffer.from(buf));
-      const name = await this.installPluginFromZip(tmp);
-      try { rmSync(tmp, { force: true }); } catch {}
-      return name;
-    } catch (e) {
-      const msg = (e as Error).name === "AbortError" ? "fetch timeout (10s)" : (e as Error).message;
-      logger.error("bridge", `installFromUrl failed`, { url: String(url).slice(0, 200), error: msg });
-      return null;
-    }
+  async installFromUrl(_url: string): Promise<string | null> {
+    logger.warn("bridge", "plugin install via URL disabled — builtins only (ponytail)");
+    return null;
   }
 }
 

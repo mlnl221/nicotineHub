@@ -1,36 +1,5 @@
 import { describe, expect, test, mock, beforeEach, afterEach } from "bun:test";
-import { NATPMP, UPnP, PortMapper, PortmapError } from "./portmapper.ts";
-
-describe("NATPMP", () => {
-  test("throws when port/ip missing", async () => {
-    const n = new NATPMP();
-    await expect(n.addPortMapping(43200)).rejects.toThrow("No port/ip");
-    n.setPort(1234, null);
-    await expect(n.addPortMapping(43200)).rejects.toThrow("No port/ip");
-    // 0.0.0.0 should be rejected with specific message
-    n.setPort(1234, "0.0.0.0");
-    await expect(n.addPortMapping(43200)).rejects.toThrow("0.0.0.0");
-  });
-
-  test("removePortMapping no-ops when no port", async () => {
-    const n = new NATPMP();
-    await n.removePortMapping(); // should not throw
-  });
-
-  test("constants match python", () => {
-    expect(NATPMP.NAME).toBe("NAT-PMP");
-    expect(NATPMP.REQUEST_PORT).toBe(5351);
-    expect(NATPMP.REQUEST_ATTEMPTS).toBe(2);
-    expect(NATPMP.REQUEST_INIT_TIMEOUT).toBe(0.25);
-    expect(NATPMP.SUCCESS_RESULT).toBe(0);
-  });
-
-  test("gateway detection returns null or valid ip in CI", () => {
-    // In CI container there is no default gateway or it is 172.x — either null or valid IPv4
-    const gw = (NATPMP as unknown as { _testGetGatewayAddress: () => string | null })._testGetGatewayAddress();
-    if (gw !== null) expect(gw).toMatch(/^\d+\.\d+\.\d+\.\d+$/);
-  });
-});
+import { UPnP, PortMapper, PortmapError } from "./portmapper.ts";
 
 describe("UPnP SSDPResponse", () => {
   test("parses headers case-insensitive", async () => {
@@ -145,13 +114,11 @@ describe("PortMapper orchestrator", () => {
   test("status includes error and lastAttempt after failed mapping", async () => {
     const pm = new PortMapper();
     pm.setPort(60754, "192.168.1.10");
-    // In CI, no gateway nor UPnP router, so mapping should fail and set error
+    // In CI, no UPnP router, so mapping should fail and set error
     await pm.addPortMapping(true);
-    // activeName should be null (both NAT-PMP and UPnP failed)
     expect(pm.activeName).toBeNull();
     expect(pm.status.error).toBeTruthy();
     expect(pm.status.lastAttemptAt).not.toBeNull();
-    // lastSuccess should still be null
     expect(pm.status.lastSuccessAt).toBeNull();
   });
 

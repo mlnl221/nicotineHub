@@ -165,7 +165,7 @@ export function PortChecker() {
       if (upnpInfo) {
         if (!upnpInfo.enabled) upnpMsg = " UPnP disabled (manual forward required).";
         else if (upnpInfo.active) upnpMsg = ` UPnP via ${upnpInfo.active} mapped ${upnpInfo.port} → ${upnpInfo.ip}:${upnpInfo.port} ✓`;
-        else if (upnpInfo.error) upnpMsg = ` UPnP attempted but failed: ${upnpInfo.error} — ensure router supports UPnP/NAT-PMP or forward manually. Host network required inside Docker (else container 172.x). Use compose.gluetun.yaml if on Gluetun.`;
+        else if (upnpInfo.error) upnpMsg = ` UPnP attempted but failed: ${upnpInfo.error} — ensure router supports UPnP/NAT-PMP or forward manually. Host network required inside Docker (else container 172.x).`;
         else upnpMsg = " UPnP enabled — waiting for mapping (or router not found).";
       }
       let extMsg = "";

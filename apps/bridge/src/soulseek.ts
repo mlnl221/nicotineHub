@@ -197,6 +197,11 @@ export const LOGIN_REJECT_REASONS = {
 
 export const MAJOR_VERSION = 160;
 export const MINOR_VERSION = 3;
+// Nicotine+ stable reserved version (for reference / fallback). Experimental 177 is kept as default per AGENTS.md — use MAJOR_VERSION.
+// See SLSKPROTOCOL.md Reserved 160 = Nicotine+, 177 = Experimental.
+export const NICOTINE_MAJOR_VERSION = 160;
+export const NICOTINE_MINOR_VERSION = 3;
+export const EXPERIMENTAL_VERSION_FLAG = true;
 
 export const DEFAULT_SERVER_HOST = "server.slsknet.org";
 export const DEFAULT_SERVER_PORT = 2242;
@@ -399,7 +404,7 @@ export function frameMessage(code: number, payload: Buffer): Buffer {
   const len = payload.length + 4;
   return Buffer.concat([packUint32(len), packUint32(code), payload]);
 }
-export function tryParseMessage(buffer: Buffer, maxLen = MAX_INCOMING.server16M): { code: number; payload: Buffer } | null {
+export function tryParseMessage(buffer: Buffer, maxLen: number = MAX_INCOMING.server16M): { code: number; payload: Buffer } | null {
   if (buffer.length < 4) return null;
   const len = buffer.readUInt32LE(0);
   if (len > maxLen) return null; // guard — caller may treat as overflow close
@@ -495,6 +500,9 @@ export function buildJoinRoom(room: string, priv = false): Buffer {
   return frameMessage(SERVER_MESSAGE_CODES.joinRoom, Buffer.concat([packString(room), packUint32(priv ? 1 : 0)]));
 }
 export function buildLeaveRoom(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.leaveRoom, packString(room)); }
+// nicotine-plus chatrooms.request_room_list: code 64 with empty payload; the auto-pushed
+// list at login omits small/blacklisted rooms, explicit requests return all rooms.
+export function buildRoomListRequest(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.roomList, Buffer.alloc(0)); }
 export function buildChangePassword(password: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.changePassword, packString(password)); }
 export function buildCheckPrivileges(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.checkPrivileges, Buffer.alloc(0)); }
 export function buildRoomTickers(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.roomTickers, packString(room)); }
@@ -558,9 +566,6 @@ export function buildFileOffset(offset: number | bigint): Buffer { return packUi
 
 export interface PierceFireWall { token: number; }
 export function parsePierceFireWall(payload: Buffer): PierceFireWall { return { token: payload.readUInt32LE(0) }; }
-export function uint32ToIp(value: number): string {
-  return `${(value >>> 24) & 0xff}.${(value >>> 16) & 0xff}.${(value >>> 8) & 0xff}.${(value >>> 0) & 0xff}`;
-}
 
 export interface ConnectToPeer {
   username: string; connType: string; ip: string; port: number; token: number; privileged: boolean;
@@ -808,7 +813,9 @@ export function parseRoomList(payload: Buffer): { rooms: RoomListEntry[]; owned:
     const n = r.uint32(); const names: string[] = [];
     for (let i = 0; i < n; i++) names.push(r.string());
     if (!hasCount) return names;
-    const counts: number[] = []; for (let i = 0; i < n; i++) counts.push(r.uint32());
+    // wire repeats the count before the user-count array (SLSKPROTOCOL server code 64)
+    const m = r.uint32();
+    const counts: number[] = []; for (let i = 0; i < m; i++) counts.push(r.uint32());
     return names.map((name, i) => ({ name, users: counts[i] ?? 0 }));
   };
   const rooms = parseRooms(true) as RoomListEntry[];

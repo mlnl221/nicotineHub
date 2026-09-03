@@ -69,7 +69,7 @@ The declared level per process reflects how Nicotine Hub is actually built:
   the human tests the running app (login, search, `P`/`F` transfers) and reports
   what breaks (see `mistakes.md: 2026-08-28 — Bridge allows search after failed login`).
 - **Documentation — pair:** The README, `docs/architecture.md`, `ATTRIBUTION.md`,
-  `COPYING` notes and code comments are drafted by the AI and edited by the human
+  `LICENSE` notes and code comments are drafted by the AI and edited by the human
   for accuracy (codes, framing, env vars like `LISTEN_PORT`, `BRIDGE_TOKEN`).
 - **Review — assist:** Review happens by the human reading diffs, checking
   `AGENTS.md` conventions, running `git diff`/`git log`, and reporting defects,
@@ -98,7 +98,7 @@ verified it:
 Soulseek clients handle real network traffic, touch a user's files and shares,
 and see plaintext passwords. People running Nicotine Hub deserve to know how it
 was built. Being open that this is an AI-heavy port — with a human accountable
-for every release under `GPL-3.0-or-later` (see `COPYING` + `ATTRIBUTION.md`) —
+for every release under `GPL-3.0-or-later` (see `LICENSE` + `ATTRIBUTION.md`) —
 is the honest thing to do, and lets others judge the code on its merits.
 
 If the tooling, workflow or declared levels change, this file and its version

@@ -11,7 +11,7 @@ decades of Soulseek reverse-engineering that preceded it.
 ## 1. License
 
 **Nicotine Hub is licensed under the GNU General Public License v3.0 or later
-(`GPL-3.0-or-later`).** See [`COPYING`](./COPYING) and
+(`GPL-3.0-or-later`).** See [`LICENSE`](./LICENSE) and
 [`LICENSES/GPL-3.0-or-later.txt`](./LICENSES/GPL-3.0-or-later.txt).
 
 ```
@@ -20,7 +20,7 @@ Copyright (C) 2001-2026 Nicotine+, Nicotine and PySoulSeek Contributors
 ```
 
 By publishing this repository we retroactively license all prior commits under the
-same `GPL-3.0-or-later`. If you received an earlier copy without a `COPYING` file,
+same `GPL-3.0-or-later`. If you received an earlier copy without a `LICENSE` file,
 that copy is now offered under `GPL-3.0-or-later` as well.
 
 Other assets licensed separately:
@@ -29,8 +29,7 @@ Other assets licensed separately:
 * `LICENSES/CC-BY-SA-4.0.txt` — CC BY-SA 4.0 (e.g. protocol illustrations, if reused)
 * `LICENSES/MIT.txt` — MIT (upstream build tooling that documents MIT)
 
-Our dependencies (`Next.js`, `Bun`, `zod`, `sharp`, `music-metadata`, `comlink`,
-`Tailwind`) are MIT / Apache-2.0 / BSD — all `GPL-3.0-or-later`-compatible for a
+Our dependencies (`Next.js`, `Bun`, `zod`, `Tailwind` + worker `mutagen`, `pillow`, `numpy`, `sox`/`ffmpeg` binaries) are MIT / Apache-2.0 / BSD — all `GPL-3.0-or-later`-compatible for a
 combined work.
 
 ---
@@ -62,7 +61,7 @@ major version. We do not extend the Soulseek protocol without Soulseek
 administrators’ approval (see `SLSKPROTOCOL.md` preamble).
 
 Repo pinned at `nicotine-plus@8d81e66` (2026-08-28). Source:
-`https://github.com/nicotine-plus/nicotine-plus` — `COPYING` (GPL-3.0-or-later).
+`https://github.com/nicotine-plus/nicotine-plus` — `LICENSE` (GPL-3.0-or-later).
 
 ---
 
@@ -104,7 +103,7 @@ ideas/spec, we still credit the source.
 | `apps/bridge/src/plugins/builtin/spamfilter.ts` | `pynicotine/plugins/spamfilter/__init__.py` | **Full port** |
 | `apps/bridge/src/plugins/builtin/core_commands.ts` | `pynicotine/plugins/core_commands/__init__.py` | **Derived** (minimal `/help`+`/plugin`) |
 | `docs/settings-mapping.md` + `apps/web/src/lib/config/defaults.ts` | `pynicotine/config.py:156` defaults, `gtkgui/dialogs/preferences.py:3764`, `ui/settings/*.ui` | **Derived mapping** |
-| `apps/bridge/src/spectrum.ts` | `smokin-salmon/smoked-salmon` `src/salmon/uploader/spectrals.py` (Apache-2.0) — sox spectrogram `2000×513` + `500×1025` Kaiser `-z 120` + `oxipng -o 2` | **Port** — sox Full/Zoom + oxipng, `/tmp` ephemeral cache |
+| `apps/worker/spectrals.py` | `smokin-salmon/smoked-salmon` `src/salmon/uploader/spectrals.py` (Apache-2.0) — sox spectrogram `2000×513` + `500×1025` Kaiser `-z 120` + `oxipng -o 2` | **Port** — sox Full/Zoom + oxipng, `/tmp` ephemeral cache (migrated from `apps/bridge/src/spectrum.ts`, now deleted) |
 | `docs/architecture.md` + `docs/plugins.md` | `doc/SLSKPROTOCOL.md`, `pynicotine/*` | **Documentation** derived |
 
 All other web UI (`apps/web/src/app`, `components`) is original but, as part of the
@@ -114,9 +113,9 @@ combined `compose.yaml` distribution, is also offered under `GPL-3.0-or-later`.
 
 ## 5. How to Comply If You Fork/Distribute
 
-1. Keep `COPYING` + `LICENSES/GPL-3.0-or-later.txt` and SPDX headers.
+1. Keep `LICENSE` + `LICENSES/GPL-3.0-or-later.txt` and SPDX headers.
 2. Keep this `ATTRIBUTION.md` (or equivalent credit to Nicotine+).
-3. Provide source (link to your GitHub fork is enough; Docker images should `COPY COPYING`).
+3. Provide source (link to your GitHub fork is enough; Docker images should `COPY LICENSE`).
 4. License your derivative under `GPL-3.0-or-later` (or a later GPL version, per `GPL §14`).
 5. Do not claim endorsement by Nicotine+ or Soulseek.
 

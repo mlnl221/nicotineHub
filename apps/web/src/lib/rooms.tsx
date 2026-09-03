@@ -44,7 +44,9 @@ export function useRooms() {
   });
 
   useEffect(() => {
-    if (state.status !== "connected") return;
+    // Subscribe from mount (not only when connected): the server sends room-list
+    // once right after login, before React re-renders on login:result — gating on
+    // `connected` systematically drops it and the room list stays empty forever.
     const unsub = subscribe((msg) => {
       if (msg.type === "room:event") {
         const ev = (msg as unknown as { event: RoomEvent }).event;
@@ -52,7 +54,7 @@ export function useRooms() {
           case "room-list": {
             const data = ev.data as { rooms?: { name: string; users: number }[]; owned?: { name: string; users: number }[]; member?: { name: string; users: number }[] } | undefined;
             if (data?.rooms || (data as unknown as { owned?: unknown })?.owned || (data as unknown as { member?: unknown })?.member) {
-              const rooms = (data.rooms || []) as { name: string; users: number }[];
+              const rooms = ((data as { rooms?: { name: string; users: number }[] })?.rooms || []) as { name: string; users: number }[];
               const owned = ((data as unknown as { owned?: { name: string; users: number }[] }).owned || []) as { name: string; users: number }[];
               const member = ((data as unknown as { member?: { name: string; users: number }[] }).member || []) as { name: string; users: number }[];
               const privateNames = new Set([...owned, ...member].map((r) => r.name.toLowerCase()));
@@ -295,7 +297,7 @@ export function useRooms() {
       }
     });
     return unsub;
-  }, [state.status, subscribe, activeRoom, settings.words.censorwords, settings.words.censored, settings.logging.readroomlines]);
+  }, [subscribe, activeRoom, settings.words.censorwords, settings.words.censored, settings.logging.readroomlines]);
 
   // Fetch UserStats (files count) for users in active room to show shares in right list
   const requestedStats = useRef<Set<string>>(new Set());
@@ -359,6 +361,19 @@ export function useRooms() {
     send({ type: "chat:room", action: "setTicker", room, message: msg } as unknown as never);
   }, [send]);
 
+  const refreshRoomList = useCallback(() => {
+    send({ type: "chat:room", action: "refreshList" });
+  }, [send]);
+
+  // Fetch-on-mount: room-list events that arrived before this hook subscribed
+  // (e.g. login happened on another page) are lost — re-request when empty.
+  const listRequested = useRef(false);
+  useEffect(() => {
+    if (state.status !== "connected" || roomList.length > 0 || listRequested.current) return;
+    listRequested.current = true;
+    refreshRoomList();
+  }, [state.status, roomList.length, refreshRoomList]);
+
   const addOperator = useCallback((room: string, username: string) => send({ type: "chat:room", action: "addOperator", room, username } as unknown as never), [send]);
   const removeOperator = useCallback((room: string, username: string) => send({ type: "chat:room", action: "removeOperator", room, username } as unknown as never), [send]);
   const cancelMembership = useCallback((room: string) => send({ type: "chat:room", action: "cancelMembership", room } as unknown as never), [send]);
@@ -373,5 +388,5 @@ export function useRooms() {
     setActiveRoom(null);
   }, [joinedRooms, send]);
 
-  return { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, addOperator, removeOperator, cancelMembership, cancelOwnership, closeAll, userStats };
+  return { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, addOperator, removeOperator, cancelMembership, cancelOwnership, closeAll, userStats, refreshRoomList };
 }

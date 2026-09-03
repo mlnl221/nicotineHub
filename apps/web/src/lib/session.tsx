@@ -15,6 +15,7 @@ import type {
   BridgeOutboundMessage,
   LoginRequest,
 } from "@/lib/protocol";
+import { useRouter } from "next/navigation";
 import { isDemo } from "@/lib/demo";
 import { emitRoomList, handleDemoSend } from "@/lib/demo/mock";
 import { clearDemoStorage, seedDemoStorage } from "@/lib/demo/seed";
@@ -149,6 +150,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // Hydrate from sessionStorage after mount so Sidebar/TopBar don't mismatch
   // (was: conditional initializer read sessionStorage during render → Sidebar badge (2) / user "demo" vs "System Administrator").
   const [state, setState] = useState<SessionState>({ status: "idle" });
+  const router = useRouter();
   useEffect(() => {
     try {
       if (isDemo) {
@@ -197,8 +199,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     shouldReconnect.current = false;
     reconnectAttempts.current = 0;
     sendQueue.current = [];
-    socketRef.current?.close();
+    const ws = socketRef.current;
     socketRef.current = null;
+    // Explicit logoff so the bridge drops the Soulseek server session
+    // immediately instead of relying on the WS close handshake.
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: "logout" })); } catch {}
+    }
+    try { ws?.close(); } catch {}
   }, [clearHeartbeat, clearReconnect]);
 
   const logout = useCallback(() => {
@@ -211,7 +219,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     teardown();
     lastLogin.current = null;
     setState({ status: "idle", reconnecting: false });
-  }, [teardown]);
+    // Protected pages render a spinner on `idle` — route home to the login form.
+    router.replace("/");
+  }, [teardown, router]);
 
   const connectSocket = useCallback((loginReq: Omit<LoginRequest, "type">) => {
     const gen = ++generation.current;
@@ -266,50 +276,67 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // still forward to listeners in case someone cares
       }
 
-        switch (data.type) {
-          case "login:result":
-            if (data.ok) {
-              setState((s) => ({ ...s, status: "connected", user: loginReq.username, error: undefined, reconnecting: false }));
-              clearReconnect();
-              reconnectAttempts.current = 0;
-              shouldReconnect.current = true;
-            } else {
-              // auth failures should NOT auto-reconnect (invalid pass etc) — also clear persisted creds so we don't loop with bad password
-              const isAuthFailure = /INVALIDPASS|INVALIDUSERNAME|EMPTYPASSWORD|INVALIDVERSION/i.test(data.error || "");
-              if (isAuthFailure) {
-                clearCreds();
-                lastLogin.current = null;
-              }
-              shouldReconnect.current = !isAuthFailure;
-              const isTransientServer = /Unable to connect|ETIMEOUT|ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ECONNRESET|fetch failed|NetworkError|Connection error|Connection closed before login/i.test(data.error || "");
-              const wasConnected = stateRef.current.status === "connected" || !!stateRef.current.reconnecting;
-              if (isTransientServer) {
-                // Bridge Soulseek TCP is retrying in background via server:reconnect — keep WS open, don't flap WS
-                // Don't schedule WS reconnect; rely on server:reconnect banner/delay
-                setState((s) => ({ ...s, error: data.error, reconnecting: true }));
-                clearHeartbeat();
-                break;
-              }
-              if (!isAuthFailure && wasConnected) {
-                // Background transient failure — keep UI interactive, retry silently
-                setState((s) => ({ ...s, error: data.error, reconnecting: true }));
-                clearHeartbeat();
-                if (shouldReconnect.current) scheduleReconnect();
-              } else {
-                setState((s) => ({ ...s, status: "failed", error: data.error, reconnecting: false }));
-                clearHeartbeat();
-                if (shouldReconnect.current) scheduleReconnect();
-              }
+      switch (data.type) {
+        case "login:result":
+          if (data.ok) {
+            setState((s) => ({ ...s, status: "connected", user: loginReq.username, error: undefined, reconnecting: false }));
+            clearReconnect();
+            reconnectAttempts.current = 0;
+            shouldReconnect.current = true;
+          } else {
+            // auth failures should NOT auto-reconnect (invalid pass etc) — also clear persisted creds so we don't loop with bad password
+            // BANNED is silent close per SLSKPROTOCOL.md:124 — server omits response, bridge emits BANNED. Stop retry and show actionable message.
+            const errStr = data.error || "";
+            const isAuthFailure = /INVALIDPASS|INVALIDUSERNAME|EMPTYPASSWORD|INVALIDVERSION/i.test(errStr);
+            const isBanned = /BANNED|banned|Server closed connection without response/i.test(errStr);
+            if (isAuthFailure) {
+              clearCreds();
+              lastLogin.current = null;
             }
-            break;
+            if (isBanned) {
+              // Keep creds for manual retry but stop hammering. Show banned UX.
+              shouldReconnect.current = false;
+              clearReconnect();
+              setState((s) => ({ ...s, status: "failed", error: errStr, reconnecting: false }));
+              clearHeartbeat();
+              // Do NOT scheduleReconnect — user must try different username / wait
+              break;
+            }
+            shouldReconnect.current = !isAuthFailure;
+            const isTransientServer = /Unable to connect|ETIMEOUT|ETIMEDOUT|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ECONNRESET|fetch failed|NetworkError|Connection error|Connection closed before login/i.test(data.error || "");
+            const wasConnected = stateRef.current.status === "connected" || !!stateRef.current.reconnecting;
+            if (isTransientServer) {
+              // Bridge Soulseek TCP is retrying in background via server:reconnect — keep WS open, don't flap WS
+              // Don't schedule WS reconnect; rely on server:reconnect banner/delay
+              setState((s) => ({ ...s, error: data.error, reconnecting: true }));
+              clearHeartbeat();
+              break;
+            }
+            if (!isAuthFailure && wasConnected) {
+              // Background transient failure — keep UI interactive, retry silently
+              setState((s) => ({ ...s, error: data.error, reconnecting: true }));
+              clearHeartbeat();
+              if (shouldReconnect.current) scheduleReconnect();
+            } else {
+              setState((s) => ({ ...s, status: "failed", error: data.error, reconnecting: false }));
+              clearHeartbeat();
+              if (shouldReconnect.current) scheduleReconnect();
+            }
+          }
+          break;
         case "server:reconnect": {
           // Bridge is reconnecting Soulseek TCP (e.g. after listening port change via portrange)
           // WS stays open — reconnect silently with subtle banner, don't flash fullscreen spinner
           const d = data as unknown as { error?: string; ok?: boolean; listenPort?: number };
           const wasConnected = stateRef.current.status === "connected" || !!stateRef.current.reconnecting;
           if (d.error) {
-            // reconnect-failed after 15 attempts or listen port bind failure
-            if (wasConnected) {
+            const isBanned = /BANNED|banned|Server closed connection without response/i.test(d.error || "");
+            if (isBanned) {
+              shouldReconnect.current = false;
+              clearReconnect();
+              clearHeartbeat();
+              setState((s) => ({ ...s, status: "failed", error: d.error, reconnecting: false }));
+            } else if (wasConnected) {
               // Keep UI interactive, surface error subtly
               setState((s) => ({ ...s, error: d.error, reconnecting: false }));
             } else {
