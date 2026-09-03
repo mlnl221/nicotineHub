@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { readTags, writeTags, scrapeTags } from "@/lib/worker";
+import { readTags, writeTags, scrapeTags, verifyFile, analyzeFile, requestWorkerSpectrum, getWorkerHttpBase, workerFetchHeaders } from "@/lib/worker";
 
 type Props = {
   open: boolean;
@@ -33,6 +33,11 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
   const [scrapeUrl, setScrapeUrl] = useState("");
   const [scraping, setScraping] = useState(false);
   const [scrapeResult, setScrapeResult] = useState<string | null>(null);
+  const [verifyRes, setVerifyRes] = useState<Record<string, unknown> | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [analyzeRes, setAnalyzeRes] = useState<Record<string, unknown> | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [spectrum, setSpectrum] = useState<{ fullBlobUrl?: string; zoomBlobUrl?: string; etag?: string; loading?: boolean; error?: string } | null>(null);
 
   // Load tags when opened
   useEffect(() => {
@@ -40,6 +45,9 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
     setLoading(true);
     setError(null);
     setScrapeResult(null);
+    setVerifyRes(null);
+    setAnalyzeRes(null);
+    setSpectrum(null);
     readTags(fileName)
       .then((res) => {
         setTags(res.tags || {});
@@ -49,6 +57,49 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
   }, [open, fileName]);
+
+  const handleVerify = async () => {
+    setVerifying(true);
+    setError(null);
+    try {
+      const res = await verifyFile(fileName);
+      setVerifyRes(res as Record<string, unknown>);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setVerifying(false);
+    }
+  };
+  const handleAnalyze = async () => {
+    setAnalyzing(true);
+    setError(null);
+    try {
+      const res = await analyzeFile(fileName);
+      setAnalyzeRes(res as Record<string, unknown>);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+  const handleSpectrum = async () => {
+    setSpectrum({ loading: true });
+    setError(null);
+    try {
+      const res = await requestWorkerSpectrum({ fileName });
+      const base = getWorkerHttpBase();
+      const headers = { "If-None-Match": res.etag, ...workerFetchHeaders() } as Record<string, string>;
+      const [fullRes, zoomRes] = await Promise.all([fetch(`${base}${res.urls.full}`, { headers }), fetch(`${base}${res.urls.zoom}`, { headers })]);
+      if (!fullRes.ok || !zoomRes.ok) throw new Error(`Spectrum fetch failed`);
+      const [fullBlob, zoomBlob] = await Promise.all([fullRes.blob(), zoomRes.blob()]);
+      const fullBlobUrl = URL.createObjectURL(fullBlob);
+      const zoomBlobUrl = URL.createObjectURL(zoomBlob);
+      setSpectrum({ fullBlobUrl, zoomBlobUrl, etag: res.etag });
+    } catch (e) {
+      setSpectrum({ error: e instanceof Error ? e.message : String(e) });
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   if (!open) return null;
 
@@ -176,6 +227,53 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
                   </button>
                 </div>
                 {scrapeResult ? <p className="font-body text-xs text-primary">{scrapeResult}</p> : null}
+              </div>
+
+              {/* Verify / Analyze / Spectrum — single inspector */}
+              <div className="grid grid-cols-1 gap-3">
+                <div className="rounded-xl bg-surface-container-low p-4 ghost-border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Verify</h4>
+                    <button disabled={verifying} onClick={handleVerify} className="rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs disabled:opacity-40">{verifying ? "Verifying…" : "Run Verify"}</button>
+                  </div>
+                  <p className="font-body text-xs text-outline">Checks <span className="font-mono">flacOk</span> + MQA tag sniff (worker <span className="font-mono">POST /verify</span>).</p>
+                  {verifyRes ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      <span className={`rounded-full px-2 py-1 font-mono text-[10px] ${verifyRes.flacOk ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200" : verifyRes.flacOk === false ? "bg-error-container text-on-error-container" : "bg-surface-container-high text-outline"}`}>flacOk: {String(verifyRes.flacOk ?? "—")}</span>
+                      <span className={`rounded-full px-2 py-1 font-mono text-[10px] ${verifyRes.mqa ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40" : "bg-surface-container-high text-outline"}`}>mqa: {String(verifyRes.mqa ?? "—")}</span>
+                      {verifyRes.upconvert != null ? <span className="rounded-full bg-surface-container-high px-2 py-1 font-mono text-[10px]">upconvert: {String(verifyRes.upconvert)}</span> : null}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="rounded-xl bg-surface-container-low p-4 ghost-border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Analyze (transcode)</h4>
+                    <button disabled={analyzing} onClick={handleAnalyze} className="rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs disabled:opacity-40">{analyzing ? "Analyzing…" : "Run Analyze"}</button>
+                  </div>
+                  <p className="font-body text-xs text-outline">Worker <span className="font-mono">POST /analyze</span> <span className="font-mono">mutagen</span> + <span className="font-mono">ffmpeg</span> spectral knee <span className="font-mono">-40dB</span> → <span className="font-mono">cutoffHz</span>.</p>
+                  {analyzeRes ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {analyzeRes.bitrate ? <span className="rounded-full bg-surface-container-high px-2 py-1 font-mono text-[10px]">{String(analyzeRes.bitrate)} kbps {analyzeRes.vbr ? `· ${String(analyzeRes.vbr)}` : ""}</span> : null}
+                      {analyzeRes.cutoffHz ? <span className={`rounded-full px-2 py-1 font-mono text-[10px] ${Number(analyzeRes.cutoffHz) < 17000 ? "bg-error-container text-on-error-container" : "bg-green-100 text-green-800 dark:bg-green-900/40"}`}>cutoff {String(analyzeRes.cutoffHz)} Hz {analyzeRes.likelyTranscode ? "· likely transcode" : "· clean"}</span> : null}
+                      {analyzeRes.confidence ? <span className="rounded-full bg-surface-container-high px-2 py-1 font-mono text-[10px]">conf {String(analyzeRes.confidence)}</span> : null}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="rounded-xl bg-surface-container-low p-4 ghost-border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Spectrum</h4>
+                    <button disabled={!!spectrum?.loading} onClick={handleSpectrum} className="rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs disabled:opacity-40">{spectrum?.loading ? "Generating…" : "Generate Spectrum"}</button>
+                  </div>
+                  <p className="font-body text-xs text-outline"><span className="font-mono">sox</span> Full <span className="font-mono">2000×513</span> + Zoom <span className="font-mono">500×1025</span> Kaiser <span className="font-mono">-z 120</span> via worker <span className="font-mono">POST /spectrum/request</span>.</p>
+                  {spectrum?.error ? <p className="font-body text-xs text-error">{spectrum.error}</p> : null}
+                  {spectrum?.fullBlobUrl ? (
+                    <div className="space-y-2">
+                      <img src={spectrum.fullBlobUrl} alt="Full spectrum" className="w-full rounded-xl ghost-border" />
+                      {spectrum.zoomBlobUrl ? <img src={spectrum.zoomBlobUrl} alt="Zoom spectrum" className="w-full rounded-xl ghost-border" /> : null}
+                      <p className="font-mono text-[10px] text-outline">etag {spectrum.etag}</p>
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
               <p className="font-body text-[11px] leading-relaxed text-outline">Nicotin-plus parity: TinyTag fields (artist, album, title, track, genre, year, composer, albumartist). Worker edits via <span className="font-mono">mutagen</span> with <span className="font-mono">DATA_DIR</span> containment.</p>

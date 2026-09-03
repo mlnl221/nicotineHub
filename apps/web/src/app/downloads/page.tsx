@@ -21,6 +21,11 @@ import { isDemo } from "@/lib/demo";
 import { useSpectrum, parseDownloadToken } from "@/lib/spectrum";
 import { SpectrumHoverCard } from "@/components/transfers/SpectrumHoverCard";
 import { TagEditor } from "@/components/tag/TagEditor";
+import { BulkBar } from "@/components/tag/BulkBar";
+import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
+import { BulkScrapeModal } from "@/components/tag/BulkScrapeModal";
+import { useBulkSelection } from "@/lib/bulkSelection";
+import { bulkVerify, bulkAnalyze, bulkRequestSpectrum } from "@/lib/worker";
 import { humanSize, humanSpeed as _humanSpeed } from "@/lib/format";
 
 function humanSpeed(bps: number): string {
@@ -46,6 +51,12 @@ function DownloadsInner() {
   const { requestSpectrum, getEntry } = useSpectrum();
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; transfer: import("@/lib/protocol").Transfer; isUpload: boolean } | null>(null);
   const [tagFile, setTagFile] = useState<string | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const bulk = useBulkSelection();
+  const [bulkEditor, setBulkEditor] = useState(false);
+  const [bulkScrape, setBulkScrape] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ title: string; rows: Array<Record<string, unknown>> } | null>(null);
+  const [focusedIdx, setFocusedIdx] = useState(-1);
   const totalDown = stats?.downloadSpeed ?? downloads.filter(d => d.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const totalUp = stats?.uploadSpeed ?? 0;
   const activeCount = downloads.length;
@@ -84,6 +95,41 @@ function DownloadsInner() {
     });
     return [...map.entries()];
   })();
+
+  const audioIds = downloads.filter((d) => !isDemo && isAudioForSpectrum(d.fileName) && d.status === "Finished").map((d) => d.id);
+  const selectedFileNames = Array.from(bulk.selected).map((id) => downloads.find((d) => d.id === id)?.fileName).filter(Boolean) as string[];
+  const handleBulkVerify = async () => {
+    const ids = Array.from(bulk.selected);
+    const files = ids.map((id) => downloads.find((d) => d.id === id)?.fileName).filter(Boolean) as string[];
+    if (!files.length) return;
+    try { const r = await bulkVerify(files); setBulkResult({ title: `Verify — ${files.length} files`, rows: r.results as Array<Record<string, unknown>> }); } catch (e) { setBulkResult({ title: "Verify error", rows: [{ error: e instanceof Error ? e.message : String(e) }] }); }
+  };
+  const handleBulkAnalyze = async () => {
+    const ids = Array.from(bulk.selected);
+    const files = ids.map((id) => downloads.find((d) => d.id === id)?.fileName).filter(Boolean) as string[];
+    if (!files.length) return;
+    try { const r = await bulkAnalyze(files); setBulkResult({ title: `Analyze (fast) — ${files.length} files`, rows: r.results as Array<Record<string, unknown>> }); } catch (e) { setBulkResult({ title: "Analyze error", rows: [{ error: e instanceof Error ? e.message : String(e) }] }); }
+  };
+  const handleBulkSpectrum = async () => {
+    const ids = Array.from(bulk.selected);
+    const files = ids.map((id) => { const t = downloads.find((d) => d.id === id); return t ? { fileName: t.fileName, size: t.size, token: parseDownloadToken(t as unknown as { downloadUrl?: string }) } : null; }).filter(Boolean) as Array<{ fileName: string; size?: number; token?: number }>;
+    if (!files.length) return;
+    setBulkResult({ title: "Spectrum queue started", rows: files.map((f) => ({ fileName: f.fileName, status: "queued" })) });
+    const res = await bulkRequestSpectrum(files);
+    setBulkResult({ title: `Spectrum — ${files.length} files`, rows: res as unknown as Array<Record<string, unknown>> });
+  };
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!selectMode) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const dir = e.key === "ArrowDown" ? 1 : -1;
+      const next = Math.max(0, Math.min(audioIds.length - 1, focusedIdx + dir));
+      setFocusedIdx(next);
+      const id = audioIds[next];
+      if (e.shiftKey && id) bulk.toggleRange(id, audioIds);
+      else if (id && !e.shiftKey) bulk.toggle(id);
+    }
+  };
 
   const handleDoubleClick = (t: import("@/lib/protocol").Transfer, isUpload: boolean) => {
     const action = isUpload ? settings.transfers.upload_doubleclick : settings.transfers.download_doubleclick;
@@ -151,6 +197,17 @@ function DownloadsInner() {
                   Downloading ({dlCount})
                 </h3>
                 <div className="flex items-center gap-1">
+                  {!isDemo ? (
+                    <button onClick={() => setSelectMode((v) => !v)} className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-[10px] font-semibold ${selectMode ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant"}`}>
+                      <span className="material-symbols-outlined text-[14px]">{selectMode ? "check_box" : "check_box_outline_blank"}</span> {selectMode ? `Selecting (${bulk.size}/50)` : "Select"}
+                    </button>
+                  ) : null}
+                  {selectMode && audioIds.length ? (
+                    <>
+                      <button onClick={() => bulk.selectAll(audioIds)} className="hidden sm:inline-flex rounded-full bg-surface-container-high px-2 py-1 text-[10px]">All</button>
+                      <button onClick={() => bulk.clear()} className="hidden sm:inline-flex rounded-full bg-surface-container-high px-2 py-1 text-[10px]">Clear</button>
+                    </>
+                  ) : null}
                   <select value={groupMode} onChange={(e) => setOption("transfers", "groupdownloads", e.target.value)} className="rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-semibold outline-none">
                     <option value="folder_grouping">By Folder</option>
                     <option value="user_grouping">By User</option>
@@ -163,6 +220,7 @@ function DownloadsInner() {
                   </select>
                 </div>
               </div>
+              {selectMode ? <p className="font-body text-[10px] text-outline">Bulk edit: title+artist per-file, others uniform · Limit 50 · Shift+click / Shift+↑/↓ extends range — per-page only</p> : null}
               {downloads.length === 0 ? (
                 <div data-testid="empty-downloads" className="py-12 text-center">
                   <p className="font-body text-on-surface-variant">No active downloads</p>
@@ -185,12 +243,14 @@ function DownloadsInner() {
                           </button>
                         ) : null}
                         {!isCollapsed ? (
-                          <div className="space-y-3">
+                          <div onKeyDown={handleKeyDown} tabIndex={selectMode ? 0 : -1} className="space-y-3 outline-none">
                             {items.map((t) => {
                               const spectrumEntry = getEntry(t.id);
                               const hasSpectrum = spectrumEntry?.status === "done";
                               const isFinished = t.status === "Finished";
                               const canAnalyze = isFinished && isAudioForSpectrum(t.fileName);
+                              const checked = bulk.has(t.id);
+                              const isAudio = isAudioForSpectrum(t.fileName);
                               const card = (
                                 <TransferCard
                                   transfer={t}
@@ -201,13 +261,17 @@ function DownloadsInner() {
                                   onClear={() => clearTransfer(t.id, false)}
                                 />
                               );
-                              // Wrap with SpectrumHoverCard if finished audio or has spectrum
-                              const wrapped = isFinished && isAudioForSpectrum(t.fileName) ? (
+                              const wrapped = isFinished && isAudio ? (
                                 <SpectrumHoverCard transferId={t.id} fileName={t.fileName}>{card}</SpectrumHoverCard>
                               ) : card;
                               return (
-                                <div key={t.id} onDoubleClick={() => handleDoubleClick(t, false)} onContextMenu={(e) => { e.preventDefault(); setMenuAnchor({ x: e.clientX, y: e.clientY, transfer: t, isUpload: false }); }}>
-                                  {wrapped}
+                                <div key={t.id} className={`flex items-center gap-2 rounded-xl ${checked ? "ring-1 ring-primary bg-primary-fixed/10" : ""} ${selectMode && isAudio && isFinished && focusedIdx === audioIds.indexOf(t.id) ? "ring-1 ring-primary" : ""}`} onDoubleClick={() => !selectMode && handleDoubleClick(t, false)} onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenuAnchor({ x: e.clientX, y: e.clientY, transfer: t, isUpload: false }); }}>
+                                  {selectMode && isAudio && isFinished ? (
+                                    <input type="checkbox" checked={checked} onChange={(e) => bulk.toggle(t.id)} onClick={(e) => { e.stopPropagation(); if (e.shiftKey) bulk.toggleRange(t.id, audioIds); }} className="ml-2 h-4 w-4 shrink-0 accent-primary" />
+                                  ) : null}
+                                  <div className="flex-1 min-w-0" onClick={() => { if (selectMode && isAudio && isFinished) { const cb = bulk.has(t.id); if (cb) bulk.remove(t.id); else bulk.toggle(t.id); } }}>
+                                    {wrapped}
+                                  </div>
                                 </div>
                               );
                             })}
@@ -255,6 +319,30 @@ function DownloadsInner() {
         />
       ) : null}
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} /> : null}
+      <BulkBar count={bulk.size} onClear={bulk.clear} onEdit={() => setBulkEditor(true)} onScrape={() => setBulkScrape(true)} onVerify={handleBulkVerify} onAnalyze={handleBulkAnalyze} onSpectrum={handleBulkSpectrum} />
+      {bulkEditor ? <BulkTagEditor open={bulkEditor} files={selectedFileNames} onClose={() => setBulkEditor(false)} onSaved={() => bulk.clear()} /> : null}
+      {bulkScrape ? <BulkScrapeModal open={bulkScrape} files={selectedFileNames} onClose={() => setBulkScrape(false)} /> : null}
+      {bulkResult ? (
+        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
+          <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col overflow-hidden rounded-t-2xl md:rounded-2xl bg-surface-container-lowest shadow-xl ghost-border" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-outline-variant/10 flex justify-between gap-3">
+              <h3 className="font-headline font-bold">{bulkResult.title}</h3>
+              <button onClick={() => setBulkResult(null)} className="h-8 w-8 rounded-full bg-surface-container-high flex items-center justify-center"><span className="material-symbols-outlined text-[18px]">close</span></button>
+            </div>
+            <div className="flex-1 overflow-auto p-4 space-y-2">
+              {bulkResult.rows.map((r, i) => (
+                <div key={i} className="rounded-xl bg-surface-container-low p-3 ghost-border font-mono text-xs break-all">
+                  <div className="font-semibold truncate">{String((r as Record<string, unknown>).fileName ?? r.path ?? i)}</div>
+                  <div className="text-[11px] text-on-surface-variant">{Object.entries(r).filter(([k]) => k !== "fileName" && k !== "path").map(([k,v]) => `${k}:${String(v)}`).join(" · ") || "ok"}</div>
+                </div>
+              ))}
+            </div>
+            <div className="px-6 py-3 border-t flex justify-end">
+              <button onClick={() => setBulkResult(null)} className="rounded-full bg-primary px-5 py-2 font-label text-xs font-bold text-on-primary">Close</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,10 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { bridgeFetchUrl, bridgeFetchHeaders, type BridgeFileEntry } from "@/lib/bridgeHttp";
 import { isDemo } from "@/lib/demo";
 import { mockFileExplorerResponse } from "@/lib/demo/fixtures";
 import { TagEditor } from "@/components/tag/TagEditor";
+import { BulkBar } from "@/components/tag/BulkBar";
+import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
+import { BulkScrapeModal } from "@/components/tag/BulkScrapeModal";
+import { useBulkSelection } from "@/lib/bulkSelection";
+import { bulkVerify, bulkAnalyze, bulkRequestSpectrum } from "@/lib/worker";
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return "—";
@@ -29,7 +34,7 @@ export type FileExplorerProps = {
   selectable?: "directories" | "all";
   confirmLabel?: string;
   title?: string;
-  showFiles?: boolean; // if false, only directories are shown/interactive
+  showFiles?: boolean;
 };
 
 export function FileExplorer({
@@ -47,13 +52,18 @@ export function FileExplorer({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tagFile, setTagFile] = useState<string | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const bulk = useBulkSelection();
+  const [bulkEditor, setBulkEditor] = useState(false);
+  const [bulkScrape, setBulkScrape] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ title: string; rows: Array<Record<string, unknown>> } | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [focusedIdx, setFocusedIdx] = useState<number>(-1);
 
   const fetchDir = useCallback(async (path: string) => {
-    // Demo on Vercel — fake /data tree, hide bridge error
     if (isDemo) {
       setLoading(true);
       setError(null);
-      // small delay to mimic network
       await new Promise((r) => setTimeout(r, 180));
       const data = mockFileExplorerResponse(path);
       setCurrent(data.path);
@@ -114,8 +124,55 @@ export function FileExplorer({
 
   const dirs = entries.filter((e) => e.type === "directory");
   const files = entries.filter((e) => e.type !== "directory");
+  const audioFiles = files.filter((e) => {
+    const ext = e.name.toLowerCase().split(".").pop() ?? "";
+    return !isDemo && ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"].includes(ext);
+  });
+  const audioIds = audioFiles.map((e) => e.path);
 
   const canSelectCurrent = selectable === "all" || selectable === "directories";
+
+  // keyboard up/down with shift for range
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!selectMode) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const dir = e.key === "ArrowDown" ? 1 : -1;
+      const next = Math.max(0, Math.min(audioIds.length - 1, focusedIdx + dir));
+      setFocusedIdx(next);
+      const id = audioIds[next];
+      if (e.shiftKey && id) bulk.toggleRange(id, audioIds);
+      else if (id && !e.shiftKey) bulk.toggle(id);
+    }
+  };
+
+  const handleBulkVerify = async () => {
+    const ids = Array.from(bulk.selected);
+    if (!ids.length) return;
+    try {
+      const r = await bulkVerify(ids);
+      setBulkResult({ title: `Verify — ${ids.length} files`, rows: r.results as Array<Record<string, unknown>> });
+    } catch (e) {
+      setBulkResult({ title: "Verify error", rows: [{ error: e instanceof Error ? e.message : String(e) }] });
+    }
+  };
+  const handleBulkAnalyze = async () => {
+    const ids = Array.from(bulk.selected);
+    if (!ids.length) return;
+    try {
+      const r = await bulkAnalyze(ids);
+      setBulkResult({ title: `Analyze (fast) — ${ids.length} files`, rows: r.results as Array<Record<string, unknown>> });
+    } catch (e) {
+      setBulkResult({ title: "Analyze error", rows: [{ error: e instanceof Error ? e.message : String(e) }] });
+    }
+  };
+  const handleBulkSpectrum = async () => {
+    const ids = Array.from(bulk.selected);
+    if (!ids.length) return;
+    setBulkResult({ title: "Spectrum queue started", rows: ids.map((f) => ({ fileName: f, status: "queued" })) });
+    const res = await bulkRequestSpectrum(ids.map((f) => ({ fileName: f })));
+    setBulkResult({ title: `Spectrum — ${ids.length} files`, rows: res as unknown as Array<Record<string, unknown>> });
+  };
 
   return (
     <div className="flex flex-col overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-sm dark:bg-surface-container-high">
@@ -126,6 +183,21 @@ export function FileExplorer({
           <span className="font-label text-sm font-semibold text-on-surface dark:text-inverse-on-surface">{title}</span>
         </div>
         <div className="flex items-center gap-1.5">
+          {!isDemo ? (
+            <button
+              type="button"
+              onClick={() => setSelectMode((v) => !v)}
+              className={`inline-flex items-center gap-1 rounded-full px-3 py-1.5 font-label text-xs font-medium ${selectMode ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest"}`}
+            >
+              <span className="material-symbols-outlined text-[16px]">{selectMode ? "check_box" : "check_box_outline_blank"}</span> Select
+            </button>
+          ) : null}
+          {selectMode && audioIds.length ? (
+            <>
+              <button type="button" onClick={() => bulk.selectAll(audioIds)} className="hidden sm:inline-flex rounded-full bg-surface-container-high px-2 py-1 font-label text-[11px]">All ({Math.min(50, audioIds.length)})</button>
+              <button type="button" onClick={() => bulk.clear()} className="hidden sm:inline-flex rounded-full bg-surface-container-high px-2 py-1 font-label text-[11px]">Clear</button>
+            </>
+          ) : null}
           {parent !== null && (
             <button
               type="button"
@@ -176,7 +248,7 @@ export function FileExplorer({
         <div className="min-w-0">
           <div className="font-mono text-xs font-medium text-amber-900 dark:text-amber-200 truncate" title={current}>{current}</div>
           <div className="font-body text-[11px] text-amber-800/80 dark:text-amber-200/70">
-            {dirs.length} folder(s){showFiles ? ` · ${files.length} file(s)` : ""} · {canSelectCurrent ? "Select current folder to share" : ""}
+            {dirs.length} folder(s){showFiles ? ` · ${files.length} file(s)` : ""}{selectMode && bulk.size ? ` · ${bulk.size} selected (max 50)` : ""} · {canSelectCurrent ? "Select current folder to share" : ""}
           </div>
         </div>
         <button
@@ -191,7 +263,7 @@ export function FileExplorer({
       </div>
 
       {/* Content */}
-      <div className="min-h-[280px] flex-1 overflow-auto bg-surface-container-lowest dark:bg-surface-container-high/40">
+      <div ref={listRef as unknown as React.RefObject<HTMLDivElement>} tabIndex={selectMode ? 0 : -1} onKeyDown={handleKeyDown} className="min-h-[280px] flex-1 overflow-auto bg-surface-container-lowest dark:bg-surface-container-high/40 outline-none">
         {loading && (
           <div className="space-y-2 p-3">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -227,7 +299,6 @@ export function FileExplorer({
         )}
         {!loading && !error && entries.length > 0 && (
           <div className="divide-y divide-outline-variant/10">
-            {/* Directories first */}
             {dirs.map((e) => (
               <button
                 key={e.path}
@@ -245,7 +316,6 @@ export function FileExplorer({
                 <span className="material-symbols-outlined text-[18px] text-outline">chevron_right</span>
               </button>
             ))}
-            {/* Symlinks (treated separately) */}
             {entries.filter((e) => e.type === "symlink").map((e) => (
               <div key={e.path} className="flex items-center gap-3 px-3 py-3 hover:bg-surface-container-high/30">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-secondary-container text-on-secondary-container">
@@ -265,19 +335,24 @@ export function FileExplorer({
                 </button>
               </div>
             ))}
-            {showFiles && files.filter((e) => e.type !== "symlink").map((e) => {
+            {showFiles && files.filter((e) => e.type !== "symlink").map((e, idx) => {
               const ext = e.name.toLowerCase().split(".").pop() ?? "";
               const isAudio = !isDemo && ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"].includes(ext);
+              const checked = bulk.has(e.path);
+              const isFocused = focusedIdx === audioIds.indexOf(e.path);
               return (
-              <div key={e.path} className="flex items-center gap-3 px-3 py-3 opacity-90 hover:bg-surface-container-high/40">
+              <div key={e.path} onClick={() => selectMode && isAudio && (isFocused ? bulk.toggleRange(e.path, audioIds) : bulk.toggle(e.path, audioIds))} className={`flex items-center gap-3 px-3 py-3 hover:bg-surface-container-high/40 ${checked ? "bg-primary-fixed/20" : "opacity-90"} ${isFocused ? "ring-1 ring-primary" : ""} ${selectMode && isAudio ? "cursor-pointer" : ""}`}>
+                {selectMode && isAudio ? (
+                  <input type="checkbox" checked={checked} onChange={() => bulk.toggle(e.path)} onClick={(ev) => ev.stopPropagation()} className="h-4 w-4 shrink-0 accent-primary" />
+                ) : null}
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-container-high text-on-surface-variant dark:bg-surface-variant dark:text-outline">
                   <span className="material-symbols-outlined text-[18px]">{isAudio ? "audio_file" : "description"}</span>
                 </span>
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1" onClick={() => selectMode && isAudio && bulk.toggle(e.path)}>
                   <div className="truncate font-body text-sm text-on-surface dark:text-inverse-on-surface">{e.name}</div>
                   <div className="truncate font-mono text-[11px] text-on-surface-variant dark:text-outline">{formatSize(e.size)} · {formatMtime(e.mtime)}</div>
                 </div>
-                {isAudio ? (
+                {isAudio && !selectMode ? (
                   <button
                     type="button"
                     onClick={() => setTagFile(e.path)}
@@ -287,12 +362,18 @@ export function FileExplorer({
                     <span className="material-symbols-outlined text-[14px]">edit</span> Tags
                   </button>
                 ) : null}
+                {selectMode && isAudio ? (
+                  <span className={`material-symbols-outlined text-[18px] ${checked ? "text-primary" : "text-outline"}`}>{checked ? "check_box" : "check_box_outline_blank"}</span>
+                ) : null}
               </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {/* Bulk bar per-page */}
+      <BulkBar count={bulk.size} onClear={bulk.clear} onEdit={() => setBulkEditor(true)} onScrape={() => setBulkScrape(true)} onVerify={handleBulkVerify} onAnalyze={handleBulkAnalyze} onSpectrum={handleBulkSpectrum} />
 
       {/* Footer note */}
       <div className="border-t border-outline-variant/10 bg-surface-container-low px-3 py-2 dark:bg-surface-variant/20">
@@ -301,6 +382,29 @@ export function FileExplorer({
         </div>
       </div>
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} onSaved={() => fetchDir(current)} /> : null}
+      {bulkEditor ? <BulkTagEditor open={bulkEditor} files={Array.from(bulk.selected)} onClose={() => setBulkEditor(false)} onSaved={() => { bulk.clear(); fetchDir(current); }} /> : null}
+      {bulkScrape ? <BulkScrapeModal open={bulkScrape} files={Array.from(bulk.selected)} onClose={() => setBulkScrape(false)} /> : null}
+      {bulkResult ? (
+        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
+          <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col overflow-hidden rounded-t-2xl md:rounded-2xl bg-surface-container-lowest shadow-xl ghost-border" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-outline-variant/10 flex justify-between gap-3">
+              <h3 className="font-headline font-bold">{bulkResult.title}</h3>
+              <button onClick={() => setBulkResult(null)} className="h-8 w-8 rounded-full bg-surface-container-high flex items-center justify-center"><span className="material-symbols-outlined text-[18px]">close</span></button>
+            </div>
+            <div className="flex-1 overflow-auto p-4 space-y-2">
+              {bulkResult.rows.map((r, i) => (
+                <div key={i} className="rounded-xl bg-surface-container-low p-3 ghost-border font-mono text-xs break-all">
+                  <div className="font-semibold truncate">{String((r as Record<string, unknown>).fileName ?? r.path ?? i)}</div>
+                  <div className="text-[11px] text-on-surface-variant">{Object.entries(r).filter(([k]) => k !== "fileName" && k !== "path").map(([k,v]) => `${k}:${String(v)}`).join(" · ") || "ok"}</div>
+                </div>
+              ))}
+            </div>
+            <div className="px-6 py-3 border-t border-outline-variant/10 flex justify-end">
+              <button onClick={() => setBulkResult(null)} className="rounded-full bg-primary px-5 py-2 font-label text-xs font-bold text-on-primary">Close</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
