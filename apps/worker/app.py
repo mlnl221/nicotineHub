@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -43,6 +44,18 @@ SCRAPERS = [
 ]
 
 app = FastAPI(title="nicotine-hub worker", version=VERSION)
+
+# Browser calls the worker directly (web origin != worker origin).
+# Mirrors the bridge: open by default, restricted when ALLOWED_ORIGINS is set.
+_cors_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins or ["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type", "If-None-Match"],
+    expose_headers=["ETag"],
+    max_age=600,
+)
 
 
 @app.middleware("http")

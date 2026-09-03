@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SectionCard } from "@/components/settings/controls";
 import { useSession } from "@/lib/session";
 import { getWorkerHealth } from "@/lib/worker";
@@ -46,12 +46,14 @@ function SecretField({ label, description, placeholder, value, onChange }: {
 }
 
 export function WorkerSection() {
-  const { send } = useSession();
+  const { send, subscribe, state } = useSession();
   const [values, setValues] = useState<Record<string, string>>({});
   const [auth, setAuth] = useState<WorkerAuth | null>(null);
   const [reachable, setReachable] = useState<boolean | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const saveStatusRef = useRef(saveStatus);
+  saveStatusRef.current = saveStatus;
 
   const refresh = useCallback(async () => {
     const h = await getWorkerHealth();
@@ -61,24 +63,61 @@ export function WorkerSection() {
   useEffect(() => { refresh(); }, [refresh]);
 
   const dirty = FIELDS.some((f) => (values[f.key] ?? "") !== "");
+  const connected = state.status === "connected";
   const save = () => {
+    if (!connected) {
+      setSaveStatus("error");
+      setSaveError("Bridge not connected — log in first, then save.");
+      return;
+    }
+    const keys = FIELDS.map((f) => f.key).filter((k) => (values[k] ?? "") !== "");
+    if (!keys.length) return;
     setSaveStatus("saving");
     setSaveError(null);
-    try {
-      for (const f of FIELDS) {
-        const v = values[f.key] ?? "";
-        if (v === "") continue; // blank = keep stored value
-        send({ type: "config:update", section: "worker", key: f.key, value: v } as unknown as never);
+    let done = 0;
+    const timer = setTimeout(() => {
+      setSaveStatus((s) => {
+        if (s === "saving") {
+          setSaveError("No confirmation from bridge — is it connected?");
+          return "error";
+        }
+        return s;
+      });
+    }, 5000);
+    const unsub = subscribe((msg) => {
+      const t = (msg as { type?: string }).type;
+      if (t === "config:updated" && (msg as { section?: string }).section === "worker") {
+        done += 1;
+        if (done >= keys.length) {
+          clearTimeout(timer);
+          unsub();
+          setValues({});
+          setSaveStatus("success");
+          setTimeout(() => { setSaveStatus("idle"); refresh(); }, 1200);
+        }
+      } else if (t === "error" && saveStatusRef.current === "saving") {
+        clearTimeout(timer);
+        unsub();
+        setSaveStatus("error");
+        setSaveError((msg as { error?: string }).error || "Save failed");
       }
-      setValues({});
-      setSaveStatus("success");
-      setTimeout(() => { setSaveStatus("idle"); refresh(); }, 1200);
+    });
+    saveStatusRef.current = "saving";
+    try {
+      for (const k of keys) send({ type: "config:update", section: "worker", key: k, value: values[k] } as unknown as never);
     } catch (e) {
+      clearTimeout(timer);
+      unsub();
       setSaveStatus("error");
       setSaveError(e instanceof Error ? e.message : "Save failed");
     }
   };
   const clear = (key: string) => {
+    if (!connected) {
+      setSaveStatus("error");
+      setSaveError("Bridge not connected — log in first, then clear.");
+      return;
+    }
     send({ type: "config:update", section: "worker", key, value: "" } as unknown as never);
     setTimeout(() => refresh(), 500);
   };
@@ -135,6 +174,7 @@ export function WorkerSection() {
             {saveStatus === "saving" ? "Saving…" : saveStatus === "success" ? "Saved ✓" : "Save tokens"}
           </button>
           {saveStatus === "error" && saveError ? <span className="font-body text-xs text-error">{saveError}</span> : null}
+          {!connected ? <span className="font-body text-xs text-outline">Log in to save (bridge connection required).</span> : null}
         </div>
       </SectionCard>
     </div>
