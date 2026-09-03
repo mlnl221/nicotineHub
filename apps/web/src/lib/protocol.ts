@@ -14,6 +14,11 @@ export interface LoginStartMessage {
   type: "login:start";
 }
 
+/** Explicit logoff — bridge drops the Soulseek server session immediately. */
+export interface LogoutRequest {
+  type: "logout";
+}
+
 export interface LoginResultSuccess {
   type: "login:result";
   ok: true;
@@ -794,6 +799,7 @@ export interface SpectrumStatusRequest {
 
 export type BridgeInboundMessage =
   | LoginRequest
+  | LogoutRequest
   | SearchRequest
   | SearchUserRequest
   | SearchRoomRequest
