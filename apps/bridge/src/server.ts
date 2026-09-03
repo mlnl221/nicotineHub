@@ -910,6 +910,15 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         return;
       }
 
+      if (data.type === "logout") {
+        // Explicit logoff: drop the Soulseek server session immediately
+        // (client closes the WS right after; close() is idempotent backup).
+        try { if (ws.data.session) activeSessions.delete(ws.data.session); } catch {}
+        try { ws.data.session?.close(); } catch {}
+        logger.info("auth", "logout — soulseek session closed");
+        return;
+      }
+
       // Helpers to enforce logged-in
       const requireLogin = (): SoulseekSession | null => {
         const s = ws.data.session;

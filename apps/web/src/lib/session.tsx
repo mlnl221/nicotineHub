@@ -15,6 +15,7 @@ import type {
   BridgeOutboundMessage,
   LoginRequest,
 } from "@/lib/protocol";
+import { useRouter } from "next/navigation";
 import { isDemo } from "@/lib/demo";
 import { emitRoomList, handleDemoSend } from "@/lib/demo/mock";
 import { clearDemoStorage, seedDemoStorage } from "@/lib/demo/seed";
@@ -149,6 +150,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // Hydrate from sessionStorage after mount so Sidebar/TopBar don't mismatch
   // (was: conditional initializer read sessionStorage during render → Sidebar badge (2) / user "demo" vs "System Administrator").
   const [state, setState] = useState<SessionState>({ status: "idle" });
+  const router = useRouter();
   useEffect(() => {
     try {
       if (isDemo) {
@@ -197,8 +199,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     shouldReconnect.current = false;
     reconnectAttempts.current = 0;
     sendQueue.current = [];
-    socketRef.current?.close();
+    const ws = socketRef.current;
     socketRef.current = null;
+    // Explicit logoff so the bridge drops the Soulseek server session
+    // immediately instead of relying on the WS close handshake.
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: "logout" })); } catch {}
+    }
+    try { ws?.close(); } catch {}
   }, [clearHeartbeat, clearReconnect]);
 
   const logout = useCallback(() => {
@@ -211,7 +219,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     teardown();
     lastLogin.current = null;
     setState({ status: "idle", reconnecting: false });
-  }, [teardown]);
+    // Protected pages render a spinner on `idle` — route home to the login form.
+    router.replace("/");
+  }, [teardown, router]);
 
   const connectSocket = useCallback((loginReq: Omit<LoginRequest, "type">) => {
     const gen = ++generation.current;
