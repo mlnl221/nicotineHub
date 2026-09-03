@@ -146,3 +146,37 @@ export async function bulkAnalyze(files: string[]): Promise<{ results: Array<Rec
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Bulk analyze failed (${res.status})`);
   return body as { results: Array<Record<string, unknown>> };
 }
+
+export async function verifyFile(fileName: string): Promise<{ flacOk: boolean | null; mqa: boolean | null; upconvert?: unknown }> {
+  const res = await workerFetch("/verify", { method: "POST", body: JSON.stringify({ fileName }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { detail?: string }).detail || `Verify failed (${res.status})`);
+  return body as { flacOk: boolean | null; mqa: boolean | null };
+}
+
+export async function analyzeFile(fileName: string): Promise<{ bitrate: number | null; vbr: string | null; sampleRate: number | null; bitDepth: number | null; cutoffHz: number | null; likelyTranscode: boolean | null; confidence: number }> {
+  const res = await workerFetch("/analyze", { method: "POST", body: JSON.stringify({ fileName }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { detail?: string }).detail || `Analyze failed (${res.status})`);
+  return body as { bitrate: number | null; vbr: string | null; sampleRate: number | null; bitDepth: number | null; cutoffHz: number | null; likelyTranscode: boolean | null; confidence: number };
+}
+
+export async function bulkVerify(files: string[]): Promise<{ results: Array<Record<string, unknown>> }> {
+  const res = await workerFetch("/verify/bulk", { method: "POST", body: JSON.stringify({ files }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { detail?: string }).detail || `Bulk verify failed (${res.status})`);
+  return body as { results: Array<Record<string, unknown>> };
+}
+
+export async function bulkRequestSpectrum(files: Array<{ fileName: string; size?: number; token?: number }>): Promise<Array<{ fileName: string; ok: boolean; etag?: string; error?: string }>> {
+  const results: Array<{ fileName: string; ok: boolean; etag?: string; error?: string }> = [];
+  for (const f of files) {
+    try {
+      const r = await requestWorkerSpectrum(f);
+      results.push({ fileName: f.fileName, ok: true, etag: r.etag });
+    } catch (e) {
+      results.push({ fileName: f.fileName, ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return results;
+}

@@ -629,6 +629,41 @@ async def verify(body: FileIn):
     return out
 
 
+class BulkVerifyIn(BaseModel):
+    files: list[str] = Field(min_length=1, max_length=50)
+
+
+@app.post("/verify/bulk", dependencies=[Depends(require_auth)])
+async def verify_bulk(body: BulkVerifyIn):
+    out: list[dict] = []
+    for fname in body.files[:50]:
+        if len(fname) > 1024:
+            out.append({"fileName": fname, "error": "name too long"})
+            continue
+        path = _resolve_any(fname)
+        if path is None:
+            out.append({"fileName": fname, "error": "not found"})
+            continue
+        try:
+            from mutagen import File as _mut_file
+            audio = _mut_file(path)
+            if audio is None:
+                out.append({"fileName": fname, "flacOk": False})
+                continue
+            ext = path.suffix.lstrip(".").lower()
+            entry: dict = {"fileName": fname, "path": str(path), "flacOk": None, "mqa": None}
+            if ext == "flac":
+                entry["flacOk"] = audio.info is not None
+            raw = dict(getattr(audio, "tags", None) or {})
+            blob = " ".join(str(v) for v in raw.values())[:2000].lower()
+            if "mqa" in blob or "mqaencoder" in str(raw.keys()).lower():
+                entry["mqa"] = True
+            out.append(entry)
+        except Exception as e:
+            out.append({"fileName": fname, "error": str(e)[:200]})
+    return {"results": out}
+
+
 @app.post("/analyze", dependencies=[Depends(require_auth)])
 async def analyze(body: FileIn):
     path = _resolve_or_404(body.fileName)
