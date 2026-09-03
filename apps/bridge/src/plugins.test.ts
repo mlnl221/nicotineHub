@@ -20,12 +20,14 @@ describe("PluginManager", () => {
 
   beforeEach(() => {
     dataDir = tmpDataDir();
+    process.env.CONFIG_DIR = dataDir;
     process.env.DATA_DIR = dataDir;
     pm = new PluginManager({ dataDir });
     pm.registerBuiltin("core_commands", coreManifest as unknown as Record<string, unknown>, () => new CorePlugin());
     pm.registerBuiltin("spamfilter", spamManifest as unknown as Record<string, unknown>, () => new SpamPlugin());
   });
   afterEach(() => {
+    try { delete process.env.CONFIG_DIR; } catch {}
     try { rmSync(dataDir, { recursive: true, force: true }); } catch {}
   });
 

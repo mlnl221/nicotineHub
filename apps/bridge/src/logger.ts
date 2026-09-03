@@ -31,7 +31,7 @@ const LEVEL_ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, erro
 const MAX_MEMORY = 2000;
 const MAX_PERSIST = 2000;
 
-let dataDir = process.env.CONFIG_DIR || process.env.DATA_DIR || "/config";
+let dataDir = process.env.CONFIG_DIR || "/config";
 let filePath = join(dataDir, "diagnostics.log");
 
 const ring: LogEntry[] = [];
@@ -46,7 +46,7 @@ function isTestEnv(): boolean {
 function ensureLoaded() {
   if (loaded) return;
   loaded = true;
-  dataDir = process.env.CONFIG_DIR || process.env.DATA_DIR || "/config";
+  dataDir = process.env.CONFIG_DIR || "/config";
   filePath = join(dataDir, "diagnostics.log");
   if (isTestEnv()) {
     // isolated in-memory only for tests; don't read/ pollute /data

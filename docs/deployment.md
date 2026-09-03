@@ -10,8 +10,8 @@ docker compose up --build  # http://localhost:3000 + ws://localhost:8787/ws
 
 `compose.yaml` builds all services from the monorepo root:
 
-- `bridge` — `apps/bridge/Dockerfile` → `PORT=8787`, `LISTEN_PORT=60754`, `CONFIG_DIR=/config` + `DATA_DIR=/data`, volumes `config:/config` + `data:/data`, `ports: 8787:8787 + 60754:60754` TCP+UDP (no `network_mode` key — bridge ports)
-- `worker` — `apps/worker/Dockerfile` → `:8789`, volumes `config:/config:ro` + `data:/data` (spectra in ephemeral `/tmp/hub-spectrum`)
+- `bridge` — `apps/bridge/Dockerfile` → `PORT=8787`, `LISTEN_PORT=60754`, `DATA_DIR=/data`, volume `bridge-data:/data`, `ports: 8787:8787 + 60754:60754` TCP+UDP (no `network_mode` key — bridge ports)
+- `worker` — `apps/worker/Dockerfile` → `:8789`, volumes `bridge-data:/data:ro`
 - `web` — `apps/web/Dockerfile` → `PORT=3000`
 
 **Network mode — bridge ports (default) vs host**
@@ -19,7 +19,7 @@ docker compose up --build  # http://localhost:3000 + ws://localhost:8787/ws
 - **Bridge ports (default `compose.yaml`)**: `bridge` publishes `8787:8787` + `60754:60754` TCP+UDP. `LISTEN_PORT` host mapping is static at create time — changing the peer port in Settings → Network hot-swaps `Bun.listen` + `SetWaitPort` inside the container, but the *host* mapping needs `LISTEN_PORT=NEW docker compose up -d` to match. UPnP inside bridge-network sees the container IP — prefer manual port-forward or host mode for UPnP.
 - **Host mode**: add `network_mode: host` to `bridge` (and drop its `ports:`) — it binds directly to host `8787` + `LISTEN_PORT`, UPnP sees the host LAN IP, and Settings → Network port changes apply without `docker compose up -d`.
 
-Port-forwarding is parameterized: `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` (TCP+UDP) when in bridge mode; in host mode the port is host-direct. To use a different peer port, set `LISTEN_PORT` (see `docs/architecture.md#env-full` for `CONFIG_DIR/listen_port` persistence):
+Port-forwarding is parameterized: `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` (TCP+UDP) when in bridge mode; in host mode the port is host-direct. To use a different peer port, set `LISTEN_PORT` (see `docs/architecture.md#env-full` for `DATA_DIR/listen_port` persistence):
 
 ```bash
 LISTEN_PORT=60755 docker compose up -d
@@ -59,7 +59,7 @@ docker pull ghcr.io/mlnl221/nicotinehub-bridge:0.2.0
 
 > First publish requires making each GHCR package **Public** (GitHub → Packages → Settings → Change visibility) so `docker pull` works without `docker login ghcr.io`.
 
-All env vars for deployment are in `docs/architecture.md#env-full`: `BRIDGE_TOKEN` (`?token`/`Bearer`/`Sec-WebSocket-Protocol` → 401 on `/ws` `/files/:token` `/logs` `/diagnostics` `/plugins`), `CONFIG_DIR`/`DATA_DIR`, `SHARED_DIRS`, `UPLOAD_LIMIT`/`DOWNLOAD_LIMIT`, `ALLOWED_ORIGINS`, `NEXT_PUBLIC_BRIDGE_URL` (build-time) vs `localStorage.nicotineHub.bridgeUrl` (runtime).
+All env vars for deployment are in `docs/architecture.md#env-full`: `BRIDGE_TOKEN` (`?token`/`Bearer`/`Sec-WebSocket-Protocol` → 401 on `/ws` `/files/:token` `/logs` `/diagnostics` `/plugins`), `DATA_DIR`, `SHARED_DIRS`, `UPLOAD_LIMIT`/`DOWNLOAD_LIMIT`, `ALLOWED_ORIGINS`, `NEXT_PUBLIC_BRIDGE_URL` (build-time) vs `localStorage.nicotineHub.bridgeUrl` (runtime).
 
 ## Branching & promotion
 

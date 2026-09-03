@@ -24,7 +24,7 @@ type PluginsFile = {
 const DEFAULT_PLUGINS_FILE: PluginsFile = { enable: true, enabled: [], plugins: {} };
 
 function dataDir(): string {
-  return process.env.CONFIG_DIR || process.env.DATA_DIR || "/config";
+  return process.env.CONFIG_DIR || "/config";
 }
 function pluginsFilePath(): string {
   return join(dataDir(), "plugins.json");

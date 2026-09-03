@@ -3,17 +3,16 @@
 FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    CONFIG_DIR=/config \
     DATA_DIR=/data \
-    SPECTRUM_DIR=/tmp/hub-spectrum
+    SPECTRUM_DIR=/tmp/spectrals
 WORKDIR /app
 COPY apps/worker/requirements.txt ./
 RUN apt-get update \
     && apt-get install -y --no-install-recommends sox flac ffmpeg curl \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir -r requirements.txt \
-    && mkdir -p /tmp/hub-spectrum && chmod 777 /tmp/hub-spectrum \
-    && mkdir -p $CONFIG_DIR $DATA_DIR $DATA_DIR/downloads
+    && mkdir -p /tmp/spectrals && chmod 777 /tmp/spectrals \
+    && mkdir -p $DATA_DIR $DATA_DIR/downloads
 COPY apps/worker/ ./
 LABEL org.opencontainers.image.licenses="GPL-3.0-or-later"
 LABEL org.opencontainers.image.description="Nicotine Hub worker — scrape/spectrum/tag (own code)"

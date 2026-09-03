@@ -21,7 +21,7 @@ export interface Statistics {
 }
 
 function defaultDataDir(): string {
-  return process.env.CONFIG_DIR || process.env.DATA_DIR || "/config";
+  return process.env.CONFIG_DIR || "/config";
 }
 
 function statsPath(dataDir: string): string {
