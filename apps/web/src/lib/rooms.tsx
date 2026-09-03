@@ -44,7 +44,9 @@ export function useRooms() {
   });
 
   useEffect(() => {
-    if (state.status !== "connected") return;
+    // Subscribe from mount (not only when connected): the server sends room-list
+    // once right after login, before React re-renders on login:result — gating on
+    // `connected` systematically drops it and the room list stays empty forever.
     const unsub = subscribe((msg) => {
       if (msg.type === "room:event") {
         const ev = (msg as unknown as { event: RoomEvent }).event;
@@ -295,7 +297,7 @@ export function useRooms() {
       }
     });
     return unsub;
-  }, [state.status, subscribe, activeRoom, settings.words.censorwords, settings.words.censored, settings.logging.readroomlines]);
+  }, [subscribe, activeRoom, settings.words.censorwords, settings.words.censored, settings.logging.readroomlines]);
 
   // Fetch UserStats (files count) for users in active room to show shares in right list
   const requestedStats = useRef<Set<string>>(new Set());
