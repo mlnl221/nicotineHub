@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { bridgeFetchUrl, bridgeFetchHeaders, type BridgeFileEntry } from "@/lib/bridgeHttp";
 import { isDemo } from "@/lib/demo";
 import { mockFileExplorerResponse } from "@/lib/demo/fixtures";
+import { TagEditor } from "@/components/tag/TagEditor";
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return "—";
@@ -45,6 +46,7 @@ export function FileExplorer({
   const [parent, setParent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tagFile, setTagFile] = useState<string | null>(null);
 
   const fetchDir = useCallback(async (path: string) => {
     // Demo on Vercel — fake /data tree, hide bridge error
@@ -263,17 +265,31 @@ export function FileExplorer({
                 </button>
               </div>
             ))}
-            {showFiles && files.filter((e) => e.type !== "symlink").map((e) => (
-              <div key={e.path} className="flex items-center gap-3 px-3 py-3 opacity-90">
+            {showFiles && files.filter((e) => e.type !== "symlink").map((e) => {
+              const ext = e.name.toLowerCase().split(".").pop() ?? "";
+              const isAudio = !isDemo && ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"].includes(ext);
+              return (
+              <div key={e.path} className="flex items-center gap-3 px-3 py-3 opacity-90 hover:bg-surface-container-high/40">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-container-high text-on-surface-variant dark:bg-surface-variant dark:text-outline">
-                  <span className="material-symbols-outlined text-[18px]">description</span>
+                  <span className="material-symbols-outlined text-[18px]">{isAudio ? "audio_file" : "description"}</span>
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-body text-sm text-on-surface dark:text-inverse-on-surface">{e.name}</div>
                   <div className="truncate font-mono text-[11px] text-on-surface-variant dark:text-outline">{formatSize(e.size)} · {formatMtime(e.mtime)}</div>
                 </div>
+                {isAudio ? (
+                  <button
+                    type="button"
+                    onClick={() => setTagFile(e.path)}
+                    className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs hover:bg-surface-variant"
+                    title="Edit tags (worker)"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">edit</span> Tags
+                  </button>
+                ) : null}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -284,6 +300,7 @@ export function FileExplorer({
           <span className="font-semibold">Security:</span> You start at <span className="font-mono">/data</span> but can navigate up to <span className="font-mono">/</span> (host root) — traversal outside <span className="font-mono">/</span> is blocked and symlink escapes are rejected. If <span className="font-mono">BRIDGE_TOKEN</span> is set, requests require <span className="font-mono">?token</span> or <span className="font-mono">Authorization: Bearer</span> (same as <span className="font-mono">/ws</span>, <span className="font-mono">/logs</span>).
         </div>
       </div>
+      {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} onSaved={() => fetchDir(current)} /> : null}
     </div>
   );
 }

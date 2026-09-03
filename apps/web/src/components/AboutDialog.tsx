@@ -168,7 +168,7 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
                 This project is not affiliated with Soulseek. Based on Nicotine+ — thanks to the Nicotine+ Team.
               </p>
               <ul className="list-disc pl-5 font-body text-xs leading-relaxed text-on-surface-variant">
-                <li><a href="https://github.com/tinytag/tinytag" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">tinytag</a> — MIT</li>
+                <li><a href="https://mutagen.readthedocs.io/" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">mutagen</a> — GPL-2.0-or-later (worker tag read/write) — TinyTag parity</li>
                 <li><a href="https://github.com/madebybowtie/FlagKit" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">FlagKit</a> — MIT</li>
                 <li>IP2Location LITE — CC-BY-SA-4.0</li>
               </ul>

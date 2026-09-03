@@ -29,8 +29,7 @@ Other assets licensed separately:
 * `LICENSES/CC-BY-SA-4.0.txt` — CC BY-SA 4.0 (e.g. protocol illustrations, if reused)
 * `LICENSES/MIT.txt` — MIT (upstream build tooling that documents MIT)
 
-Our dependencies (`Next.js`, `Bun`, `zod`, `sharp`, `music-metadata`, `comlink`,
-`Tailwind`) are MIT / Apache-2.0 / BSD — all `GPL-3.0-or-later`-compatible for a
+Our dependencies (`Next.js`, `Bun`, `zod`, `Tailwind` + worker `mutagen`, `pillow`, `numpy`, `sox`/`ffmpeg` binaries) are MIT / Apache-2.0 / BSD — all `GPL-3.0-or-later`-compatible for a
 combined work.
 
 ---
@@ -104,7 +103,7 @@ ideas/spec, we still credit the source.
 | `apps/bridge/src/plugins/builtin/spamfilter.ts` | `pynicotine/plugins/spamfilter/__init__.py` | **Full port** |
 | `apps/bridge/src/plugins/builtin/core_commands.ts` | `pynicotine/plugins/core_commands/__init__.py` | **Derived** (minimal `/help`+`/plugin`) |
 | `docs/settings-mapping.md` + `apps/web/src/lib/config/defaults.ts` | `pynicotine/config.py:156` defaults, `gtkgui/dialogs/preferences.py:3764`, `ui/settings/*.ui` | **Derived mapping** |
-| `apps/bridge/src/spectrum.ts` | `smokin-salmon/smoked-salmon` `src/salmon/uploader/spectrals.py` (Apache-2.0) — sox spectrogram `2000×513` + `500×1025` Kaiser `-z 120` + `oxipng -o 2` | **Port** — sox Full/Zoom + oxipng, `/tmp` ephemeral cache |
+| `apps/worker/spectrals.py` | `smokin-salmon/smoked-salmon` `src/salmon/uploader/spectrals.py` (Apache-2.0) — sox spectrogram `2000×513` + `500×1025` Kaiser `-z 120` + `oxipng -o 2` | **Port** — sox Full/Zoom + oxipng, `/tmp` ephemeral cache (migrated from `apps/bridge/src/spectrum.ts`, now deleted) |
 | `docs/architecture.md` + `docs/plugins.md` | `doc/SLSKPROTOCOL.md`, `pynicotine/*` | **Documentation** derived |
 
 All other web UI (`apps/web/src/app`, `components`) is original but, as part of the

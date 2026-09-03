@@ -17,6 +17,7 @@ import { transferMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
 import { useSearchesOptional } from "@/lib/search";
 import { isDemo } from "@/lib/demo";
+import { TagEditor } from "@/components/tag/TagEditor";
 
 function humanSpeed(bps: number): string {
   if (!bps) return "—";
@@ -36,6 +37,7 @@ function UploadsInner() {
   const totalUp = stats?.uploadSpeed ?? uploads.filter(u=>u.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const activeCount = downloads.length + uploads.length;
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; transfer: import("@/lib/protocol").Transfer } | null>(null);
+  const [tagFile, setTagFile] = useState<string | null>(null);
   const groupMode = settings.transfers.groupuploads ?? "folder_grouping";
   const expandMode = settings.transfers.expand_uploads ?? "all";
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -158,10 +160,15 @@ function UploadsInner() {
         <ContextMenu
           x={menuAnchor.x}
           y={menuAnchor.y}
-          items={transferMenu({ user: menuAnchor.transfer.username, fileName: menuAnchor.transfer.fileName, virtualPath: menuAnchor.transfer.virtualPath }, true, { onRemove: () => clearTransfer(menuAnchor.transfer.id, true), onClear: () => clearTransfer(menuAnchor.transfer.id, true) })}
+          items={transferMenu({ user: menuAnchor.transfer.username, fileName: menuAnchor.transfer.fileName, virtualPath: menuAnchor.transfer.virtualPath }, true, {
+            onRemove: () => clearTransfer(menuAnchor.transfer.id, true),
+            onClear: () => clearTransfer(menuAnchor.transfer.id, true),
+            onEditTags: isDemo ? undefined : ["mp3","flac","ogg","m4a","wav","wma","aac","opus","aiff","aif","wv"].includes(menuAnchor.transfer.fileName.toLowerCase().split(".").pop() ?? "") ? () => setTagFile(menuAnchor.transfer.fileName) : undefined,
+          })}
           onClose={() => setMenuAnchor(null)}
         />
       ) : null}
+      {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} /> : null}
     </div>
   );
 }

@@ -44,7 +44,7 @@ Reference: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plu
 
 ## Browse / Shares
 
-- `SharedFileListRequest 4` → `SharedFileListResponse 5` (zlib lvl4 sorted), `FolderContentsRequest 36` → `FolderContentsResponse 37`, 0.4s throttle per peer (`ShareDB.shouldThrottle`), `ExcludedSearchPhrases` gated, FS scanner `ShareDB.scanFsShares` via `SHARED_DIRS` colon list (attrs empty on sync scan, enriched async via `music-metadata`).
+- `SharedFileListRequest 4` → `SharedFileListResponse 5` (zlib lvl4 sorted), `FolderContentsRequest 36` → `FolderContentsResponse 37`, 0.4s throttle per peer (`ShareDB.shouldThrottle`), `ExcludedSearchPhrases` gated, FS scanner `ShareDB.scanFsShares` via `SHARED_DIRS` colon list (attrs `[]` — bridge is SLSK-only; worker `POST /analyze` owns TinyTag/mutagen parity if local attrs needed).
 
 ## Chat / Rooms / Privileges
 
@@ -114,9 +114,9 @@ Keeps CPU/IO-heavy work off the SLSK event loop. Own code throughout (scraper *p
 - `GET /health` (open) → `{ok, ts, uptime, version, sources:[discogs,bandcamp,apple,qobuz,tidal,musicbrainz,deezer,beatport], queueDepth}`
 - `POST /scrape {url}` → `{artist, album, year, track_count, query, source, confidence, url}` (`422` no-scraper/unreachable, SSRF private-IP reject, 10 s timeout, random UA, Qobuz/Tidal need env tokens). Web `SearchBar` paste-link calls this, then `search:global` on `query`.
 - `POST /spectrum/request {fileName, size?, token?}` → `{etag, hash, urls:{full,zoom}, fromCache}`; `GET /spectrum/{stem}/full|zoom` (PNG, `ETag`, `If-None-Match` → 304); `GET /spectrum/{stem}` (JSON). Reads `bridge-data:/data` RO, writes shared `spectrum-cache:/tmp/hub-spectrum`. See `docs/spectrum.md`.
-- `POST /tag {fileName}` → `{tags, coverArtApplied, tracklist}` (mutagen read, preview only).
+- `POST /tag {fileName}` → `{tags, coverArtApplied, tracklist}` (mutagen read, full TinyTag parity: artist/album/title/track/disc/genre/year/composer/albumartist + audio props). `POST /tag/write {fileName, tags, coverArt?}` edits via mutagen; `POST /tag/scrape {fileName, url}` scrapes then writes; `POST /tag/bulk {files[]}` for own-file browser.
 - `POST /verify {fileName}` → `{flacOk, upconvert, mqa, logScore, logChecksum, durationMismatch}` (honest subset today: `flacOk` + MQA tag sniff; the rest `null` until spectral checks land).
-- `POST /analyze {fileName}` → `{bitrate, vbr, sampleRate, bitDepth, cutoffHz, likelyTranscode, confidence}` (mutagen + ffmpeg-snippet FFT knee when `numpy` present, else `null`s).
+- `POST /analyze {fileName}` → `{bitrate, vbr, sampleRate, bitDepth, cutoffHz, likelyTranscode, confidence}` (mutagen + ffmpeg-snippet FFT knee when `numpy` present, else `null`s). `POST /analyze/bulk` for share-scan enrichment.
 - All routes except `/health`: `WORKER_TOKEN` Bearer, 1 MB JSON cap.
 
 ## Tests
