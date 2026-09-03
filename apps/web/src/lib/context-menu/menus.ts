@@ -321,6 +321,22 @@ export function buddyMenu(buddy: string, opts?: { onNote?: () => void; onRemove?
   ];
 }
 
+export function fileExplorerMenu(entry: { path: string; name: string }, opts: { onEditTags?: () => void; onScrape?: () => void; onVerify?: () => void; onAnalyze?: () => void; onSpectrum?: () => void; hasSpectrum?: boolean; isAudio?: boolean }): MenuItem[] {
+  const isAudio = !!opts.isAudio;
+  return [
+    { id: "hdr", label: entry.name, icon: "description", disabled: true },
+    { id: "sep", label: "---", icon: "" },
+    { id: "edit-tags", label: "Edit tags", icon: "edit", disabled: !isAudio || !opts.onEditTags, action: opts.onEditTags ?? (() => toast("Edit tags — not an audio file")) },
+    { id: "scrape", label: "Scrape", icon: "auto_awesome", disabled: !isAudio || !opts.onScrape, action: opts.onScrape ?? (() => toast("Scrape — not an audio file")) },
+    { id: "verify", label: "Verify", icon: "verified", disabled: !isAudio || !opts.onVerify, action: opts.onVerify ?? (() => toast("Verify — not an audio file")) },
+    { id: "analyze", label: "Analyze", icon: "analytics", disabled: !isAudio || !opts.onAnalyze, action: opts.onAnalyze ?? (() => toast("Analyze — not an audio file")) },
+    { id: "spectrum", label: opts.hasSpectrum ? "View spectrum" : "Spectrum", icon: "graphic_eq", disabled: !isAudio || !opts.onSpectrum, action: opts.onSpectrum ?? (() => toast("Spectrum — not an audio file")) },
+    { id: "sep2", label: "---", icon: "" },
+    { id: "copy-path", label: "Copy File Path", icon: "content_copy", action: () => copy(entry.path) },
+    { id: "copy-name", label: "Copy File Name", icon: "content_copy", action: () => copy(entry.name) },
+  ];
+}
+
 export function genericPageMenu(): MenuItem[] {
   return [
     { id: "copy-link", label: "Copy Link", icon: "link", action: () => copy(window.location.href) },
