@@ -81,13 +81,8 @@ export class ShareDB {
     } else {
       this.rebuildCombined();
     }
-    // Trigger async enrichment in background (buildAttrs sync is empty, async fills via music-metadata)
-    if (this.folders.length > 0) {
-      const hasEmptyAttrs = this.folders.some(f => f.files.some(file => !file.attrs || file.attrs.length === 0));
-      if (hasEmptyAttrs) {
-        this.rescanAsync().catch(() => {});
-      }
-    }
+    // Bridge is SLSK-only: local share attrs stay [] (peer attrs are authoritative).
+    // Worker owns audio analysis (mutagen/TinyTag parity) via POST /analyze if needed.
     // fs.watch incremental — debounce 2s, mirrors pynicotine Scanner rescanning
     try {
       const dirs = this.resolveSharedDirs();
@@ -533,7 +528,8 @@ export class ShareDB {
           continue;
         }
         this.fileMtimes.set(full, mtime);
-        const attrs = this.buildAttrs(full, ext, st.size);
+        // ponytail: attrs empty — bridge is SLSK-only, worker owns TinyTag/mutagen analysis (POST /analyze)
+        const attrs: Array<[number, number]> = [];
         files.push({ name: vName, size: st.size, ext, attrs });
         this.virtual2real.set(vName, full);
         this.real2virtual.set(full, vName);
@@ -542,22 +538,7 @@ export class ShareDB {
     if (files.length) out.push({ name: virtualPath, files: files.sort((a,b)=> a.name.localeCompare(b.name)) });
   }
 
-  private buildAttrs(full: string, ext: string, _size: number): Array<[number, number]> {
-    // Nicotine uses TinyTag for bitrate/length/sampleRate/bitDepth (slskmessages.py FileAttribute 0/1/2/4/5)
-    // Bridge tries music-metadata sync fallback; async rescan uses full parsing
-    // Keep sync fast — return empty here, async path fills via scanFsSharesAsync
-    if (["mp3","flac","ogg","m4a","wav","wma","aac","opus","aiff"].includes(ext)) {
-      try {
-        // Try quick header parse without async: attempt to read bitrate from file if tiny
-        // Fallback empty — async scanner will enrich via music-metadata
-        void full;
-      } catch {}
-      return [];
-    }
-    return [];
-  }
-
-  /** Async FS scanner with music-metadata enrichment (TinyTag parity) */
+  /** Async FS scanner (no local enrichment — bridge stays SLSK-only) */
   async scanFsSharesAsync(sharedDirs?: string[]): Promise<ShareFolder[]> {
     const dirs = sharedDirs || this.resolveSharedDirs();
     const folders: ShareFolder[] = [];
@@ -604,18 +585,14 @@ export class ShareDB {
           continue;
         }
         this.fileMtimes.set(full, mtime);
-        const attrs = await this.buildAttrsAsync(full, ext);
+        // ponytail: bridge stays SLSK-only — worker owns analysis
+        const attrs: Array<[number, number]> = [];
         files.push({ name: vName, size: st.size, ext, attrs });
         this.virtual2real.set(vName, full);
         this.real2virtual.set(full, vName);
       }
     }
     if (files.length) out.push({ name: virtualPath, files: files.sort((a,b)=> a.name.localeCompare(b.name)) });
-  }
-
-  private async buildAttrsAsync(_full: string, _ext: string): Promise<Array<[number, number]>> {
-    // ponytail: music-metadata removed (11MB dep, TinyTag parity); attrs empty — peer reports bitrate/length, add back if search filtering needs local attrs
-    return [];
   }
 
   private async scanCustomRootsAsync(roots: [string, string][]): Promise<ShareFolder[]> {
@@ -645,7 +622,8 @@ export class ShareDB {
             folders.push({ name: vName, files: [{ ...prev, size: stats.size }] });
           } else {
             this.fileMtimes.set(rPath, mtime);
-            const attrs = await this.buildAttrsAsync(rPath, ext);
+            // ponytail: bridge SLSK-only — attrs empty, worker handles TinyTag
+            const attrs: Array<[number, number]> = [];
             folders.push({ name: vName, files: [{ name: fileName, size: stats.size, ext, attrs }] });
           }
           this.virtual2real.set(vName, rPath);
@@ -687,7 +665,8 @@ export class ShareDB {
             folders.push({ name: vName, files: [{ ...prev, size: stats.size }] });
           } else {
             this.fileMtimes.set(rPath, mtime);
-            const attrs = this.buildAttrs(rPath, ext, stats.size);
+            // ponytail: bridge SLSK-only — attrs empty, worker handles TinyTag
+            const attrs: Array<[number, number]> = [];
             folders.push({ name: vName, files: [{ name: fileName, size: stats.size, ext, attrs }] });
           }
           this.virtual2real.set(vName, rPath);

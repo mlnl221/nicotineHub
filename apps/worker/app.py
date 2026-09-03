@@ -5,7 +5,8 @@
 Own implementation throughout (scraper *pattern* only guided by smoked-salmon).
 Endpoints: GET /health, POST /scrape, POST /spectrum/request,
 GET /spectrum/{stem}/full|zoom, GET /spectrum/{stem},
-POST /tag, POST /verify, POST /analyze.
+POST /tag, POST /tag/write, POST /tag/scrape, POST /tag/bulk,
+POST /verify, POST /analyze, POST /analyze/bulk.
 """
 
 from __future__ import annotations
@@ -207,8 +208,70 @@ def _stem_lookup(stem: str) -> dict | None:
     return None
 
 
+def _resolve_any(file_name: str) -> Path | None:
+    """Resolve fileName which may be basename, relative path, or absolute /data path.
+
+    Security: all resolved paths must be inside DATA_DIR.
+    Supports:
+    - "/data/Music/artist/file.flac" (absolute from FileExplorer /api/files)
+    - "downloads/file.flac" or "Music/file.mp3" (relative to DATA_DIR)
+    - "file.flac" (basename search via spectrals.resolve_audio)
+    - "Music\\Artist\\file.mp3" (virtual path — fallback to basename)
+    """
+    raw = file_name.strip().replace("\\", "/")
+    if not raw or raw in (".", ".."):
+        return None
+    root = spectrals.data_dir().resolve()
+    # 1. Absolute path containment check
+    if raw.startswith("/"):
+        try:
+            cand = Path(raw).resolve()
+            if cand.is_file() and cand.is_relative_to(root):
+                return cand
+            # Also try resolving without resolve symlink for existence
+            cand2 = (root / raw.lstrip("/")).resolve()
+            if cand2.is_file() and cand2.is_relative_to(root):
+                return cand2
+        except OSError:
+            pass
+    # 2. Relative path under DATA_DIR (e.g. "downloads/file.flac" or "Music/file.mp3")
+    if "/" in raw:
+        try:
+            cand = (root / raw.lstrip("/")).resolve()
+            if cand.is_file() and cand.is_relative_to(root):
+                return cand
+            # also try nested basename direct join
+            cand2 = (root / "downloads" / Path(raw).name).resolve()
+            if cand2.is_file() and cand2.is_relative_to(root):
+                return cand2
+        except OSError:
+            pass
+        # 3. Virtual path fallback: basename search
+        base = Path(raw).name
+        hit = spectrals.resolve_audio(base)
+        if hit:
+            return hit
+    # 4. Basename search (downloads + shallow scan)
+    hit = spectrals.resolve_audio(raw)
+    if hit:
+        return hit
+    # 5. Direct DATA_DIR search for file explorer shared files (depth 2)
+    try:
+        base = Path(raw).name
+        for top in (root, root / "downloads", root / "uploads", root / "shared"):
+            found = spectrals._scan(top, base, root, depth=3)  # type: ignore
+            if found:
+                return found
+    except Exception:
+        pass
+    return None
+
+
 def _resolve_or_404(file_name: str) -> Path | JSONResponse:
-    path = spectrals.resolve_audio(file_name)
+    path = _resolve_any(file_name)
+    if path is None:
+        # fallback to old resolver for compat
+        path = spectrals.resolve_audio(file_name)
     if path is None:
         return JSONResponse({"detail": "file not found in DATA_DIR"}, status_code=404)
     return path
@@ -226,8 +289,96 @@ def _probe_duration(path: Path) -> float | None:
     return None
 
 
+def _read_tags_and_info(path: Path) -> tuple[dict[str, str], dict, bool]:
+    """TinyTag-parity read via mutagen: tags + technical info + cover flag."""
+    from mutagen import File as _mut_file
+
+    audio = _mut_file(path)
+    if audio is None:
+        raise ValueError("unrecognized audio")
+    tags: dict[str, str] = {}
+    info: dict = {}
+    # technical info
+    try:
+        inf = getattr(audio, "info", None)
+        if inf:
+            info["duration"] = round(float(getattr(inf, "length", 0) or 0), 2) or None
+            br = getattr(inf, "bitrate", None)
+            if br:
+                info["bitrate"] = int(round(br / 1000))
+            info["sampleRate"] = getattr(inf, "sample_rate", None) or getattr(inf, "samplerate", None)
+            info["bitDepth"] = getattr(inf, "bits_per_sample", None) or getattr(inf, "bitdepth", None)
+            info["channels"] = getattr(inf, "channels", None)
+            br_mode = getattr(inf, "bitrate_mode", None)
+            if br_mode is not None:
+                info["vbr"] = str(br_mode)
+                info["isVbr"] = str(br_mode).lower() in ("vbr", "true", "1")
+            # flac/wav lossless hint
+            ext = path.suffix.lstrip(".").lower()
+            info["format"] = ext
+            info["fileSize"] = path.stat().st_size if path.exists() else None
+            # isLossless heuristic
+            if ext in ("flac", "wav", "aiff", "aif", "wv") and info.get("bitDepth"):
+                info["isLossless"] = True
+            elif ext == "flac":
+                info["isLossless"] = True
+    except Exception:
+        pass
+    # tags via easy first, then raw fallback for musicbrainz etc
+    try:
+        audio_easy = _mut_file(path, easy=True)
+        if audio_easy and getattr(audio_easy, "tags", None):
+            for k, v in audio_easy.items():
+                vals = v if isinstance(v, list) else [v]
+                if vals:
+                    tags[k] = str(vals[0])[:500]
+        # also collect raw for keys not in easy
+        raw = dict(getattr(audio, "tags", None) or {})
+        for key in ("musicbrainz_albumid", "musicbrainz_artistid", "musicbrainz_trackid",
+                    "TIT2", "TPE1", "TALB", "TYER", "TCON", "TPE2", "TCOM", "TPOS", "TRCK",
+                    "APIC", "covr", "©nam", "©ART", "©alb"):
+            if key in raw and key not in tags:
+                val = raw[key]
+                vals = val if isinstance(val, list) else [val]
+                # for APIC/covr it's binary, skip
+                if key in ("APIC", "covr"):
+                    continue
+                try:
+                    tags[key] = str(vals[0])[:500] if vals else ""
+                except Exception:
+                    continue
+        # map Track/disc total parsing
+        if "tracknumber" in tags and "/" in tags["tracknumber"]:
+            parts = tags["tracknumber"].split("/")
+            tags["track"] = parts[0].strip()
+            tags["track_total"] = parts[1].strip() if len(parts) > 1 else ""
+        if "discnumber" in tags and "/" in tags["discnumber"]:
+            parts = tags["discnumber"].split("/")
+            tags["disc"] = parts[0].strip()
+            tags["disc_total"] = parts[1].strip() if len(parts) > 1 else ""
+    except Exception:
+        pass
+    # cover art detection
+    cover = False
+    try:
+        raw = dict(getattr(audio, "tags", None) or {})
+        pictures = getattr(audio, "pictures", None) or raw.get("APIC") or raw.get("covr")
+        if pictures:
+            cover = bool(pictures)
+        else:
+            # mp4 covr is under raw
+            if hasattr(audio, "tags") and audio.tags:
+                for k in audio.tags.keys():
+                    if "covr" in str(k).lower() or "apic" in str(k).lower():
+                        cover = True
+                        break
+    except Exception:
+        pass
+    return tags, info, cover
+
+
 class FileIn(BaseModel):
-    fileName: str = Field(min_length=1, max_length=512)
+    fileName: str = Field(min_length=1, max_length=1024)
 
 
 @app.post("/tag", dependencies=[Depends(require_auth)])
@@ -235,27 +386,221 @@ async def tag(body: FileIn):
     path = _resolve_or_404(body.fileName)
     if isinstance(path, JSONResponse):
         return path
-    tags: dict[str, str] = {}
-    cover = False
+    try:
+        tags, info, cover = _read_tags_and_info(path)
+    except Exception as e:
+        return JSONResponse({"detail": f"tag read failed: {e}"[:300]}, status_code=422)
+    # nicotine-plus parity: surface common fields + audio props
+    return {"tags": tags, "info": info, "coverArtApplied": cover, "tracklist": None, "fileName": path.name, "path": str(path)}
+
+
+class TagWriteIn(BaseModel):
+    fileName: str = Field(min_length=1, max_length=1024)
+    tags: dict[str, str | None] = Field(default_factory=dict)
+    removeTags: list[str] = Field(default_factory=list)
+
+
+@app.post("/tag/write", dependencies=[Depends(require_auth)])
+async def tag_write(body: TagWriteIn):
+    path = _resolve_or_404(body.fileName)
+    if isinstance(path, JSONResponse):
+        return path
+    # whitelist tag keys to prevent injection; mutagen easy keys + common
+    allowed = {
+        "artist", "album", "title", "albumartist", "composer", "genre", "date", "year",
+        "tracknumber", "track", "track_total", "discnumber", "disc", "disc_total",
+        "comment", "description", "organization", "copyright", "encodedby",
+        "musicbrainz_albumid", "musicbrainz_artistid", "musicbrainz_trackid",
+        "TIT2", "TPE1", "TALB", "TPE2", "TCOM", "TCON", "TYER", "TRCK", "TPOS",
+    }
+    # normalize tags: filter, trim
+    clean: dict[str, str] = {}
+    for k, v in (body.tags or {}).items():
+        kk = k.strip()
+        if kk not in allowed:
+            # also allow lowercase variants
+            ll = kk.lower()
+            if ll not in allowed and ll not in {a.lower() for a in allowed}:
+                continue
+            kk = ll if ll in allowed else kk
+        if v is None:
+            continue
+        sv = str(v).strip()[:500]
+        if not sv and kk not in body.removeTags:
+            continue
+        # map year -> date for mutagen easy compatibility
+        if kk == "year" and "date" not in clean:
+            clean["date"] = sv
+        elif kk == "track" and "tracknumber" not in clean:
+            # handle track + track_total combine
+            total = body.tags.get("track_total") or ""
+            clean["tracknumber"] = f"{sv}/{total}" if total else sv
+        elif kk == "disc" and "discnumber" not in clean:
+            total = body.tags.get("disc_total") or ""
+            clean["discnumber"] = f"{sv}/{total}" if total else sv
+        else:
+            clean[kk] = sv
+    # handle explicit track_total/disc_total when track/disc not in clean
+    if "track_total" in body.tags and "track" not in body.tags and "tracknumber" not in clean:
+        existing = clean.get("tracknumber") or ""
+        if existing and "/" not in existing:
+            clean["tracknumber"] = f"{existing}/{body.tags['track_total']}"
+    if "disc_total" in body.tags and "disc" not in body.tags and "discnumber" not in clean:
+        existing = clean.get("discnumber") or ""
+        if existing and "/" not in existing:
+            clean["discnumber"] = f"{existing}/{body.tags['disc_total']}"
+
     try:
         from mutagen import File as _mut_file
 
-        audio = _mut_file(path)
+        # Try easy mode first
+        audio = _mut_file(path, easy=True)
+        created = False
         if audio is None:
-            return JSONResponse({"detail": "unrecognized audio"}, status_code=422)
-        raw = dict(getattr(audio, "tags", None) or {})
-        # ponytail: flatten first value per key, keep it small
-        for key in ("artist", "album", "title", "date", "year", "genre", "albumartist", "tracknumber",
-                    "musicbrainz_albumid", "TIT2", "TPE1", "TALB", "TYER", "TCON"):
-            if key in raw:
-                val = raw[key]
-                vals = val if isinstance(val, list) else [val]
-                tags[key] = str(vals[0])[:300] if vals else ""
-        pictures = getattr(audio, "pictures", None) or raw.get("APIC") or raw.get("covr")
-        cover = bool(pictures)
+            audio = _mut_file(path)
+            if audio is None:
+                return JSONResponse({"detail": "unrecognized audio"}, status_code=422)
+        if getattr(audio, "tags", None) is None:
+            try:
+                audio.add_tags()
+                created = True
+            except Exception:
+                pass
+        # For easy mode, need to ensure tags is dict-like
+        # Some formats (WAV) have no easy tags, fallback to raw
+        use_easy = hasattr(audio, "tags") and audio.tags is not None
+        # Write via easy if possible, else raw
+        if use_easy:
+            for k, v in clean.items():
+                # mutagen easy expects key lower
+                lk = k.lower() if k.lower() in {"artist","album","title","albumartist","composer","genre","date","tracknumber","discnumber","comment"} else k
+                try:
+                    audio[lk] = v
+                except Exception:
+                    # fallback: try raw dict
+                    try:
+                        if getattr(audio, "tags", None) is not None:
+                            audio.tags[lk] = v  # type: ignore
+                    except Exception:
+                        continue
+            for rk in body.removeTags:
+                rk = rk.strip()
+                if not rk:
+                    continue
+                try:
+                    if rk in audio:
+                        del audio[rk]
+                    elif rk.lower() in audio:
+                        del audio[rk.lower()]
+                except Exception:
+                    pass
+            audio.save()
+        else:
+            # raw fallback (rare)
+            return JSONResponse({"detail": "tag write not supported for this format"}, status_code=422)
     except Exception as e:
-        return JSONResponse({"detail": f"tag read failed: {e}"[:200]}, status_code=422)
-    return {"tags": tags, "coverArtApplied": cover, "tracklist": None}
+        return JSONResponse({"detail": f"tag write failed: {e}"[:300]}, status_code=500)
+    # return updated tags
+    try:
+        new_tags, new_info, cover = _read_tags_and_info(path)
+        return {"ok": True, "tags": new_tags, "info": new_info, "coverArtApplied": cover}
+    except Exception:
+        return {"ok": True}
+
+
+class TagScrapeIn(BaseModel):
+    fileName: str = Field(min_length=1, max_length=1024)
+    url: str = Field(min_length=8, max_length=2048)
+    apply: bool = Field(default=False)
+
+
+@app.post("/tag/scrape", dependencies=[Depends(require_auth)])
+async def tag_scrape(body: TagScrapeIn):
+    path = _resolve_or_404(body.fileName)
+    if isinstance(path, JSONResponse):
+        return path
+    url = body.url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        return JSONResponse({"detail": "only http(s) URLs can be scraped"}, status_code=400)
+    # scrape
+    found = None
+    for scraper in SCRAPERS:
+        if scraper.match(url):
+            try:
+                found = await scraper.scrape(url)
+            except ScrapeError as e:
+                return JSONResponse({"detail": str(e)[:300]}, status_code=422)
+            break
+    if not found:
+        return JSONResponse({"detail": "no scraper handles this URL"}, status_code=422)
+    suggested: dict[str, str] = {}
+    if found.artist:
+        suggested["artist"] = found.artist
+        suggested["albumartist"] = found.artist
+    if found.album:
+        suggested["album"] = found.album
+    if found.year:
+        suggested["date"] = str(found.year)
+        suggested["year"] = str(found.year)
+    if found.track_count:
+        suggested["track_total"] = str(found.track_count)
+    # include source info
+    suggested["_source"] = found.source
+    suggested["_query"] = f"{found.artist} - {found.album}".strip(" -")
+    if body.apply:
+        # apply to file via same logic as tag_write (reuse)
+        try:
+            from mutagen import File as _mut_file
+            audio = _mut_file(path, easy=True)
+            if audio is None:
+                audio = _mut_file(path)
+            if audio is None:
+                return JSONResponse({"detail": "unrecognized audio"}, status_code=422)
+            if getattr(audio, "tags", None) is None:
+                try:
+                    audio.add_tags()
+                except Exception:
+                    pass
+            # only apply known tag keys
+            apply_map = {k: v for k, v in suggested.items() if not k.startswith("_")}
+            for k, v in apply_map.items():
+                try:
+                    audio[k] = v
+                except Exception:
+                    continue
+            audio.save()
+        except Exception as e:
+            return JSONResponse({"detail": f"scrape apply failed: {e}"[:300]}, status_code=500)
+        # re-read
+        try:
+            new_tags, new_info, cover = _read_tags_and_info(path)
+            return {"artist": found.artist, "album": found.album, "year": found.year, "track_count": found.track_count, "query": suggested["_query"], "source": found.source, "confidence": _confidence(found.source), "url": url, "suggested": suggested, "applied": True, "tags": new_tags, "info": new_info}
+        except Exception:
+            pass
+    return {"artist": found.artist, "album": found.album, "year": found.year, "track_count": found.track_count, "query": suggested["_query"], "source": found.source, "confidence": _confidence(found.source), "url": url, "suggested": suggested, "applied": False}
+
+
+class BulkTagIn(BaseModel):
+    files: list[str] = Field(min_length=1, max_length=50)
+
+
+@app.post("/tag/bulk", dependencies=[Depends(require_auth)])
+async def tag_bulk(body: BulkTagIn):
+    out: list[dict] = []
+    for fname in body.files[:50]:
+        if len(fname) > 1024:
+            out.append({"fileName": fname, "error": "name too long"})
+            continue
+        path = _resolve_any(fname)
+        if path is None:
+            out.append({"fileName": fname, "error": "not found"})
+            continue
+        try:
+            tags, info, cover = _read_tags_and_info(path)
+            out.append({"fileName": fname, "path": str(path), "tags": tags, "info": info, "coverArtApplied": cover})
+        except Exception as e:
+            out.append({"fileName": fname, "error": str(e)[:200]})
+    return {"results": out}
 
 
 @app.post("/verify", dependencies=[Depends(require_auth)])
@@ -315,6 +660,58 @@ async def analyze(body: FileIn):
         out["likelyTranscode"] = cutoff < 17000
         out["confidence"] = 0.85
     return out
+
+
+class BulkAnalyzeIn(BaseModel):
+    files: list[str] = Field(min_length=1, max_length=50)
+
+
+@app.post("/analyze/bulk", dependencies=[Depends(require_auth)])
+async def analyze_bulk(body: BulkAnalyzeIn):
+    out: list[dict] = []
+    for fname in body.files[:50]:
+        if len(fname) > 1024:
+            out.append({"fileName": fname, "error": "name too long"})
+            continue
+        path = _resolve_any(fname)
+        if path is None:
+            out.append({"fileName": fname, "error": "not found"})
+            continue
+        try:
+            from mutagen import File as _mut_file
+            audio = _mut_file(path)
+            if audio is None or audio.info is None:
+                out.append({"fileName": fname, "error": "unrecognized"})
+                continue
+            info = audio.info
+            entry: dict = {
+                "fileName": fname,
+                "path": str(path),
+                "bitrate": round(info.bitrate / 1000) if getattr(info, "bitrate", None) else None,
+                "sampleRate": getattr(info, "sample_rate", None) or getattr(info, "samplerate", None),
+                "bitDepth": getattr(info, "bits_per_sample", None),
+                "channels": getattr(info, "channels", None),
+                "duration": round(float(getattr(info, "length", 0) or 0), 2) or None,
+                "vbr": str(getattr(info, "bitrate_mode", None)) if getattr(info, "bitrate_mode", None) else None,
+            }
+            # add attrs for share response convenience
+            attrs: list[list[int]] = []
+            if entry["bitrate"]:
+                attrs.append([0, int(entry["bitrate"])])
+            if entry["duration"]:
+                attrs.append([1, int(entry["duration"])])
+            if entry["vbr"]:
+                # VBR flag 2 per soulseek attrs
+                attrs.append([2, 1 if str(entry["vbr"]).lower() in ("vbr", "true") else 0])
+            if entry["sampleRate"]:
+                attrs.append([4, int(entry["sampleRate"])])
+            if entry["bitDepth"]:
+                attrs.append([5, int(entry["bitDepth"])])
+            entry["attrs"] = attrs
+            out.append(entry)
+        except Exception as e:
+            out.append({"fileName": fname, "error": str(e)[:200]})
+    return {"results": out}
 
 
 def _cutoff_hz(path: Path) -> int | None:

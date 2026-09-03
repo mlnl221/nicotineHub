@@ -20,6 +20,7 @@ import { useSearchesOptional } from "@/lib/search";
 import { isDemo } from "@/lib/demo";
 import { useSpectrum, parseDownloadToken } from "@/lib/spectrum";
 import { SpectrumHoverCard } from "@/components/transfers/SpectrumHoverCard";
+import { TagEditor } from "@/components/tag/TagEditor";
 import { humanSize, humanSpeed as _humanSpeed } from "@/lib/format";
 
 function humanSpeed(bps: number): string {
@@ -44,6 +45,7 @@ function DownloadsInner() {
   const router = useRouter();
   const { requestSpectrum, getEntry } = useSpectrum();
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; transfer: import("@/lib/protocol").Transfer; isUpload: boolean } | null>(null);
+  const [tagFile, setTagFile] = useState<string | null>(null);
   const totalDown = stats?.downloadSpeed ?? downloads.filter(d => d.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const totalUp = stats?.uploadSpeed ?? 0;
   const activeCount = downloads.length;
@@ -244,11 +246,15 @@ function DownloadsInner() {
                     })
                   : undefined,
               hasSpectrum: !!getEntry(menuAnchor.transfer.id) && getEntry(menuAnchor.transfer.id)?.status === "done",
+              onEditTags: !isDemo && isAudioForSpectrum(menuAnchor.transfer.fileName) && menuAnchor.transfer.status === "Finished"
+                ? () => setTagFile(menuAnchor.transfer.fileName)
+                : undefined,
             }
           )}
           onClose={() => setMenuAnchor(null)}
         />
       ) : null}
+      {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} /> : null}
     </div>
   );
 }

@@ -88,3 +88,61 @@ export async function getWorkerHealth(): Promise<{
     return null;
   }
 }
+
+export interface TagReadResult {
+  tags: Record<string, string>;
+  info?: Record<string, unknown>;
+  coverArtApplied: boolean;
+  tracklist?: unknown;
+  fileName?: string;
+  path?: string;
+}
+
+export async function readTags(fileName: string): Promise<TagReadResult> {
+  const res = await workerFetch("/tag", { method: "POST", body: JSON.stringify({ fileName }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { detail?: string }).detail || `Tag read failed (${res.status})`);
+  return body as TagReadResult;
+}
+
+export async function writeTags(fileName: string, tags: Record<string, string | null>, removeTags: string[] = []): Promise<TagReadResult> {
+  const res = await workerFetch("/tag/write", { method: "POST", body: JSON.stringify({ fileName, tags, removeTags }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { detail?: string }).detail || `Tag write failed (${res.status})`);
+  return body as TagReadResult;
+}
+
+export interface TagScrapeResult {
+  artist: string;
+  album: string;
+  year: number | string | null;
+  track_count: number | null;
+  source: string;
+  confidence: number;
+  url: string;
+  suggested: Record<string, string>;
+  applied: boolean;
+  tags?: Record<string, string>;
+  info?: Record<string, unknown>;
+}
+
+export async function scrapeTags(fileName: string, url: string, apply = false): Promise<TagScrapeResult> {
+  const res = await workerFetch("/tag/scrape", { method: "POST", body: JSON.stringify({ fileName, url, apply }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { detail?: string }).detail || `Scrape failed (${res.status})`);
+  return body as TagScrapeResult;
+}
+
+export async function bulkReadTags(files: string[]): Promise<{ results: Array<{ fileName: string; tags?: Record<string, string>; info?: Record<string, unknown>; coverArtApplied?: boolean; error?: string }> }> {
+  const res = await workerFetch("/tag/bulk", { method: "POST", body: JSON.stringify({ files }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { detail?: string }).detail || `Bulk tag read failed (${res.status})`);
+  return body as { results: Array<{ fileName: string; tags?: Record<string, string>; info?: Record<string, unknown>; coverArtApplied?: boolean; error?: string }> };
+}
+
+export async function bulkAnalyze(files: string[]): Promise<{ results: Array<Record<string, unknown>> }> {
+  const res = await workerFetch("/analyze/bulk", { method: "POST", body: JSON.stringify({ files }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { detail?: string }).detail || `Bulk analyze failed (${res.status})`);
+  return body as { results: Array<Record<string, unknown>> };
+}
