@@ -8,6 +8,7 @@ services:
     environment:
       PORT: "8787"
       LISTEN_PORT: "60754"
+      CONFIG_DIR: "/config"
       DATA_DIR: "/data"
       BRIDGE_TOKEN: "${BRIDGE_TOKEN:-}"
       # Shares: Settings → Shares sends virtualName|hostPath pairs to the bridge via WS config:update.
@@ -21,11 +22,12 @@ services:
       - "60754:60754"
       - "60754:60754/udp"
     # Homelab: bridge ports are published so the browser can ws://nas:8787/ws directly.
-    # LISTEN_PORT is the host port — changing it in Settings → Network (portrange) writes DATA_DIR/listen_port (+ DATA_DIR/host.env for .env sync) and hot-swaps Bun.listen + reconnects Soulseek (SetWaitPort) without WS restart; UI stays up, Save triggers fresh connect. The *host* mapping is static at create time: `LISTEN_PORT=NEW docker compose up -d` to change it.
+    # LISTEN_PORT is the host port — changing it in Settings → Network (portrange) writes CONFIG_DIR/listen_port (+ CONFIG_DIR/host.env for .env sync) and hot-swaps Bun.listen + reconnects Soulseek (SetWaitPort) without WS restart; UI stays up, Save triggers fresh connect. The *host* mapping is static at create time: `LISTEN_PORT=NEW docker compose up -d` to change it.
     # UPnP auto-maps if `server.upnp` is enabled (default true, toggle in Network) but sees the container IP in bridge mode — prefer manual forward, or add `network_mode: host` (then drop `ports:`) so UPnP sees the host LAN IP.
     # For reverse-proxy only (internal): services: { bridge: { ports: !["127.0.0.1:8787:8787"] } } and set NEXT_PUBLIC_BRIDGE_URL via web env.
     volumes:
-      - bridge-data:/data
+      - config:/config
+      - data:/data
       # Example host mounts for real file sharing (uncomment and adjust):
       # - /home/user/Music:/data/Music:ro
       # - /home/user/Downloads:/data/downloads:ro
@@ -41,6 +43,7 @@ services:
       dockerfile: apps/worker/Dockerfile
     restart: unless-stopped
     environment:
+      CONFIG_DIR: "/config"
       DATA_DIR: "/data"
       SPECTRUM_DIR: "/tmp/spectrals"
       WORKER_TOKEN: "${WORKER_TOKEN:-}"
@@ -53,7 +56,8 @@ services:
     ports:
       - "8789:8789"
     volumes:
-      - bridge-data:/data
+      - config:/config:ro
+      - data:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8789/health"]
       interval: 15s
@@ -79,4 +83,5 @@ services:
       retries: 5
 
 volumes:
-  bridge-data:
+  config:
+  data:
