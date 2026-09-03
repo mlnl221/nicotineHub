@@ -128,31 +128,6 @@ export class ShareDB {
     const p = sharesPath();
     if (!existsSync(p)) {
       return;
-      if (existsSync(alt)) {
-        try {
-          const raw = JSON.parse(readFileSync(alt, "utf8"));
-          if (Array.isArray(raw.folders)) {
-            this.folders = raw.folders;
-            // legacy file has no split — treat as public
-            this.publicFolders = raw.folders;
-            if (Array.isArray(raw.publicFolders)) this.publicFolders = raw.publicFolders;
-            if (Array.isArray(raw.buddyFolders)) this.buddyFolders = raw.buddyFolders;
-            if (Array.isArray(raw.trustedFolders)) this.trustedFolders = raw.trustedFolders;
-            if (typeof raw.revealBuddyShares === "boolean") this.revealBuddyShares = raw.revealBuddyShares;
-            if (typeof raw.revealTrustedShares === "boolean") this.revealTrustedShares = raw.revealTrustedShares;
-            if (Array.isArray(raw.shareFilters)) { this.shareFilters = raw.shareFilters; this.compileShareFilters(); }
-            this.loadCustomRoots(raw);
-          } else if (Array.isArray(raw.publicFolders)) {
-            this.publicFolders = raw.publicFolders;
-            this.buddyFolders = raw.buddyFolders || [];
-            this.trustedFolders = raw.trustedFolders || [];
-            this.loadCustomRoots(raw);
-          } else {
-            this.loadCustomRoots(raw);
-          }
-        } catch {}
-      }
-      return;
     }
     try {
       const raw = JSON.parse(readFileSync(p, "utf8"));

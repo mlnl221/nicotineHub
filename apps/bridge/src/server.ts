@@ -26,6 +26,7 @@ import { Plugin as SpamfilterPlugin, manifest as spamManifest } from "./plugins/
 import { Plugin as LeechDetectorPlugin, manifest as leechManifest } from "./plugins/builtin/leech_detector.ts";
 import { listDirectory } from "./files.ts";
 import { portChecker } from "./portchecker.ts";
+import { logPrivateMessage, logRoomMessage, logRoomSystem } from "./chatLogger.ts";
 
 /* Schemas */
 
@@ -232,6 +233,9 @@ DATA_DIR = ensureDirWithFallback(DATA_DIR, ["./data", "/tmp/nicotine-hub"], "DAT
 // Ensure env reflects resolved dirs for ShareDB defaultDataDir() and diagnostics
 try { if (process.env.CONFIG_DIR !== CONFIG_DIR) process.env.CONFIG_DIR = CONFIG_DIR; } catch {}
 try { if (process.env.DATA_DIR !== DATA_DIR) process.env.DATA_DIR = DATA_DIR; } catch {}
+// Ensure chat log dirs exist (nicotine-plus parity: CONFIG_DIR/logs/rooms + private)
+try { mkdirSync(join(CONFIG_DIR, "logs", "rooms"), { recursive: true }); } catch {}
+try { mkdirSync(join(CONFIG_DIR, "logs", "private"), { recursive: true }); } catch {}
 
 // One-time migration: copy config files from old DATA_DIR to new CONFIG_DIR if CONFIG_DIR is separate and empty
 try {
@@ -836,6 +840,23 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
               pluginManager.incomingPublicChatNotification(event.room, event.username, event.message);
             }
             logger.debug("chat", "chat event", { type: event.type, room: event.room, username: event.username });
+            // nicotine-plus parity: write chat logs under CONFIG_DIR/logs (daily, only active rooms)
+            try {
+              if (event.type === "private-message" && event.username && event.message) {
+                const isAction = event.message.startsWith("/me ") || event.message.startsWith("* ");
+                const txt = isAction ? event.message.replace(/^\/(me)\s+|^\*\s+/, "") : event.message;
+                // incoming: tag is peer username
+                logPrivateMessage(event.username, event.username, txt, { isAction });
+              } else if (event.type === "say-chatroom" && event.room && event.username && event.message) {
+                const isAction = event.message.startsWith("/me ") || event.message.startsWith("* ");
+                const txt = isAction ? event.message.replace(/^\/(me)\s+|^\*\s+/, "") : event.message;
+                logRoomMessage(event.room, event.username, txt, { isAction });
+              } else if (event.type === "global-room-message" && event.room && event.username && event.message) {
+                const isAction = event.message.startsWith("/me ") || event.message.startsWith("* ");
+                const txt = isAction ? event.message.replace(/^\/(me)\s+|^\*\s+/, "") : event.message;
+                logRoomMessage(event.room, event.username, txt, { isAction, isGlobal: true, globalRoom: event.room });
+              }
+            } catch {}
             try { ws.send(JSON.stringify({ type: "chat:event", event })); } catch {}
           },
           onRoomEvent: (event) => {
@@ -1168,6 +1189,12 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           const finalMsg = (out?.[1] as string) ?? message;
           session.sayChatroom(room, finalMsg);
           pluginManager.outgoingPublicChatNotification(room, finalMsg);
+          // log outgoing room message (nicotine logs outgoing too)
+          try {
+            const isAction = finalMsg.startsWith("/me ") || finalMsg.startsWith("* ");
+            const txt = isAction ? finalMsg.replace(/^\/(me)\s+|^\*\s+/, "") : finalMsg;
+            logRoomMessage(room, session.username, txt, { isAction });
+          } catch {}
         } else if (action === "setTicker" && message !== undefined) session.setRoomTicker(room, message);
         else if (action === "addOperator" && result.data.username) session.addRoomOperator(room, result.data.username);
         else if (action === "removeOperator" && result.data.username) session.removeRoomOperator(room, result.data.username);
@@ -1203,6 +1230,12 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           const finalMsg = (out?.[1] as string) ?? msg;
           session.sendPrivateMessage(result.data.username, finalMsg);
           pluginManager.outgoingPrivateChatNotification(result.data.username, finalMsg);
+          // log outgoing private (tag is own username, peer is recipient)
+          try {
+            const isAction = finalMsg.startsWith("/me ") || finalMsg.startsWith("* ");
+            const txt = isAction ? finalMsg.replace(/^\/(me)\s+|^\*\s+/, "") : finalMsg;
+            logPrivateMessage(result.data.username, session.username, txt, { isAction });
+          } catch {}
         }
         return;
       }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSession } from "@/lib/session";
 import { useConfig } from "@/lib/config/provider";
 import type { ChatEvent } from "@/lib/protocol";
@@ -17,16 +17,96 @@ export interface PrivateMessage {
   isNew?: boolean;
 }
 
-export function usePrivateChat() {
+interface PrivateChatApi {
+  conversations: Map<string, PrivateMessage[]>;
+  users: string[];
+  activeUser: string | null;
+  setActiveUser: (u: string | null) => void;
+  sendMessage: (username: string, message: string) => void;
+  sendTyping: (username: string) => void;
+  isTyping: (username: string) => boolean;
+  typingUsers: Map<string, number>;
+  closeConversation: (username: string) => void;
+  closeAll: () => void;
+}
+
+const PrivateChatContext = createContext<PrivateChatApi | null>(null);
+
+const ACTIVE_KEY = "nicotineHub.private.active";
+const PRIVATECHATS_KEY = "nicotineHub.privatechats";
+
+function loadPersistedUsers(): string[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(PRIVATECHATS_KEY) ?? localStorage.getItem(PRIVATECHATS_KEY.replace("nicotineHub.", "nicotine."));
+    if (!raw) return null;
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return null;
+    return arr.filter((x: unknown) => typeof x === "string" && (x as string).trim()).slice(0, 50) as string[];
+  } catch { return null; }
+}
+function loadPersistedActive(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const v = localStorage.getItem(ACTIVE_KEY);
+    if (v && v.trim()) return v.trim();
+    // fallback to query param handling already in page
+  } catch {}
+  return null;
+}
+function persistActive(u: string | null) {
+  try {
+    if (u) localStorage.setItem(ACTIVE_KEY, u);
+    else localStorage.removeItem(ACTIVE_KEY);
+  } catch {}
+}
+
+export function PrivateChatProvider({ children }: { children: ReactNode }) {
   const { send, subscribe, state } = useSession();
   const { settings } = useConfig();
-  const [conversations, setConversations] = useState<Map<string, PrivateMessage[]>>(() => new Map());
-  const [activeUser, setActiveUser] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<Map<string, PrivateMessage[]>>(() => {
+    const users = loadPersistedUsers();
+    if (users && users.length) {
+      const m = new Map<string, PrivateMessage[]>();
+      for (const u of users) m.set(u, []);
+      return m;
+    }
+    return new Map();
+  });
+  const [activeUser, setActiveUserState] = useState<string | null>(() => loadPersistedActive());
   const [typingUsers, setTypingUsers] = useState<Map<string, number>>(() => new Map());
   const ctcpThrottle = useRef<Map<string, number>>(new Map());
 
   const activeUserRef = useRef(activeUser);
   activeUserRef.current = activeUser;
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
+
+  const setActiveUser = useCallback((u: string | null) => {
+    setActiveUserState(u);
+    persistActive(u);
+  }, []);
+
+  useEffect(() => { persistActive(activeUser); }, [activeUser]);
+  // persist users ordering whenever conversations keys change (mirrors existing logic)
+  useEffect(() => {
+    try {
+      const keys = Array.from(conversations.keys()).slice(0, 50);
+      if (keys.length) localStorage.setItem(PRIVATECHATS_KEY, JSON.stringify(keys));
+    } catch {}
+  }, [conversations]);
+
+  // clear on logout — not on initial mount
+  const hasConnectedRef = useRef(false);
+  useEffect(() => {
+    if (state.status === "connected") hasConnectedRef.current = true;
+    if (state.status !== "idle") return;
+    if (!hasConnectedRef.current) return;
+    setConversations(new Map());
+    setActiveUserState(null);
+    try { localStorage.removeItem(ACTIVE_KEY); } catch {}
+    if (isDemo) try { localStorage.removeItem(PRIVATECHATS_KEY); } catch {}
+  }, [state.status]);
 
   useEffect(() => {
     if (!isDemo) return;
@@ -40,14 +120,14 @@ export function usePrivateChat() {
     setConversations(next);
     const first = Object.keys(seeded)[0];
     if (first) setActiveUser(first);
-  }, [state.status, conversations.size]);
+  }, [state.status, conversations.size, setActiveUser]);
 
   useEffect(() => {
     if (!isDemo) return;
     if (state.status !== "idle") return;
     setConversations(new Map());
     setActiveUser(null);
-  }, [state.status]);
+  }, [state.status, setActiveUser]);
 
   useEffect(() => {
     if (state.status !== "connected") return;
@@ -55,7 +135,6 @@ export function usePrivateChat() {
       if (msg.type !== "chat:event") return;
       const ev = (msg as unknown as { event: ChatEvent }).event;
       if (ev.type === "private-message" && ev.username && ev.message) {
-        // CTCP TYPING handling
         if (ev.message.includes("\u0001TYPING")) {
           setTypingUsers((prev) => {
             const next = new Map(prev);
@@ -72,7 +151,6 @@ export function usePrivateChat() {
           }, 3100);
           return;
         }
-        // CTCP VERSION throttle 1s (nicotine CTCP 1s throttle)
         if (ev.message.includes("\u0001VERSION")) {
           const last = ctcpThrottle.current.get(ev.username!) || 0;
           if (Date.now() - last < 1000) return;
@@ -91,12 +169,10 @@ export function usePrivateChat() {
         setConversations((prev) => {
           const next = new Map(prev);
           const arr = next.get(ev.username!) || [];
-          // Move user to top by deleting and re-inserting at end then reorder via insertion order? Use Map reinsert
           next.delete(ev.username!);
           next.set(ev.username!, truncateMessages([...arr, pm], settings.logging.readprivatelines || 200));
           return next;
         });
-        // Also clear typing
         setTypingUsers((prev) => {
           const next = new Map(prev);
           next.delete(ev.username!);
@@ -104,7 +180,6 @@ export function usePrivateChat() {
         });
       } else if (ev.type === "private-message-acked" && (ev as unknown as { username?: string }).username) {
         const username = (ev as unknown as { username: string }).username;
-        // Persist ordering: move acked user to top of privatechat.users
         setConversations((prev) => {
           if (!prev.has(username)) return prev;
           const next = new Map(prev);
@@ -137,9 +212,7 @@ export function usePrivateChat() {
       let out = message.trim();
       if (out.startsWith("/me ")) out = `* ${out.slice(4)}`;
       if (!settings.ctcp.enable && out.includes("\u0001VERSION")) return;
-      // Offline queue: if not logged in, queue via GetPeerAddress deferred (best-effort)
       if (state.status !== "connected") {
-        // store in pending localStorage and will retry on reconnect (like nicotine GetPeerAddress queue)
         try {
           const pending = JSON.parse((localStorage.getItem("nicotineHub.pendingPrivate") ?? localStorage.getItem("nicotine.pendingPrivate")) || "[]");
           pending.push({ username, message: out, ts: Date.now() });
@@ -159,6 +232,8 @@ export function usePrivateChat() {
       setConversations((prev) => {
         const next = new Map(prev);
         const arr = next.get(username) || [];
+        // move to top on send too? keep insertion order
+        if (next.has(username)) next.delete(username);
         next.set(username, truncateMessages([...arr, pm], settings.logging.readprivatelines || 200));
         return next;
       });
@@ -170,20 +245,20 @@ export function usePrivateChat() {
         }
       } catch {}
     },
-    [send, settings.words, settings.ctcp.enable, settings.privatechat.store, settings.logging.readprivatelines],
+    [send, settings.words, settings.ctcp.enable, settings.privatechat.store, settings.logging.readprivatelines, state.status],
   );
 
   const users = Array.from(conversations.keys());
 
-  const closeConversation = (username: string) => {
-    const usersList = Array.from(conversations.keys());
+  const closeConversation = useCallback((username: string) => {
+    const usersList = Array.from(conversationsRef.current.keys());
     const idx = usersList.indexOf(username);
     setConversations((prev) => {
       const next = new Map(prev);
       next.delete(username);
       return next;
     });
-    if (activeUser === username) {
+    if (activeUserRef.current === username) {
       const nextUsers = usersList.filter((u) => u !== username);
       if (nextUsers.length === 0) { setActiveUser(null); return; }
       let preferPrev = true;
@@ -198,14 +273,20 @@ export function usePrivateChat() {
       else if (!preferPrev && idx < usersList.length - 1) setActiveUser(usersList[idx + 1] ?? nextUsers[nextUsers.length - 1] ?? null);
       else setActiveUser(nextUsers[nextUsers.length - 1] ?? null);
     }
-  };
+    // also remove from persisted privatechats
+    try {
+      const stored = JSON.parse((localStorage.getItem("nicotineHub.privatechats") ?? localStorage.getItem("nicotine.privatechats")) || "[]");
+      const next = stored.filter((u: string) => u !== username);
+      localStorage.setItem("nicotineHub.privatechats", JSON.stringify(next));
+    } catch {}
+  }, [setActiveUser]);
 
-  const closeAll = () => {
+  const closeAll = useCallback(() => {
     setConversations(new Map());
     setActiveUser(null);
-  };
+    try { localStorage.removeItem(PRIVATECHATS_KEY); localStorage.removeItem(ACTIVE_KEY); } catch {}
+  }, [setActiveUser]);
 
-  // Flush offline pending on reconnect
   useEffect(() => {
     if (state.status !== "connected") return;
     try {
@@ -217,10 +298,17 @@ export function usePrivateChat() {
     } catch {}
   }, [state.status, send]);
 
-  const isTyping = (username: string) => {
+  const isTyping = useCallback((username: string) => {
     const exp = typingUsers.get(username);
     return exp !== undefined && Date.now() < exp;
-  };
+  }, [typingUsers]);
 
-  return { conversations, users, activeUser, setActiveUser, sendMessage, sendTyping, isTyping, typingUsers, closeConversation, closeAll };
+  const value: PrivateChatApi = { conversations, users, activeUser, setActiveUser, sendMessage, sendTyping, isTyping, typingUsers, closeConversation, closeAll };
+  return <PrivateChatContext.Provider value={value}>{children}</PrivateChatContext.Provider>;
+}
+
+export function usePrivateChat(): PrivateChatApi {
+  const ctx = useContext(PrivateChatContext);
+  if (!ctx) throw new Error("usePrivateChat must be used within PrivateChatProvider");
+  return ctx;
 }
