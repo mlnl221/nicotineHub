@@ -332,8 +332,8 @@ export interface RoomEventMessage {
 
 export interface ChatRoomRequest {
   type: "chat:room";
-  action: "join" | "leave" | "say" | "ticker" | "setTicker" | "addOperator" | "removeOperator" | "cancelMembership" | "cancelOwnership";
-  room: string;
+  action: "join" | "leave" | "say" | "ticker" | "setTicker" | "addOperator" | "removeOperator" | "cancelMembership" | "cancelOwnership" | "refreshList";
+  room?: string;
   message?: string;
   username?: string;
 }

@@ -46,6 +46,7 @@ import {
   buildQueueUpload,
   buildRemoveThingIHate,
   buildRemoveThingILike,
+  buildRoomListRequest,
   buildRoomSearch,
   buildSayChatroom,
   buildSendUploadSpeed,
@@ -1285,6 +1286,9 @@ export class SoulseekSession {
         this.restartAutoawayTimer();
         this.restartRescanTimer();
         this.handleAutoJoinAndWatch();
+        // nicotine-plus parity: explicit RoomList request on every login — the list
+        // auto-pushed at login omits small/blacklisted rooms, requests return all.
+        try { this.requestRoomList(); } catch {}
         if (this._rescanOnStartup) {
           this.rescanShares().catch((e) => logger.warn("server", "startup rescan failed", { error: (e as Error).message }));
         }
@@ -2689,6 +2693,7 @@ export class SoulseekSession {
   checkPrivileges() { this.serverSocket?.write(buildCheckPrivileges()); }
   joinRoom(room: string, priv = false) { this.serverSocket?.write(buildJoinRoom(room, priv)); }
   leaveRoom(room: string) { this.serverSocket?.write(buildLeaveRoom(room)); }
+  requestRoomList() { if (this.loggedIn) this.serverSocket?.write(buildRoomListRequest()); }
   sayChatroom(room: string, message: string) { this.serverSocket?.write(buildSayChatroom(room, message)); }
   sendPrivateMessage(username: string, message: string) { this.serverSocket?.write(buildMessageUser(username, message)); }
   joinGlobalRoom() { this.serverSocket?.write(buildJoinGlobalRoom()); }

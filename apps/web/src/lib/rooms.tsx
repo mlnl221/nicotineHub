@@ -359,6 +359,19 @@ export function useRooms() {
     send({ type: "chat:room", action: "setTicker", room, message: msg } as unknown as never);
   }, [send]);
 
+  const refreshRoomList = useCallback(() => {
+    send({ type: "chat:room", action: "refreshList" });
+  }, [send]);
+
+  // Fetch-on-mount: room-list events that arrived before this hook subscribed
+  // (e.g. login happened on another page) are lost — re-request when empty.
+  const listRequested = useRef(false);
+  useEffect(() => {
+    if (state.status !== "connected" || roomList.length > 0 || listRequested.current) return;
+    listRequested.current = true;
+    refreshRoomList();
+  }, [state.status, roomList.length, refreshRoomList]);
+
   const addOperator = useCallback((room: string, username: string) => send({ type: "chat:room", action: "addOperator", room, username } as unknown as never), [send]);
   const removeOperator = useCallback((room: string, username: string) => send({ type: "chat:room", action: "removeOperator", room, username } as unknown as never), [send]);
   const cancelMembership = useCallback((room: string) => send({ type: "chat:room", action: "cancelMembership", room } as unknown as never), [send]);
@@ -373,5 +386,5 @@ export function useRooms() {
     setActiveRoom(null);
   }, [joinedRooms, send]);
 
-  return { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, addOperator, removeOperator, cancelMembership, cancelOwnership, closeAll, userStats };
+  return { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, addOperator, removeOperator, cancelMembership, cancelOwnership, closeAll, userStats, refreshRoomList };
 }

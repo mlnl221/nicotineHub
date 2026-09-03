@@ -500,6 +500,9 @@ export function buildJoinRoom(room: string, priv = false): Buffer {
   return frameMessage(SERVER_MESSAGE_CODES.joinRoom, Buffer.concat([packString(room), packUint32(priv ? 1 : 0)]));
 }
 export function buildLeaveRoom(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.leaveRoom, packString(room)); }
+// nicotine-plus chatrooms.request_room_list: code 64 with empty payload; the auto-pushed
+// list at login omits small/blacklisted rooms, explicit requests return all rooms.
+export function buildRoomListRequest(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.roomList, Buffer.alloc(0)); }
 export function buildChangePassword(password: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.changePassword, packString(password)); }
 export function buildCheckPrivileges(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.checkPrivileges, Buffer.alloc(0)); }
 export function buildRoomTickers(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.roomTickers, packString(room)); }

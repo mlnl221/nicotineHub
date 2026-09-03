@@ -40,6 +40,7 @@ import {
   buildRecommendationsEmpty,
   buildGlobalRecommendationsEmpty,
   buildSimilarUsersEmpty,
+  buildRoomListRequest,
   buildUserInfoResponse,
   parseUserInfoResponse,
   buildQueueUpload,
@@ -485,6 +486,13 @@ describe("Phase 0 — recommendations empty + 1001 + 121", () => {
     const raw = buildSimilarUsersEmpty();
     const p = tryParseMessage(raw)!;
     expect(p.code).toBe(SERVER_MESSAGE_CODES.similarUsers);
+    expect(p.payload.length).toBe(0);
+  });
+  test("RoomList 64 request is code 64 with empty payload", () => {
+    const raw = buildRoomListRequest();
+    const p = tryParseMessage(raw)!;
+    expect(p.code).toBe(SERVER_MESSAGE_CODES.roomList);
+    expect(p.code).toBe(64);
     expect(p.payload.length).toBe(0);
   });
   test("CantConnectToPeer 1001 round-trip", () => {

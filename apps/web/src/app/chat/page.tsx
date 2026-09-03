@@ -21,7 +21,7 @@ export default function ChatRoomsPage() {
   const { state } = useSession();
   const { settings } = useConfig();
   const router = useRouter();
-  const { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, closeAll, userStats } = useRooms();
+  const { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, closeAll, userStats, refreshRoomList } = useRooms();
   const { buddies } = useBuddies();
   const [joinInput, setJoinInput] = useState("");
   const [sayInput, setSayInput] = useState("");
@@ -119,6 +119,7 @@ export default function ChatRoomsPage() {
                   Join
                 </button>
               </div>
+              <div className="flex gap-2">
               <select
                 data-testid="public-room-dropdown"
                 value=""
@@ -126,7 +127,7 @@ export default function ChatRoomsPage() {
                   const v = e.target.value;
                   if (v) setJoinInput(v);
                 }}
-                className="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest dark:bg-surface-container-low dark:text-inverse-primary px-3 py-2.5 text-sm focus:border-primary outline-none"
+                className="min-w-0 flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest dark:bg-surface-container-low dark:text-inverse-primary px-3 py-2.5 text-sm focus:border-primary outline-none"
               >
                 <option value="">Choose a room to join… ({sortedRooms.length})</option>
                 {sortedRooms.slice(0, 50).map((r) => (
@@ -135,6 +136,15 @@ export default function ChatRoomsPage() {
                   </option>
                 ))}
               </select>
+              <button
+                onClick={refreshRoomList}
+                title="Refresh room list"
+                aria-label="Refresh room list"
+                className="shrink-0 rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 text-on-surface-variant hover:text-primary hover:border-primary"
+              >
+                <span className="material-symbols-outlined text-[18px] align-middle">refresh</span>
+              </button>
+              </div>
               <label className="flex items-center gap-2 text-xs text-on-surface-variant">
                 <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} className="rounded" />
                 Private room
@@ -263,6 +273,7 @@ export default function ChatRoomsPage() {
                   Join
                 </button>
               </div>
+              <div className="mt-2 flex gap-2">
               <select
                 data-testid="public-room-dropdown"
                 value=""
@@ -270,7 +281,7 @@ export default function ChatRoomsPage() {
                   const v = e.target.value;
                   if (v) setJoinInput(v);
                 }}
-                className="mt-2 w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest dark:bg-surface-container-low dark:text-inverse-primary px-3 py-2.5 text-sm focus:border-primary outline-none"
+                className="min-w-0 flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest dark:bg-surface-container-low dark:text-inverse-primary px-3 py-2.5 text-sm focus:border-primary outline-none"
               >
                 <option value="">Choose a room to join… ({sortedRooms.length})</option>
                 {sortedRooms.slice(0, 50).map((r) => (
@@ -279,6 +290,15 @@ export default function ChatRoomsPage() {
                   </option>
                 ))}
               </select>
+              <button
+                onClick={refreshRoomList}
+                title="Refresh room list"
+                aria-label="Refresh room list"
+                className="shrink-0 rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 min-h-11 text-on-surface-variant hover:text-primary hover:border-primary"
+              >
+                <span className="material-symbols-outlined text-[18px] align-middle">refresh</span>
+              </button>
+              </div>
               <label className="mt-2 flex items-center gap-2 text-xs text-on-surface-variant">
                 <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} /> Private
               </label>

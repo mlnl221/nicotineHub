@@ -139,8 +139,8 @@ const UserInfoRequestSchema = z.object({ type: z.literal("userinfo") }).and(User
 
 const ChatRoomSchema = z.object({
   type: z.literal("chat:room"),
-  action: z.enum(["join", "leave", "say", "ticker", "setTicker", "addOperator", "removeOperator", "cancelMembership", "cancelOwnership"]),
-  room: z.string().min(1).max(64),
+  action: z.enum(["join", "leave", "say", "ticker", "setTicker", "addOperator", "removeOperator", "cancelMembership", "cancelOwnership", "refreshList"]),
+  room: z.string().min(1).max(64).optional(),
   message: z.string().max(5000).optional(),
   username: z.string().max(64).optional(),
 });
@@ -1087,6 +1087,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid chat:room message.")); return; }
         const session = requireLogin(); if (!session) return;
         const { action, room, message } = result.data;
+        if (action === "refreshList") { session.requestRoomList(); return; }
+        if (!room) { ws.send(errorMessage("room is required.")); return; }
         if (action === "join") {
           pluginManager.joinChatroomNotification(room);
           session.joinRoom(room);
