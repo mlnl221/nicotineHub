@@ -33,7 +33,7 @@ help: ## show targets
 clean: ## remove build artifacts (keep node_modules)
 	@if ss -tln 2>/dev/null | grep -qE ':300[0-9] |:878[0-9] '; then echo "⚠ dev ports still listening — stop 'bun run dev' first or .next corrupts (mistakes.md:74)"; fi
 	rm -rf apps/web/.next apps/bridge/dist
-	rm -rf /tmp/hub-spectrum* /tmp/nicotine-transfers-test-*
+	rm -rf /tmp/spectrals* /tmp/nicotine-transfers-test-*
 	@echo "clean done"
 
 distclean: clean ## clean + node_modules

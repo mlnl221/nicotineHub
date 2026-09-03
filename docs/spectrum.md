@@ -1,6 +1,6 @@
 # Analyze Spectrum
 
-> Right-click a **Finished** audio download on `/downloads` → **Analyze Spectrum**. The **worker** (`apps/worker`, FastAPI `:8789`) renders two PNG spectrograms with `sox` (`oxipng` recompress when present in the image — currently skipped, PNGs served raw) (own implementation; output semantics match the old bridge port of [`smoked-salmon`](https://github.com/smokin-salmon/smoked-salmon) `src/salmon/uploader/spectrals.py`, Apache-2.0) and the web shows them on hover / modal. Images live only in `/tmp/hub-spectrum` in the shared `spectrum-cache` volume — wiped on reboot.
+> Right-click a **Finished** audio download on `/downloads` → **Analyze Spectrum**. The **worker** (`apps/worker`, FastAPI `:8789`) renders two PNG spectrograms with `sox` (`oxipng` recompress when present in the image — currently skipped, PNGs served raw) (own implementation; output semantics match the old bridge port of [`smoked-salmon`](https://github.com/smokin-salmon/smoked-salmon) `src/salmon/uploader/spectrals.py`, Apache-2.0) and the web shows them on hover / modal. Images live only in `/tmp/spectrals` (ephemeral `/tmp/spectrals`, no volume — regenerated on demand, wiped on reboot/restart).
 
 ## UX
 
@@ -14,7 +14,7 @@
 ## Worker pipeline (`apps/worker/spectrals.py` + `app.py`)
 
 ```
-POST /spectrum/request {fileName, size?, token?} → resolve file → stat mtime/size → probe duration → sox → oxipng → /tmp/hub-spectrum
+POST /spectrum/request {fileName, size?, token?} → resolve file → stat mtime/size → probe duration → sox → oxipng → /tmp/spectrals
 ```
 
 * **Resolve file** — worker scans `DATA_DIR/downloads` by basename (containment-checked, `resolve().is_relative_to(DATA_DIR)`); never trusts a client-provided path. `404` when absent.
@@ -24,7 +24,7 @@ POST /spectrum/request {fileName, size?, token?} → resolve file → stat mtime
   ```
   sox --multi-threaded <in> --buffer 128000 -n remix 1 spectrogram -x 2000 -y 513 -z 120 -w Kaiser -o <label>-<hash>-Full.png remix 1 spectrogram -x 500 -y 1025 -z 120 -w Kaiser -S <zoomStart> -d 0:02 -o <label>-<hash>-Zoom.png
   ```
-  `label = token` when the web parsed it from `/files/:token`, else `f<sha1(fileName)[0..8]>`; `hash = sha256(label:mtimeMs:size)[0..16]`, `etag = "hash"`, paths `/tmp/hub-spectrum/<label>-<hash>-{Full,Zoom}.png`.
+  `label = token` when the web parsed it from `/files/:token`, else `f<sha1(fileName)[0..8]>`; `hash = sha256(label:mtimeMs:size)[0..16]`, `etag = "hash"`, paths `/tmp/spectrals/<label>-<hash>-{Full,Zoom}.png`.
 * **oxipng** — `oxipng -o 2 --strip all <png>` per file, 15 s timeout, best-effort (if missing, just skips).
 * **Concurrency** — `asyncio.Semaphore(2)`, queue, 90 s `sox` timeout, LRU prune when >100 files (delete oldest `mtime`).
 * **Single-flight** — `_in_flight` map `label:hash → Task` dedupes concurrent requests for same file.
@@ -49,7 +49,7 @@ POST /spectrum/request {fileName, size?, token?} → resolve file → stat mtime
 RUN apt-get install -y sox flac ffmpeg curl && pip install -r requirements.txt
 ```
 
-`compose.yaml` shares `bridge-data:/data:ro` (worker reads finished downloads) + `spectrum-cache:/tmp/hub-spectrum`. The bridge image no longer installs audio tooling.
+`compose.yaml` shares `bridge-data:/data:ro` (worker reads finished downloads). The bridge image no longer installs audio tooling.
 
 ## Attribution
 

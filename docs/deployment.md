@@ -11,7 +11,7 @@ docker compose up --build  # http://localhost:3000 + ws://localhost:8787/ws
 `compose.yaml` builds all services from the monorepo root:
 
 - `bridge` — `apps/bridge/Dockerfile` → `PORT=8787`, `LISTEN_PORT=60754`, `DATA_DIR=/data`, volume `bridge-data:/data`, `ports: 8787:8787 + 60754:60754` TCP+UDP (no `network_mode` key — bridge ports)
-- `worker` — `apps/worker/Dockerfile` → `:8789`, volumes `bridge-data:/data:ro` + `spectrum-cache:/tmp/hub-spectrum`
+- `worker` — `apps/worker/Dockerfile` → `:8789`, volumes `bridge-data:/data:ro`
 - `web` — `apps/web/Dockerfile` → `PORT=3000`
 
 **Network mode — bridge ports (default) vs host**

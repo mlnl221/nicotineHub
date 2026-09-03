@@ -42,7 +42,7 @@ services:
     restart: unless-stopped
     environment:
       DATA_DIR: "/data"
-      SPECTRUM_DIR: "/tmp/hub-spectrum"
+      SPECTRUM_DIR: "/tmp/spectrals"
       WORKER_TOKEN: "${WORKER_TOKEN:-}"
       # Optional per-service scraper tokens (env first; see apps/worker for names)
       DISCOGS_TOKEN: "${DISCOGS_TOKEN:-}"
@@ -54,7 +54,6 @@ services:
       - "8789:8789"
     volumes:
       - bridge-data:/data
-      - spectrum-cache:/tmp/hub-spectrum
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8789/health"]
       interval: 15s
@@ -81,4 +80,3 @@ services:
 
 volumes:
   bridge-data:
-  spectrum-cache:
