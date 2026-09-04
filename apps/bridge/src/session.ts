@@ -197,8 +197,7 @@ export interface TransferEvent {
   username?: string; file?: string; token?: number; place?: number; reason?: string;
 }
 
-const MAX_DISPLAYED_RESULTS = 400;
-const DEFAULT_SEARCH_TIMEOUT_MS = 20_000;
+const DEFAULT_SEARCH_TIMEOUT_MS = 20_000; // kept for reference — not used (nicotine parity: searches live until explicit stop, no timeout)
 const PEER_ADDRESS_TIMEOUT_MS = 20_000; // INDIRECT_REQUEST_TIMEOUT
 const CONNECTION_MAX_IDLE_MS = 60_000;
 const GHOST_IDLE_MS = 10_000;
@@ -633,7 +632,7 @@ export class SoulseekSession {
   private _searchEnabled = true;
   private _privateSearchEnabled = false;
   private _maxResults = 300;
-  private _maxDisplayedResults = 400;
+  private _maxDisplayedResults = 2500;
   setSearchConfig(opts: Partial<{ search_results: boolean; private_search_results: boolean; maxresults: number; max_displayed_results: number }>) {
     if (opts.search_results !== undefined) this._searchEnabled = !!opts.search_results;
     if (opts.private_search_results !== undefined) this._privateSearchEnabled = !!opts.private_search_results;
@@ -753,10 +752,6 @@ export class SoulseekSession {
           onEnd: (p) => this.opts.onWishlistEvent?.({ type: "end", searchId: p.searchId, token, reason: p.reason }),
         };
         const active: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
-        active.timer = setTimeout(() => {
-          this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token);
-          handlers.onEnd({ searchId, reason: "timeout" });
-        }, DEFAULT_SEARCH_TIMEOUT_MS);
         this.searches.set(token, active);
         this.searchIds.set(searchId, token);
         this.serverSocket.write(buildWishlistSearch(token, term));
@@ -2576,15 +2571,6 @@ export class SoulseekSession {
     const batch = rows.slice(0, remaining);
     search.count += batch.length;
     search.onResult({ searchId: search.searchId, token: resp.token, rows: batch });
-    // sliding timeout: reset timer on every response (Soulseek.NET SearchInternal.cs:266)
-    if (search.timer) clearTimeout(search.timer);
-    const timeoutMs = search.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS;
-    search.timer = setTimeout(() => {
-      this.searches.delete(resp.token);
-      this.searchIds.delete(search.searchId);
-      this.allowedSearchTokens.delete(resp.token);
-      search.onEnd({ searchId: search.searchId, reason: "timeout" });
-    }, timeoutMs);
     if (search.count >= search.maxResults) {
       if (search.timer) clearTimeout(search.timer);
       this.searches.delete(resp.token); this.searchIds.delete(search.searchId);
@@ -2608,11 +2594,7 @@ export class SoulseekSession {
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
-    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
-    search.timer = setTimeout(() => {
-      logger.info("search", "search timeout", { searchId, token, users: search.users.size, count: search.count });
-      this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" });
-    }, search.timeoutMs);
+    const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
     try {
       const buf = buildFileSearch(token, outQuery);
@@ -2641,11 +2623,7 @@ export class SoulseekSession {
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
-    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
-    search.timer = setTimeout(() => {
-      logger.info("search", "searchUser timeout", { searchId, token, username, users: search.users.size, count: search.count });
-      this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" });
-    }, search.timeoutMs);
+    const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
     try {
       const buf = buildUserSearch(username, token, outQuery);
@@ -2665,8 +2643,7 @@ export class SoulseekSession {
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
-    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
-    search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
+    const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
     for (const username of usernames) {
       try { this.serverSocket.write(buildUserSearch(username, token, outQuery)); } catch {}
@@ -2681,8 +2658,7 @@ export class SoulseekSession {
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
-    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
-    search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
+    const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
     this.serverSocket.write(buildRoomSearch(room, token, outQuery));
     return token;
@@ -2695,8 +2671,7 @@ export class SoulseekSession {
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
-    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
-    search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
+    const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
     this.serverSocket.write(buildWishlistSearch(token, outQuery));
     return token;
@@ -2976,7 +2951,7 @@ export class SoulseekSession {
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
     // Portmapper: remove mapping on quit (like nicotine _server_disconnect portmapper.remove)
     try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}
-    for (const token of [...this.searches.keys()]) { const s = this.searches.get(token); if (s?.timer) clearTimeout(s.timer); if (s) s.onEnd({ searchId: s.searchId, reason: "stopped" }); this.searches.delete(token); }
+    for (const token of [...this.searches.keys()]) { const s = this.searches.get(token); if (s?.timer) clearTimeout(s.timer); if (s) s.onEnd({ searchId: s.searchId, reason: "error" }); this.searches.delete(token); }
     this.searchIds.clear(); this.allowedSearchTokens.clear();
     for (const { timer } of this.peerAddressRequests.values()) clearTimeout(timer);
     for (const { timer } of this.pendingConnects.values()) clearTimeout(timer);

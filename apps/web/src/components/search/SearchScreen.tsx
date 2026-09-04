@@ -21,7 +21,7 @@ import { useWishlist } from "@/lib/wishlist";
 import { humanLength, humanQuality, humanSize } from "@/lib/format";
 
 export function SearchScreen() {
-  const { activeTab, activeId, tabs, setActive, closeTab, startSearch, stopSearch, setFilters, clearFilters } = useSearches();
+  const { activeTab, activeId, tabs, setActive, closeTab, startSearch, stopSearch, retrySearch, setFilters, clearFilters } = useSearches();
   const { requestDownload } = useTransfers();
   const { settings, setOption } = useConfig();
   const { getIgnored, markSeen } = useWishlist();
@@ -197,14 +197,17 @@ export function SearchScreen() {
           <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 py-16 text-center">
             <span className="material-symbols-outlined text-4xl text-outline">search_off</span>
             <p className="font-body text-sm font-semibold text-on-surface">
-              {activeTab.reason === "timeout" && activeTab.total === 0
-                ? "No results — check your listening port"
+              {activeTab.reason === "error" ? "Connection lost — retry?"
+                : activeTab.reason === "timeout" && activeTab.total === 0
+                  ? "No results — check your listening port"
                 : activeTab.reason === "max_results"
                   ? "Search limit reached — no matching results"
                   : "No results"}
             </p>
             <p className="max-w-md font-body text-xs leading-relaxed text-on-surface-variant">
-              {activeTab.reason === "timeout" && activeTab.total === 0 ? (
+              {activeTab.reason === "error" ? (
+                <>Search ended because the connection dropped. Your previous results are kept — <button onClick={() => retrySearch(activeTab.id)} className="text-primary underline">Retry</button> will continue the same tab.</>
+              ) : activeTab.reason === "timeout" && activeTab.total === 0 ? (
                 <>
                   Soulseek returns results peer-to-peer to your listening port (currently <code className="rounded bg-surface-container-high px-1 py-0.5 font-mono text-[11px]">{settings.server.portrange[0] ?? 60754}</code>). If this port isn&apos;t forwarded through your VPN/router and into WSL, searches will time out with 0 results.
                   <br />
@@ -221,7 +224,11 @@ export function SearchScreen() {
                 Search ended: timeout (no peer could connect back). This is expected if {settings.server.portrange[0] ?? 60754} isn&apos;t reachable.
               </div>
             ) : null}
-            <button onClick={() => startSearch(activeTab.query, { mode: activeTab.mode, target: activeTab.target })} className="mt-2 rounded-full bg-primary px-4 py-2 font-label text-xs font-semibold text-on-primary">Search again</button>
+            {activeTab.reason === "error" ? (
+              <button onClick={() => retrySearch(activeTab.id)} className="mt-2 rounded-full bg-primary px-4 py-2 font-label text-xs font-semibold text-on-primary">Retry</button>
+            ) : (
+              <button onClick={() => retrySearch(activeTab.id)} className="mt-2 rounded-full bg-primary px-4 py-2 font-label text-xs font-semibold text-on-primary">Search again</button>
+            )}
           </div>
         ) : (
           <div
