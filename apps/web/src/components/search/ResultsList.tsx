@@ -21,6 +21,29 @@ function fileTypeIcon(ext: string): string {
   return "draft";
 }
 
+function qualityBadge(row: SearchRow): { label: string; cls: string } | null {
+  const attrs = row.attributes || {};
+  const ext = row.fileType?.toLowerCase?.() ?? "";
+  const sr = attrs.sampleRate;
+  const bd = attrs.bitDepth;
+  const br = attrs.bitrate;
+  const vbr = attrs.vbr;
+  if (sr && bd) {
+    const isHiRes = sr > 48000 || bd > 16;
+    const srLabel = sr === 44100 ? "44.1" : sr === 48000 ? "48" : `${(sr / 1000).toFixed(1)}`;
+    if (isHiRes) return { label: `HI-RES ${srLabel}/${bd}`, cls: "bg-tertiary-container text-on-tertiary-container" };
+    return { label: `${ext.toUpperCase()} ${srLabel}/${bd}`, cls: "bg-surface-container-high text-on-surface-variant" };
+  }
+  if (["flac", "wav", "aiff", "alac", "ape", "wv"].includes(ext) && !br) {
+    return { label: "LOSSLESS", cls: "bg-surface-container-high text-on-surface-variant" };
+  }
+  if (br) {
+    const vbrLabel = vbr ? "VBR" : "CBR";
+    return { label: `${br} ${vbrLabel}`, cls: "bg-surface-container-high text-on-surface-variant" };
+  }
+  return null;
+}
+
 interface ResultsListProps {
   rows: SearchRow[];
   onRowTap: (row: SearchRow) => void;
@@ -127,6 +150,7 @@ export function ResultsList({ rows, onRowTap, grouping = "folder_grouping", expa
                           <span className="inline-flex items-center gap-1 min-w-0 max-w-[35vw] truncate"><span className="material-symbols-outlined text-[13px] shrink-0">person</span><span className="truncate">{row.user}</span></span>
                           <span>{humanSize(row.size)}</span>
                           {humanQuality(row.attributes) ? <span>{humanQuality(row.attributes)}</span> : null}
+                          {(() => { const qb = qualityBadge(row); return qb ? <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${qb.cls}`}>{qb.label}</span> : null; })()}
                           {humanLength(row.length) ? <span>{humanLength(row.length)}</span> : null}
                           {row.slotFree ? <span className="rounded-full bg-tertiary-container px-1.5 py-0.5 font-semibold text-on-tertiary-container">free</span> : <span className="text-outline">q:{row.inQueue}</span>}
                           {row.private ? <span className="rounded-full bg-surface-container-highest px-1.5 py-0.5 text-on-surface-variant">private</span> : null}
@@ -190,6 +214,7 @@ export function ResultsList({ rows, onRowTap, grouping = "folder_grouping", expa
                           </span>
                           <span>{humanSize(row.size)}</span>
                           {humanQuality(row.attributes) ? <span>{humanQuality(row.attributes)}</span> : null}
+                          {(() => { const qb = qualityBadge(row); return qb ? <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${qb.cls}`}>{qb.label}</span> : null; })()}
                           {humanLength(row.length) ? <span>{humanLength(row.length)}</span> : null}
                           {row.slotFree ? (
                             <span className="rounded-full bg-tertiary-container px-1.5 py-0.5 font-semibold text-on-tertiary-container">

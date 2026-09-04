@@ -52,6 +52,8 @@ export function ConfigBridgeSync() {
         customban: settings.transfers.customban,
         usecustomgeoblock: settings.transfers.usecustomgeoblock,
         customgeoblock: settings.transfers.customgeoblock,
+        honeypot_enabled: settings.transfers.honeypot_enabled,
+        honeypot_names: settings.transfers.honeypot_names,
       },
       server: {
         banlist: settings.server.banlist,

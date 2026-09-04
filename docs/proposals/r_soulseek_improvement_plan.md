@@ -1,6 +1,6 @@
 # r/Soulseek → Nicotine Hub Improvement Plan — 2026-09-02 (moved to proposals 2026-09-03)
 
-> **Status: PROPOSAL — partial.** Worker scaffold + scrape/spectrum/tag/verify/analyze landed in `5c65ea9` + **share safety (exclusions + preview + secret heuristic) landed in `feat/share-safety`** + **P1 wildcard bans + slop badge + worker webhook landed in `feat/share-safety` (second push)** (record: `docs/architecture.md` `## Worker` + `apps/bridge/src/networkfilter.ts:34` + `apps/worker/app.py:754` + `apps/web/src/components/settings/WorkerSection.tsx`); worker plan doc deleted. Unbuilt backlog: **B ProveIt, H HoneyPot** (A, C, E DONE; D,F,G DONE).
+> **Status: PROPOSAL — partial.** Worker scaffold + scrape/spectrum/tag/verify/analyze landed in `5c65ea9` + **share safety landed in `feat/share-safety`** + **P1 wildcard+slop+webhook landed in `feat/share-safety` (second push)** + **P2 quality filter + flac-t + HoneyPot landed in `feat/share-safety` (third push)** (record: `docs/architecture.md` `## Worker` + `apps/web/src/lib/filter.ts:137` + `apps/worker/app.py:608` + `apps/bridge/src/transfers.ts:701`); worker plan doc deleted. Unbuilt backlog: **B ProveIt only** (A, C, E, Quality, HoneyPot DONE; D,F,G DONE).
 > **Decisions locked 2026-09-02:** scope **Full P0–P2** (P3 deferred), ProveIt `hash(user+week)` rotating.
 > **Sources:** `r_soulseek_posts.jsonl` (4763) + `r_soulseek_comments.jsonl` (50604) in `~/projects/improvement_docs/`
 > **Snapshot:** retrieved_on up to 2026, covers 2002–2026 nostalgia through TikTok + vibe-coded slop era.
@@ -148,11 +148,12 @@ add when: slop still degrades throughput despite ProveIt
 | **C — Wildcard+slop badge (P1)** | `networkfilter.ts` glob (`*`→`.*` user glob; IP `*` already) + `transfers.ts` `isSlopLike` + `TransferCard` pill | **DONE `feat/share-safety`** — `networkfilter.ts:34` + `transfers.ts:236` + `protocol.ts:218` | `aurral_*` blocks (case-sensitive), `50/60`+10 folders+`[A-Z0-9]{8,12}` → `Slop-like` badge in Uploads |
 | **D — Scrape engine (P1)** | `apps/worker` `POST /scrape` + web `SearchBar→workerFetch` + delete `linkParser.ts` | **DONE `5c65ea9`** — `docs/architecture.md` `## Worker` | Paste Discogs URL in global search → `scrapeRelease` → `query` |
 | **E — Webhook (P1)** | `worker POST /scan` (was `MEDIA_SCAN_URL` in `transfers.ts:991`) | **DONE `feat/share-safety`** — `worker/app.py:754` + `WorkerSection` Media automation + `transfers.tsx:201` relay | Finish (tab open) → worker forwards POST (5s, Bearer), `curl /scan` → `media_scan:true` |
+| **P2 — Quality filter + badge** | `filter.ts` `quality` + `FilterBar` + `ResultsList` badge + `fixtures` hi-res | **DONE `feat/share-safety`** — `protocol.ts:160` + `filter.ts:137` + `ResultsList.tsx:128` | `lossless|320|hi-res|VBR` filters, `FLAC 44.1/16`/`HI-RES` badges, `bun test` + Settings→Searches Quality |
 | **F — Migrate spectrum (P2)** | `apps/worker` `POST /spectrum/request` + `GET /spectrum/{stem}/full\|zoom` + web `workerHttpBase()` | **DONE `5c65ea9`** — `docs/architecture.md` `## Worker` + `docs/spectrum.md` | Finished flac → `Analyze Spectrum` → Full+Zoom PNGs, `curl -I .../full` 304 |
-| **G — Tag/verify/analyze (P2 opt)** | `apps/worker` `POST /tag|verify|analyze` (+ bulk/write/scrape) | **DONE (subset) `5c65ea9`** — `docs/architecture.md` `## Worker` | `curl -X POST :8789/verify` → `flacOk` honest; rest `null` until spectral checks |
-| **H — HoneyPot (P2)** | `honeyPot.ts` plugin `!banned.txt → ban` | **OPEN** | `!banned.txt` → ban |
+| **G — Tag/verify/analyze (P2 opt)** | `apps/worker` `POST /tag|verify|analyze` (+ bulk/write/scrape) + `flac -t` + bulk `cutoffHz` | **DONE `feat/share-safety`** — `app.py:608` `flac -t` + `analyze/bulk` `cutoffHz` | `flacOk` via `flac -t`, `bulk` now `cutoffHz/likelyTranscode`, `pytest` 15 pass |
+| **H — HoneyPot (P2)** | `transfers.ts:701` inline `honeypot_enabled` + `banlist:updated` + `UploadsSection` | **DONE `feat/share-safety`** — `transfers.ts:701` + `server.ts:1528` + `BannedUsersSection` sync | `!banned.txt` exact case-insensitive → ban (buddies exempt), `Uploads→HoneyPot` toggle |
 
-Deferred P3: `POST /notify` in worker or bridge (still deferred — no code). Unbuilt backlog: **B, H** (A, C, D, E, F, G DONE).
+Deferred P3: `POST /notify` in worker or bridge (still deferred — no code). Unbuilt backlog: **B ProveIt only** (A, C, D, E, F, G, P2 Quality, H DONE).
 
 Each phase: git worktree → `bun test && bun run build` → `docker compose up --build` (worker when needed) → `curl -sf http://localhost:8789/health \| jq` + `cp apps/web/.env.example apps/web/.env`. Doc sync after build: `cp docs/proposals/r_soulseek_improvement_plan.md ~/projects/improvement_docs/r_soulseek_improvement_plan.md`.
 
@@ -195,6 +196,6 @@ Minor: `MEDIA_SCAN_URL` → `MEDIA_SCAN_TOKEN` Bearer if needed; `WORKER_TOKEN` 
 
 ---
 
-*Next (unbuilt P0–P2): **A DONE, C DONE, E DONE** `feat/share-safety` → **B ProveIt** `proveIt.ts` `hash(user+week)` → **H HoneyPot** `!banned.txt`. Worker (0/D/F/G) already landed in `5c65ea9`; see `docs/architecture.md` `## Worker`.*
+*Next (unbuilt P0–P2): **A DONE, C DONE, E DONE, P2 Quality DONE, H DONE** `feat/share-safety` → **B ProveIt** `proveIt.ts` `hash(user+week)` only. Worker (0/D/F/G) already landed in `5c65ea9`; see `docs/architecture.md` `## Worker`.*
 
 (End of file - total 205 lines)

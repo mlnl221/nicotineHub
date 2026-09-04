@@ -143,6 +143,7 @@ export class TransferManager {
   private incompleteDir: string;
   private downloadsDir: string;
   private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
+  private onBanlistUpdated?: (banlist: string[], byUser: string) => void;
   private tokenCounter = Math.floor(Math.random() * 900000) + 10000;
   private statsManager: StatsManager;
   private userUpdateCounter = new Map<string, number>();
@@ -188,6 +189,8 @@ export class TransferManager {
     geoblockcc: [""] as string[],
     usecustomgeoblock: false,
     customgeoblock: "Sorry, your country is blocked",
+    honeypot_enabled: false as boolean,
+    honeypot_names: ["!banned.txt"] as string[],
     buddies: [] as string[],
     privilegedUsers: [] as string[],
   };
@@ -231,6 +234,10 @@ export class TransferManager {
 
   setSessionGetter(getter: () => any) {
     this.sessionGetter = getter;
+  }
+
+  setBanlistUpdatedCb(cb: (banlist: string[], byUser: string) => void) {
+    this.onBanlistUpdated = cb;
   }
 
   setConfig(partial: Partial<typeof this.config>) {
@@ -693,6 +700,31 @@ export class TransferManager {
   /** Handle incoming QueueUpload from peer (they want to download from us). */
   handleQueueUpload(username: string, virtualPath: string, peerIp?: string) {
     const id = `${username}::${virtualPath}`;
+    // HoneyPot bait — exact basename case-insensitive, default off, buddies exempt
+    const baseName = fileNameOf(virtualPath);
+    const honeyLower = baseName.toLowerCase();
+    const honeyNames = (this.config.honeypot_names || []).map((s: string) => s.toLowerCase().trim()).filter(Boolean);
+    const isHoney = this.config.honeypot_enabled && honeyNames.includes(honeyLower);
+    if (isHoney) {
+      const isBuddy = this.config.buddies.includes(username) || this.config.privilegedUsers.includes(username);
+      if (!isBuddy) {
+        if (!this.config.banlist.includes(username)) {
+          this.config.banlist = [...this.config.banlist, username];
+        }
+        try {
+          const sess = this.sessionGetter?.() as unknown as { setNetworkFilters?: (o: unknown) => void };
+          sess?.setNetworkFilters?.({ banlist: this.config.banlist });
+        } catch {}
+        try { this.onBanlistUpdated?.(this.config.banlist, username); } catch {}
+        const t: BridgeTransfer = { id, username, virtualPath, fileName: baseName, size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Banned", queuePosition: null, isUpload: true };
+        this.transfers.set(id, t);
+        this.emit(t);
+        this.emitStats();
+        this.persist();
+        try { logger.warn("honeypot", "banned via honeypot", { username, virtualPath, ip: peerIp || "" }); } catch {}
+        return t;
+      }
+    }
     // 0. Ban/Geoblock check before queuing (nicotine networkfilter.py)
     const ip = peerIp || "";
     const country = ip ? getCountryCode(ip) : "";

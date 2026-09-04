@@ -763,6 +763,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       });
       // Link session getter after creation
       (tm as unknown as { setSessionGetter: (fn: () => unknown) => void }).setSessionGetter(() => ws.data.session as unknown as never);
+      (tm as unknown as { setBanlistUpdatedCb: (cb: (b: string[], u: string) => void) => void }).setBanlistUpdatedCb((banlist, byUser) => {
+        const payload = JSON.stringify({ type: "banlist:updated", banlist, byUser, reason: "honeypot" });
+        try { ws.send(payload); } catch {}
+      });
       ws.data.transfers = tm;
       setTimeout(() => {
         for (const t of tm.list()) { try { ws.send(JSON.stringify({ type: "transfer:update", transfer: t })); } catch {} }

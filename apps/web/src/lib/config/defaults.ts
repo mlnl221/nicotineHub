@@ -20,6 +20,7 @@ export type Filters = {
   fileType: string;
   length: string;
   publicFiles: boolean;
+  quality: string;
 };
 
 export type SharedFolder = [string, string]; // [virtualName, path]
@@ -139,6 +140,8 @@ export interface Settings {
     customgeoblock: string;
     geoblock: boolean;
     geoblockcc: string[];
+    honeypot_enabled: boolean;
+    honeypot_names: string[];
   };
   userinfo: {
     descr: string;
@@ -288,6 +291,7 @@ export const defaults: Settings = {
       fileType: "",
       length: "",
       publicFiles: false,
+      quality: "",
     },
     enable_history: true,
     history: [],
@@ -351,6 +355,8 @@ export const defaults: Settings = {
     customgeoblock: "Sorry, your country is blocked",
     geoblock: false,
     geoblockcc: [""],
+    honeypot_enabled: false,
+    honeypot_names: ["!banned.txt"],
   },
   userinfo: {
     descr: "''",

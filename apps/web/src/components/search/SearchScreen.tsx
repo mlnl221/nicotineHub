@@ -77,6 +77,7 @@ export function SearchScreen() {
     if (f.bitrate.trim()) n++;
     if (f.length.trim()) n++;
     if (f.country.trim()) n++;
+    if (f.quality.trim()) n++;
     if (f.freeSlot) n++;
     if (f.publicOnly) n++;
     return n;

@@ -85,6 +85,7 @@ export function mockSearchRows(query: string, _mode?: string): import("@/lib/pro
     const size = Math.floor(5_000_000 + rnd() * 150_000_000);
     const bitrate = ext === "flac" || ext === "wav" ? 0 : [128, 192, 256, 320][Math.floor(rnd() * 4)];
     const length = Math.floor(90 + rnd() * 400);
+    const isLossless = ext === "flac" || ext === "wav";
     rows.push({
       user,
       folder,
@@ -102,6 +103,8 @@ export function mockSearchRows(query: string, _mode?: string): import("@/lib/pro
         bitrate: bitrate || undefined,
         length,
         vbr: rnd() > 0.7 ? 1 : 0,
+        sampleRate: isLossless ? (rnd() > 0.5 ? 44100 : 96000) : undefined,
+        bitDepth: isLossless ? (rnd() > 0.5 ? 16 : 24) : undefined,
       },
     });
   }

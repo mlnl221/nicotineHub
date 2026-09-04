@@ -614,6 +614,7 @@ async def verify(body: FileIn):
            "logScore": None, "logChecksum": None, "durationMismatch": None}
     try:
         from mutagen import File as _mut_file
+        import shutil
 
         audio = _mut_file(path)
         if audio is None:
@@ -621,7 +622,14 @@ async def verify(body: FileIn):
             return out
         ext = path.suffix.lstrip(".").lower()
         if ext == "flac":
-            out["flacOk"] = audio.info is not None
+            if shutil.which("flac"):
+                try:
+                    r = subprocess.run(["flac", "-t", "--totally-silent", str(path)], capture_output=True, timeout=30)
+                    out["flacOk"] = r.returncode == 0
+                except Exception:
+                    out["flacOk"] = audio.info is not None
+            else:
+                out["flacOk"] = audio.info is not None
         raw = dict(getattr(audio, "tags", None) or {})
         blob = " ".join(str(v) for v in raw.values())[:2000].lower()
         if "mqa" in blob or "mqaencoder" in str(raw.keys()).lower():
@@ -648,6 +656,7 @@ async def verify_bulk(body: BulkVerifyIn):
             continue
         try:
             from mutagen import File as _mut_file
+            import shutil
             audio = _mut_file(path)
             if audio is None:
                 out.append({"fileName": fname, "flacOk": False})
@@ -655,7 +664,14 @@ async def verify_bulk(body: BulkVerifyIn):
             ext = path.suffix.lstrip(".").lower()
             entry: dict = {"fileName": fname, "path": str(path), "flacOk": None, "mqa": None}
             if ext == "flac":
-                entry["flacOk"] = audio.info is not None
+                if shutil.which("flac"):
+                    try:
+                        r = subprocess.run(["flac", "-t", "--totally-silent", str(path)], capture_output=True, timeout=30)
+                        entry["flacOk"] = r.returncode == 0
+                    except Exception:
+                        entry["flacOk"] = audio.info is not None
+                else:
+                    entry["flacOk"] = audio.info is not None
             raw = dict(getattr(audio, "tags", None) or {})
             blob = " ".join(str(v) for v in raw.values())[:2000].lower()
             if "mqa" in blob or "mqaencoder" in str(raw.keys()).lower():
@@ -745,6 +761,14 @@ async def analyze_bulk(body: BulkAnalyzeIn):
             if entry["bitDepth"]:
                 attrs.append([5, int(entry["bitDepth"])])
             entry["attrs"] = attrs
+            # spectral cutoff — opt-in style, best-effort, cached via _cutoff_hz internal file
+            try:
+                cutoff = _cutoff_hz(path)
+                if cutoff:
+                    entry["cutoffHz"] = cutoff
+                    entry["likelyTranscode"] = cutoff < 17000
+            except Exception:
+                pass
             out.append(entry)
         except Exception as e:
             out.append({"fileName": fname, "error": str(e)[:200]})

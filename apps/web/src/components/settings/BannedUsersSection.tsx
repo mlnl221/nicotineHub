@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect } from "react";
 import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
 import { SectionCard, ToggleControl, TextFieldControl } from "@/components/settings/controls";
+import { useSession } from "@/lib/session";
 
 function isIpLike(s: string) {
   // Parity with pynicotine core.network_filter.is_ip_address — * wildcard allowed, IPv4-ish
@@ -13,6 +15,16 @@ export function BannedUsersSection() {
   const { settings, setOption } = useConfig();
   const server = settings.server;
   const t = settings.transfers;
+  const { subscribe } = useSession();
+
+  useEffect(() => {
+    return subscribe((msg) => {
+      if ((msg as { type: string }).type === "banlist:updated") {
+        const m = msg as unknown as { banlist?: string[] };
+        if (Array.isArray(m.banlist)) setOption("server", "banlist", m.banlist);
+      }
+    });
+  }, [subscribe, setOption]);
 
   const bannedIpEntries = Object.entries(server.ipblocklist);
   const hasInvalidBanIp = bannedIpEntries.some(([ip]) => !isIpLike(ip) && ip !== "");
