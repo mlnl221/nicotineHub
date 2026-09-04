@@ -15,7 +15,7 @@
  */
 
 import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync, chmodSync, renameSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { z } from "zod";
 import { SoulseekSession } from "./session.ts";
 import { PermissionLevel } from "./shares.ts";
@@ -25,7 +25,7 @@ import { PluginManager } from "./plugins/manager.ts";
 import { Plugin as CoreCommandsPlugin, manifest as coreCommandsManifest } from "./plugins/builtin/core_commands.ts";
 import { Plugin as SpamfilterPlugin, manifest as spamManifest } from "./plugins/builtin/spamfilter.ts";
 import { Plugin as LeechDetectorPlugin, manifest as leechManifest } from "./plugins/builtin/leech_detector.ts";
-import { listDirectory } from "./files.ts";
+import { listDirectory, resolveSafePath, sanitizeFileNameForHeader, serveFileWithRanges } from "./files.ts";
 import { portChecker } from "./portchecker.ts";
 import { logPrivateMessage, logRoomMessage, logRoomSystem } from "./chatLogger.ts";
 
@@ -447,17 +447,6 @@ function requireAuth(req: Request, cors: Record<string, string>): Response | nul
   return null;
 }
 
-function sanitizeFileNameForHeader(name: string): string {
-  // Strict whitelist: strip CR/LF, quotes, slashes, control chars; fallback to "download"
-  let s = name.replace(/[\r\n"]/g, "").replace(/[/\\]/g, "_").trim();
-  // Remove control chars
-  s = s.replace(/[\x00-\x1f\x7f]/g, "");
-  // Allow only printable safe chars for filename, otherwise fallback to encodeURIComponent
-  if (!s || s.length > 255) s = "download";
-  const safe = s.replace(/[^a-zA-Z0-9._\- ()[\]{}!@#$%^&+=,;~`']/g, "_");
-  return safe || "download";
-}
-
 export const server = Bun.serve<{ session?: SoulseekSession; transfers?: TransferManager; logUnsub?: () => void; pluginManager?: PluginManager }>({
   port: PORT,
   async fetch(req, server) {
@@ -674,6 +663,48 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       }
     }
 
+    // GET /api/files/raw?path=/data/Music/song.flac — raw bytes for in-browser audio playback.
+    // Restricted to DATA_DIR subtree (unlike listing, which may browse host root) + same token auth.
+    if (url.pathname === "/api/files/raw" && req.method === "GET") {
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
+      const rawPath = url.searchParams.get("path") ?? "";
+      if (!rawPath || rawPath.length > 1024 || rawPath.includes("\0")) {
+        return new Response(JSON.stringify({ error: "invalid path" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
+      }
+      try {
+        const { statSync, realpathSync } = require("node:fs") as typeof import("node:fs");
+        const { basename } = require("node:path") as typeof import("node:path");
+        // FileExplorer paths are host-root-absolute ("/data/...") — resolve like
+        // the listing endpoint, then restrict to DATA_DIR (realpath: no symlink escape).
+        const abs = await resolveSafePath(rawPath, "/");
+        let st;
+        try {
+          st = statSync(abs);
+        } catch {
+          return new Response("Not found", { status: 404, headers: secHeaders });
+        }
+        if (!st.isFile()) return new Response("Not found", { status: 404, headers: secHeaders });
+        const dataResolved = resolve(DATA_DIR);
+        let real = abs;
+        try {
+          real = realpathSync(abs);
+        } catch {}
+        if (real !== dataResolved && !real.startsWith(dataResolved + sep)) {
+          return new Response("Not found", { status: 404, headers: secHeaders });
+        }
+        if (st.size > 500 * 1024 * 1024) {
+          return new Response(JSON.stringify({ error: "file too large to stream" }), { status: 413, headers: { "content-type": "application/json", ...cors } });
+        }
+        return serveFileWithRanges(real, req, cors, sanitizeFileNameForHeader(basename(real)));
+      } catch (e) {
+        const msg = (e as Error).message || "error";
+        if (msg.includes("traversal") || msg.includes("escapes")) {
+          return new Response(JSON.stringify({ error: "path traversal blocked" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
+        }
+        return new Response("Not found", { status: 404, headers: secHeaders });
+      }
+    }
+
     if (url.pathname === "/ws") {
       if (BRIDGE_TOKEN) {
         const tok = extractToken(req);
@@ -753,16 +784,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           } catch {}
         }
         if (!filePath || !existsSync(filePath)) return new Response("Not found", { status: 404, headers: secHeaders });
-        const file = Bun.file(filePath);
-        const safeDisposition = sanitizeFileNameForHeader(safeName);
-        const encoded = encodeURIComponent(safeDisposition).replace(/'/g, "%27");
-        const headers: Record<string, string> = {
-          "Content-Disposition": `attachment; filename="${safeDisposition}"; filename*=UTF-8''${encoded}`,
-          "X-Content-Type-Options": "nosniff",
-          "Cache-Control": "private, no-store",
-          "Content-Security-Policy": "default-src 'none'",
-        };
-        return new Response(file as unknown as never, { headers: { ...headers, ...cors } });
+        return serveFileWithRanges(filePath, req, cors, safeName);
       } catch {
         return new Response("Not found", { status: 404, headers: secHeaders });
       }

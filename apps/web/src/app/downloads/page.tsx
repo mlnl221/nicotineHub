@@ -19,6 +19,8 @@ import { useConfig } from "@/lib/config/provider";
 import { useSearchesOptional } from "@/lib/search";
 import { isDemo } from "@/lib/demo";
 import { useSpectrum, parseDownloadToken } from "@/lib/spectrum";
+import { usePlayer } from "@/lib/player/store";
+import { downloadPlayUrl, formatLabelOf, splitArtistTitle } from "@/lib/player/urls";
 import { SpectrumHoverCard } from "@/components/transfers/SpectrumHoverCard";
 import { TagEditor } from "@/components/tag/TagEditor";
 import { BulkBar } from "@/components/tag/BulkBar";
@@ -49,6 +51,7 @@ function DownloadsInner() {
   const searches = useSearchesOptional();
   const router = useRouter();
   const { requestSpectrum, getEntry } = useSpectrum();
+  const { play } = usePlayer();
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; transfer: import("@/lib/protocol").Transfer; isUpload: boolean } | null>(null);
   const [tagFile, setTagFile] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
@@ -129,6 +132,15 @@ function DownloadsInner() {
       if (e.shiftKey && id) bulk.toggleRange(id, audioIds);
       else if (id && !e.shiftKey) bulk.toggle(id);
     }
+  };
+
+  const handlePlay = (t: import("@/lib/protocol").Transfer) => {
+    const dl = (t as unknown as { downloadUrl?: string }).downloadUrl;
+    if (t.status !== "Finished" || !dl) return;
+    const target = downloadPlayUrl(dl, t.fileName);
+    if (!target) return;
+    const { artist, title } = splitArtistTitle(t.fileName);
+    play({ title, artist, src: target.url, formatLabel: formatLabelOf(t.fileName), transcoding: target.viaWorker });
   };
 
   const handleDoubleClick = (t: import("@/lib/protocol").Transfer, isUpload: boolean) => {
@@ -312,6 +324,11 @@ function DownloadsInner() {
               hasSpectrum: !!getEntry(menuAnchor.transfer.id) && getEntry(menuAnchor.transfer.id)?.status === "done",
               onEditTags: !isDemo && isAudioForSpectrum(menuAnchor.transfer.fileName) && menuAnchor.transfer.status === "Finished"
                 ? () => setTagFile(menuAnchor.transfer.fileName)
+                : undefined,
+              onPlay: !isDemo && !menuAnchor.isUpload && menuAnchor.transfer.status === "Finished" &&
+                !!(menuAnchor.transfer as unknown as { downloadUrl?: string }).downloadUrl &&
+                !!downloadPlayUrl((menuAnchor.transfer as unknown as { downloadUrl: string }).downloadUrl, menuAnchor.transfer.fileName)
+                ? () => handlePlay(menuAnchor.transfer)
                 : undefined,
             }
           )}

@@ -890,3 +890,162 @@ def _cutoff_hz(path: Path) -> int | None:
                 os.unlink(tmp)
         except OSError:
             pass
+
+
+# ---- in-browser audio: direct serve for native formats, ffmpeg→opus for exotic ----
+# Mirrors bridge AUDIO_MIME/TRANSCODE_EXTS (apps/bridge/src/files.ts).
+AUDIO_NATIVE_EXTS = {"mp3", "flac", "ogg", "oga", "opus", "wav", "m4a", "aac"}
+AUDIO_TRANSCODE_EXTS = {"wma", "wv", "ape", "aiff", "aif", "alac", "mp2"}
+AUDIO_MIME = {
+    "mp3": "audio/mpeg", "flac": "audio/flac", "ogg": "audio/ogg", "oga": "audio/ogg",
+    "opus": "audio/ogg", "wav": "audio/wav", "m4a": "audio/mp4", "aac": "audio/aac",
+}
+TRANSCODE_DIR = Path(os.environ.get("TRANSCODE_DIR", "/tmp/transcodes"))
+TRANSCODE_CACHE_BYTES = 500 * 1024 * 1024
+
+
+def _parse_range(header: str | None, size: int):
+    """Single bytes= range → (start, end) | 'unsatisfiable' | None. Multipart ignored."""
+    if not header or not header.startswith("bytes="):
+        return None
+    spec = header[6:].strip()
+    if "," in spec:
+        return None
+    s, _, e = spec.partition("-")
+    if s == "":
+        try:
+            suffix = int(e)
+        except ValueError:
+            return None
+        if suffix <= 0:
+            return None
+        return (max(0, size - suffix), size - 1)
+    try:
+        start = int(s)
+    except ValueError:
+        return None
+    if start < 0:
+        return None
+    if e == "":
+        end = size - 1
+    else:
+        try:
+            end = int(e)
+        except ValueError:
+            return None
+        if end < start:
+            return None
+    if start >= size:
+        return "unsatisfiable"
+    return (start, min(end, size - 1))
+
+
+def _file_chunks(path: Path, start: int, end: int, chunk: int = 1 << 20):
+    with open(path, "rb") as f:
+        f.seek(start)
+        remaining = end - start + 1
+        while remaining > 0:
+            data = f.read(min(chunk, remaining))
+            if not data:
+                break
+            remaining -= len(data)
+            yield data
+
+
+def _ranged_audio_response(path: Path, request: Request, media_type: str, filename: str):
+    from fastapi.responses import StreamingResponse
+
+    size = path.stat().st_size
+    base_headers = {
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": f'inline; filename="{filename}"',
+    }
+    parsed = _parse_range(request.headers.get("range"), size)
+    if parsed == "unsatisfiable":
+        return JSONResponse({"detail": "range not satisfiable"}, status_code=416,
+                            headers={**base_headers, "Content-Range": f"bytes */{size}"})
+    if parsed is None:
+        return StreamingResponse(_file_chunks(path, 0, size - 1), media_type=media_type,
+                                 headers={**base_headers, "Content-Length": str(size)})
+    start, end = parsed
+    return StreamingResponse(_file_chunks(path, start, end), status_code=206, media_type=media_type,
+                             headers={**base_headers, "Content-Range": f"bytes {start}-{end}/{size}",
+                                      "Content-Length": str(end - start + 1)})
+
+
+def _transcode_cache_key(src: Path) -> str:
+    st = src.stat()
+    h = hashlib.sha1(f"{src.resolve()}|{st.st_mtime_ns}|{st.st_size}".encode()).hexdigest()[:24]
+    return f"{h}.opus"
+
+
+def _trim_transcode_cache() -> None:
+    try:
+        TRANSCODE_DIR.mkdir(parents=True, exist_ok=True)
+        files = sorted(TRANSCODE_DIR.glob("*.opus"), key=lambda p: p.stat().st_mtime)
+        total = sum(p.stat().st_size for p in files)
+        while files and total > TRANSCODE_CACHE_BYTES:
+            old = files.pop(0)
+            try:
+                total -= old.stat().st_size
+                old.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+def _transcode_to_opus(src: Path) -> Path | None:
+    """ffmpeg → cached opus. None when ffmpeg missing/failed."""
+    import shutil
+
+    if not shutil.which("ffmpeg"):
+        return None
+    try:
+        TRANSCODE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    out = TRANSCODE_DIR / _transcode_cache_key(src)
+    if out.exists() and out.stat().st_size > 1000:
+        return out
+    tmp = out.with_suffix(".tmp.opus")
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(src), "-vn", "-c:a", "libopus", "-b:a", "128k", str(tmp)],
+            capture_output=True, timeout=180,
+        )
+        if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 1000:
+            tmp.replace(out)
+            _trim_transcode_cache()
+            return out
+        tmp.unlink(missing_ok=True)
+    except (OSError, subprocess.SubprocessError):
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return None
+
+
+@app.get("/audio", dependencies=[Depends(require_auth)])
+async def audio(file: str, request: Request):
+    """Playable audio for the browser mini-player.
+
+    Query `file`: basename, DATA_DIR-relative, or absolute /data path
+    (same resolution as tag/verify). Native formats stream directly;
+    wma/wv/ape/aiff/alac/mp2 transcode to cached opus. Others → 415,
+    ffmpeg failure → 422 (web shows a toast; original stays downloadable).
+    """
+    resolved = _resolve_or_404(file)
+    if isinstance(resolved, JSONResponse):
+        return resolved
+    ext = resolved.suffix.lstrip(".").lower()
+    if ext in AUDIO_TRANSCODE_EXTS:
+        out = await asyncio.to_thread(_transcode_to_opus, resolved)
+        if out is None:
+            return JSONResponse({"detail": f"cannot transcode .{ext} for browser playback"}, status_code=422)
+        return _ranged_audio_response(out, request, "audio/ogg", f"{resolved.stem}.opus")
+    if ext in AUDIO_NATIVE_EXTS:
+        return _ranged_audio_response(resolved, request, AUDIO_MIME[ext], resolved.name)
+    return JSONResponse({"detail": f".{ext or '?'} is not playable in the browser"}, status_code=415)

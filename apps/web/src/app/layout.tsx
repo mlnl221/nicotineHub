@@ -22,6 +22,8 @@ import { ProfileProvider } from "@/lib/profile-tabs";
 import { RoomsProvider } from "@/lib/rooms";
 import { PrivateChatProvider } from "@/lib/privateChat";
 import { ReconnectBanner } from "@/components/ReconnectBanner";
+import { PlayerProvider } from "@/lib/player/store";
+import { MiniPlayer } from "@/components/player/MiniPlayer";
 
 export const metadata: Metadata = {
   title: "Nicotine Hub",
@@ -99,7 +101,10 @@ export default function RootLayout({
                                 <ExitDialogHandler />
                                 <WindowGeometrySync />
                                 <NowPlayingSync />
+                                <PlayerProvider>
                                 {children}
+                                <MiniPlayer />
+                                </PlayerProvider>
                                 <ToastHost />
                                 <GlobalContextMenu />
                               </SpectrumProvider>

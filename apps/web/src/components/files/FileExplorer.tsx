@@ -13,6 +13,8 @@ import { bulkVerify, bulkAnalyze, bulkRequestSpectrum, verifyFile, analyzeFile, 
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { fileExplorerDirMenu, fileExplorerMenu } from "@/lib/context-menu/menus";
 import { useSpectrum } from "@/lib/spectrum";
+import { usePlayer } from "@/lib/player/store";
+import { dataFilePlayUrl, formatLabelOf, splitArtistTitle, toast } from "@/lib/player/urls";
 import { createPortal } from "react-dom";
 
 function formatSize(bytes: number): string {
@@ -56,6 +58,17 @@ export function FileExplorer({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tagFile, setTagFile] = useState<string | null>(null);
+  const { play } = usePlayer();
+
+  const playFile = useCallback((absPath: string, name: string) => {
+    const target = dataFilePlayUrl(absPath);
+    if (!target) {
+      toast("Not playable", `${name} cannot play in the browser — download it instead.`);
+      return;
+    }
+    const { artist, title } = splitArtistTitle(name);
+    play({ title, artist, src: target.url, formatLabel: formatLabelOf(name), transcoding: target.viaWorker });
+  }, [play]);
   const [selectMode, setSelectMode] = useState(false);
   const bulk = useBulkSelection();
   const [bulkEditor, setBulkEditor] = useState(false);
@@ -484,6 +497,16 @@ export function FileExplorer({
                 {isAudio && !selectMode ? (
                   <button
                     type="button"
+                    onClick={() => playFile(e.path, e.name)}
+                    className="inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 font-label text-xs font-medium text-on-primary"
+                    title="Play in browser"
+                  >
+                    <span className="material-symbols-outlined text-[14px]" style={{ fontVariationSettings: "'FILL' 1" }}>play_arrow</span> Play
+                  </button>
+                ) : null}
+                {isAudio && !selectMode ? (
+                  <button
+                    type="button"
                     onClick={() => setTagFile(e.path)}
                     className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs hover:bg-surface-variant"
                     title="Edit tags (worker)"
@@ -559,6 +582,7 @@ export function FileExplorer({
               onVerify: isAudio ? () => handleSingleVerify(e.path) : undefined,
               onAnalyze: isAudio ? () => handleSingleAnalyze(e.path) : undefined,
               onSpectrum: isAudio ? () => handleSingleSpectrum(e.path) : undefined,
+              onPlay: isAudio ? () => playFile(e.path, e.name) : undefined,
             });
           })()}
           onClose={() => setMenuAnchor(null)}
