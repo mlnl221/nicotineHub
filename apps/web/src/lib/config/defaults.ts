@@ -96,6 +96,7 @@ export interface Settings {
     buddyshared: SharedFolder[];
     trustedshared: SharedFolder[];
     share_filters: string[];
+    exclusions: string[];
     rescanonstartup: boolean;
     rescan_shares_daily: boolean;
     rescan_shares_hour: number;
@@ -301,6 +302,7 @@ export const defaults: Settings = {
     buddyshared: [],
     trustedshared: [],
     share_filters: [".*", ".*\\", "@eaDir\\", "#recycle\\", "#snapshot\\", "desktop.ini", "Thumbs.db"],
+    exclusions: [],
     rescanonstartup: true,
     rescan_shares_daily: true,
     rescan_shares_hour: 0,

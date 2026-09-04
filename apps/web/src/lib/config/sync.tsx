@@ -22,6 +22,7 @@ export function ConfigBridgeSync() {
         buddyshared: settings.transfers.buddyshared,
         trustedshared: settings.transfers.trustedshared,
         share_filters: settings.transfers.share_filters,
+        exclusions: settings.transfers.exclusions,
         rescanonstartup: settings.transfers.rescanonstartup,
         rescan_shares_daily: settings.transfers.rescan_shares_daily,
         rescan_shares_hour: settings.transfers.rescan_shares_hour,

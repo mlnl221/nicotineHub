@@ -489,6 +489,14 @@ export class SoulseekSession {
     this.shareDB.setShareFilters(filters);
   }
 
+  setExclusions(patterns: string[]) {
+    this.shareDB.setExclusions(patterns);
+  }
+
+  async previewShares(exclusions?: string[]): Promise<{ counts: { dirs: number; files: number }; sample: string[]; excludedCount: number; secretHits: string[] }> {
+    return this.shareDB.previewWithExclusions(exclusions);
+  }
+
   setWishlistTerms(terms: string[]) {
     this.wishlistTerms = terms.slice();
     this.wishlistIndex = 0;

@@ -1343,11 +1343,23 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (data.type === "shares:rescan") {
         const session = requireLogin(); if (!session) return;
         (session as unknown as { rescanShares: () => Promise<unknown> }).rescanShares().then((folders: unknown) => {
-          const sdb = (session as unknown as { shareDBInstance: { getSharedCounts: () => { dirs:number; files:number }; getUnavailableShares: () => [string,string][] } }).shareDBInstance;
+          const sdb = (session as unknown as { shareDBInstance: { getSharedCounts: () => { dirs:number; files:number }; getUnavailableShares: () => [string,string][]; getSecretHits: (n?: number) => string[] } }).shareDBInstance;
           const counts = sdb.getSharedCounts();
           const unavailable = sdb.getUnavailableShares();
+          const secretHits = sdb.getSecretHits(20);
           if (unavailable.length) logger.warn("bridge", "rescan: some shares unavailable on bridge FS", { unavailable, counts });
-          ws.send(JSON.stringify({ type: "shares:rescanned", folders, counts, unavailable }));
+          if (secretHits.length) logger.warn("bridge", "rescan: secret-like files exposed", { secretHits });
+          ws.send(JSON.stringify({ type: "shares:rescanned", folders, counts, unavailable, secretHits }));
+        }).catch((e: Error) => ws.send(errorMessage(e.message)));
+        return;
+      }
+
+      if (data.type === "shares:preview") {
+        const session = requireLogin(); if (!session) return;
+        const rawExcl = (parsed as unknown as { exclusions?: unknown }).exclusions;
+        const exclusions = Array.isArray(rawExcl) ? (rawExcl as unknown[]).filter((s) => typeof s === "string").slice(0, 500) as string[] : undefined;
+        (session as unknown as { previewShares: (e?: string[]) => Promise<{ counts: { dirs:number; files:number }; sample: string[]; excludedCount: number; secretHits: string[] }> }).previewShares(exclusions).then((res) => {
+          ws.send(JSON.stringify({ type: "shares:preview:result", ...res }));
         }).catch((e: Error) => ws.send(errorMessage(e.message)));
         return;
       }
@@ -1385,6 +1397,12 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             }
             if (key === "share_filters" && Array.isArray(value)) {
               (session as unknown as { setShareFilters?: (f: string[]) => void })?.setShareFilters?.(value as string[]);
+            }
+            if (key === "exclusions" && Array.isArray(value)) {
+              const arr = (value as unknown[]).filter((s) => typeof s === "string") as string[];
+              if (arr.length <= 500) {
+                (session as unknown as { setExclusions?: (f: string[]) => void })?.setExclusions?.(arr);
+              }
             }
             if (key === "downloadfilters" || key === "enablefilters") {
               tm?.setConfig?.({ [key]: value });
