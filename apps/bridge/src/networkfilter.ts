@@ -31,12 +31,44 @@ export function ipMatchesPattern(ip: string, pattern: string): boolean {
   return true;
 }
 
+const userBanRegexCache = new Map<string, RegExp | null>();
+
+function getUserBanRegex(pattern: string): RegExp | null {
+  if (userBanRegexCache.has(pattern)) return userBanRegexCache.get(pattern)!;
+  if (!pattern.includes("*") && !pattern.includes("?")) {
+    userBanRegexCache.set(pattern, null);
+    return null;
+  }
+  if (pattern.length > 64 || userBanRegexCache.size > 500) {
+    return null;
+  }
+  try {
+    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+    const re = new RegExp("^" + escaped + "$");
+    userBanRegexCache.set(pattern, re);
+    return re;
+  } catch {
+    userBanRegexCache.set(pattern, null);
+    return null;
+  }
+}
+
 export function isUserBanned(
   username: string,
   banlist: Set<string> | string[],
 ): boolean {
   const set = banlist instanceof Set ? banlist : new Set(banlist);
-  return set.has(username);
+  if (set.has(username)) return true;
+  // glob path — case-sensitive (Soulseek usernames are case-sensitive)
+  for (const pat of set) {
+    const re = getUserBanRegex(pat);
+    if (!re) continue;
+    if (re.test(username)) return true;
+  }
+  // also handle array input where Set may not contain all? but set already has all
+  // for array without Set dedup, we already covered via Set; but if banlist was array with duplicates, Set covers
+  // fallback for array that wasn't deduped due to Set conversion? already handled
+  return false;
 }
 
 export function isIpBlocked(

@@ -65,6 +65,7 @@ export interface BridgeTransfer {
   status: TransferStatus;
   queuePosition: number | null;
   isUpload: boolean;
+  isSlopLike?: boolean;
   token?: number;
   // internal
   _timer?: Timer;
@@ -235,6 +236,37 @@ export class TransferManager {
   setConfig(partial: Partial<typeof this.config>) {
     Object.assign(this.config, partial);
     try { const ul = this.getUploadLimit(); if (ul) this.uploadBucket.configure(ul); const dl = this.getDownloadLimit(); if (dl) this.downloadBucket.configure(dl); } catch {}
+  }
+
+  private isSlopUsername(username: string): boolean {
+    return /^[A-Z0-9]{8,12}$/.test(username);
+  }
+
+  private getSlopStats(username: string): { files: number; folders: Set<string> } {
+    let files = 0;
+    const folders = new Set<string>();
+    for (const t of this.transfers.values()) {
+      if (t.username !== username || !t.isUpload) continue;
+      if (t.status !== "Queued") continue;
+      files++;
+      const idx = t.virtualPath.lastIndexOf("\\");
+      const folder = idx >= 0 ? t.virtualPath.slice(0, idx) : t.virtualPath;
+      folders.add(folder);
+    }
+    return { files, folders };
+  }
+
+  private updateSlopForUser(username: string) {
+    if (!this.isSlopUsername(username)) {
+      let changed = false;
+      for (const t of this.transfers.values()) if (t.username === username && t.isSlopLike) { t.isSlopLike = false; changed = true; this.emit(t); }
+      return;
+    }
+    const { files, folders } = this.getSlopStats(username);
+    const isSlop = files > 0 && files <= 60 && folders.size === 10;
+    for (const t of this.transfers.values()) if (t.username === username) {
+      if (!!t.isSlopLike !== isSlop) { t.isSlopLike = isSlop; this.emit(t); }
+    }
   }
 
   getStatsSummary() {
@@ -673,7 +705,7 @@ export class TransferManager {
       geoblock: this.config.geoblock,
       geoblockcc: this.config.geoblockcc,
     });
-    if (this.config.banlist.includes(username) || block.blocked) {
+    if (block.blocked) {
       const isGeo = block.reason === "Geoblocked";
       const banMsg = isGeo ? (this.config.usecustomgeoblock ? this.config.customgeoblock : "Sorry, your country is blocked") : (this.config.usecustomban ? this.config.customban : "Banned, don't bother retrying");
       // If geoblock with empty IP, defer — allow queue and re-check later via handlePeerAddressResolved
@@ -808,6 +840,7 @@ export class TransferManager {
     };
     this.transfers.set(id, t);
     this.emit(t);
+    this.updateSlopForUser(username);
     this.emitStats();
     this.persist();
     // schedule upload queue check (FIFO) after 100ms
@@ -907,6 +940,7 @@ export class TransferManager {
     this.globalUpdateCounter++;
     this.userUpdateCounter.set(candidate.username, this.globalUpdateCounter);
     this.emit(candidate);
+    this.updateSlopForUser(candidate.username);
     this.emitStats();
     this.statsManager.recordUploadStarted();
     const token = this.tokenCounter++ >>> 0;

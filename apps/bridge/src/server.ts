@@ -1525,12 +1525,24 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           } else if (section === "plugins" && key === "enable") {
             (pluginManager as unknown as { setGlobalEnable?: (b: boolean) => void }).setGlobalEnable?.(Boolean(value));
             logger.info("bridge", `plugins ${Boolean(value) ? "enabled" : "disabled"} via config`, { enable: Boolean(value) });
-          } else if (section === "worker" && ["discogs_token", "tidal_token", "tidal_country", "qobuz_app_id", "qobuz_user_auth_token"].includes(key)) {
+          } else if (section === "worker" && ["discogs_token", "tidal_token", "tidal_country", "qobuz_app_id", "qobuz_user_auth_token", "media_scan_url", "media_scan_token"].includes(key)) {
             // Worker metadata tokens — write-only API. Merged into DATA_DIR/worker.json
             // (0600), read by the worker (env wins). Values never logged or returned.
-            if (typeof value !== "string" || value.length > 512) {
-              ws.send(errorMessage("Worker token must be a string ≤512 chars (empty clears it)."));
+            const maxLen = key === "media_scan_url" ? 2048 : 512;
+            if (typeof value !== "string" || value.length > maxLen) {
+              ws.send(errorMessage(`Worker value must be a string ≤${maxLen} chars (empty clears it).`));
               return;
+            }
+            if (key === "media_scan_url" && value) {
+              const v = value.trim();
+              if (!v.toLowerCase().startsWith("http://") && !v.toLowerCase().startsWith("https://")) {
+                ws.send(errorMessage("MEDIA_SCAN_URL must start with http:// or https://"));
+                return;
+              }
+              try {
+                const u = new URL(v);
+                if (u.username || u.password) { ws.send(errorMessage("MEDIA_SCAN_URL must not contain credentials")); return; }
+              } catch { ws.send(errorMessage("MEDIA_SCAN_URL invalid URL")); return; }
             }
             try {
               const p = join(CONFIG_DIR, "worker.json");

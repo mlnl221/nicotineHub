@@ -32,7 +32,7 @@ def test_health(client):
     assert body["ok"] is True
     for src in ("discogs", "bandcamp", "apple", "qobuz", "tidal", "musicbrainz", "deezer", "beatport"):
         assert src in body["sources"]
-    assert set(body["auth"]) == {"discogs", "tidal", "qobuz"}
+    assert set(body["auth"]) == {"discogs", "tidal", "qobuz", "media_scan"}
 
 
 def test_tokens_env_wins_and_json_fallback(monkeypatch, tmp_path):
@@ -46,7 +46,7 @@ def test_tokens_env_wins_and_json_fallback(monkeypatch, tmp_path):
     assert tokens.get("DISCOGS_TOKEN") == "from-json"
     monkeypatch.setenv("DISCOGS_TOKEN", "from-env")
     assert tokens.get("DISCOGS_TOKEN") == "from-env"
-    assert tokens.configured() == {"discogs": True, "tidal": True, "qobuz": False}
+    assert tokens.configured() == {"discogs": True, "tidal": True, "qobuz": False, "media_scan": False}
     tokens._cache, tokens._cache_mtime = {}, -1.0
 
 
@@ -151,3 +151,25 @@ def test_tag_and_verify_wav(client, tmp_path):
     v = client.post("/verify", json={"fileName": "plain.wav"})
     assert v.status_code == 200
     assert set(v.json()) == {"flacOk", "upconvert", "mqa", "logScore", "logChecksum", "durationMismatch"}
+
+
+def test_scan_not_configured(client):
+    r = client.post("/scan", json={"fileName": "track.flac", "size": 123, "username": "peer", "virtualPath": "Music\\track.flac", "transferId": "peer::Music\\track.flac", "downloadUrl": "/files/1"})
+    assert r.status_code == 422
+    assert "not configured" in r.text
+
+
+def test_scan_validates_url(monkeypatch, tmp_path):
+    client_tmp = tmp_path / "data"
+    client_tmp.mkdir(parents=True)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("SPECTRUM_DIR", str(tmp_path / "spectra"))
+    monkeypatch.setenv("MEDIA_SCAN_URL", "ftp://example.com/hook")
+    tokens._cache, tokens._cache_mtime = {}, -1.0
+    monkeypatch.setattr(worker_app, "worker_token", lambda: "")
+    with TestClient(worker_app.app) as c:
+        r = c.post("/scan", json={"fileName": "track.flac"})
+        assert r.status_code == 422
+        assert "invalid" in r.text.lower()
+    monkeypatch.delenv("MEDIA_SCAN_URL", raising=False)
+    tokens._cache, tokens._cache_mtime = {}, -1.0

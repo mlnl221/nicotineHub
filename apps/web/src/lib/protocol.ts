@@ -220,6 +220,7 @@ export interface Transfer {
   status: TransferStatus;
   queuePosition: number | null;
   isUpload: boolean;
+  isSlopLike?: boolean;
 }
 
 export interface TransferUpdateMessage {

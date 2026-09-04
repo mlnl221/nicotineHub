@@ -1,6 +1,6 @@
 # r/Soulseek → Nicotine Hub Improvement Plan — 2026-09-02 (moved to proposals 2026-09-03)
 
-> **Status: PROPOSAL — partial.** Worker scaffold + scrape/spectrum/tag/verify/analyze landed in `5c65ea9` + **share safety (exclusions + preview + secret heuristic) landed in `feat/share-safety`** (record: `docs/architecture.md` `## Worker` + `apps/bridge/src/shares.ts:59` + `apps/web/src/components/settings/SharesSection.tsx`); worker plan doc deleted. Unbuilt backlog: **B ProveIt, C wildcard/slop, E webhook, H HoneyPot** (A DONE).
+> **Status: PROPOSAL — partial.** Worker scaffold + scrape/spectrum/tag/verify/analyze landed in `5c65ea9` + **share safety (exclusions + preview + secret heuristic) landed in `feat/share-safety`** + **P1 wildcard bans + slop badge + worker webhook landed in `feat/share-safety` (second push)** (record: `docs/architecture.md` `## Worker` + `apps/bridge/src/networkfilter.ts:34` + `apps/worker/app.py:754` + `apps/web/src/components/settings/WorkerSection.tsx`); worker plan doc deleted. Unbuilt backlog: **B ProveIt, H HoneyPot** (A, C, E DONE; D,F,G DONE).
 > **Decisions locked 2026-09-02:** scope **Full P0–P2** (P3 deferred), ProveIt `hash(user+week)` rotating.
 > **Sources:** `r_soulseek_posts.jsonl` (4763) + `r_soulseek_comments.jsonl` (50604) in `~/projects/improvement_docs/`
 > **Snapshot:** retrieved_on up to 2026, covers 2002–2026 nostalgia through TikTok + vibe-coded slop era.
@@ -69,26 +69,26 @@ Summary: separate Python FastAPI service `apps/worker:8789` (own code, guided by
 
 ---
 
-### 3.2 Anti-leech / anti-slop — P0+P1 (stay in bridge)
+### 3.2 Anti-leech / anti-slop — P0+P1 (P1 wildcard+slop DONE in `feat/share-safety`)
 
 **Posts:** `1rzsds8` 55/163, `1s8igsv` 39/57 `aurral_*`, `1oeg231` 79/37 `generate_random_credentials: [A-Za-z0-9]{8}`, `1n4vhrz` 94/38, `1oevauz` 96/26, `1tipagj` 18/28, `1s232m7` 26/9 ProveIt, `1tglltw` 16/27, `1noys3w` 0/33 HoneyPot.
 
 **Comments:** `1rzsds8:65` (slskd author) reputation, `1rzsds8:42` captcha word, `1rzsds8:20` `50 files/10 folders` slop signature (`1ulos96:19` batchdl artifact), `1tipagj:9` ProveIt, `1s232m7:3` “bans & messages”.
 
-**Has:** `leech_detector` + `banlist` + `UploadsSection` limits. Missing: ProveIt per-user, wildcard, honeypot badge.
+**Has:** `leech_detector` + `banlist` + `UploadsSection` limits. **P1 DONE:** `isUserBanned` now glob `*`/`?` case-sensitive (`networkfilter.ts:34`) + `TransferManager` queue aggregate `isSlopLike` (`transfers.ts:236`) + `TransferCard` pill (`TransferCard.tsx:90`).
 
 **Lazy (worker not needed, keep SLSK loop tight):**
 
-- **ProveIt `hash(user+week)` (P0 locked):** `apps/bridge/src/plugins/builtin/proveIt.ts` (≈80 lines, copy `leech_detector.ts`). `shouldBlockUser` → if unverified, `UploadDenied 50` + `MessageUser 22` word `hash(username+ISOWeek)[0:6]` (`djb2`/`sha256`). `verified.json` `{user, week}` valid 4 weeks, then re-challenge. No globals.
-- **Wildcard+slop badge (P1):** `banlist` glob `aurral_*` (`*`→`.*`) in `networkfilter.ts:70`, uploads `isSlopLike = pending.files<=60 && folders==10 && /^[A-Z0-9]{8,12}$/` badge.
-- **HoneyPot (P2 in-scope):** `if (filename==="!banned.txt") ban(user)` opt-in off.
+- **ProveIt `hash(user+week)` (P0 locked):** `apps/bridge/src/plugins/builtin/proveIt.ts` (≈80 lines, copy `leech_detector.ts`). `shouldBlockUser` → if unverified, `UploadDenied 50` + `MessageUser 22` word `hash(username+ISOWeek)[0:6]` (`djb2`/`sha256`). `verified.json` `{user, week}` valid 4 weeks, then re-challenge. No globals. **Still OPEN (B).**
+- **Wildcard+slop badge (P1 DONE):** `banlist` glob `aurral_*` (`*`→`.*`) in `networkfilter.ts:34`, uploads `isSlopLike = queued.files<=60 && folders==10 && /^[A-Z0-9]{8,12}$/` badge (`TransferCard.tsx:90`).
+- **HoneyPot (P2 in-scope):** `if (filename==="!banned.txt") ban(user)` opt-in off. **Still OPEN (H).**
 
 ```
 → skipped: community blocklist sync, reputation, country ban
 add when: slop still degrades throughput despite ProveIt
 ```
 
-**Files:** `apps/bridge/src/plugins/builtin/leech_detector.ts`, `server.ts:591`, `networkfilter.ts:70`, `app/uploads/page.tsx`.
+**Files:** `apps/bridge/src/plugins/builtin/leech_detector.ts`, `server.ts:591`, `networkfilter.ts:34`, `app/uploads/page.tsx`, `transfers.ts:236`, `protocol.ts:218`.
 
 ---
 
@@ -98,17 +98,17 @@ add when: slop still degrades throughput despite ProveIt
 
 ---
 
-### 3.4 Finished-download webhook — P1 (bridge or worker)
+### 3.4 Finished-download webhook — P1 (DONE via worker `POST /scan` in `feat/share-safety`)
 
 **Posts:** `1iu68qz` 23/30 (Synology vs QNAP), `1k9uk09` 7/28, `14ke746` 57/14, `1sfl7zs` 18/9 Feishin.
 
-**Lazy:** `MEDIA_SCAN_URL` env + Settings Downloads webhook. On `TransferManager:Finished` (`transfers.ts:991`) `fetch(webhook,{method:"POST"})` 5 s fire-and-forget. Keep in bridge (simpler) or host in worker `POST /scan` that worker calls `fetch(MEDIA_SCAN_URL)` — either works; pick bridge to avoid worker dependency for trivial fetch.
+**DONE `feat/share-safety`:** worker `POST /scan` (`apps/worker/app.py:754` `ScanIn` + `tokens.py:media_scan_url` 0600) validates `http(s)` + no creds, forwards `{event:"download.finished",eventType:"Download",fileName,size,username,virtualPath,destinationPath,transferId,downloadUrl}` to `MEDIA_SCAN_URL` with `Bearer <MEDIA_SCAN_TOKEN>` (5 s timeout, fire-and-forget). Web `transfers.tsx:201` `transfer:finished`/`transfer:update Finished` → `workerFetch("/scan")` (tab-open only, bridge stays SLSK-only). Settings → Worker → Media automation card (`WorkerSection.tsx:135`). Bridge `server.ts:1528` now accepts `media_scan_url`/`media_scan_token` (≤2048 chars, `http(s)` check) into `worker.json`.
 
 ```
-→ skipped: DLNA server, Symfonium inside Hub
+→ skipped: DLNA server, Symfonium inside Hub (worker webhook covers Plex/Navidrome/n8n)
 ```
 
-**Files:** `apps/bridge/src/transfers.ts:904`, `apps/web/src/components/settings/DownloadsSection.tsx:7`.
+**Files:** `apps/worker/app.py:754`, `apps/worker/tokens.py:17`, `apps/bridge/src/server.ts:1528`, `apps/web/src/lib/transfers.tsx:201`, `apps/web/src/components/settings/WorkerSection.tsx:135`.
 
 ---
 
@@ -145,14 +145,14 @@ add when: slop still degrades throughput despite ProveIt
 | **0 — Worker scaffold** | `apps/worker/` FastAPI own impl (do not copy) + `POST /scrape` (8 sources) + `GET /health` + `compose.yaml` `worker:8789` | **DONE `5c65ea9`** — `docs/architecture.md` `## Worker` | `curl -sf http://localhost:8789/health \| jq .sources` → 8 sources |
 | **A — Share safety (P0)** | `defaults.transfers.exclusions[]` + `SharesSection` preview modal + `shares.ts:scanFsShares` exclude (`\.env\|id_rsa\|*.key\|wallet\|.git` banner) | **DONE `feat/share-safety`** — `shares.ts:59` + `sync.tsx:25` + `server.ts:1343` preview + `SharesSection.tsx:733` | `/tmp` with `.env` → preview `secretHits`, `bun test` 116 pass + `bun run build` + Playwright `Settings→Shares` → `Excluded paths` + `Preview` modal |
 | **B — ProveIt `hash(user+week)` (P0)** | `apps/bridge/src/plugins/builtin/proveIt.ts`, `verified.json` 4-week TTL, `server.ts:591` bypass | **OPEN** | Unverified → `UploadDenied 50`+PM `abc123`; correct word → success; week rolls |
-| **C — Wildcard+slop badge (P1)** | `networkfilter.ts` glob (`*`→`.*` user glob; IP `*` already) + `uploads/page.tsx` badge `slop-like` | **OPEN** | `aurral_*` blocks, `50/60`+`[A-Z0-9]{8}` badge |
+| **C — Wildcard+slop badge (P1)** | `networkfilter.ts` glob (`*`→`.*` user glob; IP `*` already) + `transfers.ts` `isSlopLike` + `TransferCard` pill | **DONE `feat/share-safety`** — `networkfilter.ts:34` + `transfers.ts:236` + `protocol.ts:218` | `aurral_*` blocks (case-sensitive), `50/60`+10 folders+`[A-Z0-9]{8,12}` → `Slop-like` badge in Uploads |
 | **D — Scrape engine (P1)** | `apps/worker` `POST /scrape` + web `SearchBar→workerFetch` + delete `linkParser.ts` | **DONE `5c65ea9`** — `docs/architecture.md` `## Worker` | Paste Discogs URL in global search → `scrapeRelease` → `query` |
-| **E — Webhook (P1)** | `MEDIA_SCAN_URL` in `transfers.ts:991` (or worker `POST /scan`) | **OPEN** | Finish → `docker logs bridge` shows `POST` |
+| **E — Webhook (P1)** | `worker POST /scan` (was `MEDIA_SCAN_URL` in `transfers.ts:991`) | **DONE `feat/share-safety`** — `worker/app.py:754` + `WorkerSection` Media automation + `transfers.tsx:201` relay | Finish (tab open) → worker forwards POST (5s, Bearer), `curl /scan` → `media_scan:true` |
 | **F — Migrate spectrum (P2)** | `apps/worker` `POST /spectrum/request` + `GET /spectrum/{stem}/full\|zoom` + web `workerHttpBase()` | **DONE `5c65ea9`** — `docs/architecture.md` `## Worker` + `docs/spectrum.md` | Finished flac → `Analyze Spectrum` → Full+Zoom PNGs, `curl -I .../full` 304 |
 | **G — Tag/verify/analyze (P2 opt)** | `apps/worker` `POST /tag|verify|analyze` (+ bulk/write/scrape) | **DONE (subset) `5c65ea9`** — `docs/architecture.md` `## Worker` | `curl -X POST :8789/verify` → `flacOk` honest; rest `null` until spectral checks |
 | **H — HoneyPot (P2)** | `honeyPot.ts` plugin `!banned.txt → ban` | **OPEN** | `!banned.txt` → ban |
 
-Deferred P3: `POST /notify` in worker or bridge (still deferred — no code). Unbuilt backlog: **B, C, E, H** (A DONE).
+Deferred P3: `POST /notify` in worker or bridge (still deferred — no code). Unbuilt backlog: **B, H** (A, C, D, E, F, G DONE).
 
 Each phase: git worktree → `bun test && bun run build` → `docker compose up --build` (worker when needed) → `curl -sf http://localhost:8789/health \| jq` + `cp apps/web/.env.example apps/web/.env`. Doc sync after build: `cp docs/proposals/r_soulseek_improvement_plan.md ~/projects/improvement_docs/r_soulseek_improvement_plan.md`.
 
@@ -195,6 +195,6 @@ Minor: `MEDIA_SCAN_URL` → `MEDIA_SCAN_TOKEN` Bearer if needed; `WORKER_TOKEN` 
 
 ---
 
-*Next (unbuilt P0–P2): **A DONE** `feat/share-safety` → **B ProveIt** `proveIt.ts` `hash(user+week)` → **C wildcard+slop** `networkfilter.ts` glob + `uploads/page.tsx` badge → **E webhook** `transfers.ts:991` `MEDIA_SCAN_URL` → **H HoneyPot** `!banned.txt`. Worker (0/D/F/G) already landed in `5c65ea9`; see `docs/architecture.md` `## Worker`.*
+*Next (unbuilt P0–P2): **A DONE, C DONE, E DONE** `feat/share-safety` → **B ProveIt** `proveIt.ts` `hash(user+week)` → **H HoneyPot** `!banned.txt`. Worker (0/D/F/G) already landed in `5c65ea9`; see `docs/architecture.md` `## Worker`.*
 
 (End of file - total 205 lines)
