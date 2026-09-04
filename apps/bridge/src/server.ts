@@ -14,7 +14,7 @@
  *   client -> server: { type:"chat:private", action:"send", username, message }
  */
 
-import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync, chmodSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync, chmodSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { SoulseekSession } from "./session.ts";
@@ -241,7 +241,7 @@ try { mkdirSync(join(CONFIG_DIR, "logs", "private"), { recursive: true }); } cat
 // One-time migration: copy config files from old DATA_DIR to new CONFIG_DIR if CONFIG_DIR is separate and empty
 try {
   if (CONFIG_DIR !== DATA_DIR) {
-    const cfgFiles = ["listen_port", "host.env", "upnp_enabled", "worker.json", "shares.json", "browse.cache", "downloads.json", "transfers.json", "statistics.json", "plugins.json", "diagnostics.log"];
+    const cfgFiles = ["listen_port", "host.env", "upnp_enabled", "worker.json", "shares.json", "browse.cache", "downloads.json", "transfers.json", "statistics.json", "plugins.json", "diagnostics.log", "settings.json"];
     for (const f of cfgFiles) {
       const src = join(DATA_DIR, f);
       const dst = join(CONFIG_DIR, f);
@@ -303,6 +303,37 @@ try {
     }
   }
 } catch {}
+
+// Central durable settings store — every config:update (except worker secrets)
+// merges here so ALL preferences (incl. ui/appearance) survive bridge restarts
+// and resync to new browsers via config:get. Special files (listen_port,
+// shares.json, worker.json, plugins.json) remain authoritative for their domains.
+let PERSISTED_SETTINGS: Record<string, Record<string, unknown>> = {};
+try {
+  const _p = join(CONFIG_DIR, "settings.json");
+  if (existsSync(_p)) {
+    const _raw = JSON.parse(readFileSync(_p, "utf8")) as unknown;
+    if (_raw && typeof _raw === "object" && !Array.isArray(_raw)) {
+      PERSISTED_SETTINGS = _raw as Record<string, Record<string, unknown>>;
+    }
+  }
+} catch {}
+function persistSetting(section: string, key: string, value: unknown) {
+  try {
+    if (section === "worker") return; // secrets stay in worker.json (0600), never in settings.json
+    const cur = PERSISTED_SETTINGS[section];
+    PERSISTED_SETTINGS = {
+      ...PERSISTED_SETTINGS,
+      [section]: { ...(cur && typeof cur === "object" ? cur : {}), [key]: value },
+    };
+    const p = join(CONFIG_DIR, "settings.json");
+    const tmp = `${p}.tmp-${process.pid}`;
+    writeFileSync(tmp, JSON.stringify(PERSISTED_SETTINGS));
+    renameSync(tmp, p); // atomic
+  } catch (e) {
+    logger.warn("server", "settings.json persist failed", { section, key, error: (e as Error).message });
+  }
+}
 
 // Helper to collect current PortMapper status from active sessions (or global defaults)
 function getGlobalPortMapperStatus(): { enabled: boolean; active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; hasPort: boolean } {
@@ -1454,6 +1485,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                   // Fire-and-forget, report via WS — trigger fresh Soulseek reconnect (WS stays open)
                   (sess.setListenPort(newPort) as Promise<void>).then(() => {
                     logger.info("server", "listen port updated via config", { oldPort: prevPort, newPort });
+                    persistSetting(section, "portrange", [newPort, newPort]);
                     try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: newPort })); } catch {}
                     // Notify all WS clients of new health (so UI Save shows success without poll)
                     try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: newPort, configDir: CONFIG_DIR, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: getGlobalPortMapperStatus() } })); } catch {}
@@ -1466,6 +1498,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                   }).catch((e: Error) => {
                     // Revert global on bind failure
                     LISTEN_PORT = prevPort;
+                    persistSetting(section, "portrange", [prevPort, prevPort]);
                     try { writeFileSync(join(CONFIG_DIR, "listen_port"), String(prevPort)); } catch {}
                     try { writeFileSync(join(CONFIG_DIR, "host.env"), `LISTEN_PORT=${prevPort}\n`); } catch {}
                     logger.warn("server", "listen port change failed, reverted", { newPort, error: e.message });
@@ -1503,6 +1536,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
               try {
                 sess?.setNetworkInterface?.(newIface);
                 logger.info("server", `interface set to ${newIface || "default (0.0.0.0)"}`, { iface: newIface || "default", username: (session as unknown as { username?: string })?.username });
+                persistSetting(section, key, newIface);
                 // Send config updated + health so UI can reflect immediate bind change (WS stays open, Soulseek reconnects if loggedIn)
                 try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: newIface })); } catch {}
                 try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, configDir: CONFIG_DIR, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: getGlobalPortMapperStatus() } })); } catch {}
@@ -1569,10 +1603,17 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             logger.debug("bridge", "server config stored", { key, value: typeof value === "object" ? JSON.stringify(value).slice(0,120) : String(value).slice(0,80) });
           }
           logger.debug("bridge", "config update", { section, key });
+          persistSetting(section, key, value);
           ws.send(JSON.stringify({ type: "config:updated", section, key }));
         } catch (e) {
           ws.send(errorMessage((e as Error).message));
         }
+        return;
+      }
+
+      if (data.type === "config:get") {
+        // Durable settings snapshot for new browsers / post-restart reconcile (no secrets — worker never persisted here)
+        ws.send(JSON.stringify({ type: "config:state", settings: PERSISTED_SETTINGS }));
         return;
       }
 
@@ -1696,6 +1737,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           }
           case "setProfile":
             session.setProfile({ username: session.username, descr: msg.profile.descr, pic: msg.profile.pic ? Buffer.from(msg.profile.pic, "base64") : null, totalupl: msg.profile.totalupl, queuesize: msg.profile.queuesize, slotsavail: msg.profile.slotsavail, uploadallowed: msg.profile.uploadallowed });
+            persistSetting("userinfo", "descr", msg.profile.descr);
+            // ponytail: skip huge embedded pictures in settings.json (re-pushed by web on connect), cap 256KB
+            if (typeof msg.profile.pic === "string" && msg.profile.pic.length <= 256_000) persistSetting("userinfo", "pic", msg.profile.pic);
             break;
         }
         return;

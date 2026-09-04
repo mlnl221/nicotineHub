@@ -2,7 +2,7 @@
 
 import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
-import { SectionCard, ToggleControl, NumberControl, RadioGroupControl, SelectControl, TextFieldControl } from "@/components/settings/controls";
+import { SectionCard, SectionSaveButton, ToggleControl, NumberControl, RadioGroupControl, SelectControl, TextFieldControl } from "@/components/settings/controls";
 
 export function UploadsSection() {
   const { settings, setOption } = useConfig();
@@ -10,7 +10,7 @@ export function UploadsSection() {
 
   return (
     <div className="flex flex-col gap-6">
-      <SectionCard title="Uploads" description="Queueing and bandwidth for files you share. Maps to the bridge upload queue when P2P serving is active.">
+      <SectionCard title="Uploads" description="Queueing and bandwidth for files you share. Maps to the bridge upload queue when P2P serving is active." actions={<SectionSaveButton section="transfers" />}>
         <ToggleControl
           label="Auto-clear finished uploads"
           checked={t.autoclear_uploads}
@@ -146,6 +146,7 @@ export function UploadsSection() {
 
       <SectionCard
         title="HoneyPot bait"
+        actions={<SectionSaveButton section="transfers" />}
         description="Trap for scanners that probe for a known bait file. When a peer requests the bait name, they are banned. Exact basename, case-insensitive. Default off. Buddies/privileged are exempt."
       >
         <ToggleControl

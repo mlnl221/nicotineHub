@@ -4,6 +4,7 @@ import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
 import {
   SectionCard,
+  SectionSaveButton,
   NumberControl,
   ToggleControl,
   TextFieldControl,
@@ -19,6 +20,7 @@ export function SearchesSection() {
       <SectionCard
         title="Search results"
         description="How many results are kept and shown for a query."
+        actions={<SectionSaveButton section="searches" />}
       >
         <NumberControl
           label="Maximum results per search"
@@ -111,6 +113,7 @@ export function SearchesSection() {
       <SectionCard
         title="Default filters"
         description="Filters applied to every new search. Leave blank to disable a filter."
+        actions={<SectionSaveButton section="searches" />}
       >
         <ToggleControl
           label="Enable default filters"

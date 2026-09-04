@@ -2,7 +2,7 @@
 
 import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
-import { SectionCard, ToggleControl, NumberControl, TextFieldControl, RadioGroupControl, SelectControl } from "@/components/settings/controls";
+import { SectionCard, SectionSaveButton, ToggleControl, NumberControl, TextFieldControl, RadioGroupControl, SelectControl } from "@/components/settings/controls";
 
 export function DownloadsSection() {
   const { settings, setOption } = useConfig();
@@ -10,7 +10,7 @@ export function DownloadsSection() {
 
   return (
     <div className="flex flex-col gap-6">
-      <SectionCard title="Downloads" description="How incoming files are handled. Folder paths are browser-local notes; actual saves use the browser download location.">
+      <SectionCard title="Downloads" description="How incoming files are handled. Folder paths are browser-local notes; actual saves use the browser download location." actions={<SectionSaveButton section="transfers" />}>
         <ToggleControl
           label="Auto-clear finished downloads"
           checked={t.autoclear_downloads}
@@ -93,7 +93,7 @@ export function DownloadsSection() {
         />
       </SectionCard>
 
-      <SectionCard title="Download speed">
+      <SectionCard title="Download speed" actions={<SectionSaveButton section="transfers" />}>
         <RadioGroupControl
           label="Speed limit"
           value={t.use_download_speed_limit}
@@ -122,7 +122,7 @@ export function DownloadsSection() {
         />
       </SectionCard>
 
-      <SectionCard title="Download filters">
+      <SectionCard title="Download filters" actions={<SectionSaveButton section="transfers" />}>
         <ToggleControl
           label="Enable download filters"
           description="Skip files matching any filter below."

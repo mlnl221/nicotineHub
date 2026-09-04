@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
 import type { SharedFolder } from "@/lib/config/defaults";
-import { SectionCard, ToggleControl, SelectControl, TextFieldControl } from "@/components/settings/controls";
+import { SectionCard, SectionSaveButton, ToggleControl, SelectControl, TextFieldControl } from "@/components/settings/controls";
 import { useSession } from "@/lib/session";
 
 const FileExplorer = dynamic(() => import("@/components/files/FileExplorer").then((m) => m.FileExplorer), {
@@ -348,6 +348,7 @@ export function SharesSection() {
       <SectionCard
         title="Shared folders"
         description="Folders you share on the Soulseek network. WSL (bun): use absolute WSL paths like /home/user/Music or /mnt/c/Users/you/Music. Docker: browse container /data to add any nested folder. Browser pickers are a fallback."
+        actions={<SectionSaveButton section="transfers" />}
       >
         <div className="py-4 space-y-3">
           <div className="rounded-xl bg-amber-50 px-4 py-3 font-body text-xs leading-relaxed text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
@@ -718,7 +719,7 @@ export function SharesSection() {
         document.body
       )}
 
-      <SectionCard title="Share filters" description="Patterns excluded from shares (case-insensitive, * wildcard). Trailing \ means folder.">
+      <SectionCard title="Share filters" description="Patterns excluded from shares (case-insensitive, * wildcard). Trailing \ means folder." actions={<SectionSaveButton section="transfers" />}>
         <TextFieldControl
           label="Filters"
           description="One pattern per line. Defaults include @eaDir\, #recycle\, desktop.ini, Thumbs.db."

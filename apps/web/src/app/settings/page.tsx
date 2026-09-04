@@ -148,7 +148,7 @@ export default function SettingsPage() {
             Settings
           </h1>
           <p className="mb-6 font-body text-sm text-on-surface-variant dark:text-outline">
-            Preferences for this browser client. Stored locally in your browser.
+            Edits stay local until you press <span className="font-medium">Save</span> on a section — saving stores them in the browser and on the bridge (<span className="font-mono">/config/settings.json</span>) so they survive restarts.
           </p>
 
           {/* Mobile dropdown — grouped select */}

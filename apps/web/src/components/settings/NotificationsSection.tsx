@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useConfig } from "@/lib/config/provider";
-import { SectionCard, ToggleControl } from "@/components/settings/controls";
+import { SectionCard, SectionSaveButton, ToggleControl } from "@/components/settings/controls";
 
 export function NotificationsSection() {
   const { settings, setOption } = useConfig();
@@ -32,6 +32,7 @@ export function NotificationsSection() {
     <SectionCard
       title="Notifications"
       description="Choose which events raise a browser notification or sound. Web Push uses Service Worker when available."
+      actions={<SectionSaveButton section="notifications" />}
     >
       <div className="rounded-xl bg-surface-container-low p-4 flex items-center justify-between gap-4">
         <div>

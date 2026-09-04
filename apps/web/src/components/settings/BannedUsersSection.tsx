@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
-import { SectionCard, ToggleControl, TextFieldControl } from "@/components/settings/controls";
+import { SectionCard, SectionSaveButton, ToggleControl, TextFieldControl } from "@/components/settings/controls";
 import { useSession } from "@/lib/session";
 
 function isIpLike(s: string) {
@@ -34,6 +34,7 @@ export function BannedUsersSection() {
       <SectionCard
         title="Banned users"
         description="Mirrors ban.ui (preferences.py:1507). Users and IPs blocked from your shares/uploads. Wildcards (*, ?) allowed — IPs via pynicotine core.network_filter, usernames exact-case glob (e.g. spammer*, *@bot)."
+        actions={<SectionSaveButton sections={["server", "transfers"]} />}
       >
         <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs leading-relaxed text-on-surface-variant dark:bg-surface-container-highest/40">
           {server.banlist.length} banned user(s), {bannedIpEntries.length} banned IP(s). Banned users are stored in <span className="font-mono">server.banlist</span>, IPs in{" "}
@@ -81,7 +82,7 @@ export function BannedUsersSection() {
         />
       </SectionCard>
 
-      <SectionCard title="Geo blocking" description="Mirrors transfers geoblock (pynicotine/config.py:219). Requires GeoIP in desktop; browser stores the setting for bridge parity.">
+      <SectionCard title="Geo blocking" description="Mirrors transfers geoblock (pynicotine/config.py:219). Requires GeoIP in desktop; browser stores the setting for bridge parity." actions={<SectionSaveButton section="transfers" />}>
         <ToggleControl
           label="Enable geo blocking"
           checked={t.geoblock}

@@ -2,7 +2,7 @@
 
 import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
-import { SectionCard, ToggleControl, TextFieldControl } from "@/components/settings/controls";
+import { SectionCard, SectionSaveButton, ToggleControl, TextFieldControl } from "@/components/settings/controls";
 
 export function LoggingSection() {
   const { settings, setOption } = useConfig();
@@ -13,6 +13,7 @@ export function LoggingSection() {
       <SectionCard
         title="Logging"
         description="Mirrors log.ui (preferences.py:2743). In the browser, logs are stored client-side (localStorage/IndexedDB). Folder paths are notes — they map to retention/storage, not filesystem locations (settings-mapping.md:266)."
+        actions={<SectionSaveButton section="logging" />}
       >
         <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs leading-relaxed text-on-surface-variant dark:bg-surface-container-highest/40">
           Python strftime codes for timestamps:{" "}
@@ -65,7 +66,7 @@ export function LoggingSection() {
         />
       </SectionCard>
 
-      <SectionCard title="Debug & display">
+      <SectionCard title="Debug & display" actions={<SectionSaveButton section="logging" />}>
         <ToggleControl
           label="Debug mode"
           description="Verbose logging (pynicotine logfacility debug)."

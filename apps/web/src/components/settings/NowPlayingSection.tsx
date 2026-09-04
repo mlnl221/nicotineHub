@@ -2,7 +2,7 @@
 
 import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
-import { SectionCard, TextFieldControl, RadioGroupControl } from "@/components/settings/controls";
+import { SectionCard, SectionSaveButton, TextFieldControl, RadioGroupControl } from "@/components/settings/controls";
 import { useState } from "react";
 
 const PLAYER_OPTIONS = [
@@ -47,6 +47,7 @@ export function NowPlayingSection() {
     <SectionCard
       title="Now Playing"
       description="Format for /np. Desktop backends (MPRIS/other) are browser-inapplicable — stored locally and usable with navigator.mediaSession later (preferences.py:3206, settings-mapping.md:244). Last.fm/Libre.fm/ListenBrainz scrobblers intentionally omitted — no browser API."
+      actions={<SectionSaveButton section="players" />}
     >
       <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs leading-relaxed text-on-surface-variant dark:bg-surface-container-highest/40">
         Tokens for current player: <span className="font-mono">{tokens}</span> — $n (now playing), $t (title), $a (artist), $b (album), $l (duration), $r (bitrate), $c (comment), $k (track), $y (year), $f (filename), $p (program). Example: <span className="font-mono">$a - $t</span>
