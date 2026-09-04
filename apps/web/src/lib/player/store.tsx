@@ -35,14 +35,32 @@ interface PlayerApi {
   loading: boolean;
   time: number;
   duration: number;
+  volume: number;
+  muted: boolean;
   play: (track: Track) => void;
   toggle: () => void;
   seekTo: (seconds: number) => void;
   seekBy: (delta: number) => void;
+  setVolume: (v: number) => void;
+  toggleMute: () => void;
   close: () => void;
 }
 
 const PlayerContext = createContext<PlayerApi | null>(null);
+
+const VOLUME_KEY = "nicotineHub.playerVolume";
+function readVolume(): { volume: number; muted: boolean } {
+  if (typeof window === "undefined") return { volume: 1, muted: false };
+  try {
+    const raw = window.localStorage.getItem(VOLUME_KEY);
+    if (!raw) return { volume: 1, muted: false };
+    const p = JSON.parse(raw) as { volume?: unknown; muted?: unknown };
+    const volume = typeof p.volume === "number" ? Math.min(1, Math.max(0, p.volume)) : 1;
+    return { volume, muted: p.muted === true };
+  } catch {
+    return { volume: 1, muted: false };
+  }
+}
 
 // Module singleton — survives navigation, single audio element app-wide.
 let sharedAudio: HTMLAudioElement | null = null;
@@ -78,8 +96,30 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [volState, setVolState] = useState(readVolume);
   const trackRef = useRef<Track | null>(null);
   trackRef.current = track;
+
+  // Apply persisted volume to the singleton element + persist changes.
+  useEffect(() => {
+    const el = audio();
+    if (el) {
+      el.volume = volState.volume;
+      el.muted = volState.muted;
+    }
+    try {
+      window.localStorage.setItem(VOLUME_KEY, JSON.stringify(volState));
+    } catch {}
+  }, [volState]);
+
+  const setVolume = useCallback((v: number) => {
+    const volume = Math.min(1, Math.max(0, v));
+    setVolState((prev) => ({ volume, muted: volume === 0 ? prev.muted : false }));
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    setVolState((prev) => ({ ...prev, muted: !prev.muted }));
+  }, []);
 
   useEffect(() => {
     const el = audio();
@@ -211,8 +251,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const api = useMemo<PlayerApi>(
-    () => ({ track, playing, loading, time, duration, play, toggle, seekTo, seekBy, close }),
-    [track, playing, loading, time, duration, play, toggle, seekTo, seekBy, close],
+    () => ({ track, playing, loading, time, duration, volume: volState.volume, muted: volState.muted, play, toggle, seekTo, seekBy, setVolume, toggleMute, close }),
+    [track, playing, loading, time, duration, volState, play, toggle, seekTo, seekBy, setVolume, toggleMute, close],
   );
   return <PlayerContext.Provider value={api}>{children}</PlayerContext.Provider>;
 }

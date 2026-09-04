@@ -13,7 +13,7 @@ import { useSidebarCollapsed } from "@/components/SidebarContext";
  * with a second metadata line (tags + technical); mobile stays compact.
  */
 export function MiniPlayer() {
-  const { track, playing, loading, time, duration, toggle, seekTo, seekBy, close } = usePlayer();
+  const { track, playing, loading, time, duration, volume, muted, toggle, seekTo, seekBy, setVolume, toggleMute, close } = usePlayer();
   const { collapsed } = useSidebarCollapsed();
   if (!track) return null;
 
@@ -28,7 +28,7 @@ export function MiniPlayer() {
 
   return (
     <div
-      className={`fixed inset-x-3 bottom-[calc(76px+env(safe-area-inset-bottom))] z-40 rounded-2xl bg-surface-container-high/80 shadow-[0_8px_40px_4px_rgb(0_0_0/0.06)] backdrop-blur-[20px] ghost-border dark:bg-surface-container-highest/80 md:inset-x-auto md:bottom-6 md:right-6 md:w-auto ${collapsed ? "md:left-[88px]" : "md:left-[312px]"}`}
+      className={`fixed inset-x-3 bottom-[calc(76px+env(safe-area-inset-bottom))] z-40 rounded-2xl bg-surface-container-lowest/90 shadow-[0_8px_40px_4px_rgb(0_0_0/0.10)] backdrop-blur-[20px] ghost-border dark:bg-surface-container-highest/90 md:inset-x-auto md:bottom-6 md:right-6 md:w-auto ${collapsed ? "md:left-[88px]" : "md:left-[312px]"}`}
       role="region"
       aria-label="Audio player"
     >
@@ -59,6 +59,24 @@ export function MiniPlayer() {
         >
           <span className="material-symbols-outlined text-[22px]">forward_10</span>
         </button>
+        <button
+          type="button"
+          onClick={toggleMute}
+          aria-label={muted || volume === 0 ? "Unmute" : "Mute"}
+          className="shrink-0 rounded-full px-1 py-2 font-label text-xs text-on-surface-variant hover:underline"
+        >
+          <span className="material-symbols-outlined text-[22px]">{muted || volume === 0 ? "volume_off" : "volume_up"}</span>
+        </button>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={Math.round((muted ? 0 : volume) * 100)}
+          onChange={(e) => setVolume(Number(e.target.value) / 100)}
+          aria-label="Volume"
+          className="hidden w-24 shrink-0 accent-primary md:block"
+        />
         <div className="min-w-0 flex-1">
           <div className="truncate font-headline text-sm font-semibold text-on-surface dark:text-inverse-on-surface md:whitespace-normal md:line-clamp-2 md:text-base md:leading-snug">
             {track.title}
