@@ -10,6 +10,7 @@ import { ContextMenu } from "@/components/ui/ContextMenu";
 import { browseFolderMenu, browseFileMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
 import { useBulkSelection } from "@/lib/bulkSelection";
+import { usePaneWidth } from "@/lib/usePaneWidth";
 
 const PAGE_SIZE = 50;
 
@@ -49,6 +50,9 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
     if (folders.length && !selectedFolder) setSelectedFolder(folders[0].name);
   }, [folders, selectedFolder, settings]);
 
+  // Pane width persisted
+  const [asideW, onAsideDown] = usePaneWidth("nicotineHub.browse.asideW");
+
   // reset selection when username changes (tab switch handled via new tab prop, but folders may change)
   useEffect(() => {
     if (!folders.find((f) => f.name === selectedFolder)) {
@@ -78,6 +82,27 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
     }
     return map;
   }, [filteredFolders, minDepth]);
+
+  // Recursive stats: each folder's total includes all descendant subfolders' files
+  // Protocol carries own-files only, so parents with 0 own files need descendant aggregation
+  const folderStats = useMemo(() => {
+    const map = new Map<string, { files: number; folders: number }>();
+    for (const f of filteredFolders) map.set(f.name, { files: f.files.length, folders: 0 });
+    for (const f of filteredFolders) {
+      let cur = f.name;
+      while (true) {
+        const idx = cur.lastIndexOf("\\");
+        if (idx < 0) break;
+        cur = cur.slice(0, idx);
+        const entry = map.get(cur);
+        if (entry) {
+          entry.files += f.files.length;
+          entry.folders += 1;
+        }
+      }
+    }
+    return map;
+  }, [filteredFolders]);
 
   // auto-expand parents when expand_folders !== "none"
   useEffect(() => {
@@ -265,7 +290,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
 
       <div className="flex flex-1 overflow-hidden min-h-0" style={isDemo ? ({ marginTop: "var(--demo-banner-h)" } as React.CSSProperties) : undefined}>
         {/* Folder list */}
-        <aside className="hidden w-80 flex-shrink-0 flex-col border-r border-surface-container-highest/30 bg-surface-container-lowest md:flex min-h-0">
+        <aside className="hidden flex-shrink-0 flex-col border-r border-surface-container-highest/30 bg-surface-container-lowest md:flex min-h-0" style={{ width: asideW }}>
           <div className="border-b border-surface-container-highest/20 p-3">
             <div className="relative">
               <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-outline">search</span>
@@ -334,7 +359,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                         <span className="material-symbols-outlined text-[20px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>{hasChildren ? (isExpanded ? "folder_open" : "folder") : "folder"}</span>
                         <div className="min-w-0 flex-1">
                           <p className="whitespace-nowrap font-body text-sm font-medium" title={f.name}>{f.name.split("\\").pop() || f.name}</p>
-                          <p className="truncate font-label text-[11px] text-on-surface-variant">{f.files.length} files</p>
+                          {(() => { const s = folderStats.get(f.name); if (!s) return <p className="truncate font-label text-[11px] text-on-surface-variant">{f.files.length} files</p>; const hasDesc = s.folders > 0; return <p className="truncate font-label text-[11px] text-on-surface-variant">{hasDesc ? `${s.files.toLocaleString()} files · ${s.folders} folders` : `${s.files} files`}</p>; })()}
                         </div>
                       </button>
                     </div>
@@ -352,8 +377,19 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                 {visibleFolderCount < visibleTreeFolders.length ? <div ref={folderSentinel} className="h-px" aria-hidden /> : null}
               </>
             )}
-          </div>
+            </div>
         </aside>
+        {/* Drag handle — resize folder pane */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize folder list"
+          onPointerDown={onAsideDown}
+          className="hidden md:flex w-2 shrink-0 cursor-col-resize items-center justify-center hover:bg-primary/10 touch-none select-none"
+          style={{ touchAction: "none" }}
+        >
+          <div className="h-8 w-0.5 rounded-full bg-outline-variant/40" />
+        </div>
 
         {/* File list */}
         <div className="flex flex-1 flex-col overflow-hidden min-h-0">

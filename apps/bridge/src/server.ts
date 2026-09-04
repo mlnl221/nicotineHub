@@ -875,10 +875,23 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             logger.debug("server", "browse event", { type: event.type, username: event.username, folder: (event as { folder?: string }).folder });
             try {
               if (event.type === "browse-shares") {
+                // order-preserving dedupe by folder name — peers can emit dupes, and our 200-page paging
+                // must not amplify them into the cache
+                const deduped = (() => {
+                  const seen = new Set<string>();
+                  const out: unknown[] = [];
+                  for (const f of (event.folders as unknown[] || [])) {
+                    const name = (f as { name?: string }).name;
+                    if (typeof name !== "string" || seen.has(name)) continue;
+                    seen.add(name);
+                    out.push(f);
+                  }
+                  return out;
+                })();
                 // cache full shares for 5m paging
-                try { browseCache.set(event.username.toLowerCase(), { folders: event.folders as unknown[], ts: Date.now() }); } catch {}
+                try { browseCache.set(event.username.toLowerCase(), { folders: deduped as unknown[], ts: Date.now() }); } catch {}
                 // trim API response: cap initial payload to 200 folders, client pages 50 at a time
-                const all = (event.folders as unknown[]) || [];
+                const all = deduped as unknown[];
                 const page = all.slice(0, 200);
                 const hasMore = all.length > 200;
                 const lockedCount = Array.isArray(event.lockedFolders) ? event.lockedFolders.length : 0;
@@ -1248,7 +1261,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         else if (msg.action === "leave") session.leaveGlobalRoom();
         return;
       }
-      if (data.type === "browse") {
+       if (data.type === "browse") {
         const result = BrowseSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid browse message.")); return; }
         const reqUser = typeof (parsed as { username?: unknown }).username === "string" ? (parsed as { username: string }).username : result.data.username;
@@ -1259,14 +1272,22 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           try { ws.send(JSON.stringify({ type: "browse:shares", username: reqUser, folders: [] as never, total: 0, hasMore: false, offset: 0, error: "Not logged in." })); } catch {}
           return;
         }
+        const rawFolders = (session.shareDBInstance.getFoldersForPermission(PermissionLevel.PUBLIC) as unknown[]);
+        const seen = new Set<string>();
+        const foldersForBrowse = [] as unknown[];
+        for (const f of rawFolders) {
+          const name = (f as { name?: string }).name;
+          if (typeof name !== "string" || seen.has(name)) continue;
+          seen.add(name);
+          foldersForBrowse.push(f);
+        }
         const isSelf = result.data.username.trim().toLowerCase() === session.username.trim().toLowerCase();
         if (result.data.action === "shares") {
           // Local browse — nicotine-plus userbrowse.py:browse_user serves own shares
           // locally (self→PUBLIC view + reveal flags); no peer round-trip to self.
           if (isSelf) {
             try {
-              const folders = session.shareDBInstance.getFoldersForPermission(PermissionLevel.PUBLIC) as unknown[];
-              const all = folders || [];
+              const all = foldersForBrowse as unknown[];
               const page = all.slice(0, 200);
               const hasMore = all.length > 200;
               logger.info("browse", "local self-shares", { username: result.data.username, dirs: all.length });
@@ -1285,7 +1306,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           if (isSelf) {
             const tok = result.data.token ?? Math.floor(Math.random() * 1e9);
             try {
-              const allFolders = session.shareDBInstance.getFoldersForPermission(PermissionLevel.PUBLIC);
+              const allFolders = foldersForBrowse as unknown as { name: string; files: unknown[] }[];
               const want = result.data.folder;
               const match = allFolders.find((f) => f.name === want)
                 ?? allFolders.find((f) => f.name.toLowerCase() === want.toLowerCase());
