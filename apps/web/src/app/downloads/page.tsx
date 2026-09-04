@@ -140,7 +140,7 @@ function DownloadsInner() {
     const target = downloadPlayUrl(dl, t.fileName);
     if (!target) return;
     const { artist, title } = splitArtistTitle(t.fileName);
-    play({ title, artist, src: target.url, formatLabel: formatLabelOf(t.fileName), transcoding: target.viaWorker });
+    play({ title, artist, src: target.url, formatLabel: formatLabelOf(t.fileName), transcoding: target.viaWorker, fileKey: t.fileName, size: t.size });
   };
 
   const handleDoubleClick = (t: import("@/lib/protocol").Transfer, isUpload: boolean) => {

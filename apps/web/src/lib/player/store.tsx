@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { toast } from "@/lib/player/urls";
+import { toast, fetchTrackMeta } from "@/lib/player/urls";
 
 export interface Track {
   title: string;
@@ -19,6 +19,14 @@ export interface Track {
   formatLabel: string;
   /** Worker transcode in progress (first byte pending) — cleared on canplay. */
   transcoding: boolean;
+  /** Tag/technical enrichment (filled async after play). */
+  album?: string;
+  year?: string;
+  genre?: string;
+  quality?: string;
+  size?: number;
+  /** Key for worker readTags (basename, DATA_DIR-relative, or /data path). Not displayed. */
+  fileKey?: string;
 }
 
 interface PlayerApi {
@@ -144,6 +152,26 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       void el.play().catch(() => setLoading(false));
     } catch {
       setLoading(false);
+    }
+    // Enrich title/tags/technical async — never blocks playback.
+    if (t.fileKey) {
+      const src = t.src;
+      void fetchTrackMeta(t.fileKey).then((meta) => {
+        if (!meta || trackRef.current?.src !== src) return;
+        setTrack((prev) => {
+          if (!prev || prev.src !== src) return prev;
+          const next = { ...prev };
+          if (meta.title) next.title = meta.title;
+          if (meta.artist) next.artist = meta.artist;
+          if (meta.album) next.album = meta.album;
+          if (meta.year) next.year = meta.year;
+          if (meta.genre) next.genre = meta.genre;
+          if (meta.quality) next.quality = meta.quality;
+          return next;
+        });
+        const cur = trackRef.current;
+        if (cur && cur.src === src) setMediaSession(cur);
+      });
     }
   }, []);
 

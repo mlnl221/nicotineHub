@@ -1,16 +1,20 @@
 "use client";
 
 import { usePlayer } from "@/lib/player/store";
-import { humanLength } from "@/lib/format";
+import { humanLength, humanSize } from "@/lib/format";
+import { useSidebarCollapsed } from "@/components/SidebarContext";
 
 /**
  * Alexandria glass mini-player — floating bar above BottomNav/footer.
  * Glass (80% + 20px blur), tonal surface, no 1px borders, rounded-2xl.
  * One primary action (gradient play/pause); ±10s + close are tertiary.
  * Serif title, Public Sans metadata, archival-gold format/transcode chip.
+ * Desktop (webmode): spans the content width (left follows sidebar state)
+ * with a second metadata line (tags + technical); mobile stays compact.
  */
 export function MiniPlayer() {
   const { track, playing, loading, time, duration, toggle, seekTo, seekBy, close } = usePlayer();
+  const { collapsed } = useSidebarCollapsed();
   if (!track) return null;
 
   const transcoding = track.transcoding && !duration;
@@ -18,10 +22,13 @@ export function MiniPlayer() {
     const v = Math.floor(s || 0);
     return v <= 0 ? "0:00" : humanLength(v);
   };
+  const tagBits = [track.album, track.year, track.genre].filter(Boolean) as string[];
+  const techBits = [...(track.quality ? [track.quality] : []), ...(typeof track.size === "number" && track.size > 0 ? [humanSize(track.size)] : [])];
+  const hasMeta = tagBits.length > 0 || techBits.length > 0;
 
   return (
     <div
-      className="fixed inset-x-3 bottom-[calc(76px+env(safe-area-inset-bottom))] z-40 rounded-2xl bg-surface-container-high/80 shadow-[0_8px_40px_4px_rgb(0_0_0/0.06)] backdrop-blur-[20px] ghost-border dark:bg-surface-container-highest/80 md:inset-x-auto md:bottom-6 md:right-6 md:w-96"
+      className={`fixed inset-x-3 bottom-[calc(76px+env(safe-area-inset-bottom))] z-40 rounded-2xl bg-surface-container-high/80 shadow-[0_8px_40px_4px_rgb(0_0_0/0.06)] backdrop-blur-[20px] ghost-border dark:bg-surface-container-highest/80 md:inset-x-auto md:bottom-6 md:right-6 md:w-auto ${collapsed ? "md:left-[88px]" : "md:left-[312px]"}`}
       role="region"
       aria-label="Audio player"
     >
@@ -53,12 +60,19 @@ export function MiniPlayer() {
           <span className="material-symbols-outlined text-[22px]">forward_10</span>
         </button>
         <div className="min-w-0 flex-1">
-          <div className="truncate font-headline text-sm font-semibold text-on-surface dark:text-inverse-on-surface">
+          <div className="truncate font-headline text-sm font-semibold text-on-surface dark:text-inverse-on-surface md:whitespace-normal md:line-clamp-2 md:text-base md:leading-snug">
             {track.title}
           </div>
-          <div className="truncate font-label text-[11px] text-on-surface-variant dark:text-outline">
+          <div className="truncate font-label text-[11px] text-on-surface-variant dark:text-outline md:text-xs">
             {track.artist ? `${track.artist} · ` : ""}{track.formatLabel}
           </div>
+          {hasMeta ? (
+            <div className="mt-0.5 hidden truncate font-label text-[11px] text-on-surface-variant dark:text-outline md:block">
+              {tagBits.length > 0 ? <span>{tagBits.join(" · ")}</span> : null}
+              {tagBits.length > 0 && techBits.length > 0 ? <span className="mx-1.5 opacity-50">|</span> : null}
+              {techBits.length > 0 ? <span className="tabular-nums">{techBits.join(" · ")}</span> : null}
+            </div>
+          ) : null}
         </div>
         {transcoding || loading ? (
           <span className="flex shrink-0 items-center gap-1 rounded-full bg-tertiary-container px-2 py-1 font-label text-[10px] uppercase tracking-widest text-tertiary dark:text-tertiary-fixed">

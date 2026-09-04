@@ -60,14 +60,14 @@ export function FileExplorer({
   const [tagFile, setTagFile] = useState<string | null>(null);
   const { play } = usePlayer();
 
-  const playFile = useCallback((absPath: string, name: string) => {
+  const playFile = useCallback((absPath: string, name: string, size?: number) => {
     const target = dataFilePlayUrl(absPath);
     if (!target) {
       toast("Not playable", `${name} cannot play in the browser — download it instead.`);
       return;
     }
     const { artist, title } = splitArtistTitle(name);
-    play({ title, artist, src: target.url, formatLabel: formatLabelOf(name), transcoding: target.viaWorker });
+    play({ title, artist, src: target.url, formatLabel: formatLabelOf(name), transcoding: target.viaWorker, fileKey: absPath, size });
   }, [play]);
   const [selectMode, setSelectMode] = useState(false);
   const bulk = useBulkSelection();
@@ -497,7 +497,7 @@ export function FileExplorer({
                 {isAudio && !selectMode ? (
                   <button
                     type="button"
-                    onClick={() => playFile(e.path, e.name)}
+                    onClick={() => playFile(e.path, e.name, e.size)}
                     className="inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 font-label text-xs font-medium text-on-primary"
                     title="Play in browser"
                   >
@@ -582,7 +582,7 @@ export function FileExplorer({
               onVerify: isAudio ? () => handleSingleVerify(e.path) : undefined,
               onAnalyze: isAudio ? () => handleSingleAnalyze(e.path) : undefined,
               onSpectrum: isAudio ? () => handleSingleSpectrum(e.path) : undefined,
-              onPlay: isAudio ? () => playFile(e.path, e.name) : undefined,
+              onPlay: isAudio ? () => playFile(e.path, e.name, e.size) : undefined,
             });
           })()}
           onClose={() => setMenuAnchor(null)}
