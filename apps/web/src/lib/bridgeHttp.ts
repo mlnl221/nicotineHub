@@ -2,7 +2,8 @@
 
 /**
  * Helper to derive HTTP base URL for bridge REST APIs from the WS URL logic
- * used in session.tsx (localStorage.nicotineHub.bridgeUrl > NEXT_PUBLIC_BRIDGE_URL > hostname:8787).
+ * used in session.tsx (localStorage.nicotineHub.bridgeUrl > NEXT_PUBLIC_BRIDGE_URL >
+ * same-origin /ws, proxied to the bridge — no published :8787 needed).
  * Also handles BRIDGE_TOKEN via query param or Authorization header.
  */
 
@@ -25,14 +26,26 @@ function getRawBridgeWsUrl(): string {
   } catch {}
   const configured = process.env.NEXT_PUBLIC_BRIDGE_URL;
   if (configured) return configured;
+  // Same-origin default: /ws on the web origin (proxied to the bridge),
+  // so bridge :8787 needs no published host port.
   const scheme = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
-  const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
-  // Support worktree port helpers (8788/8789) — mirror session fallback not exhaustive
-  const port = typeof window !== "undefined" && (window.location.port === "3001" ? "8788" : window.location.port === "3002" ? "8789" : "8787");
-  return `${scheme}//${host}:${port}/ws`;
+  const host = typeof window !== "undefined" ? window.location.host : "localhost";
+  return `${scheme}//${host}/ws`;
+}
+
+/** True when the client uses the same-origin proxy (no direct bridge URL). */
+export function isBridgeProxied(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    if (window.localStorage.getItem("nicotineHub.bridgeUrl") ?? window.localStorage.getItem("nicotine.bridgeUrl")) return false;
+  } catch {}
+  return !process.env.NEXT_PUBLIC_BRIDGE_URL;
 }
 
 export function getBridgeHttpBase(): string {
+  // Proxied default is same-origin: paths are prefixed with /api/bridge
+  // in bridgeFetchUrl below, so the base stays empty (relative URLs).
+  if (isBridgeProxied()) return "";
   const raw = getRawBridgeWsUrl();
   if (!raw) return "";
   try {
@@ -54,7 +67,8 @@ export function bridgeFetchHeaders(): Record<string, string> {
 }
 
 export function bridgeFetchUrl(pathWithQuery: string): string {
-  const base = getBridgeHttpBase();
+  // Same-origin default: route through /api/bridge on the web origin.
+  const base = isBridgeProxied() ? "/api/bridge" : getBridgeHttpBase();
   const url = `${base}${pathWithQuery}`;
   const tok = getBridgeToken();
   if (tok) {

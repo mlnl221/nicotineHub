@@ -4,17 +4,21 @@ This doc holds the technical details removed from `README.md` for brevity.
 
 ## Bridge
 
-The browser cannot open raw TCP; the bridge is the only SLSK speaker. JSON over `ws://host:8787/ws` is translated to Soulseek binary framing `[uint32 len][uint32 code][payload]` (little-endian; `PeerInit`/`D` use `[uint32 len][uint8 code][payload]`).
+The browser cannot open raw TCP; the bridge is the only SLSK speaker. JSON over same-origin `/ws` (the web entrypoint pipes it to the bridge; direct `ws://host:8787/ws` only in bare dev / direct mode) is translated to Soulseek binary framing `[uint32 len][uint32 code][payload]` (little-endian; `PeerInit`/`D` use `[uint32 len][uint8 code][payload]`).
 
 ```
-[ Browser (Next.js PWA) ] --WS JSON--> [ Bun bridge :8787 ] --TCP--> server.slsknet.org:2242
-         |                    --HTTP--> [ Python worker :8789 ] --HTTP--> Discogs/Bandcamp/Apple/…
-          |                                sox/flac/ffmpeg/numpy/mutagen (oxipng recompress skipped — not in image)
-         |                              \--volumes--> bridge-data:/data (RO)
-         \--HTTP--> bridge GET /files/:token (finished downloads)
+[ Browser (Next.js PWA :3000) ] --WS /ws + HTTP /api/*--> [ web proxy-server.js ]
+        (same-origin; only web:3000 + LISTEN_PORT published)  |--/ws pipe--> [ Bun bridge :8787 ] --TCP--> server.slsknet.org:2242
+                                                             |--/api/bridge/*--> [ Bun bridge :8787 ]
+                                                             \--/api/worker/*--> [ Python worker :8789 ] --HTTP--> Discogs/Bandcamp/Apple/…
+                                                                                    sox/flac/ffmpeg/numpy/mutagen (oxipng recompress skipped — not in image)
+                                                                                   \--volumes--> data:/data
+                                                                                     (finished downloads stream back through /api/bridge/files/:token)
 
 Bridge peer legs: `--P--> peers (messages)`, `--F--> file (raw bytes)`, `--D--> distrib (leaf only)`.
 ```
+
+> Direct mode (remote bridge/worker, e.g. Vercel demo): set `NEXT_PUBLIC_BRIDGE_URL=ws://host:8787/ws` / `NEXT_PUBLIC_WORKER_URL=http://host:8789` (or the `localStorage` overrides) and publish those ports — the client bypasses the proxy.
 
 Reference: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plus/nicotine-plus) (GPL-3.0-or-later) and `apps/bridge/src/soulseek.ts` (102 server / 18 peer / 6 distrib / 2 file codes). See `ATTRIBUTION.md` and `LICENSE` — this bridge is a port of `pynicotine/slskmessages.py`/`slskproto.py` under GPL-3.0-or-later.
 
@@ -91,7 +95,7 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 | Env | Default | Notes |
 |-----|---------|-------|
 | `PORT` | `8787` | WS port (`apps/bridge/src/server.ts:196`) |
-| `LISTEN_PORT` | `60754` | Peer listener — **default 60754** (`DEFAULT_LISTEN_PORT` `apps/web/src/lib/config/defaults.ts:210`). Editable via `server.portrange` in Settings → Network (`NetworkSection.tsx:82`), persists to `DATA_DIR/listen_port` (env `LISTEN_PORT` wins on boot), triggers `SetWaitPort 2` + `PortMapper.setPort` + reconnect. `compose.yaml` maps `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` TCP+UDP (no `network_mode` key — bridge ports). |
+| `LISTEN_PORT` | `60754` | Peer listener — **default 60754** (`DEFAULT_LISTEN_PORT` `apps/web/src/lib/config/defaults.ts:210`). Editable via `server.portrange` in Settings → Network (`NetworkSection.tsx:82`), persists to `DATA_DIR/listen_port` (env `LISTEN_PORT` wins on boot; `compose.yaml` interpolates env and ports from the same var so they agree), triggers `SetWaitPort 2` + `PortMapper.setPort` + reconnect. With the opt-in Docker socket (`/var/run/docker.sock` + `ALLOW_CONTAINER_RESTART=1`) the bridge then recreates its own container so the host mapping follows (`apps/bridge/src/docker.ts`; status `GET /container`, manual `POST /restart`); otherwise `LISTEN_PORT=NEW docker compose up -d`. `compose.yaml` maps `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` TCP+UDP (no `network_mode` key — bridge ports). |
 | `UPNP_ENABLED` | `1` | `0` disables UPnP at boot (overridden by `DATA_DIR/upnp_enabled` persisted from Settings → Network toggle `server.upnp`, default true; UPnP-only lease 43200 / renew 7200). |
 | `DATA_DIR` | `/data` | Volume (`/data` in compose; dev falls back to `./data` or `/tmp/nicotine-hub` if `/data` not writable) |
 | `BRIDGE_TOKEN` | *(open)* | `?token` / `Bearer` / `Sec-WebSocket-Protocol` → 401 on `/ws`, `/files/:token`, `/api/files`, `/spectrum/*`, `/logs`, `/diagnostics`, `/plugins`, `/upnp/status`, `/interfaces` (`/portchecker` stays open; `/health?json` returns limited fields without token) |
@@ -99,9 +103,11 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 | `UPLOAD_LIMIT`/`DOWNLOAD_LIMIT` | `0` | KB/s (`0` = unlimited), aliases `UPLOADLIMIT`/`DOWNLOADLIMIT`; TokenBucket shaping split per active transfer + `DOWNLOAD_LIMIT` stored in `transfer:stats` 2 s |
 | `ENABLE_SERVER_PING` | `1` | `0` disables `ServerPing 32` fallback |
 | `ALLOWED_ORIGINS` | *(open)* | CSV — if set, `getCorsHeaders` (`server.ts:336`) only allows listed `Origin` (homelab lock-down) |
-| `NEXT_PUBLIC_BRIDGE_URL` | `ws://host:8787/ws` | Build-time WS override; runtime `localStorage.nicotineHub.bridgeUrl` wins |
+| `NEXT_PUBLIC_BRIDGE_URL` | *(same-origin `/ws`)* | Direct-bridge WS override (e.g. `ws://host:8787/ws` for Vercel demo / remote bridge); runtime `localStorage.nicotineHub.bridgeUrl` wins. Default (unset): browser uses same-origin `/ws` on the web origin, piped to the bridge by `apps/web/proxy-server.js` — no published bridge port needed |
+| `BRIDGE_INTERNAL_URL` | `http://bridge:8787` (Docker) / `http://localhost:8787` (dev) | Server-side bridge target for the web proxy (`/api/bridge/*` + `/ws` pipe) |
 | `WORKER_TOKEN` | *(open)* | `Bearer` / `?token` → 401 on worker routes except `/health` (`hmac.compare_digest`) |
-| `NEXT_PUBLIC_WORKER_URL` | `http://host:8789` | Build-time worker override; runtime `localStorage.nicotineHub.workerUrl` wins |
+| `NEXT_PUBLIC_WORKER_URL` | *(same-origin `/api/worker`)* | Direct-worker override (e.g. `http://host:8789`); runtime `localStorage.nicotineHub.workerUrl` wins. Default (unset): browser uses same-origin `/api/worker`, proxied by `apps/web/src/app/api/worker/[...path]/route.ts` — no published worker port needed |
+| `WORKER_INTERNAL_URL` | `http://worker:8789` (Docker) / `http://localhost:8789` (dev) | Server-side worker target for the web proxy |
 | `DISCOGS_TOKEN` / `QOBUZ_APP_ID` / `TIDAL_TOKEN` | *(unset)* | Optional scraper tokens (worker env); Qobuz/Tidal scrape returns a clear error without theirs |
 | `QOBUZ_USER_AUTH_TOKEN` / `TIDAL_COUNTRY` | *(unset)* | Qobuz `X-User-Auth-Token` header; Tidal `countrycode` (default `US`) |
 | `DATA_DIR/worker.json` | *(absent)* | Same tokens via Settings → Worker (write-only, `0600`, never shown back). Env wins when both set. `GET /health` reports `auth:{discogs,tidal,qobuz}` booleans only. |

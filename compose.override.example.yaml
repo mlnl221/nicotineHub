@@ -7,6 +7,15 @@
 #   #   network_mode: host  # (and drop ports:)
 #   docker compose up -d
 #
+# For self-recreating bridge (Settings → Network port change applies the Docker
+# host mapping automatically, no manual `LISTEN_PORT=NEW docker compose up -d`):
+#   # Then in compose.override.yaml set for bridge:
+#   #   volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+#   #   environment: { ALLOW_CONTAINER_RESTART: "1" }
+#   # (socket access is host-root-equivalent — trusted LAN hosts only; keep
+#   # BRIDGE_TOKEN set. Linux + Docker Desktop/WSL both work; `network_mode: host`
+#   # is Linux-only and ignores ports, so don't combine the two.)
+#
 # For VPN with custom routing, add your own override file.
 # Host network example (UPnP works, no port remap):
 services:

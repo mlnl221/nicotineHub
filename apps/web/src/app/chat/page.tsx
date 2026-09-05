@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
+import { RequireAuth } from "@/components/RequireAuth";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
@@ -19,6 +20,14 @@ import { isDemo } from "@/lib/demo";
 import { DEMO_ROOMS } from "@/lib/demo/fixtures";
 
 export default function ChatRoomsPage() {
+  return (
+    <RequireAuth>
+      <ChatRoomsInner />
+    </RequireAuth>
+  );
+}
+
+function ChatRoomsInner() {
   const { state } = useSession();
   const { settings } = useConfig();
   const router = useRouter();
@@ -60,15 +69,8 @@ export default function ChatRoomsPage() {
   const allTickers = Array.from(joinedRooms.values()).flatMap(r => (r.tickers || []).map(t => ({ ...t, room: r.name })));
 
   useEffect(() => {
-    if (state.status === "failed") router.replace("/");
-  }, [state.status, router]);
-
-  useEffect(() => {
     sysLogRef.current?.scrollTo({ top: sysLogRef.current.scrollHeight });
   }, [systemMessages.length, activeRoom]);
-
-  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
-  if (state.status !== "connected") return null;
 
   const handleJoin = () => {
     const r = joinInput.trim();

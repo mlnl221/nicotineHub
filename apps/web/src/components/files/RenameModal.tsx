@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { renameFile } from "@/lib/worker";
+import { validateRenameBasename } from "@/lib/demo/fixtures";
 
 type Props = {
   filePath: string;
@@ -11,7 +12,7 @@ type Props = {
 };
 
 function basename(p: string) {
-  return p.split("/").pop() ?? p;
+  return p.split(/[\\/]/).pop() ?? p;
 }
 
 export function RenameModal({ filePath, onClose, onRenamed }: Props) {
@@ -23,10 +24,11 @@ export function RenameModal({ filePath, onClose, onRenamed }: Props) {
   useEffect(() => setName(initial), [initial]);
 
   const handleSave = async () => {
-    const trimmed = name.trim();
-    if (!trimmed) { setError("Name cannot be empty"); return; }
-    if (trimmed.includes("/") || trimmed.includes("\\") || trimmed.includes("\x00")) {
-      setError("Name cannot contain / or \\");
+    let trimmed: string;
+    try {
+      trimmed = validateRenameBasename(name);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
       return;
     }
     if (trimmed === initial) { onClose(); return; }

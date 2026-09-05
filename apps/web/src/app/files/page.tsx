@@ -7,9 +7,18 @@ import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { FileExplorer } from "@/components/files/FileExplorer";
 import { PageHeader } from "@/components/PageHeader";
+import { RequireAuth } from "@/components/RequireAuth";
 import { isDemo } from "@/lib/demo";
 
 export default function FilesPage() {
+  return (
+    <RequireAuth>
+      <FilesInner />
+    </RequireAuth>
+  );
+}
+
+function FilesInner() {
   const router = useRouter();
   const [lastSelected, setLastSelected] = useState<string | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);

@@ -80,7 +80,7 @@ export function MediainfoModal({ filePath, onClose }: Props) {
                 <div className="mt-1 font-body text-xs leading-relaxed text-on-error-container/80 break-words">{error}</div>
               </div>
               <p className="mt-3 font-body text-xs leading-relaxed text-on-surface-variant">
-                Tip: if the worker is unreachable, check <span className="font-mono">NEXT_PUBLIC_WORKER_URL</span> / <span className="font-mono">localStorage.nicotineHub.workerUrl</span>. On Docker the worker must be at <span className="font-mono">:8789</span>.
+                Tip: if the worker is unreachable, check <span className="font-mono">NEXT_PUBLIC_WORKER_URL</span> / <span className="font-mono">localStorage.nicotineHub.workerUrl</span>. By default the app uses same-origin <span className="font-mono">/api/worker</span> (no published worker port needed).
               </p>
             </div>
           )}

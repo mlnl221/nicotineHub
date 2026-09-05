@@ -50,10 +50,15 @@ COPY --from=builder /app/apps/web/.next/standalone ./
 # Static assets and public files are served relative to apps/web.
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
+# Same-origin entry wrapper: proxies /ws → bridge and HTTP → inner Next
+# server so bridge/worker need no published host ports.
+COPY --from=builder /app/apps/web/proxy-server.js ./apps/web/proxy-server.js
 # Keep license visible in runtime image (context is repo root)
 COPY LICENSE ./LICENSE
 COPY LICENSES ./LICENSES
 COPY ATTRIBUTION.md ./ATTRIBUTION.md
 EXPOSE 3000
 ENV PORT=3000 HOSTNAME=0.0.0.0
-CMD ["node", "apps/web/server.js"]
+# Server-side service targets (compose network DNS — no published ports needed)
+ENV BRIDGE_INTERNAL_URL=http://bridge:8787 WORKER_INTERNAL_URL=http://worker:8789
+CMD ["node", "apps/web/proxy-server.js"]

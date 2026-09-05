@@ -4,9 +4,10 @@
   "private": false,
   "license": "GPL-3.0-or-later",
   "scripts": {
-    "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --turbopack",
+    "dev": "NEXT_TELEMETRY_DISABLED=1 PROXY_DEV=1 node ./proxy-server.js",
+    "dev:direct": "NEXT_TELEMETRY_DISABLED=1 next dev --turbopack",
     "build": "next build",
-    "start": "NEXT_TELEMETRY_DISABLED=1 node .next/standalone/apps/web/server.js",
+    "start": "NEXT_TELEMETRY_DISABLED=1 node ./proxy-server.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -199,3 +199,17 @@ Minor: `MEDIA_SCAN_URL` → `MEDIA_SCAN_TOKEN` Bearer if needed; `WORKER_TOKEN` 
 *Next (unbuilt P0–P2): **A DONE, C DONE, E DONE, P2 Quality DONE, H DONE** `feat/share-safety` → **B ProveIt** `proveIt.ts` `hash(user+week)` only. Worker (0/D/F/G) already landed in `5c65ea9`; see `docs/architecture.md` `## Worker`.*
 
 (End of file - total 205 lines)
+
+---
+
+## 9. Addendum 2026-09-05 — service ports internalized (PR #102)
+
+Historical note; earlier sections above still reference direct `ws://:8787/ws`
+and `worker :8789` because that was the topology when written. Since
+`feat/internalize-service-ports`, `web:3000` is the sole browser entrypoint:
+same-origin `/ws` + `/api/bridge/*` + `/api/worker/*` are proxied to internal
+`bridge:8787`/`worker:8789` (neither published; only `LISTEN_PORT` stays public
+for peer traffic). Direct URLs now apply to bare dev / direct mode only
+(`NEXT_PUBLIC_BRIDGE_URL`, `NEXT_PUBLIC_WORKER_URL`, `localStorage` overrides).
+Stress-verified post-change (k6 mixed 200 RPS, 0 failures; WS 200/200; abort
+storm 0 orphans; boot-retry fail-fast, never hangs).

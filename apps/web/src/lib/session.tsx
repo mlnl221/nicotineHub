@@ -29,6 +29,13 @@ export interface SessionState {
   user?: string;
   /** True while a background reconnect is in progress — UI stays on `connected` */
   reconnecting?: boolean;
+  /**
+   * True once first-run resolution completes (stored-cred check done, whether
+   * or not creds existed). `initialized && status === "idle"` unambiguously
+   * means logged out with nothing pending — safe to bounce to login.
+   * Maintained as separate state so existing setState sites need no changes.
+   */
+  initialized?: boolean;
 }
 
 interface SessionApi {
@@ -67,8 +74,12 @@ function bridgeUrl(): string {
     return configured;
   }
 
+  // No override and no build-time URL: same-origin /ws through the web
+  // entrypoint (proxy-server.js pipes it to the bridge), so bridge :8787
+  // needs no published host port. Remote-bridge setups (Vercel demo, NAS)
+  // keep working via localStorage override or NEXT_PUBLIC_BRIDGE_URL above.
   const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const base = `${scheme}//${window.location.hostname}:8787/ws`;
+  const base = `${scheme}//${window.location.host}/ws`;
   const tok = bridgeToken();
   if (tok) return `${base}?token=${encodeURIComponent(tok)}`;
   return base;
@@ -150,6 +161,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // Hydrate from sessionStorage after mount so Sidebar/TopBar don't mismatch
   // (was: conditional initializer read sessionStorage during render → Sidebar badge (2) / user "demo" vs "System Administrator").
   const [state, setState] = useState<SessionState>({ status: "idle" });
+  const [initialized, setInitialized] = useState(false);
   const router = useRouter();
   useEffect(() => {
     try {
@@ -355,6 +367,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           }
           break;
         }
+        case "server:restarting": {
+          // Bridge is recreating its container for a port change — WS drops
+          // mid-swap; keep the banner, the close handler below reconnects.
+          setState((s) => ({ ...s, reconnecting: true }));
+          break;
+        }
         case "server:reconnected": {
           // Background reconnect succeeded (e.g. after port change) — restore connected without user re-login
           setState((s) => ({ ...s, status: "connected", user: s.user ?? loginReq.username, error: undefined, reconnecting: false }));
@@ -536,6 +554,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, [login]);
 
+  // First-run resolution marker — declared after the hydration + auto-login
+  // effects so it runs after both in the same commit (all paths synchronous).
+  // From here on, `idle` means logged out with nothing pending.
+  useEffect(() => {
+    setInitialized(true);
+  }, []);
+
   const send = useCallback((msg: BridgeInboundMessage) => {
     if (isDemo) {
       const handled = handleDemoSend(msg, listeners.current, stateRef.current.user);
@@ -606,8 +631,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [clearHeartbeat, clearReconnect]);
 
   const api = useMemo<SessionApi>(
-    () => ({ login, logout, send, subscribe, state }),
-    [login, logout, send, subscribe, state],
+    () => ({ login, logout, send, subscribe, state: { ...state, initialized } }),
+    [login, logout, send, subscribe, state, initialized],
   );
 
   return <SessionContext.Provider value={api}>{children}</SessionContext.Provider>;

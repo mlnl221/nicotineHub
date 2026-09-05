@@ -18,3 +18,4 @@ Include: affected version/commit, steps to reproduce, impact, and (optionally) a
 
 - **Soulseek is unencrypted and sends passwords in plaintext.** The app deliberately never stores passwords (see `README.md` Security). Never include credentials, `BRIDGE_TOKEN` values, or share paths in bug reports, logs, or screenshots.
 - If you run the bridge publicly exposed, set `BRIDGE_TOKEN` and `ALLOWED_ORIGINS` (see [`docs/architecture.md#env-full`](./docs/architecture.md#env-full)).
+- **Docker socket mount (opt-in).** `ALLOW_CONTAINER_RESTART=1` + `/var/run/docker.sock` lets Settings → Network recreate the bridge container so the host port mapping follows. Socket write access is host-root-equivalent: only enable on trusted LAN hosts, never with the socket published beyond the bridge service, and keep `BRIDGE_TOKEN` set (it gates `POST /restart` and `GET /container`).

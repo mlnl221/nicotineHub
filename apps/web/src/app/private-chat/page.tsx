@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useSession } from "@/lib/session";
+import { RequireAuth } from "@/components/RequireAuth";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
@@ -16,7 +16,6 @@ import { usePaneWidth } from "@/lib/usePaneWidth";
 import { isDemo } from "@/lib/demo";
 
 function PrivateChatInner() {
-  const { state } = useSession();
   const router = useRouter();
   const params = useSearchParams();
   const initialUser = params.get("user") || "";
@@ -30,10 +29,6 @@ function PrivateChatInner() {
   const [pmW, onPmDown] = usePaneWidth("nicotineHub.privatechat.asideW");
 
   useEffect(() => {
-    if (state.status === "failed") router.replace("/");
-  }, [state.status, router]);
-
-  useEffect(() => {
     if (initialUser && !users.includes(initialUser)) {
       setActiveUser(initialUser);
     } else if (initialUser) {
@@ -44,9 +39,6 @@ function PrivateChatInner() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [conversations, activeUser]);
-
-  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
-  if (state.status !== "connected") return null;
 
   const activeMessages = activeUser ? conversations.get(activeUser) || [] : [];
   const filteredUsers = filter ? users.filter((u) => u.toLowerCase().includes(filter.toLowerCase())) : users;
@@ -327,8 +319,10 @@ function PrivateChatInner() {
 
 export default function PrivateChatPage() {
   return (
-    <Suspense fallback={<div className="flex h-screen items-center justify-center font-body text-sm text-on-surface-variant">Loading…</div>}>
-      <PrivateChatInner />
-    </Suspense>
+    <RequireAuth>
+      <Suspense fallback={<div className="flex h-screen items-center justify-center font-body text-sm text-on-surface-variant">Loading…</div>}>
+        <PrivateChatInner />
+      </Suspense>
+    </RequireAuth>
   );
 }
