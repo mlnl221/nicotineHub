@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { RequireAuth } from "@/components/RequireAuth";
 import { useSession } from "@/lib/session";
 import { useTransfers } from "@/lib/transfers";
 import { Sidebar } from "@/components/Sidebar";
@@ -16,6 +16,7 @@ import { formatStrftime } from "@/lib/chatFormat";
 import { isDemo } from "@/lib/demo";
 import { useStatistics } from "@/lib/statistics";
 import { humanSize } from "@/lib/format";
+import { isBridgeProxied } from "@/lib/bridgeHttp";
 
 const LEVELS: DiagLevel[] = ["debug", "info", "warn", "error"];
 const LEVEL_COLOR: Record<DiagLevel, string> = {
@@ -51,8 +52,9 @@ function bridgeHttpBase(): string {
       return `${u.protocol}//${u.host}`;
     } catch {}
   }
-  const scheme = window.location.protocol === "https:" ? "https:" : "http:";
-  return `${scheme}//${window.location.hostname}:8787`;
+  // Same-origin default: browser reaches the bridge through the web
+  // entrypoint (/api/bridge proxied), so no published bridge port needed.
+  return "/api/bridge";
 }
 
 function HealthCard({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
@@ -104,9 +106,16 @@ function StatisticsSummaryCard() {
 }
 
 export default function DiagnosticsPage() {
+  return (
+    <RequireAuth>
+      <DiagnosticsInner />
+    </RequireAuth>
+  );
+}
+
+function DiagnosticsInner() {
   const { state, send, subscribe } = useSession();
   const { settings } = useConfig();
-  const router = useRouter();
   const transfersApi = useTransfers();
 
   const [health, setHealth] = useState<DiagnosticsHealth | null>(null);
@@ -119,12 +128,7 @@ export default function DiagnosticsPage() {
   const [autoScroll, setAutoScroll] = useState(true);
   const logRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
-  const [bridgeUrlDisplay, setBridgeUrlDisplay] = useState("ws://localhost:8787/ws");
-
-  useEffect(() => {
-    if (state.status === "idle" || state.status === "connecting") return;
-    if (state.status !== "connected") router.replace("/");
-  }, [state.status, router]);
+  const [bridgeUrlDisplay, setBridgeUrlDisplay] = useState("same-origin (proxied /ws)");
 
   // subscribe to diagnostics WS messages
   useEffect(() => {
@@ -268,20 +272,13 @@ export default function DiagnosticsPage() {
     if (isDemo) { setBridgeUrlDisplay("demo (offline — no bridge)"); return; }
     try {
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      setBridgeUrlDisplay(`${proto}//${window.location.hostname}:8787/ws`);
+      // Default compose stack reaches the bridge via same-origin /ws (proxied);
+      // direct :8787 only applies in bare dev / direct mode.
+      setBridgeUrlDisplay(isBridgeProxied()
+        ? `${proto}//${window.location.host}/ws (via web proxy)`
+        : `${proto}//${window.location.hostname}:8787/ws`);
     } catch {}
   }, []);
-
-  if (state.status !== "connected") {
-    if (state.status === "idle" || state.status === "connecting") {
-      return (
-        <div className="flex min-h-screen items-center justify-center bg-surface-dim dark:bg-inverse-surface">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        </div>
-      );
-    }
-    return null;
-  }
 
   const stats = transfersApi.stats;
 

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "@/lib/session";
+import { RequireAuth } from "@/components/RequireAuth";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
@@ -14,7 +14,14 @@ import { ContextMenu } from "@/components/ui/ContextMenu";
 import { interestsMenu, interestsRecMenu, userMenu } from "@/lib/context-menu/menus";
 
 export default function InterestsPage() {
-  const { state } = useSession();
+  return (
+    <RequireAuth>
+      <InterestsInner />
+    </RequireAuth>
+  );
+}
+
+function InterestsInner() {
   const router = useRouter();
   const {
     likes,
@@ -40,15 +47,8 @@ export default function InterestsPage() {
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; thing: string; type: "like" | "hate" | "rec" | "similar" } | null>(null);
 
   useEffect(() => {
-    if (state.status === "failed") router.replace("/");
-  }, [state.status, router]);
-
-  useEffect(() => {
     if (itemName) setShowItemModal(true);
   }, [itemName]);
-
-  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
-  if (state.status !== "connected") return null;
 
   const handleLikeAdd = () => {
     if (likeInput.trim()) {

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "@/lib/session";
+import { RequireAuth } from "@/components/RequireAuth";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
@@ -28,6 +28,7 @@ import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
 import { BulkScrapeModal } from "@/components/tag/BulkScrapeModal";
 import { useBulkSelection } from "@/lib/bulkSelection";
 import { bulkVerify, bulkAnalyze, bulkRequestSpectrum } from "@/lib/worker";
+import { bridgeFetchUrl } from "@/lib/bridgeHttp";
 import { humanSize, humanSpeed as _humanSpeed } from "@/lib/format";
 
 function humanSpeed(bps: number): string {
@@ -149,7 +150,7 @@ function DownloadsInner() {
     switch (action) {
       case 0: break;
       case 1: {
-        if (t.status === "Finished" && (t as unknown as { downloadUrl?: string }).downloadUrl) window.open((t as unknown as { downloadUrl: string }).downloadUrl, "_blank");
+        if (t.status === "Finished" && (t as unknown as { downloadUrl?: string }).downloadUrl) window.open(bridgeFetchUrl((t as unknown as { downloadUrl: string }).downloadUrl), "_blank");
         else window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Open", body: "No file to open" } }));
         break;
       }
@@ -365,12 +366,9 @@ function DownloadsInner() {
 }
 
 export default function DownloadsPage() {
-  const { state } = useSession();
-  const router = useRouter();
-  useEffect(() => {
-    if (state.status === "failed") router.replace("/");
-  }, [state.status, router]);
-  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
-  if (state.status !== "connected") return null;
-  return <DownloadsInner />;
+  return (
+    <RequireAuth>
+      <DownloadsInner />
+    </RequireAuth>
+  );
 }

@@ -6,6 +6,7 @@ import { defaults, DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, DEFAULT_LISTEN_PORT
 import { SectionCard, SectionSaveButton, TextFieldControl, ToggleControl, NumberControl, SelectControl } from "@/components/settings/controls";
 import { useSaveSection } from "@/lib/config/save";
 import { useSession } from "@/lib/session";
+import { bridgeFetchUrl } from "@/lib/bridgeHttp";
 
 type UpnpStatus = { enabled: boolean; active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; hasPort: boolean } | null;
 function useBridgeListenPort(): { current: number | null; bridgeUrl: string; setCurrent: (n: number | null) => void; upnp: UpnpStatus; setUpnp: (s: UpnpStatus) => void } {
@@ -25,16 +26,16 @@ function useBridgeListenPort(): { current: number | null; bridgeUrl: string; set
       setBridgeUrl(`${scheme}//${window.location.hostname}:8787`);
     }
     const fetchPort = async () => {
-      // Same resolution as the WS connection (override → build-time env → hostname:8787):
-      // never show another bridge's listen port (e.g. :8787 while on a worktree bridge).
-      const base = url
-        ? (() => { try { return new URL(url.replace(/^ws/, "http")).origin; } catch { return ""; } })()
-        : typeof window !== "undefined"
-          ? `${window.location.protocol === "https:" ? "https:" : "http:"}//${window.location.hostname}:8787`
-          : "";
-      if (!base) return;
+      // Same resolution as the WS connection (override → build-time env → same-origin proxy):
+      // bridgeFetchUrl prefers /api/bridge on the web origin and only falls back to a
+      // direct :8787 base when an override is configured. Never show another bridge's
+      // listen port (e.g. :8787 while on a worktree bridge).
+      if (!url && typeof window !== "undefined") {
+        const scheme = window.location.protocol === "https:" ? "https:" : "http:";
+        setBridgeUrl(`${scheme}//${window.location.host}/api/bridge (via web proxy)`);
+      }
       try {
-        const r = await fetch(`${base}/health?json=1`, { cache: "no-store" });
+        const r = await fetch(bridgeFetchUrl(`/health?json=1`), { cache: "no-store" });
         if (!r.ok) return;
         const j = await r.json() as { listenPort?: number; upnp?: UpnpStatus };
         if (typeof j.listenPort === "number") setCurrent(j.listenPort);

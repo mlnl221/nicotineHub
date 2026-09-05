@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { bridgeFetchUrl, bridgeFetchHeaders, type BridgeFileEntry } from "@/lib/bridgeHttp";
 import { isDemo } from "@/lib/demo";
-import { mockFileExplorerResponse } from "@/lib/demo/fixtures";
+import { mockFileExplorerResponse, uniqueDemoName } from "@/lib/demo/fixtures";
 import { TagEditor } from "@/components/tag/TagEditor";
 import { BulkBar } from "@/components/tag/BulkBar";
 import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
@@ -134,7 +134,7 @@ export function FileExplorer({
     } catch (e) {
       const msg = (e as Error).message;
       if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
-        setError("Cannot reach bridge. Is it running? Check NEXT_PUBLIC_BRIDGE_URL / localStorage.nicotineHub.bridgeUrl. On Docker: ensure bridge:8787 is reachable.");
+        setError("Cannot reach bridge. Is it running? The app tries same-origin (/api/bridge) first, then NEXT_PUBLIC_BRIDGE_URL / localStorage.nicotineHub.bridgeUrl.");
       } else {
         setError(msg);
       }
@@ -499,7 +499,7 @@ export function FileExplorer({
               </div>
             </div>
             <div className="mt-3 rounded-xl bg-surface-container-high px-3 py-2 font-body text-xs text-on-surface-variant dark:bg-surface-variant/40 dark:text-outline">
-              Docker tip: ensure bridge is running on <span className="font-mono">:8787</span> and <span className="font-mono">CONFIG_DIR=/config + DATA_DIR=/data</span> is mounted (volume <span className="font-mono">config:/config + data:/data</span> or bind mount). If <span className="font-mono">BRIDGE_TOKEN</span> is set, add it in Settings → Network or <span className="font-mono">localStorage.nicotineHub.bridgeToken</span>.
+              Docker tip: the browser reaches the bridge through the web entrypoint (same-origin <span className="font-mono">/api/bridge</span> proxy — no published bridge port needed). Ensure <span className="font-mono">CONFIG_DIR=/config + DATA_DIR=/data</span> is mounted (volume <span className="font-mono">config:/config + data:/data</span> or bind mount). If <span className="font-mono">BRIDGE_TOKEN</span> is set, add it in Settings → Network or <span className="font-mono">localStorage.nicotineHub.bridgeToken</span>.
             </div>
           </div>
         )}
@@ -752,7 +752,9 @@ export function FileExplorer({
               onSpectrum: isAudio ? () => handleSingleSpectrum(e.path) : undefined,
               onPlay: isAudio ? () => playFile(e.path, e.name, e.size) : undefined,
               onMediainfo: isAudio || !isDemo ? () => setMediainfoFile(e.path) : undefined,
-              onRename: isDemo ? undefined : () => setRenamePath(e.path),
+              // Directories take the fileExplorerDirMenu branch above (no rename) —
+              // files only, mirroring the server's "directories cannot be renamed"
+              onRename: () => setRenamePath(e.path),
             });
           })()}
           onClose={() => setMenuAnchor(null)}
@@ -817,7 +819,7 @@ export function FileExplorer({
         document.body
       ) : null}
       {mediainfoFile ? <MediainfoModal filePath={mediainfoFile} onClose={() => setMediainfoFile(null)} /> : null}
-      {renamePath ? <RenameModal filePath={renamePath} onClose={() => setRenamePath(null)} onRenamed={(newPath) => { fetchDir(current); markSharesDirtyIfNeeded(newPath); try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Renamed", body: newPath.split("/").pop() || newPath } })); } catch {} }} /> : null}
+      {renamePath ? <RenameModal filePath={renamePath} onClose={() => setRenamePath(null)} onRenamed={(newPath) => { if (isDemo) { const normOld = renamePath.replace(/\\/g, "/"); const dirLen = normOld.lastIndexOf("/") + 1; const dir = renamePath.slice(0, dirLen); const newBase = newPath.replace(/\\/g, "/").split("/").pop() ?? newPath; const siblings = entries.filter((en) => en.path !== renamePath && en.path.replace(/\\/g, "/").startsWith(normOld.slice(0, dirLen)) && !en.path.replace(/\\/g, "/").slice(dirLen).includes("/")).map((en) => en.path.replace(/\\/g, "/").split("/").pop() as string); const { name: finalName, suffixed } = uniqueDemoName(siblings, newBase); const finalPath = `${dir}${finalName}`; setEntries((prev) => prev.map((en) => en.path === renamePath ? { ...en, path: finalPath, name: finalName } : en)); try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: suffixed ? "Renamed (demo — auto-suffixed, not saved)" : "Renamed (demo — not saved)", body: finalName } })); } catch {} } else { fetchDir(current); markSharesDirtyIfNeeded(newPath); try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Renamed", body: newPath.split("/").pop() || newPath } })); } catch {} } }} /> : null}
     </div>
   );
 }

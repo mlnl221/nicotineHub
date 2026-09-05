@@ -3,15 +3,23 @@
 import { useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
+import { RequireAuth } from "@/components/RequireAuth";
 
 export default function BrowseUserRedirect() {
+  return (
+    <RequireAuth>
+      <BrowseUserInner />
+    </RequireAuth>
+  );
+}
+
+function BrowseUserInner() {
   const params = useParams<{ username: string }>();
   const username = decodeURIComponent(params.username ?? "");
   const { state } = useSession();
   const router = useRouter();
   useEffect(() => {
-    if (state.status === "idle" || state.status === "connecting") return;
-    if (state.status !== "connected") { router.replace("/"); return; }
+    if (state.status !== "connected") return;
     if (username) {
       // Persist recent and redirect to tabbed browse with query param
       try {
@@ -26,6 +34,5 @@ export default function BrowseUserRedirect() {
       router.replace("/browse");
     }
   }, [username, state.status, router]);
-  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
   return null;
 }

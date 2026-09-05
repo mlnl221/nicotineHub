@@ -75,13 +75,23 @@ if (N === 0) {
 }
 
 const bridgeEnv = { ...process.env, PORT: String(bridgePort), LISTEN_PORT: String(listenPort) };
-const webEnv = { ...process.env, PORT: String(webPort), NEXT_PUBLIC_BRIDGE_URL: bridgeUrl };
+// INNER_PORT: proxy-server.js outer/inner split (web dev runs behind the
+// same-origin wrapper as prod, so /ws + /api/* proxying works in dev too).
+const innerPort = 3100 + N;
+const webEnv = {
+  ...process.env,
+  PORT: String(webPort),
+  INNER_PORT: String(innerPort),
+  NEXT_PUBLIC_BRIDGE_URL: bridgeUrl,
+  BRIDGE_INTERNAL_URL: `http://localhost:${bridgePort}`,
+  WORKER_INTERNAL_URL: "http://localhost:8789",
+};
 
 // concurrently is in devDependencies — always available
 const hasConcurrently = true;
 
 if (hasConcurrently) {
-  const cmd = `concurrently -n bridge,web -c blue,green "PORT=${bridgePort} LISTEN_PORT=${listenPort} bun run --cwd apps/bridge dev" "PORT=${webPort} NEXT_PUBLIC_BRIDGE_URL=${bridgeUrl} bun run --cwd apps/web dev"`;
+  const cmd = `concurrently -n bridge,web -c blue,green "PORT=${bridgePort} LISTEN_PORT=${listenPort} bun run --cwd apps/bridge dev" "PORT=${webPort} INNER_PORT=${innerPort} NEXT_PUBLIC_BRIDGE_URL=${bridgeUrl} BRIDGE_INTERNAL_URL=http://localhost:${bridgePort} WORKER_INTERNAL_URL=http://localhost:8789 bun run --cwd apps/web dev"`;
   const child = spawn(cmd, { shell: true, stdio: "inherit", env: process.env });
   child.on("exit", (code) => process.exit(code ?? 0));
 } else {
