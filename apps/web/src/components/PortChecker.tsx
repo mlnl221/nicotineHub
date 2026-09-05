@@ -206,7 +206,7 @@ export function PortChecker() {
         <span className={`h-2 w-2 rounded-full ${state.status === "connected" ? "bg-green-500" : "bg-outline"}`} title={state.status} />
       </div>
       <p className="mb-3 text-xs text-on-surface-variant">
-        Search results require a reachable inbound peer listener. Default <code>LISTEN_PORT 60754</code> (configurable) must be port-forwarded (TCP, see README) — edit in Settings → Network. UPnP/NAT-PMP auto-forwards when enabled (toggle in Network, renews every 2 h). Currently <code>{health?.listenPort ?? 60754}</code>.
+        Search results require a reachable inbound peer listener. Default <code>LISTEN_PORT 60754</code> (configurable) must be port-forwarded (TCP, see README) — edit in Settings → Network. With the Docker socket mounted + <code>ALLOW_CONTAINER_RESTART=1</code> the bridge recreates itself so the host mapping follows, otherwise follow with <code>LISTEN_PORT=&lt;port&gt; docker compose up -d</code>. UPnP/NAT-PMP auto-forwards when enabled (toggle in Network, renews every 2 h). Currently <code>{health?.listenPort ?? 60754}</code>.
       </p>
       {health && (
         <div className="mb-3 rounded-xl bg-surface-container-high px-3 py-2 text-xs dark:bg-surface-container-highest/40">

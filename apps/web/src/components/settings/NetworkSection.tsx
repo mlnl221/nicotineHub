@@ -163,6 +163,19 @@ export function NetworkSection() {
             setSaveError(d.error);
             reject(new Error(d.error));
           }
+        } else if (msg.type === "server:restarting") {
+          const d = msg as unknown as { listenPort?: number };
+          if (d.listenPort === p) {
+            // Bridge is recreating its container so the Docker host mapping follows
+            // the new port (mappings are immutable at runtime) — WS drops mid-swap,
+            // session auto-reconnects to the new container.
+            setBridgePort(p);
+            clearTimeout(timer);
+            unsub();
+            setSaveStatus("success");
+            setTimeout(() => setSaveStatus("idle"), 5000);
+            resolve();
+          }
         } else if (msg.type === "error") {
           const err = (msg as unknown as { error: string }).error || "";
           if (/Cannot listen on port|Invalid listen port/i.test(err)) {
@@ -276,7 +289,7 @@ export function NetworkSection() {
         </div>
         {bridgePort ? (
           <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs text-on-surface-variant dark:bg-surface-container-highest/40">
-            Bridge reports <span className="font-mono font-medium text-on-surface">{bridgePort}</span> via <span className="font-mono">/health?json</span> + WS. Click Save to hot-swap <span className="font-mono">Bun.listen</span> and fresh Soulseek connect – re-advertises via <span className="font-mono">SetWaitPort {pendingPort}</span>. For VPN (forwarded {DEFAULT_LISTEN_PORT}) use <span className="font-mono">network_mode: host</span> (see compose.override.example.yaml) – then no Docker recreate needed; otherwise Docker host mapping needs <span className="font-mono">LISTEN_PORT={pendingPort} docker compose up -d</span>.
+            Bridge reports <span className="font-mono font-medium text-on-surface">{bridgePort}</span> via <span className="font-mono">/health?json</span> + WS. Click Save to hot-swap <span className="font-mono">Bun.listen</span> and fresh Soulseek connect – re-advertises via <span className="font-mono">SetWaitPort {pendingPort}</span>. With the Docker socket mounted + <span className="font-mono">ALLOW_CONTAINER_RESTART=1</span> the bridge recreates its container so the host mapping follows automatically (status: <span className="font-mono">GET /api/bridge/container</span>); otherwise Docker host mapping needs <span className="font-mono">LISTEN_PORT={pendingPort} docker compose up -d</span>. For VPN on Linux use <span className="font-mono">network_mode: host</span> (see compose.override.example.yaml, ignored on Docker Desktop) – then no Docker recreate needed.
             {!isConnected ? <span className="block pt-1 text-amber-700 dark:text-amber-300">Not connected — Save will apply on next login.</span> : null}
           </div>
         ) : null}

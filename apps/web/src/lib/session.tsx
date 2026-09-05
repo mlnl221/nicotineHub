@@ -367,6 +367,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           }
           break;
         }
+        case "server:restarting": {
+          // Bridge is recreating its container for a port change — WS drops
+          // mid-swap; keep the banner, the close handler below reconnects.
+          setState((s) => ({ ...s, reconnecting: true }));
+          break;
+        }
         case "server:reconnected": {
           // Background reconnect succeeded (e.g. after port change) — restore connected without user re-login
           setState((s) => ({ ...s, status: "connected", user: s.user ?? loginReq.username, error: undefined, reconnecting: false }));

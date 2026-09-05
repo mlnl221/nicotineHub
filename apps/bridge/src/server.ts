@@ -27,6 +27,15 @@ import { Plugin as SpamfilterPlugin, manifest as spamManifest } from "./plugins/
 import { Plugin as LeechDetectorPlugin, manifest as leechManifest } from "./plugins/builtin/leech_detector.ts";
 import { listDirectory, resolveSafePath, sanitizeFileNameForHeader, serveFileWithRanges } from "./files.ts";
 import { portChecker } from "./portchecker.ts";
+import {
+  maybeRecreateContainerForPort,
+  recreateSelfWithPort,
+  recreateStatus,
+  inspectSelfContainer,
+  parseHostPorts,
+  envListenPort,
+  getSelfContainerId,
+} from "./docker.ts";
 import { logPrivateMessage, logRoomMessage, logRoomSystem } from "./chatLogger.ts";
 
 /* Schemas */
@@ -717,6 +726,64 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       }
       const ok = server.upgrade(req, { data: {} });
       return ok ? undefined : new Response("WebSocket upgrade failed", { status: 400 });
+    }
+
+    // Container self-recreate via Docker socket (opt-in: ALLOW_CONTAINER_RESTART=1
+    // + /var/run/docker.sock mount). Lets a UI port change update the whole
+    // bridge: container host-port mappings are immutable at runtime, so only a
+    // recreate applies a new mapping (plain `docker restart` keeps the old one).
+    if (url.pathname === "/container" && req.method === "GET") {
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
+      let mapping: number[] = [];
+      let envPort: number | null = null;
+      let name: string | null = null;
+      try {
+        const insp = await inspectSelfContainer();
+        if (insp) {
+          mapping = parseHostPorts(insp);
+          envPort = envListenPort(insp);
+          name = (insp.Name || "").replace(/^\//, "") || null;
+        }
+      } catch (e) {
+        logger.warn("bridge", "container inspect failed", { error: (e as Error).message });
+      }
+      return new Response(JSON.stringify({
+        ...recreateStatus(),
+        selfId: (getSelfContainerId() || "").slice(0, 12) || null,
+        name,
+        mapping,
+        envPort,
+        wantPort: LISTEN_PORT,
+        mappingMatches: mapping.includes(LISTEN_PORT),
+        ts: new Date().toISOString(),
+      }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
+    }
+    if (url.pathname === "/restart" && req.method === "POST") {
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
+      const st = recreateStatus();
+      if (!st.enabled || !st.socket) {
+        return new Response(JSON.stringify({
+          error: "container restart not available",
+          hint: "mount /var/run/docker.sock + set ALLOW_CONTAINER_RESTART=1 (see compose.yaml), then LISTEN_PORT=<port> applies on recreate",
+          ...st,
+        }), { status: 501, headers: { "content-type": "application/json", ...cors } });
+      }
+      if (st.inProgress) return new Response(JSON.stringify({ error: "recreate already in progress" }), { status: 409, headers: { "content-type": "application/json", ...cors } });
+      if (!getSelfContainerId()) return new Response(JSON.stringify({ error: "not running in a container" }), { status: 501, headers: { "content-type": "application/json", ...cors } });
+      let port = LISTEN_PORT;
+      try {
+        const body = (await req.json()) as { port?: number };
+        if (body?.port !== undefined) port = Number(body.port);
+      } catch { /* empty body → current LISTEN_PORT */ }
+      if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+        return new Response(JSON.stringify({ error: `Invalid listen port ${port} (must be 1024-65535)` }), { status: 400, headers: { "content-type": "application/json", ...cors } });
+      }
+      // 202: swap happens async — this container (and its sockets) go away mid-swap
+      void recreateSelfWithPort(port).then(
+        (r) => diagLog("info", "bridge", "container recreate finished", { port, ...r }),
+        (e) => diagLog("warn", "bridge", "container recreate failed", { port, error: (e as Error).message })
+      );
+      return new Response(JSON.stringify({ ok: true, restarting: true, port, ts: new Date().toISOString() }), { status: 202, headers: { "content-type": "application/json", ...cors } });
     }
 
     // GET /files/:token — serve finished downloads from DATA_DIR/downloads
@@ -1520,6 +1587,16 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                         try { (s as unknown as { _listenPort: number })._listenPort = newPort; (s as unknown as { portMapper: { setPort: (p:number,ip:string)=>void } }).portMapper?.setPort(newPort, (s as unknown as { _localIpAddress: string })._localIpAddress || "0.0.0.0"); } catch {}
                       }
                     }
+                    // Opt-in: recreate the container so the Docker host mapping
+                    // follows the new port (mappings are immutable at runtime).
+                    // No-op unless socket mounted + ALLOW_CONTAINER_RESTART=1.
+                    void maybeRecreateContainerForPort(newPort, prevPort).then((outcome) => {
+                      if (outcome === "started") {
+                        try { ws.send(JSON.stringify({ type: "server:restarting", listenPort: newPort })); } catch {}
+                      } else if (outcome !== "disabled" && outcome !== "not-in-container" && !outcome.startsWith("already")) {
+                        logger.warn("server", "container recreate skipped/failed", { newPort, outcome });
+                      }
+                    });
                   }).catch((e: Error) => {
                     // Revert global on bind failure
                     LISTEN_PORT = prevPort;
@@ -1536,6 +1613,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                 } else {
                   // No active session yet — next login will use new port (persisted)
                   logger.info("server", "listen port updated (no active session)", { oldPort: prevPort, newPort });
+                  void maybeRecreateContainerForPort(newPort, prevPort);
                 }
               }
             } else {

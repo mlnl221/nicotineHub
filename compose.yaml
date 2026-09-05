@@ -7,7 +7,11 @@ services:
     restart: unless-stopped
     environment:
       PORT: "8787"
-      LISTEN_PORT: "40598"
+      # Interpolated (not hardcoded) so env and the host mapping below always agree:
+      # `LISTEN_PORT=NEW docker compose up -d` changes both. Env wins over the
+      # persisted CONFIG_DIR/listen_port at boot (see apps/bridge/src/server.ts),
+      # so a pinned value here would silently discard the UI-chosen port on recreate.
+      LISTEN_PORT: "${LISTEN_PORT:-40598}"
       CONFIG_DIR: "/config"
       DATA_DIR: "/data"
       BRIDGE_TOKEN: "${BRIDGE_TOKEN:-}"
@@ -17,6 +21,9 @@ services:
       SHARED_DIRS: "${SHARED_DIRS:-}"
       # Homelab hardening: optionally restrict browser origins (e.g. ALLOWED_ORIGINS=https://hub.example.com,http://nas:3000)
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
+      # Opt-in companion to the socket mount above: ALLOW_CONTAINER_RESTART=1 lets the
+      # bridge recreate itself after a UI port change (POST /restart, auto after Save).
+      # ALLOW_CONTAINER_RESTART: "0"
     ports:
       # Browser traffic (WS /ws + HTTP) goes through the web entrypoint
       # (same-origin /ws + /api/bridge), so 8787 is NOT published — the
@@ -26,12 +33,19 @@ services:
       - "${LISTEN_PORT:-40598}:${LISTEN_PORT:-40598}/udp"
     # Homelab: browsers reach the bridge through the web entrypoint only
     # (same-origin /ws + /api/bridge via proxy-server.js) — no 8787 publish.
-    # LISTEN_PORT is the host port — changing it in Settings → Network (portrange) writes CONFIG_DIR/listen_port (+ CONFIG_DIR/host.env for .env sync) and hot-swaps Bun.listen + reconnects Soulseek (SetWaitPort) without WS restart; UI stays up, Save triggers fresh connect. The *host* mapping is static at create time: `LISTEN_PORT=NEW docker compose up -d` to change it.
+    # LISTEN_PORT is the host port — changing it in Settings → Network (portrange) writes CONFIG_DIR/listen_port (+ CONFIG_DIR/host.env for .env sync) and hot-swaps Bun.listen + reconnects Soulseek (SetWaitPort) without WS restart; UI stays up, Save triggers fresh connect. The *host* mapping is static at create time — with the socket mount below it self-recreates, otherwise `LISTEN_PORT=NEW docker compose up -d` to change it.
     # UPnP auto-maps if `server.upnp` is enabled (default true, toggle in Network) but sees the container IP in bridge mode — prefer manual forward, or add `network_mode: host` (then drop `ports:`) so UPnP sees the host LAN IP.
     # Direct bridge access (remote setups): publish 8787 and set NEXT_PUBLIC_BRIDGE_URL=ws://host:8787/ws via web env.
     volumes:
       - config:/config
       - data:/data
+      # Opt-in self-recreate via Docker socket: with this mounted + ALLOW_CONTAINER_RESTART=1,
+      # a Settings → Network port change recreates the bridge container with the new
+      # host mapping automatically (container ports are immutable at runtime — plain
+      # `docker restart` keeps the old mapping). Socket access is host-root-equivalent:
+      # only enable on trusted LAN hosts (see SECURITY.md). Not needed with
+      # network_mode: host or when you run `LISTEN_PORT=NEW docker compose up -d` manually.
+      # - /var/run/docker.sock:/var/run/docker.sock
       # Example host mounts for real file sharing (uncomment and adjust):
       # - /home/user/Music:/data/Music:ro
       # - /home/user/Downloads:/data/downloads:ro

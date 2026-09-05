@@ -124,7 +124,7 @@ Modify accordingly if running with unRAID or setting up with Portainer.
 - Change `BASE_DOCKER_CONFIG_PATH` (`./config`) and `BASE_DOCKER_DATA_PATH` (`./data`) to match your setup
 - Set a custom network if needed
 - Only `web:3000` + `LISTEN_PORT` are published: browsers reach bridge/worker through the web UI (same-origin `/ws` + `/api/*` proxy) — no `8787`/`8789` mapping needed
-- Forward `LISTEN_PORT` `60754` TCP+UDP on your router for Soulseek searches (or use `network_mode: host` for UPnP)
+- Forward `LISTEN_PORT` `60754` TCP+UDP on your router for Soulseek searches (or use `network_mode: host` for UPnP). Changing the port in Settings → Network recreates the bridge container automatically when the opt-in Docker-socket mode is on (`/var/run/docker.sock` + `ALLOW_CONTAINER_RESTART=1`, see `compose.yaml`); otherwise follow with `LISTEN_PORT=NEW docker compose up -d`.
 
 Create `docker-compose.yml` and add the following. If you have an existing setup change to fit that.
 

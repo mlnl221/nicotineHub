@@ -20,11 +20,11 @@ through the web entrypoint (same-origin `/ws` piped + `/api/bridge/*` +
 
 **Network mode — internal services (default) vs direct vs host**
 
-- **Internal (default `compose.yaml`)**: bridge/worker have no published ports. The web entrypoint proxies everything same-origin, so LAN browsers only need `:3000`. `LISTEN_PORT` host mapping is static at create time — changing the peer port in Settings → Network hot-swaps `Bun.listen` + `SetWaitPort` inside the container, but the *host* mapping needs `LISTEN_PORT=NEW docker compose up -d` to match. UPnP inside bridge-network sees the container IP — prefer manual port-forward or host mode for UPnP.
+- **Internal (default `compose.yaml`)**: bridge/worker have no published ports. The web entrypoint proxies everything same-origin, so LAN browsers only need `:3000`. `LISTEN_PORT` host mapping is static at create time — changing the peer port in Settings → Network hot-swaps `Bun.listen` + `SetWaitPort` inside the container. The *host* mapping follows automatically when the opt-in Docker-socket mode is on (mount `/var/run/docker.sock` + `ALLOW_CONTAINER_RESTART=1`: the bridge recreates its own container with the new mapping, then the clients reconnect); otherwise run `LISTEN_PORT=NEW docker compose up -d` to match. UPnP inside bridge-network sees the container IP — prefer manual port-forward or host mode for UPnP.
 - **Direct (remote bridge/worker)**: publish `8787:8787` / `8789:8789` and set `NEXT_PUBLIC_BRIDGE_URL=ws://host:8787/ws` / `NEXT_PUBLIC_WORKER_URL=http://host:8789` (build-time) or the `localStorage` overrides — the client bypasses the proxy. Needed for split hosting (e.g. Vercel web + home bridge).
 - **Host mode**: add `network_mode: host` to `bridge` (and drop its `ports:`) — it binds directly to host `8787` + `LISTEN_PORT`, UPnP sees the host LAN IP, and Settings → Network port changes apply without `docker compose up -d`.
 
-Port-forwarding is parameterized: `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` (TCP+UDP) when in bridge mode; in host mode the port is host-direct. To use a different peer port, set `LISTEN_PORT` (see `docs/architecture.md#env-full` for `DATA_DIR/listen_port` persistence):
+Port-forwarding is parameterized: `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` (TCP+UDP) when in bridge mode, and the container env uses the same interpolation so env and mapping always agree; in host mode the port is host-direct. To use a different peer port, set `LISTEN_PORT` (see `docs/architecture.md#env-full` for `DATA_DIR/listen_port` persistence) — with socket mode on, Settings → Network Save recreates the container for you, otherwise:
 
 ```bash
 LISTEN_PORT=60755 docker compose up -d
