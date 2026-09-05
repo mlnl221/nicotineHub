@@ -663,7 +663,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       }
     }
 
-    // GET /api/files/raw?path=/data/Music/song.flac — raw bytes for in-browser audio playback.
+    // GET /api/files/raw?path=/data/Music/song.flac — raw bytes for in-browser audio/image preview.
     // Restricted to DATA_DIR subtree (unlike listing, which may browse host root) + same token auth.
     if (url.pathname === "/api/files/raw" && req.method === "GET") {
       { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
@@ -694,6 +694,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         }
         if (st.size > 500 * 1024 * 1024) {
           return new Response(JSON.stringify({ error: "file too large to stream" }), { status: 413, headers: { "content-type": "application/json", ...cors } });
+        }
+        if (url.searchParams.get("preview") === "1" && st.size > 25 * 1024 * 1024) {
+          return new Response(JSON.stringify({ error: "too large to preview" }), { status: 413, headers: { "content-type": "application/json", ...cors } });
         }
         return serveFileWithRanges(real, req, cors, sanitizeFileNameForHeader(basename(real)));
       } catch (e) {

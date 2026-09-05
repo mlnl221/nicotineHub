@@ -18,6 +18,7 @@ import { dataFilePlayUrl, formatLabelOf, splitArtistTitle, toast } from "@/lib/p
 import { createPortal } from "react-dom";
 import { MediainfoModal } from "@/components/files/MediainfoModal";
 import { RenameModal } from "@/components/files/RenameModal";
+import { ImageHoverCard } from "@/components/files/ImageHoverCard";
 import { useConfig } from "@/lib/config/provider";
 import { useSession } from "@/lib/session";
 
@@ -97,7 +98,10 @@ export function FileExplorer({
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const fetchDir = useCallback(async (path: string) => {
+  const currentRef = useRef(current);
+  useEffect(() => { currentRef.current = current; }, [current]);
+
+  const fetchDir = useCallback(async (path: string, opts?: { push?: boolean }) => {
     if (isDemo) {
       setLoading(true);
       setError(null);
@@ -122,6 +126,11 @@ export function FileExplorer({
       setCurrent(data.path);
       setParent(data.parent);
       setEntries(data.entries);
+      if (opts?.push && typeof window !== "undefined" && !isDemo) {
+        try {
+          window.history.pushState({ explorer: data.path }, "", window.location.href);
+        } catch {}
+      }
     } catch (e) {
       const msg = (e as Error).message;
       if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
@@ -135,6 +144,26 @@ export function FileExplorer({
   }, []);
 
   useEffect(() => { fetchDir(initialPath); }, [fetchDir, initialPath]);
+
+  // Browser back walks up directories (invisible history entries, same URL)
+  useEffect(() => {
+    if (isDemo || typeof window === "undefined") return;
+    try {
+      const st = window.history.state as { explorer?: string } | null;
+      if (!st?.explorer) {
+        window.history.replaceState({ explorer: currentRef.current }, "", window.location.href);
+      }
+    } catch {}
+    const onPop = (e: PopStateEvent) => {
+      const st = e.state as { explorer?: string } | null;
+      const target = st?.explorer;
+      if (typeof target === "string" && target !== currentRef.current) {
+        fetchDir(target);
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [fetchDir]);
 
   const handleDirScrape = async (dir: BridgeFileEntry) => {
     if (isDemo) {
@@ -356,7 +385,7 @@ export function FileExplorer({
           {parent !== null && (
             <button
               type="button"
-              onClick={() => fetchDir(parent ?? "/")}
+              onClick={() => fetchDir(parent ?? "/", { push: true })}
               className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs font-medium text-on-surface-variant hover:bg-surface-container-highest dark:bg-surface-variant dark:text-outline"
             >
               <span className="material-symbols-outlined text-[16px]">arrow_upward</span> Up
@@ -377,7 +406,7 @@ export function FileExplorer({
             {i > 0 && <span className="text-outline/60">/</span>}
             <button
               type="button"
-              onClick={() => fetchDir(c.path)}
+              onClick={() => fetchDir(c.path, { push: true })}
               className={`rounded-full px-2 py-0.5 font-label text-xs ${i === breadcrumbs.length - 1 ? "bg-primary-container font-semibold text-on-primary-container" : "bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest dark:bg-surface-variant dark:text-outline"}`}
             >
               {c.label}
@@ -494,7 +523,7 @@ export function FileExplorer({
               <button
                 key={e.path}
                 type="button"
-                onClick={() => fetchDir(e.path)}
+                onClick={() => fetchDir(e.path, { push: true })}
                 onContextMenu={(ev) => {
                   ev.preventDefault();
                   ev.stopPropagation();
@@ -523,7 +552,7 @@ export function FileExplorer({
                 </div>
                 <button
                   type="button"
-                  onClick={() => fetchDir(e.path)}
+                  onClick={() => fetchDir(e.path, { push: true })}
                   className="rounded-full bg-surface-container-high px-2 py-1 font-label text-[11px] text-on-surface-variant hover:bg-surface-container-highest"
                   title="Try to enter symlink (blocked if it escapes /)"
                 >
@@ -534,12 +563,13 @@ export function FileExplorer({
             {showFiles && files.filter((e) => e.type !== "symlink").map((e, idx) => {
               const ext = e.name.toLowerCase().split(".").pop() ?? "";
               const isAudio = !isDemo && ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"].includes(ext);
+              const isImage = !isDemo && ["jpg","jpeg","png","gif","webp","bmp","ico"].includes(ext);
               const checked = bulk.has(e.path);
               const isFocused = focusedIdx === audioIds.indexOf(e.path);
               const spectrumEntry = getEntry(e.path);
               const hasSpectrum = spectrumEntry?.status === "done" && (!!spectrumEntry.fullBlobUrl || !!spectrumEntry.fullUrl);
               const isGenerating = spectrumEntry?.status === "queued" || spectrumEntry?.status === "generating";
-              return (
+              const row = (
               <div
                 key={e.path}
                 onClick={() => selectMode && isAudio && (isFocused ? bulk.toggleRange(e.path, audioIds) : bulk.toggle(e.path, audioIds))}
@@ -555,7 +585,7 @@ export function FileExplorer({
                   <input type="checkbox" checked={checked} onChange={() => bulk.toggle(e.path)} onClick={(ev) => ev.stopPropagation()} className="h-4 w-4 shrink-0 accent-primary" />
                 ) : null}
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-container-high text-on-surface-variant dark:bg-surface-variant dark:text-outline">
-                  <span className="material-symbols-outlined text-[18px]">{isAudio ? "audio_file" : "description"}</span>
+                  <span className="material-symbols-outlined text-[18px]">{isImage ? "image" : isAudio ? "audio_file" : "description"}</span>
                 </span>
                 <div className="min-w-0 flex-1" onClick={() => selectMode && isAudio && bulk.toggle(e.path)}>
                   <div className="truncate font-body text-sm text-on-surface dark:text-inverse-on-surface flex items-center gap-1.5">
@@ -573,6 +603,11 @@ export function FileExplorer({
                     {isAudio && isGenerating ? (
                       <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 font-label text-[10px] text-primary animate-pulse">
                         <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" /> generating
+                      </span>
+                    ) : null}
+                    {isImage ? (
+                      <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-secondary-container/70 px-2 py-0.5 font-label text-[10px] font-semibold text-on-secondary-container">
+                        <span className="material-symbols-outlined text-[12px]">image</span> image
                       </span>
                     ) : null}
                   </div>
@@ -603,6 +638,11 @@ export function FileExplorer({
                 ) : null}
               </div>
               );
+              return isImage ? (
+                <ImageHoverCard key={e.path} absPath={e.path} fileName={e.name}>
+                  {row}
+                </ImageHoverCard>
+              ) : row;
             })}
           </div>
           </>

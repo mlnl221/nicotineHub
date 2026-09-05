@@ -116,6 +116,10 @@ export const AUDIO_MIME: Record<string, string> = {
   mp3: "audio/mpeg", flac: "audio/flac", ogg: "audio/ogg", oga: "audio/ogg",
   opus: "audio/ogg", wav: "audio/wav", m4a: "audio/mp4", aac: "audio/aac",
 };
+export const IMAGE_MIME: Record<string, string> = {
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif",
+  webp: "image/webp", bmp: "image/bmp", ico: "image/x-icon",
+};
 /** Exotic formats the browser can't play — worker /audio transcodes these to opus. */
 export const TRANSCODE_EXTS = new Set(["wma", "wv", "ape", "aiff", "aif", "alac", "mp2"]);
 
@@ -152,7 +156,7 @@ export function parseRange(header: string | null, size: number): { start: number
 export function serveFileWithRanges(filePath: string, req: Request, cors: Record<string, string>, fileName: string): Response {
   const file = Bun.file(filePath);
   const size = file.size;
-  const mime = AUDIO_MIME[extOf(fileName)];
+  const mime = AUDIO_MIME[extOf(fileName)] || IMAGE_MIME[extOf(fileName)];
   const encoded = encodeURIComponent(fileName).replace(/'/g, "%27");
   const base: Record<string, string> = {
     "Content-Disposition": `${mime ? "inline" : "attachment"}; filename="${fileName}"; filename*=UTF-8''${encoded}`,
