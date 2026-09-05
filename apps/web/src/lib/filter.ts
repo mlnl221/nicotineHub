@@ -133,6 +133,57 @@ function matchDigit(expr: string, value: number, kind: "size" | "bitrate" | "len
   });
 }
 
+function matchQuality(row: SearchRow, expr: string): boolean {
+  if (!expr.trim()) return true;
+  const tokens = expr.split(/[\s|&]+/).filter(Boolean);
+  if (!tokens.length) return true;
+  const lower = expr.toLowerCase();
+  // negotiation: ! prefix means exclude (row must NOT match)
+  const attrs = row.attributes || {};
+  const bitrate = attrs.bitrate ?? row.quality ?? 0;
+  const sampleRate = attrs.sampleRate ?? 0;
+  const bitDepth = attrs.bitDepth ?? 0;
+  const vbr = attrs.vbr ? 1 : 0;
+  const ext = row.fileType?.toLowerCase() ?? "";
+  const isLossless = (sampleRate && bitDepth) || (["flac", "wav", "aiff", "alac", "ape", "wv"].includes(ext) && row.quality === 0);
+  const isHiRes = sampleRate > 48000 || bitDepth > 16;
+
+  const evalToken = (tok: string): boolean => {
+    let neg = false;
+    let t = tok.toLowerCase();
+    if (t.startsWith("!")) { neg = true; t = t.slice(1); }
+    if (!t) return true;
+    let hit = false;
+    if (t === "lossless") hit = !!isLossless;
+    else if (t === "lossy") hit = !isLossless;
+    else if (t === "hi-res" || t === "hires" || t === "hi_res") hit = !!isHiRes;
+    else if (t === "vbr") hit = !!vbr;
+    else if (t === "cbr") hit = !vbr && bitrate > 0;
+    else if (t === "flac" || t === "mp3" || t === "wav" || t === "aiff" || t === "ogg" || t === "m4a" || t === "opus" || t === "wma" || t === "ape" || t === "wv" || t === "alac") hit = ext === t;
+    else if (/^\d+$/.test(t)) hit = bitrate === parseInt(t, 10);
+    else if (/^\d+\.\d+\/\d+$/.test(t)) {
+      const [srStr, bdStr] = t.split("/");
+      const sr = Math.round(parseFloat(srStr) * 1000);
+      const bd = parseInt(bdStr, 10);
+      hit = sampleRate === sr && bitDepth === bd;
+    } else if (t === "320") hit = bitrate === 320;
+    else if (t === "44.1/16") hit = sampleRate === 44100 && bitDepth === 16;
+    else {
+      // unknown token: treat as substring on ext or lossless flag
+      hit = ext.includes(t);
+    }
+    return neg ? !hit : hit;
+  };
+
+  // Support OR via | already split, but also treat space as AND: all tokens must match (with ! handling)
+  // For simplicity, if any token with | semantics already split, we treat OR across groups again
+  const orGroups = expr.split("|").map(g => g.trim()).filter(Boolean);
+  if (orGroups.length > 1) {
+    return orGroups.some(group => group.split(/[\s&]+/).filter(Boolean).every(evalToken));
+  }
+  return tokens.every(evalToken);
+}
+
 /** Apply the full filter set to a list of rows (live, client-side). */
 export function applyFilters(rows: SearchRow[], f: FilterState): SearchRow[] {
   return rows.filter((row) => {
@@ -143,6 +194,7 @@ export function applyFilters(rows: SearchRow[], f: FilterState): SearchRow[] {
     if (f.bitrate && !matchDigit(f.bitrate, row.quality, "bitrate")) return false;
     if (f.length && !matchDigit(f.length, row.length, "length")) return false;
     if (f.country.trim() && !matchCountry(row, f.country)) return false;
+    if (f.quality && !matchQuality(row, f.quality)) return false;
     if (f.freeSlot && !row.slotFree) return false;
     if (f.publicOnly && row.private) return false;
     return true;
@@ -159,6 +211,7 @@ export function activeFilterCount(f: FilterState): number {
   if (f.bitrate.trim()) n++;
   if (f.length.trim()) n++;
   if (f.country.trim()) n++;
+  if (f.quality.trim()) n++;
   if (f.freeSlot) n++;
   if (f.publicOnly) n++;
   return n;

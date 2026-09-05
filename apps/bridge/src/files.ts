@@ -99,6 +99,88 @@ export function getParentPath(normalizedPath: string): string | null {
   return n.slice(0, idx);
 }
 
+/** Strict filename whitelist for Content-Disposition: strip CR/LF, quotes, slashes, control chars. */
+export function sanitizeFileNameForHeader(name: string): string {
+  let s = name.replace(/[\r\n"]/g, "").replace(/[/\\]/g, "_").trim();
+  s = s.replace(/[\x00-\x1f\x7f]/g, "");
+  if (!s || s.length > 255) s = "download";
+  const safe = s.replace(/[^a-zA-Z0-9._\- ()[\]{}!@#$%^&+=,;~`']/g, "_");
+  return safe || "download";
+}
+
+// ---- in-browser audio serving (playable files + seeking) ----
+// Native <audio> formats served inline with explicit MIME; everything else
+// keeps the legacy attachment download behavior. Single-range 206 only —
+// browsers request one range at a time (multipart ranges ignored → 200).
+export const AUDIO_MIME: Record<string, string> = {
+  mp3: "audio/mpeg", flac: "audio/flac", ogg: "audio/ogg", oga: "audio/ogg",
+  opus: "audio/ogg", wav: "audio/wav", m4a: "audio/mp4", aac: "audio/aac",
+};
+export const IMAGE_MIME: Record<string, string> = {
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif",
+  webp: "image/webp", bmp: "image/bmp", ico: "image/x-icon",
+};
+/** Exotic formats the browser can't play — worker /audio transcodes these to opus. */
+export const TRANSCODE_EXTS = new Set(["wma", "wv", "ape", "aiff", "aif", "alac", "mp2"]);
+
+export function extOf(name: string): string {
+  const i = name.lastIndexOf(".");
+  return i === -1 ? "" : name.slice(i + 1).toLowerCase();
+}
+
+export function parseRange(header: string | null, size: number): { start: number; end: number } | "unsatisfiable" | null {
+  if (!header || !header.startsWith("bytes=")) return null;
+  const spec = header.slice(6).trim();
+  if (spec.includes(",")) return null;
+  const [s, e] = spec.split("-");
+  let start: number, end: number;
+  if (s === "") {
+    const suffix = Number(e);
+    if (!Number.isInteger(suffix) || suffix <= 0) return null;
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  } else {
+    start = Number(s);
+    if (!Number.isInteger(start) || start < 0) return null;
+    if (e === "" || e === undefined) {
+      end = size - 1;
+    } else {
+      end = Number(e);
+      if (!Number.isInteger(end) || end < start) return null;
+    }
+  }
+  if (start >= size) return "unsatisfiable";
+  return { start, end: Math.min(end, size - 1) };
+}
+
+export function serveFileWithRanges(filePath: string, req: Request, cors: Record<string, string>, fileName: string): Response {
+  const file = Bun.file(filePath);
+  const size = file.size;
+  const mime = AUDIO_MIME[extOf(fileName)] || IMAGE_MIME[extOf(fileName)];
+  const encoded = encodeURIComponent(fileName).replace(/'/g, "%27");
+  const base: Record<string, string> = {
+    "Content-Disposition": `${mime ? "inline" : "attachment"}; filename="${fileName}"; filename*=UTF-8''${encoded}`,
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "private, no-store",
+    "Content-Security-Policy": "default-src 'none'",
+    "Accept-Ranges": "bytes",
+    ...cors,
+  };
+  if (mime) base["Content-Type"] = mime;
+  const range = parseRange(req.headers.get("range"), size);
+  if (range === "unsatisfiable") {
+    return new Response("Range Not Satisfiable", { status: 416, headers: { ...base, "Content-Range": `bytes */${size}` } });
+  }
+  if (range) {
+    const { start, end } = range;
+    return new Response(file.slice(start, end + 1) as unknown as never, {
+      status: 206,
+      headers: { ...base, "Content-Range": `bytes ${start}-${end}/${size}`, "Content-Length": String(end - start + 1) },
+    });
+  }
+  return new Response(file as unknown as never, { headers: base });
+}
+
 /**
  * List directory entries under the browse root ("/" for /api/files, DATA_DIR for legacy/tests).
  * Returns sorted: directories first, then files, alphabetical case-insensitive.

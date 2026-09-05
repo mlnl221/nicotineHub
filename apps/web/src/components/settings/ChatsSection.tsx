@@ -2,7 +2,7 @@
 
 import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
-import { SectionCard, ToggleControl, TextFieldControl, NumberControl } from "@/components/settings/controls";
+import { SectionCard, SectionSaveButton, ToggleControl, TextFieldControl, NumberControl } from "@/components/settings/controls";
 
 export function ChatsSection() {
   const { settings, setOption } = useConfig();
@@ -15,7 +15,7 @@ export function ChatsSection() {
 
   return (
     <div className="flex flex-col gap-6">
-      <SectionCard title="Chat — General">
+      <SectionCard title="Chat — General" actions={<SectionSaveButton sections={["server", "chatrooms", "privatechat", "logging"]} />}>
         <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs leading-relaxed text-on-surface-variant dark:bg-surface-container-highest/40">
           Mirrors <span className="font-mono">chats.ui</span> (preferences.py:1734). Private rooms require server support; timestamps use Python strftime.
         </div>
@@ -67,7 +67,7 @@ export function ChatsSection() {
         />
       </SectionCard>
 
-      <SectionCard title="Completion">
+      <SectionCard title="Completion" actions={<SectionSaveButton sections={["words", "ui", "ctcp"]} />}>
         <ToggleControl label="Tab completion" checked={w.tab} onChange={(v) => setOption("words", "tab", v)} />
         <ToggleControl label="Completion dropdown" checked={w.dropdown} onChange={(v) => setOption("words", "dropdown", v)} />
         <NumberControl
@@ -91,7 +91,7 @@ export function ChatsSection() {
         <ToggleControl label="CTCP support" checked={ctcp.enable} onChange={(v) => setOption("ctcp", "enable", v)} />
       </SectionCard>
 
-      <SectionCard title="Mentions / Keywords">
+      <SectionCard title="Mentions / Keywords" actions={<SectionSaveButton section="words" />}>
         <ToggleControl
           label="Highlight keywords"
           checked={w.watch_keywords}

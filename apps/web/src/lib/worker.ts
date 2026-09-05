@@ -124,10 +124,14 @@ export interface TagScrapeResult {
   applied: boolean;
   tags?: Record<string, string>;
   info?: Record<string, unknown>;
+  newPath?: string;
+  rename?: { renamed?: boolean; skipped?: boolean; reason?: string; newPath?: string; suffixed?: boolean };
 }
 
-export async function scrapeTags(fileName: string, url: string, apply = false): Promise<TagScrapeResult> {
-  const res = await workerFetch("/tag/scrape", { method: "POST", body: JSON.stringify({ fileName, url, apply }) });
+export async function scrapeTags(fileName: string, url: string, apply = false, rename?: { enabled: boolean; template: string }): Promise<TagScrapeResult> {
+  const payload: Record<string, unknown> = { fileName, url, apply };
+  if (rename) { payload.renameEnabled = rename.enabled; payload.renameTemplate = rename.template; }
+  const res = await workerFetch("/tag/scrape", { method: "POST", body: JSON.stringify(payload) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Scrape failed (${res.status})`);
   return body as TagScrapeResult;
@@ -166,6 +170,36 @@ export async function bulkVerify(files: string[]): Promise<{ results: Array<Reco
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Bulk verify failed (${res.status})`);
   return body as { results: Array<Record<string, unknown>> };
+}
+
+export interface MediainfoResult {
+  fileName: string;
+  path: string;
+  tracks: Array<Record<string, unknown>>;
+  summary: {
+    format?: string | null;
+    duration?: string | null;
+    fileSize?: string | null;
+    overallBitRate?: string | null;
+    video?: Array<Record<string, unknown>> | null;
+    audio?: Array<Record<string, unknown>> | null;
+    textCount?: number;
+  };
+  raw: string;
+}
+
+export async function renameFile(fileName: string, newName: string): Promise<{ ok: boolean; newPath: string; fileName: string; suffixed: boolean }> {
+  const res = await workerFetch("/rename", { method: "POST", body: JSON.stringify({ fileName, newName }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { detail?: string }).detail || `Rename failed (${res.status})`);
+  return body as { ok: boolean; newPath: string; fileName: string; suffixed: boolean };
+}
+
+export async function getMediainfo(fileName: string): Promise<MediainfoResult> {
+  const res = await workerFetch("/mediainfo", { method: "POST", body: JSON.stringify({ fileName }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { detail?: string }).detail || `Mediainfo failed (${res.status})`);
+  return body as MediainfoResult;
 }
 
 export async function bulkRequestSpectrum(files: Array<{ fileName: string; size?: number; token?: number }>): Promise<Array<{ fileName: string; ok: boolean; etag?: string; error?: string }>> {

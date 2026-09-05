@@ -12,6 +12,7 @@ import { ContextMenu } from "@/components/ui/ContextMenu";
 import { chatRoomMenu, userMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
 import { useCompletion } from "@/lib/completion";
+import { usePaneWidth } from "@/lib/usePaneWidth";
 import { useBuddies } from "@/lib/buddies";
 import { highlightKeywords, usernameHotspotClass } from "@/lib/chatFormat";
 import { isDemo } from "@/lib/demo";
@@ -30,6 +31,7 @@ export default function ChatRoomsPage() {
   const [tickerInput, setTickerInput] = useState("");
   const [showWall, setShowWall] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
+  const [roomListW, onRoomListDown] = usePaneWidth("nicotineHub.chat.asideW");
 
   const activeMessages = activeRoom ? messages.get(activeRoom) || [] : [];
   const systemMessages = activeMessages.filter((m) => m.username === "system");
@@ -108,7 +110,7 @@ export default function ChatRoomsPage() {
 
         <div className="flex flex-1 overflow-hidden min-h-0" style={isDemo ? ({ marginTop: "var(--demo-banner-h)" } as React.CSSProperties) : undefined}>
           {/* Left: Rooms */}
-          <aside className="hidden w-80 flex-col border-r border-outline-variant/15 bg-surface md:flex">
+          <aside className="hidden flex-col border-r border-outline-variant/15 bg-surface md:flex" style={{ width: roomListW }}>
             <div className="border-b border-outline-variant/15 p-3 space-y-3">
               <div className="flex gap-2">
                 <input
@@ -238,6 +240,7 @@ export default function ChatRoomsPage() {
               </div>
             </div>
           </aside>
+          <div role="separator" aria-orientation="vertical" aria-label="Resize rooms" onPointerDown={onRoomListDown} className="hidden md:flex w-2 shrink-0 cursor-col-resize items-center justify-center hover:bg-primary/10 touch-none select-none" style={{ touchAction: "none" }}><div className="h-8 w-0.5 rounded-full bg-outline-variant/40" /></div>
 
           {/* Center: Messages */}
           <section className="flex flex-1 flex-col overflow-hidden min-h-0 bg-surface-container-lowest/30" onContextMenu={(e) => {

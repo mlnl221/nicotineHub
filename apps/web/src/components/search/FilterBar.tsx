@@ -17,6 +17,7 @@ const FIELDS: Array<{ key: keyof FilterState; label: string; placeholder: string
   { key: "bitrate", label: "Bitrate", placeholder: "256 <1412" },
   { key: "length", label: "Duration", placeholder: ">6:00 <12:00" },
   { key: "country", label: "Country code", placeholder: "US ES | !DE" },
+  { key: "quality", label: "Quality", placeholder: "lossless | 320 | hi-res | !transcode" },
 ];
 
 export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {

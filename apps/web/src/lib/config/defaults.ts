@@ -20,6 +20,7 @@ export type Filters = {
   fileType: string;
   length: string;
   publicFiles: boolean;
+  quality: string;
 };
 
 export type SharedFolder = [string, string]; // [virtualName, path]
@@ -96,11 +97,14 @@ export interface Settings {
     buddyshared: SharedFolder[];
     trustedshared: SharedFolder[];
     share_filters: string[];
+    exclusions: string[];
     rescanonstartup: boolean;
     rescan_shares_daily: boolean;
     rescan_shares_hour: number;
     reveal_buddy_shares: boolean;
     reveal_trusted_shares: boolean;
+    auto_rename_enabled: boolean;
+    rename_template: string;
     incompletedir: string;
     downloaddir: string;
     uploaddir: string;
@@ -138,6 +142,8 @@ export interface Settings {
     customgeoblock: string;
     geoblock: boolean;
     geoblockcc: string[];
+    honeypot_enabled: boolean;
+    honeypot_names: string[];
   };
   userinfo: {
     descr: string;
@@ -274,7 +280,7 @@ export const defaults: Settings = {
   },
   searches: {
     maxresults: 300,
-    max_displayed_results: 400,
+    max_displayed_results: 2500,
     min_search_chars: 3,
     enablefilters: false,
     defilter: {
@@ -287,6 +293,7 @@ export const defaults: Settings = {
       fileType: "",
       length: "",
       publicFiles: false,
+      quality: "",
     },
     enable_history: true,
     history: [],
@@ -301,11 +308,14 @@ export const defaults: Settings = {
     buddyshared: [],
     trustedshared: [],
     share_filters: [".*", ".*\\", "@eaDir\\", "#recycle\\", "#snapshot\\", "desktop.ini", "Thumbs.db"],
+    exclusions: [],
     rescanonstartup: true,
     rescan_shares_daily: true,
     rescan_shares_hour: 0,
     reveal_buddy_shares: false,
     reveal_trusted_shares: false,
+    auto_rename_enabled: false,
+    rename_template: "{track}. {artist} - {title}",
     incompletedir: "${NICOTINE_DATA_HOME}/incomplete",
     downloaddir: "${NICOTINE_DATA_HOME}/downloads",
     uploaddir: "${NICOTINE_DATA_HOME}/received",
@@ -349,6 +359,8 @@ export const defaults: Settings = {
     customgeoblock: "Sorry, your country is blocked",
     geoblock: false,
     geoblockcc: [""],
+    honeypot_enabled: false,
+    honeypot_names: ["!banned.txt"],
   },
   userinfo: {
     descr: "''",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useConfig } from "@/lib/config/provider";
-import { SectionCard, TextFieldControl } from "@/components/settings/controls";
+import { SectionCard, SectionSaveButton, TextFieldControl } from "@/components/settings/controls";
 
 function isIpLike(s: string) {
   return /^(\*|\d{1,3}|\d{1,3}\.\*|\d{1,3}\.\d{1,3}|\d{1,3}\.\d{1,3}\.\*|\d{1,3}\.\d{1,3}\.\d{1,3}|\d{1,3}\.\d{1,3}\.\d{1,3}\.\*|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.test(s.trim());
@@ -19,6 +19,7 @@ export function IgnoredUsersSection() {
       <SectionCard
         title="Ignored users"
         description="Mirrors ignore.ui (preferences.py:1305). Messages and shares from ignored users/IPs are hidden. Stored in server.ignorelist (list) and server.ipignorelist (dict ip→user)."
+        actions={<SectionSaveButton section="server" />}
       >
         <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs leading-relaxed text-on-surface-variant dark:bg-surface-container-highest/40">
           {server.ignorelist.length} ignored user(s), {ignoredIpEntries.length} ignored IP(s). Wildcard * allowed for IPs.

@@ -197,8 +197,7 @@ export interface TransferEvent {
   username?: string; file?: string; token?: number; place?: number; reason?: string;
 }
 
-const MAX_DISPLAYED_RESULTS = 400;
-const DEFAULT_SEARCH_TIMEOUT_MS = 20_000;
+const DEFAULT_SEARCH_TIMEOUT_MS = 20_000; // kept for reference — not used (nicotine parity: searches live until explicit stop, no timeout)
 const PEER_ADDRESS_TIMEOUT_MS = 20_000; // INDIRECT_REQUEST_TIMEOUT
 const CONNECTION_MAX_IDLE_MS = 60_000;
 const GHOST_IDLE_MS = 10_000;
@@ -489,6 +488,14 @@ export class SoulseekSession {
     this.shareDB.setShareFilters(filters);
   }
 
+  setExclusions(patterns: string[]) {
+    this.shareDB.setExclusions(patterns);
+  }
+
+  async previewShares(exclusions?: string[]): Promise<{ counts: { dirs: number; files: number }; sample: string[]; excludedCount: number; secretHits: string[] }> {
+    return this.shareDB.previewWithExclusions(exclusions);
+  }
+
   setWishlistTerms(terms: string[]) {
     this.wishlistTerms = terms.slice();
     this.wishlistIndex = 0;
@@ -625,7 +632,7 @@ export class SoulseekSession {
   private _searchEnabled = true;
   private _privateSearchEnabled = false;
   private _maxResults = 300;
-  private _maxDisplayedResults = 400;
+  private _maxDisplayedResults = 2500;
   setSearchConfig(opts: Partial<{ search_results: boolean; private_search_results: boolean; maxresults: number; max_displayed_results: number }>) {
     if (opts.search_results !== undefined) this._searchEnabled = !!opts.search_results;
     if (opts.private_search_results !== undefined) this._privateSearchEnabled = !!opts.private_search_results;
@@ -745,10 +752,6 @@ export class SoulseekSession {
           onEnd: (p) => this.opts.onWishlistEvent?.({ type: "end", searchId: p.searchId, token, reason: p.reason }),
         };
         const active: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
-        active.timer = setTimeout(() => {
-          this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token);
-          handlers.onEnd({ searchId, reason: "timeout" });
-        }, DEFAULT_SEARCH_TIMEOUT_MS);
         this.searches.set(token, active);
         this.searchIds.set(searchId, token);
         this.serverSocket.write(buildWishlistSearch(token, term));
@@ -1904,6 +1907,7 @@ export class SoulseekSession {
         const ghost = !st.username && idle > GHOST_IDLE_MS;
         const dead = idle > CONNECTION_MAX_IDLE_MS;
         if (initTimeout || ghost || dead) {
+          logger.debug("peer", "idle sweep close", { username: st.username, connType: st.connType, initDone: st.initDone, bytes: (st as unknown as { bytesReceived?: number }).bytesReceived ?? st.buf.length, msgs: (st as unknown as { msgsParsed?: number }).msgsParsed ?? 0, reason: initTimeout ? "initTimeout" : ghost ? "ghost" : "dead" });
           try { sock.end(); } catch {}
           this.peerStates.delete(sock);
           if (st.username && st.connType === "D") this._removeChildPeerConnection(st.username);
@@ -1926,6 +1930,7 @@ export class SoulseekSession {
         if (created && now - created > PEER_ADDRESS_TIMEOUT_MS) {
           clearTimeout(pending.timer);
           this.peerAddressRequests.delete(user);
+          try { this.pendingPeerMessages.delete(user.toLowerCase()); } catch {}
         }
       }
       // pendingConnects timeout is handled per-token (45 s), but sweep stale just in case
@@ -2117,12 +2122,36 @@ export class SoulseekSession {
 
   private processPeer(peer: Socket, chunk: ArrayBuffer | Uint8Array, initDone: boolean) {
     const bytes = chunk instanceof Uint8Array ? Uint8Array.from(chunk) : new Uint8Array(chunk);
-    const state = this.peerStates.get(peer) ?? { buf: Buffer.alloc(0), initDone, lastActive: Date.now(), createdAt: Date.now() };
+    const state = this.peerStates.get(peer) ?? { buf: Buffer.alloc(0), initDone, lastActive: Date.now(), createdAt: Date.now(), bytesReceived: 0, msgsParsed: 0 } as PeerState as unknown as { buf: Buffer; initDone: boolean; lastActive: number; createdAt: number; bytesReceived: number; msgsParsed: number } & PeerState;
     if (!state.createdAt) state.createdAt = Date.now();
+    if ((state as unknown as { bytesReceived?: number }).bytesReceived === undefined) (state as unknown as { bytesReceived: number }).bytesReceived = 0;
+    if ((state as unknown as { msgsParsed?: number }).msgsParsed === undefined) (state as unknown as { msgsParsed: number }).msgsParsed = 0;
     state.lastActive = Date.now();
-    // Enforce per-conn max before appending
-    const maxForState = state.connType === "D" ? MAX_INCOMING.server16K : (state.isFileConn ? MAX_INCOMING.server16M : MAX_INCOMING.server1M);
-    if (state.buf.length + bytes.length > maxForState) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
+    (state as unknown as { bytesReceived: number }).bytesReceived += bytes.length;
+    // Per-conn cap: declared-length gated (n+ parity), not blind 1M pre-append.
+    // P shares can be 448M compressed; blind cap was silently killing Donald-sized libraries.
+    {
+      const maxForState = state.connType === "D" ? MAX_INCOMING.server16K : (state.isFileConn ? MAX_INCOMING.server16M : MAX_INCOMING.server1M);
+      if (state.buf.length + bytes.length > maxForState && state.buf.length >= 4) {
+        const declared = state.buf.readUInt32LE(0);
+        const hintedMax = (() => {
+          // Before initDone, first message is PeerInit/Pierce (5+len framing) — always ≤1M
+          if (!state.initDone) return 1024 * 1024;
+          // After init, peek peer message code (framed as [len][code][payload])
+          // Need at least 8 bytes (len+code) buffered; otherwise conservatively allow append
+          if (state.buf.length < 8) return maxForState;
+          try { const c = state.buf.readUInt32LE(4); return c === PEER_MESSAGE_CODES.sharedFileListResponse || c === PEER_MESSAGE_CODES.folderContentsResponse ? MAX_INCOMING.server448M : c === PEER_MESSAGE_CODES.fileSearchResponse ? MAX_INCOMING.server16M : MAX_INCOMING.server1M; } catch { return maxForState; }
+        })();
+        if (declared > hintedMax || state.buf.length + bytes.length > hintedMax) {
+          logger.warn("peer", "cap kill (declared-length gated)", { declared, hintedMax, buf: state.buf.length, incoming: bytes.length, connType: state.connType, username: state.username, isFileConn: state.isFileConn });
+          try { peer.end(); } catch {} this.peerStates.delete(peer); return;
+        }
+      } else if (state.buf.length + bytes.length > MAX_INCOMING.server448M) {
+        // Absolute ceiling even during init buffering
+        logger.warn("peer", "cap kill absolute 448M", { buf: state.buf.length, incoming: bytes.length, username: state.username });
+        try { peer.end(); } catch {} this.peerStates.delete(peer); return;
+      }
+    }
     state.buf = Buffer.concat([state.buf, Buffer.from(bytes)]);
     while (true) {
       if (!state.initDone) {
@@ -2543,15 +2572,6 @@ export class SoulseekSession {
     const batch = rows.slice(0, remaining);
     search.count += batch.length;
     search.onResult({ searchId: search.searchId, token: resp.token, rows: batch });
-    // sliding timeout: reset timer on every response (Soulseek.NET SearchInternal.cs:266)
-    if (search.timer) clearTimeout(search.timer);
-    const timeoutMs = search.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS;
-    search.timer = setTimeout(() => {
-      this.searches.delete(resp.token);
-      this.searchIds.delete(search.searchId);
-      this.allowedSearchTokens.delete(resp.token);
-      search.onEnd({ searchId: search.searchId, reason: "timeout" });
-    }, timeoutMs);
     if (search.count >= search.maxResults) {
       if (search.timer) clearTimeout(search.timer);
       this.searches.delete(resp.token); this.searchIds.delete(search.searchId);
@@ -2575,11 +2595,7 @@ export class SoulseekSession {
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
-    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
-    search.timer = setTimeout(() => {
-      logger.info("search", "search timeout", { searchId, token, users: search.users.size, count: search.count });
-      this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" });
-    }, search.timeoutMs);
+    const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
     try {
       const buf = buildFileSearch(token, outQuery);
@@ -2608,11 +2624,7 @@ export class SoulseekSession {
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
-    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
-    search.timer = setTimeout(() => {
-      logger.info("search", "searchUser timeout", { searchId, token, username, users: search.users.size, count: search.count });
-      this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" });
-    }, search.timeoutMs);
+    const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
     try {
       const buf = buildUserSearch(username, token, outQuery);
@@ -2632,8 +2644,7 @@ export class SoulseekSession {
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
-    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
-    search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
+    const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
     for (const username of usernames) {
       try { this.serverSocket.write(buildUserSearch(username, token, outQuery)); } catch {}
@@ -2648,8 +2659,7 @@ export class SoulseekSession {
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
-    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
-    search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
+    const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
     this.serverSocket.write(buildRoomSearch(room, token, outQuery));
     return token;
@@ -2662,8 +2672,7 @@ export class SoulseekSession {
     const token = this.tokenCounter++ >>> 0;
     if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
     this.allowedSearchTokens.add(token);
-    const search: ActiveSearch = { searchId, ...handlers, timeoutMs: handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
-    search.timer = setTimeout(() => { this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token); handlers.onEnd({ searchId, reason: "timeout" }); }, search.timeoutMs);
+    const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
     this.serverSocket.write(buildWishlistSearch(token, outQuery));
     return token;
@@ -2740,6 +2749,8 @@ export class SoulseekSession {
       logger.warn("browse", "browse timeout", { username });
       this.pendingBrowseShares.delete(key);
       this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);
+      // leak fix: stale queued P/SharedFileListRequest was blocking fresh dials via reusingDial (pendingPeerMessages >0 treated as in-flight)
+      try { this.pendingPeerMessages.delete(key); } catch {}
       // More helpful: peer may be offline, firewalled, or our LISTEN_PORT not forwarded
       this.emitBrowse({ type: "browse-error", username, error: "Timed out fetching shares — peer may be offline, firewalled, or your LISTEN_PORT not port-forwarded (check Diagnostics → Network)" });
     }, 30000);
@@ -2780,32 +2791,65 @@ export class SoulseekSession {
     const hasPending = this.peerAddressRequests.has(username);
     const cachedCheck = this.userAddresses.get(username);
     const code = msg.length >= 8 ? msg.readUInt32LE(4) : -1;
-    logger.info("browse", "ensurePeerAndSend", { username, connType, code, msgLen: msg.length, hasCached: !!cachedCheck, hasPending, pendingSize: this.pendingBrowseShares.size });
+    // Coalesce rapid re-clicks: one pending dial per user, extra messages just queue
+    const keyLower = username.toLowerCase();
+    const now = Date.now();
+    const pendingReq = this.peerAddressRequests.get(username);
+    const isLivePending = !!pendingReq && (now - (pendingReq.createdAt ?? 0) < PEER_ADDRESS_TIMEOUT_MS);
+    const hasLiveSocketForUser = !!(cachedCheck && now - cachedCheck.updated < USER_ADDRESS_TTL_MS && (() => {
+      for (const [, st] of this.peerStates) if (st.username?.toLowerCase() === keyLower && st.connType === connType) return true;
+      return false;
+    })());
+    // Only coalesce if there's a live GetPeerAddress in flight or a live socket for this exact user+type.
+    // Stale pendingPeerMessages alone (leftover from timed-out browse) must NOT count as in-flight or dials deadlock.
+    const reusingDial = isLivePending || hasLiveSocketForUser;
+    // Light dedupe log only when coalescing, not on every click
+    if (reusingDial) logger.debug("browse", "ensurePeerAndSend coalesced (in-flight dial)", { username, connType, code, pendingSize: this.pendingBrowseShares.size });
+    else logger.info("browse", "ensurePeerAndSend", { username, connType, code, msgLen: msg.length, hasCached: !!cachedCheck, hasPending, pendingSize: this.pendingBrowseShares.size });
     if (!this.loggedIn) {
       logger.warn("browse", "ensurePeerAndSend aborted — not logged in", { username, connType, code });
       return;
     }
     // Queue for indirect fallback (peer connects to us via PierceFirewall)
     this.queuePendingPeerMessage(username, connType, msg);
+    const queuedNow = (this.pendingPeerMessages.get(keyLower)?.length ?? 0) === 1 && !reusingDial;
     logger.debug("browse", "queued pending peer message", { username, connType, code, queueLen: (this.pendingPeerMessages.get(username.toLowerCase())?.length ?? 0) });
-    // Indirect first — nicotine sends ConnectToPeer before direct
-    this.sendConnectToPeerFallback(username, connType);
+    // Indirect + direct: only emit fresh ConnectToPeer/GetPeerAddress on first dial, not on coalesced clicks
+    if (queuedNow || !reusingDial) this.sendConnectToPeerFallback(username, connType);
     const cached = this.userAddresses.get(username);
     if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) {
-      logger.debug("browse", "using cached peer address", { username, ip: cached.addr.ip, port: cached.addr.port });
-      this.connectToPeerViaAddress(username, cached.addr, connType, msg);
+      // Reuse path still needs to flush the newly-queued message to the existing/new socket
+      if (reusingDial) {
+        const peer = (() => {
+          for (const [sock, st] of this.peerStates) if (st.username?.toLowerCase() === keyLower && st.connType === connType) return sock;
+          return undefined;
+        })();
+        if (peer) this.flushPendingPeerMessages(username, connType);
+        else logger.debug("browse", "using cached peer address (coalesced)", { username, ip: cached.addr.ip, port: cached.addr.port });
+        // Still attempt direct if no existing socket
+        if (!peer) this.connectToPeerViaAddress(username, cached.addr, connType, msg);
+      } else {
+        logger.debug("browse", "using cached peer address", { username, ip: cached.addr.ip, port: cached.addr.port });
+        this.connectToPeerViaAddress(username, cached.addr, connType, msg);
+      }
       return;
     }
     const existing = this.peerAddressRequests.get(username);
     if (existing) {
       logger.debug("browse", "reusing pending GetPeerAddress", { username });
+      // coalesced: just attach the new msg, the pending GetPeerAddress already covers this user
       existing.cbs.push((addr) => {
         this.connectToPeerViaAddress(username, addr, connType, msg);
       });
       return;
     }
+    if (reusingDial) {
+      // Already have an outbound dial in flight — the new msg is queued and will flush on that socket's open/pierce
+      logger.debug("browse", "coalesced: queued msg will flush on in-flight dial", { username });
+      return;
+    }
     logger.info("browse", "requesting peer address", { username });
-    const timer = setTimeout(() => { this.peerAddressRequests.delete(username); logger.debug("browse", "GetPeerAddress timeout cleanup", { username }); }, PEER_ADDRESS_TIMEOUT_MS);
+    const timer = setTimeout(() => { this.peerAddressRequests.delete(username); try { this.pendingPeerMessages.delete(username.toLowerCase()); } catch {} logger.debug("browse", "GetPeerAddress timeout cleanup", { username }); }, PEER_ADDRESS_TIMEOUT_MS);
     const entry = { cbs: [(addr: PeerAddress) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); logger.info("browse", "peer address resolved", { username, ip: addr.ip, port: addr.port }); this.connectToPeerViaAddress(username, addr, connType, msg); }], timer, createdAt: Date.now() };
     this.peerAddressRequests.set(username, entry);
     this.serverSocket?.write(buildGetPeerAddress(username));
@@ -2919,7 +2963,7 @@ export class SoulseekSession {
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
     // Portmapper: remove mapping on quit (like nicotine _server_disconnect portmapper.remove)
     try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}
-    for (const token of [...this.searches.keys()]) { const s = this.searches.get(token); if (s?.timer) clearTimeout(s.timer); if (s) s.onEnd({ searchId: s.searchId, reason: "stopped" }); this.searches.delete(token); }
+    for (const token of [...this.searches.keys()]) { const s = this.searches.get(token); if (s?.timer) clearTimeout(s.timer); if (s) s.onEnd({ searchId: s.searchId, reason: "error" }); this.searches.delete(token); }
     this.searchIds.clear(); this.allowedSearchTokens.clear();
     for (const { timer } of this.peerAddressRequests.values()) clearTimeout(timer);
     for (const { timer } of this.pendingConnects.values()) clearTimeout(timer);

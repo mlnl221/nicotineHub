@@ -83,12 +83,14 @@ function persist(entry: LogEntry) {
   } catch {}
 }
 
-function redactMeta(meta?: Record<string, unknown>): Record<string, unknown> | undefined {
+function redactMeta(meta?: Record<string, unknown>, scope?: string): Record<string, unknown> | undefined {
   if (!meta) return undefined;
   const out: Record<string, unknown> = {};
   const SENSITIVE_KEYS = new Set(["password", "pass", "pwd", "token", "bridge_token", "bridgetoken", "authorization", "sec-websocket-protocol", "sec_websocket_protocol"]);
   for (const [k, v] of Object.entries(meta)) {
     const lk = k.toLowerCase();
+    // search tokens are random uint32 per search — safe to log unredacted for correlation
+    if (scope === "search" && lk === "token") { out[k] = v; continue; }
     if (SENSITIVE_KEYS.has(lk) || lk.includes("token")) out[k] = "***";
     else if (typeof v === "string" && v.length > 500) out[k] = v.slice(0, 500) + "…";
     else if (typeof v === "string" && /(?:\btoken=|\bbridge_token=|bearer\s+)/i.test(v)) out[k] = v.replace(/(token\s*[:=]\s*)[^\s&"']+/gi, "$1***").replace(/(bearer\s+)[^\s"']+/gi, "$1***");
@@ -109,7 +111,7 @@ export function diagLog(level: LogLevel, scope: LogScope, msg: string, meta?: Re
     level,
     scope,
     msg: truncateMsg(msg),
-    meta: redactMeta(meta),
+    meta: redactMeta(meta, scope),
   };
   ring.push(entry);
   if (ring.length > MAX_MEMORY) ring.shift();
@@ -119,12 +121,12 @@ export function diagLog(level: LogLevel, scope: LogScope, msg: string, meta?: Re
   // also console for docker logs — suppress during tests (only warn/error)
   if (isTestEnv()) {
     if (level === "warn" || level === "error") {
-      const line = `[${entry.ts}] ${level.toUpperCase()} [${scope}] ${msg}${meta ? " " + JSON.stringify(redactMeta(meta)) : ""}`;
+      const line = `[${entry.ts}] ${level.toUpperCase()} [${scope}] ${msg}${meta ? " " + JSON.stringify(redactMeta(meta, scope)) : ""}`;
       if (level === "error") console.error(line);
       else console.warn(line);
     }
   } else {
-    const line = `[${entry.ts}] ${level.toUpperCase()} [${scope}] ${msg}${meta ? " " + JSON.stringify(redactMeta(meta)) : ""}`;
+    const line = `[${entry.ts}] ${level.toUpperCase()} [${scope}] ${msg}${meta ? " " + JSON.stringify(redactMeta(meta, scope)) : ""}`;
     if (level === "error") console.error(line);
     else if (level === "warn") console.warn(line);
     else console.log(line);

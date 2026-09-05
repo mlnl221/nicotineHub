@@ -1,21 +1,26 @@
 "use client";
 
 import { useState } from "react";
-import { scrapeTags, writeTags } from "@/lib/worker";
+import { scrapeTags } from "@/lib/worker";
+import { useConfig } from "@/lib/config/provider";
 
 type Props = {
   open: boolean;
   files: string[];
   onClose: () => void;
+  onRenamed?: (newPaths: string[]) => void;
 };
 
-export function BulkScrapeModal({ open, files, onClose }: Props) {
+export function BulkScrapeModal({ open, files, onClose, onRenamed }: Props) {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<null | { artist: string; album: string; year: string | number | null; source: string; track_count: number | null }>(null);
   const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [done, setDone] = useState<string | null>(null);
+  const { settings } = useConfig();
+  const autoRenameEnabled = !!(settings as unknown as { transfers?: { auto_rename_enabled?: boolean } }).transfers?.auto_rename_enabled;
+  const renameTemplate = (settings as unknown as { transfers?: { rename_template?: string } }).transfers?.rename_template || "{track}. {artist} - {title}";
 
   if (!open) return null;
 
@@ -48,15 +53,29 @@ export function BulkScrapeModal({ open, files, onClose }: Props) {
     setError(null);
     setDone(null);
     try {
-      // For v1 uniform: apply same album/artist/year to all files via loop (1 URL at a time per spec 4.2)
-      // Per-track titles would need tracklist — deferred, but uniform covers smoked-salmon album fields.
       let ok = 0;
+      let renamed = 0;
+      let skipped = 0;
+      const newPaths: string[] = [];
+      const renameOpt = autoRenameEnabled ? { enabled: true, template: renameTemplate } : undefined;
       for (const f of files.slice(0, 50)) {
-        const r = await scrapeTags(f, u, true);
+        const r = await scrapeTags(f, u, true, renameOpt);
         if (r.applied) ok++;
+        if (r.rename?.renamed) {
+          renamed++;
+          if (r.newPath) newPaths.push(r.newPath);
+          else if (r.rename.newPath) newPaths.push(r.rename.newPath);
+        } else if (r.rename?.skipped) {
+          skipped++;
+        }
       }
-      setDone(`Applied to ${ok}/${files.length} files: ${preview?.artist ?? ""} — ${preview?.album ?? ""}`);
-      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Scrape applied", body: `${ok} files` } }));
+      const parts = [`Applied to ${ok}/${files.length} files: ${preview?.artist ?? ""} — ${preview?.album ?? ""}`];
+      if (autoRenameEnabled) {
+        parts.push(`Renamed ${renamed}${skipped ? `, skipped ${skipped} (missing tags)` : ""} using ${renameTemplate}`);
+      }
+      setDone(parts.join(" · "));
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Scrape applied", body: `${ok} files${renamed ? `, ${renamed} renamed` : ""}` } }));
+      if (newPaths.length && onRenamed) onRenamed(newPaths);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -99,6 +118,7 @@ export function BulkScrapeModal({ open, files, onClose }: Props) {
               <button disabled={loading || applying || !url.trim() || !preview} onClick={handleApply} className="flex-1 rounded-xl bg-primary px-4 py-2 font-label text-xs font-bold text-on-primary disabled:opacity-40">{applying ? "Applying…" : "Apply to all"}</button>
             </div>
             {preview ? <div className="rounded-xl bg-surface-container-lowest p-3 ghost-border font-body text-xs"><div><span className="font-semibold">Found:</span> {preview.source} — {preview.artist} — {preview.album} ({preview.year ?? "?"}) · tracks {preview.track_count ?? "?"}</div><div className="font-mono text-[10px] text-outline">Positional zip (natural sort, salmon combine_tracks:193) — files sorted by numeric prefix then lexicographic.</div></div> : null}
+            {autoRenameEnabled ? <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 px-3 py-2 font-body text-xs text-amber-900 dark:text-amber-200">Auto-rename enabled: <span className="font-mono">{renameTemplate}</span> — files will be renamed after tags are written. Manage in Settings → Shares.</div> : null}
           </div>
           <div className="rounded-xl bg-surface-container-low p-3 ghost-border space-y-2">
             <h4 className="font-label text-xs font-semibold uppercase tracking-widest">Files (sorted natural, salmon _tracknumber_sort_key)</h4>

@@ -1,6 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import type { Settings } from "@/lib/config/defaults";
+import { useConfig } from "@/lib/config/provider";
+import { useSaveSection } from "@/lib/config/save";
+import { useSession } from "@/lib/session";
 import { InfoTooltip, useInfoSplit } from "@/components/ui/InfoTooltip";
 
 /**
@@ -301,18 +305,23 @@ export function RadioGroupControl<T extends string | number>({
 export function SectionCard({
   title,
   description,
+  actions,
   children,
 }: {
   title: string;
   description?: string;
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="overflow-hidden rounded-2xl bg-surface-container-low shadow-sm dark:bg-surface-container-high">
       <header className="border-b border-surface-container-high px-5 py-4 dark:border-surface-container-highest/40">
-        <h2 className="font-headline text-lg font-semibold text-on-surface dark:text-inverse-primary">
-          {title}
-        </h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-headline text-lg font-semibold text-on-surface dark:text-inverse-primary">
+            {title}
+          </h2>
+          {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+        </div>
         {description ? (
           <p className="mt-1 font-body text-xs text-on-surface-variant dark:text-outline">
             {description}
@@ -323,5 +332,87 @@ export function SectionCard({
         {children}
       </div>
     </section>
+  );
+}
+
+/**
+ * Per-section Save button for SectionCard headers. Enabled only when the
+ * section draft differs from last-saved; pushes to the bridge (awaiting acks
+ * when connected) and commits locally. Sections with bespoke flows (listening
+ * port hot-swap, worker tokens) pass `dirty` + `onSave` overrides.
+ */
+export function SectionSaveButton({
+  section,
+  sections,
+  dirty: dirtyOverride,
+  onSave: onSaveOverride,
+}: {
+  /** Settings section for generic save; optional when `onSave` override is provided (e.g. worker tokens). */
+  section?: keyof Settings;
+  /** Save multiple settings sections from one card (e.g. Chat — General spans server/chatrooms/privatechat/logging). */
+  sections?: (keyof Settings)[];
+  dirty?: boolean;
+  onSave?: () => Promise<void>;
+}) {
+  const { settings, isDirty } = useConfig();
+  const saveSection = useSaveSection();
+  const { state } = useSession();
+  const [phase, setPhase] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  const list = sections ?? (section ? [section] : []);
+  const dirty = dirtyOverride ?? list.some((s) => isDirty(s));
+
+  useEffect(() => {
+    if (dirty) {
+      setPhase("idle");
+      setError(null);
+    }
+  }, [dirty]);
+
+  useEffect(() => {
+    if (phase !== "saved") return;
+    const t = setTimeout(() => setPhase("idle"), 2500);
+    return () => clearTimeout(t);
+  }, [phase]);
+
+  const handleSave = async () => {
+    if (phase === "saving") return;
+    setPhase("saving");
+    setError(null);
+    try {
+      if (onSaveOverride) await onSaveOverride();
+      else for (const s of list) await saveSection(s, () => settings);
+      setPhase("saved");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+      setPhase("error");
+    }
+  };
+
+  const label = phase === "saving" ? "Saving…" : phase === "saved" ? "Saved ✓" : "Save";
+  return (
+    <span className="flex items-center gap-2">
+      {phase === "error" && error ? (
+        <span title={error} className="max-w-40 truncate font-body text-xs text-error">
+          {error}
+        </span>
+      ) : null}
+      <button
+        type="button"
+        onClick={handleSave}
+        disabled={!dirty || phase === "saving" || phase === "saved"}
+        title={state.status !== "connected" ? "Bridge offline — saves locally, syncs on connect" : dirty ? "Save changes" : "No unsaved changes"}
+        className={`rounded-xl px-4 py-2 font-label text-xs uppercase tracking-widest transition-all ${
+          phase === "saved"
+            ? "bg-primary-container text-on-primary-container"
+            : dirty
+              ? "bg-primary text-on-primary"
+              : "bg-surface-container-high text-outline"
+        } disabled:opacity-60`}
+      >
+        {label}
+      </button>
+    </span>
   );
 }

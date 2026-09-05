@@ -88,6 +88,7 @@ export function TransferCard({
             {transfer.isUpload ? "To: " : "Peer: "}
             {transfer.username} • {humanSize(transfer.size)}
             {isQueued && transfer.queuePosition ? ` • Queue ${transfer.queuePosition}` : ""}
+            {transfer.isSlopLike && <span className="ml-1 inline-flex rounded-full bg-tertiary-container/50 px-2 py-0.5 text-[10px] font-medium text-on-tertiary-container">Slop-like</span>}
           </p>
           <p className="font-label text-[11px] text-outline mt-0.5 truncate hidden md:block" title={reverse ? transfer.virtualPath : transfer.fileName}>
             {reverse ? transfer.virtualPath : transfer.fileName}

@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect } from "react";
 import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
-import { SectionCard, ToggleControl, TextFieldControl } from "@/components/settings/controls";
+import { SectionCard, SectionSaveButton, ToggleControl, TextFieldControl } from "@/components/settings/controls";
+import { useSession } from "@/lib/session";
 
 function isIpLike(s: string) {
   // Parity with pynicotine core.network_filter.is_ip_address — * wildcard allowed, IPv4-ish
@@ -13,6 +15,16 @@ export function BannedUsersSection() {
   const { settings, setOption } = useConfig();
   const server = settings.server;
   const t = settings.transfers;
+  const { subscribe } = useSession();
+
+  useEffect(() => {
+    return subscribe((msg) => {
+      if ((msg as { type: string }).type === "banlist:updated") {
+        const m = msg as unknown as { banlist?: string[] };
+        if (Array.isArray(m.banlist)) setOption("server", "banlist", m.banlist);
+      }
+    });
+  }, [subscribe, setOption]);
 
   const bannedIpEntries = Object.entries(server.ipblocklist);
   const hasInvalidBanIp = bannedIpEntries.some(([ip]) => !isIpLike(ip) && ip !== "");
@@ -21,17 +33,18 @@ export function BannedUsersSection() {
     <div className="flex flex-col gap-6">
       <SectionCard
         title="Banned users"
-        description="Mirrors ban.ui (preferences.py:1507). Users and IPs blocked from your shares/uploads. Wildcards (*) allowed for IPs; handled via pynicotine core.network_filter in desktop."
+        description="Mirrors ban.ui (preferences.py:1507). Users and IPs blocked from your shares/uploads. Wildcards (*, ?) allowed — IPs via pynicotine core.network_filter, usernames exact-case glob (e.g. spammer*, *@bot)."
+        actions={<SectionSaveButton sections={["server", "transfers"]} />}
       >
         <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs leading-relaxed text-on-surface-variant dark:bg-surface-container-highest/40">
           {server.banlist.length} banned user(s), {bannedIpEntries.length} banned IP(s). Banned users are stored in <span className="font-mono">server.banlist</span>, IPs in{" "}
           <span className="font-mono">server.ipblocklist</span> (dict ip→user).
         </div>
         <TextFieldControl
-          label="Banned usernames (one per line)"
+          label="Banned usernames (one per line, * and ? wildcards, case-sensitive)"
           value={server.banlist.join("\n")}
           multiline
-          placeholder="baduser&#10;spammer"
+          placeholder="baduser&#10;spammer*&#10;aurral_*&#10;*@bot"
           onChange={(v) => setOption("server", "banlist", v.split("\n").map((s) => s.trim()).filter(Boolean))}
         />
         <TextFieldControl
@@ -69,7 +82,7 @@ export function BannedUsersSection() {
         />
       </SectionCard>
 
-      <SectionCard title="Geo blocking" description="Mirrors transfers geoblock (pynicotine/config.py:219). Requires GeoIP in desktop; browser stores the setting for bridge parity.">
+      <SectionCard title="Geo blocking" description="Mirrors transfers geoblock (pynicotine/config.py:219). Requires GeoIP in desktop; browser stores the setting for bridge parity." actions={<SectionSaveButton section="transfers" />}>
         <ToggleControl
           label="Enable geo blocking"
           checked={t.geoblock}

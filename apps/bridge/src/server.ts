@@ -14,8 +14,8 @@
  *   client -> server: { type:"chat:private", action:"send", username, message }
  */
 
-import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync, chmodSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync, chmodSync, renameSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import { z } from "zod";
 import { SoulseekSession } from "./session.ts";
 import { PermissionLevel } from "./shares.ts";
@@ -25,7 +25,7 @@ import { PluginManager } from "./plugins/manager.ts";
 import { Plugin as CoreCommandsPlugin, manifest as coreCommandsManifest } from "./plugins/builtin/core_commands.ts";
 import { Plugin as SpamfilterPlugin, manifest as spamManifest } from "./plugins/builtin/spamfilter.ts";
 import { Plugin as LeechDetectorPlugin, manifest as leechManifest } from "./plugins/builtin/leech_detector.ts";
-import { listDirectory } from "./files.ts";
+import { listDirectory, resolveSafePath, sanitizeFileNameForHeader, serveFileWithRanges } from "./files.ts";
 import { portChecker } from "./portchecker.ts";
 import { logPrivateMessage, logRoomMessage, logRoomSystem } from "./chatLogger.ts";
 
@@ -241,7 +241,7 @@ try { mkdirSync(join(CONFIG_DIR, "logs", "private"), { recursive: true }); } cat
 // One-time migration: copy config files from old DATA_DIR to new CONFIG_DIR if CONFIG_DIR is separate and empty
 try {
   if (CONFIG_DIR !== DATA_DIR) {
-    const cfgFiles = ["listen_port", "host.env", "upnp_enabled", "worker.json", "shares.json", "browse.cache", "downloads.json", "transfers.json", "statistics.json", "plugins.json", "diagnostics.log"];
+    const cfgFiles = ["listen_port", "host.env", "upnp_enabled", "worker.json", "shares.json", "browse.cache", "downloads.json", "transfers.json", "statistics.json", "plugins.json", "diagnostics.log", "settings.json"];
     for (const f of cfgFiles) {
       const src = join(DATA_DIR, f);
       const dst = join(CONFIG_DIR, f);
@@ -303,6 +303,37 @@ try {
     }
   }
 } catch {}
+
+// Central durable settings store — every config:update (except worker secrets)
+// merges here so ALL preferences (incl. ui/appearance) survive bridge restarts
+// and resync to new browsers via config:get. Special files (listen_port,
+// shares.json, worker.json, plugins.json) remain authoritative for their domains.
+let PERSISTED_SETTINGS: Record<string, Record<string, unknown>> = {};
+try {
+  const _p = join(CONFIG_DIR, "settings.json");
+  if (existsSync(_p)) {
+    const _raw = JSON.parse(readFileSync(_p, "utf8")) as unknown;
+    if (_raw && typeof _raw === "object" && !Array.isArray(_raw)) {
+      PERSISTED_SETTINGS = _raw as Record<string, Record<string, unknown>>;
+    }
+  }
+} catch {}
+function persistSetting(section: string, key: string, value: unknown) {
+  try {
+    if (section === "worker") return; // secrets stay in worker.json (0600), never in settings.json
+    const cur = PERSISTED_SETTINGS[section];
+    PERSISTED_SETTINGS = {
+      ...PERSISTED_SETTINGS,
+      [section]: { ...(cur && typeof cur === "object" ? cur : {}), [key]: value },
+    };
+    const p = join(CONFIG_DIR, "settings.json");
+    const tmp = `${p}.tmp-${process.pid}`;
+    writeFileSync(tmp, JSON.stringify(PERSISTED_SETTINGS));
+    renameSync(tmp, p); // atomic
+  } catch (e) {
+    logger.warn("server", "settings.json persist failed", { section, key, error: (e as Error).message });
+  }
+}
 
 // Helper to collect current PortMapper status from active sessions (or global defaults)
 function getGlobalPortMapperStatus(): { enabled: boolean; active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; hasPort: boolean } {
@@ -414,17 +445,6 @@ function requireAuth(req: Request, cors: Record<string, string>): Response | nul
   const tok = extractToken(req);
   if (tok !== BRIDGE_TOKEN) return new Response("Unauthorized", { status: 401, headers: cors });
   return null;
-}
-
-function sanitizeFileNameForHeader(name: string): string {
-  // Strict whitelist: strip CR/LF, quotes, slashes, control chars; fallback to "download"
-  let s = name.replace(/[\r\n"]/g, "").replace(/[/\\]/g, "_").trim();
-  // Remove control chars
-  s = s.replace(/[\x00-\x1f\x7f]/g, "");
-  // Allow only printable safe chars for filename, otherwise fallback to encodeURIComponent
-  if (!s || s.length > 255) s = "download";
-  const safe = s.replace(/[^a-zA-Z0-9._\- ()[\]{}!@#$%^&+=,;~`']/g, "_");
-  return safe || "download";
 }
 
 export const server = Bun.serve<{ session?: SoulseekSession; transfers?: TransferManager; logUnsub?: () => void; pluginManager?: PluginManager }>({
@@ -643,6 +663,51 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       }
     }
 
+    // GET /api/files/raw?path=/data/Music/song.flac — raw bytes for in-browser audio/image preview.
+    // Restricted to DATA_DIR subtree (unlike listing, which may browse host root) + same token auth.
+    if (url.pathname === "/api/files/raw" && req.method === "GET") {
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
+      const rawPath = url.searchParams.get("path") ?? "";
+      if (!rawPath || rawPath.length > 1024 || rawPath.includes("\0")) {
+        return new Response(JSON.stringify({ error: "invalid path" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
+      }
+      try {
+        const { statSync, realpathSync } = require("node:fs") as typeof import("node:fs");
+        const { basename } = require("node:path") as typeof import("node:path");
+        // FileExplorer paths are host-root-absolute ("/data/...") — resolve like
+        // the listing endpoint, then restrict to DATA_DIR (realpath: no symlink escape).
+        const abs = await resolveSafePath(rawPath, "/");
+        let st;
+        try {
+          st = statSync(abs);
+        } catch {
+          return new Response("Not found", { status: 404, headers: secHeaders });
+        }
+        if (!st.isFile()) return new Response("Not found", { status: 404, headers: secHeaders });
+        const dataResolved = resolve(DATA_DIR);
+        let real = abs;
+        try {
+          real = realpathSync(abs);
+        } catch {}
+        if (real !== dataResolved && !real.startsWith(dataResolved + sep)) {
+          return new Response("Not found", { status: 404, headers: secHeaders });
+        }
+        if (st.size > 500 * 1024 * 1024) {
+          return new Response(JSON.stringify({ error: "file too large to stream" }), { status: 413, headers: { "content-type": "application/json", ...cors } });
+        }
+        if (url.searchParams.get("preview") === "1" && st.size > 25 * 1024 * 1024) {
+          return new Response(JSON.stringify({ error: "too large to preview" }), { status: 413, headers: { "content-type": "application/json", ...cors } });
+        }
+        return serveFileWithRanges(real, req, cors, sanitizeFileNameForHeader(basename(real)));
+      } catch (e) {
+        const msg = (e as Error).message || "error";
+        if (msg.includes("traversal") || msg.includes("escapes")) {
+          return new Response(JSON.stringify({ error: "path traversal blocked" }), { status: 400, headers: { "content-type": "application/json", ...cors } });
+        }
+        return new Response("Not found", { status: 404, headers: secHeaders });
+      }
+    }
+
     if (url.pathname === "/ws") {
       if (BRIDGE_TOKEN) {
         const tok = extractToken(req);
@@ -722,16 +787,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           } catch {}
         }
         if (!filePath || !existsSync(filePath)) return new Response("Not found", { status: 404, headers: secHeaders });
-        const file = Bun.file(filePath);
-        const safeDisposition = sanitizeFileNameForHeader(safeName);
-        const encoded = encodeURIComponent(safeDisposition).replace(/'/g, "%27");
-        const headers: Record<string, string> = {
-          "Content-Disposition": `attachment; filename="${safeDisposition}"; filename*=UTF-8''${encoded}`,
-          "X-Content-Type-Options": "nosniff",
-          "Cache-Control": "private, no-store",
-          "Content-Security-Policy": "default-src 'none'",
-        };
-        return new Response(file as unknown as never, { headers: { ...headers, ...cors } });
+        return serveFileWithRanges(filePath, req, cors, safeName);
       } catch {
         return new Response("Not found", { status: 404, headers: secHeaders });
       }
@@ -763,6 +819,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       });
       // Link session getter after creation
       (tm as unknown as { setSessionGetter: (fn: () => unknown) => void }).setSessionGetter(() => ws.data.session as unknown as never);
+      (tm as unknown as { setBanlistUpdatedCb: (cb: (b: string[], u: string) => void) => void }).setBanlistUpdatedCb((banlist, byUser) => {
+        const payload = JSON.stringify({ type: "banlist:updated", banlist, byUser, reason: "honeypot" });
+        try { ws.send(payload); } catch {}
+      });
       ws.data.transfers = tm;
       setTimeout(() => {
         for (const t of tm.list()) { try { ws.send(JSON.stringify({ type: "transfer:update", transfer: t })); } catch {} }
@@ -875,10 +935,23 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             logger.debug("server", "browse event", { type: event.type, username: event.username, folder: (event as { folder?: string }).folder });
             try {
               if (event.type === "browse-shares") {
+                // order-preserving dedupe by folder name — peers can emit dupes, and our 200-page paging
+                // must not amplify them into the cache
+                const deduped = (() => {
+                  const seen = new Set<string>();
+                  const out: unknown[] = [];
+                  for (const f of (event.folders as unknown[] || [])) {
+                    const name = (f as { name?: string }).name;
+                    if (typeof name !== "string" || seen.has(name)) continue;
+                    seen.add(name);
+                    out.push(f);
+                  }
+                  return out;
+                })();
                 // cache full shares for 5m paging
-                try { browseCache.set(event.username.toLowerCase(), { folders: event.folders as unknown[], ts: Date.now() }); } catch {}
+                try { browseCache.set(event.username.toLowerCase(), { folders: deduped as unknown[], ts: Date.now() }); } catch {}
                 // trim API response: cap initial payload to 200 folders, client pages 50 at a time
-                const all = (event.folders as unknown[]) || [];
+                const all = deduped as unknown[];
                 const page = all.slice(0, 200);
                 const hasMore = all.length > 200;
                 const lockedCount = Array.isArray(event.lockedFolders) ? event.lockedFolders.length : 0;
@@ -1248,7 +1321,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         else if (msg.action === "leave") session.leaveGlobalRoom();
         return;
       }
-      if (data.type === "browse") {
+       if (data.type === "browse") {
         const result = BrowseSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid browse message.")); return; }
         const reqUser = typeof (parsed as { username?: unknown }).username === "string" ? (parsed as { username: string }).username : result.data.username;
@@ -1259,14 +1332,22 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           try { ws.send(JSON.stringify({ type: "browse:shares", username: reqUser, folders: [] as never, total: 0, hasMore: false, offset: 0, error: "Not logged in." })); } catch {}
           return;
         }
+        const rawFolders = (session.shareDBInstance.getFoldersForPermission(PermissionLevel.PUBLIC) as unknown[]);
+        const seen = new Set<string>();
+        const foldersForBrowse = [] as unknown[];
+        for (const f of rawFolders) {
+          const name = (f as { name?: string }).name;
+          if (typeof name !== "string" || seen.has(name)) continue;
+          seen.add(name);
+          foldersForBrowse.push(f);
+        }
         const isSelf = result.data.username.trim().toLowerCase() === session.username.trim().toLowerCase();
         if (result.data.action === "shares") {
           // Local browse — nicotine-plus userbrowse.py:browse_user serves own shares
           // locally (self→PUBLIC view + reveal flags); no peer round-trip to self.
           if (isSelf) {
             try {
-              const folders = session.shareDBInstance.getFoldersForPermission(PermissionLevel.PUBLIC) as unknown[];
-              const all = folders || [];
+              const all = foldersForBrowse as unknown[];
               const page = all.slice(0, 200);
               const hasMore = all.length > 200;
               logger.info("browse", "local self-shares", { username: result.data.username, dirs: all.length });
@@ -1285,7 +1366,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           if (isSelf) {
             const tok = result.data.token ?? Math.floor(Math.random() * 1e9);
             try {
-              const allFolders = session.shareDBInstance.getFoldersForPermission(PermissionLevel.PUBLIC);
+              const allFolders = foldersForBrowse as unknown as { name: string; files: unknown[] }[];
               const want = result.data.folder;
               const match = allFolders.find((f) => f.name === want)
                 ?? allFolders.find((f) => f.name.toLowerCase() === want.toLowerCase());
@@ -1322,11 +1403,23 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (data.type === "shares:rescan") {
         const session = requireLogin(); if (!session) return;
         (session as unknown as { rescanShares: () => Promise<unknown> }).rescanShares().then((folders: unknown) => {
-          const sdb = (session as unknown as { shareDBInstance: { getSharedCounts: () => { dirs:number; files:number }; getUnavailableShares: () => [string,string][] } }).shareDBInstance;
+          const sdb = (session as unknown as { shareDBInstance: { getSharedCounts: () => { dirs:number; files:number }; getUnavailableShares: () => [string,string][]; getSecretHits: (n?: number) => string[] } }).shareDBInstance;
           const counts = sdb.getSharedCounts();
           const unavailable = sdb.getUnavailableShares();
+          const secretHits = sdb.getSecretHits(20);
           if (unavailable.length) logger.warn("bridge", "rescan: some shares unavailable on bridge FS", { unavailable, counts });
-          ws.send(JSON.stringify({ type: "shares:rescanned", folders, counts, unavailable }));
+          if (secretHits.length) logger.warn("bridge", "rescan: secret-like files exposed", { secretHits });
+          ws.send(JSON.stringify({ type: "shares:rescanned", folders, counts, unavailable, secretHits }));
+        }).catch((e: Error) => ws.send(errorMessage(e.message)));
+        return;
+      }
+
+      if (data.type === "shares:preview") {
+        const session = requireLogin(); if (!session) return;
+        const rawExcl = (parsed as unknown as { exclusions?: unknown }).exclusions;
+        const exclusions = Array.isArray(rawExcl) ? (rawExcl as unknown[]).filter((s) => typeof s === "string").slice(0, 500) as string[] : undefined;
+        (session as unknown as { previewShares: (e?: string[]) => Promise<{ counts: { dirs:number; files:number }; sample: string[]; excludedCount: number; secretHits: string[] }> }).previewShares(exclusions).then((res) => {
+          ws.send(JSON.stringify({ type: "shares:preview:result", ...res }));
         }).catch((e: Error) => ws.send(errorMessage(e.message)));
         return;
       }
@@ -1364,6 +1457,12 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             }
             if (key === "share_filters" && Array.isArray(value)) {
               (session as unknown as { setShareFilters?: (f: string[]) => void })?.setShareFilters?.(value as string[]);
+            }
+            if (key === "exclusions" && Array.isArray(value)) {
+              const arr = (value as unknown[]).filter((s) => typeof s === "string") as string[];
+              if (arr.length <= 500) {
+                (session as unknown as { setExclusions?: (f: string[]) => void })?.setExclusions?.(arr);
+              }
             }
             if (key === "downloadfilters" || key === "enablefilters") {
               tm?.setConfig?.({ [key]: value });
@@ -1411,6 +1510,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                   // Fire-and-forget, report via WS — trigger fresh Soulseek reconnect (WS stays open)
                   (sess.setListenPort(newPort) as Promise<void>).then(() => {
                     logger.info("server", "listen port updated via config", { oldPort: prevPort, newPort });
+                    persistSetting(section, "portrange", [newPort, newPort]);
                     try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: newPort })); } catch {}
                     // Notify all WS clients of new health (so UI Save shows success without poll)
                     try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: newPort, configDir: CONFIG_DIR, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: getGlobalPortMapperStatus() } })); } catch {}
@@ -1423,6 +1523,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                   }).catch((e: Error) => {
                     // Revert global on bind failure
                     LISTEN_PORT = prevPort;
+                    persistSetting(section, "portrange", [prevPort, prevPort]);
                     try { writeFileSync(join(CONFIG_DIR, "listen_port"), String(prevPort)); } catch {}
                     try { writeFileSync(join(CONFIG_DIR, "host.env"), `LISTEN_PORT=${prevPort}\n`); } catch {}
                     logger.warn("server", "listen port change failed, reverted", { newPort, error: e.message });
@@ -1460,6 +1561,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
               try {
                 sess?.setNetworkInterface?.(newIface);
                 logger.info("server", `interface set to ${newIface || "default (0.0.0.0)"}`, { iface: newIface || "default", username: (session as unknown as { username?: string })?.username });
+                persistSetting(section, key, newIface);
                 // Send config updated + health so UI can reflect immediate bind change (WS stays open, Soulseek reconnects if loggedIn)
                 try { ws.send(JSON.stringify({ type: "config:updated", section, key, value: newIface })); } catch {}
                 try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, configDir: CONFIG_DIR, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: getGlobalPortMapperStatus() } })); } catch {}
@@ -1486,12 +1588,24 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           } else if (section === "plugins" && key === "enable") {
             (pluginManager as unknown as { setGlobalEnable?: (b: boolean) => void }).setGlobalEnable?.(Boolean(value));
             logger.info("bridge", `plugins ${Boolean(value) ? "enabled" : "disabled"} via config`, { enable: Boolean(value) });
-          } else if (section === "worker" && ["discogs_token", "tidal_token", "tidal_country", "qobuz_app_id", "qobuz_user_auth_token"].includes(key)) {
+          } else if (section === "worker" && ["discogs_token", "tidal_token", "tidal_country", "qobuz_app_id", "qobuz_user_auth_token", "media_scan_url", "media_scan_token"].includes(key)) {
             // Worker metadata tokens — write-only API. Merged into DATA_DIR/worker.json
             // (0600), read by the worker (env wins). Values never logged or returned.
-            if (typeof value !== "string" || value.length > 512) {
-              ws.send(errorMessage("Worker token must be a string ≤512 chars (empty clears it)."));
+            const maxLen = key === "media_scan_url" ? 2048 : 512;
+            if (typeof value !== "string" || value.length > maxLen) {
+              ws.send(errorMessage(`Worker value must be a string ≤${maxLen} chars (empty clears it).`));
               return;
+            }
+            if (key === "media_scan_url" && value) {
+              const v = value.trim();
+              if (!v.toLowerCase().startsWith("http://") && !v.toLowerCase().startsWith("https://")) {
+                ws.send(errorMessage("MEDIA_SCAN_URL must start with http:// or https://"));
+                return;
+              }
+              try {
+                const u = new URL(v);
+                if (u.username || u.password) { ws.send(errorMessage("MEDIA_SCAN_URL must not contain credentials")); return; }
+              } catch { ws.send(errorMessage("MEDIA_SCAN_URL invalid URL")); return; }
             }
             try {
               const p = join(CONFIG_DIR, "worker.json");
@@ -1514,10 +1628,17 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             logger.debug("bridge", "server config stored", { key, value: typeof value === "object" ? JSON.stringify(value).slice(0,120) : String(value).slice(0,80) });
           }
           logger.debug("bridge", "config update", { section, key });
+          persistSetting(section, key, value);
           ws.send(JSON.stringify({ type: "config:updated", section, key }));
         } catch (e) {
           ws.send(errorMessage((e as Error).message));
         }
+        return;
+      }
+
+      if (data.type === "config:get") {
+        // Durable settings snapshot for new browsers / post-restart reconcile (no secrets — worker never persisted here)
+        ws.send(JSON.stringify({ type: "config:state", settings: PERSISTED_SETTINGS }));
         return;
       }
 
@@ -1641,6 +1762,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           }
           case "setProfile":
             session.setProfile({ username: session.username, descr: msg.profile.descr, pic: msg.profile.pic ? Buffer.from(msg.profile.pic, "base64") : null, totalupl: msg.profile.totalupl, queuesize: msg.profile.queuesize, slotsavail: msg.profile.slotsavail, uploadallowed: msg.profile.uploadallowed });
+            persistSetting("userinfo", "descr", msg.profile.descr);
+            // ponytail: skip huge embedded pictures in settings.json (re-pushed by web on connect), cap 256KB
+            if (typeof msg.profile.pic === "string" && msg.profile.pic.length <= 256_000) persistSetting("userinfo", "pic", msg.profile.pic);
             break;
         }
         return;
@@ -1739,9 +1863,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       logger.debug("bridge", "unknown message type", { type: data.type });
       ws.send(errorMessage("Unknown message type."));
     },
-    close(ws) {
+    close(ws, code, reason) {
       try { (ws.data as unknown as { logUnsub?: () => void }).logUnsub?.(); } catch {}
-      logger.info("bridge", "ws close");
+      const sess = ws.data.session as unknown as { searches?: Map<unknown, unknown>; username?: string } | undefined;
+      const searchCount = sess?.searches?.size ?? 0;
+      logger.info("bridge", "ws close", { code, reason: reason ? String(reason).slice(0,200) : "", username: (sess as { username?: string })?.username ?? "", searches: searchCount });
       if (ws.data.session) {
         try { activeSessions.delete(ws.data.session); } catch {}
       }

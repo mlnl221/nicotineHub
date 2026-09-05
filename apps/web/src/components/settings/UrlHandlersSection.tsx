@@ -1,7 +1,7 @@
 "use client";
 
 import { useConfig } from "@/lib/config/provider";
-import { SectionCard, TextFieldControl } from "@/components/settings/controls";
+import { SectionCard, SectionSaveButton, TextFieldControl } from "@/components/settings/controls";
 
 export function UrlHandlersSection() {
   const { settings, setOption } = useConfig();
@@ -11,6 +11,7 @@ export function UrlHandlersSection() {
       <SectionCard
         title="URL handlers"
         description="Desktop-only: protocol → command mappings and file manager (urlhandlers.ui, preferences.py:3001). Hidden in isolated mode in Nicotine+ (preferences.py:3784). In the browser, links are handled natively."
+        actions={<SectionSaveButton section="urls" />}
       >
         <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs leading-relaxed text-on-surface-variant dark:bg-surface-container-highest/40">
           No configuration needed in the browser. Your system/browser opens <span className="font-mono">http://, https://</span> and file links. Desktop default protocols include{" "}

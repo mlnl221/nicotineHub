@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
 import type { SharedFolder } from "@/lib/config/defaults";
-import { SectionCard, ToggleControl, SelectControl, TextFieldControl } from "@/components/settings/controls";
+import { SectionCard, SectionSaveButton, ToggleControl, SelectControl, TextFieldControl } from "@/components/settings/controls";
 import { useSession } from "@/lib/session";
 
 const FileExplorer = dynamic(() => import("@/components/files/FileExplorer").then((m) => m.FileExplorer), {
@@ -83,23 +83,36 @@ export function SharesSection() {
   const [rescanError, setRescanError] = useState<string | null>(null);
   const [lastRescanAt, setLastRescanAt] = useState<number | null>(null);
   const [unavailableShares, setUnavailableShares] = useState<[string, string][] | null>(null);
+  const [secretHits, setSecretHits] = useState<string[] | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewData, setPreviewData] = useState<{ counts: { dirs: number; files: number }; sample: string[]; excludedCount: number; secretHits: string[] } | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   useEffect(() => {
     return subscribe((msg) => {
       if ((msg as { type: string }).type === "shares:rescanned") {
-        const m = msg as unknown as { counts?: { dirs: number; files: number }; unavailable?: [string, string][] };
+        const m = msg as unknown as { counts?: { dirs: number; files: number }; unavailable?: [string, string][]; secretHits?: string[] };
         setRescanning(false);
         if (m.counts) setLastCounts(m.counts);
         setLastRescanAt(Date.now());
         setRescanError(null);
         setUnavailableShares(m.unavailable?.length ? m.unavailable : null);
-      } else if ((msg as { type: string }).type === "error" && rescanning) {
+        setSecretHits(m.secretHits?.length ? m.secretHits : null);
+      } else if ((msg as { type: string }).type === "shares:preview:result") {
+        const m = msg as unknown as { counts?: { dirs: number; files: number }; sample?: string[]; excludedCount?: number; secretHits?: string[] };
+        setPreviewLoading(false);
+        if (m.counts && Array.isArray(m.sample)) {
+          setPreviewData({ counts: m.counts, sample: m.sample, excludedCount: m.excludedCount ?? 0, secretHits: m.secretHits ?? [] });
+          setPreviewError(null);
+        }
+      } else if ((msg as { type: string }).type === "error" && (rescanning || previewLoading)) {
         const m = msg as unknown as { error?: string };
-        setRescanning(false);
-        setRescanError(m.error || "Rescan failed");
+        if (rescanning) { setRescanning(false); setRescanError(m.error || "Rescan failed"); }
+        if (previewLoading) { setPreviewLoading(false); setPreviewError(m.error || "Preview failed"); }
       }
     });
-  }, [subscribe, rescanning]);
+  }, [subscribe, rescanning, previewLoading]);
 
   // Dialog state
   const [addOpen, setAddOpen] = useState(false);
@@ -335,6 +348,7 @@ export function SharesSection() {
       <SectionCard
         title="Shared folders"
         description="Folders you share on the Soulseek network. WSL (bun): use absolute WSL paths like /home/user/Music or /mnt/c/Users/you/Music. Docker: browse container /data to add any nested folder. Browser pickers are a fallback."
+        actions={<SectionSaveButton section="transfers" />}
       >
         <div className="py-4 space-y-3">
           <div className="rounded-xl bg-amber-50 px-4 py-3 font-body text-xs leading-relaxed text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
@@ -409,6 +423,57 @@ export function SharesSection() {
               <div className="flex justify-end gap-2 border-t border-outline-variant/15 bg-surface-container-low px-4 py-3 dark:bg-surface-variant/20">
                 <a href="/files" className="font-label text-xs text-primary hover:underline">Open standalone Explorer</a>
                 <button type="button" onClick={() => setBrowseOpen(false)} className="rounded-xl px-4 py-2 font-label text-sm text-on-surface-variant">Close</button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+        {/* Preview modal — dry-run top 20 exposed files + excludedCount + secretHits */}
+        {previewOpen && mounted && createPortal(
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => setPreviewOpen(false)}>
+            <div className="max-h-[90dvh] w-full max-w-xl overflow-hidden rounded-2xl bg-surface-container-lowest shadow-xl dark:bg-surface-container-high flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between border-b border-outline-variant/15 px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[20px] text-primary">visibility</span>
+                  <h3 className="font-headline text-base font-semibold text-on-surface dark:text-inverse-on-surface">Preview shares</h3>
+                </div>
+                <button type="button" aria-label="Close preview" onClick={() => setPreviewOpen(false)} className="inline-flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container-high"><span className="material-symbols-outlined text-[18px]">close</span></button>
+              </div>
+              <div className="overflow-auto p-4 space-y-3">
+                {previewLoading ? (
+                  <div className="flex items-center gap-2 font-body text-sm text-on-surface-variant"><span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span> Scanning…</div>
+                ) : previewData ? (
+                  <>
+                    <div className="font-body text-xs text-on-surface-variant">Would share <span className="font-semibold">{previewData.counts.dirs} dirs · {previewData.counts.files} files</span>{previewData.excludedCount ? ` · ${previewData.excludedCount} filtered by exclusions` : ""}.</div>
+                    {previewData.secretHits.length > 0 && (
+                      <div className="rounded-xl bg-error-container px-3 py-3 font-body text-xs leading-relaxed text-on-error-container">
+                        <div className="font-semibold">Potential secrets in preview — add to exclusions:</div>
+                        <ul className="mt-1 list-disc pl-4">
+                          {previewData.secretHits.map((p) => <li key={p} className="font-mono break-all">{p}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    <div className="rounded-xl bg-surface-container-low px-3 py-3 dark:bg-surface-variant/20">
+                      <div className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Top 20 exposed files</div>
+                      {previewData.sample.length === 0 ? (
+                        <div className="mt-2 font-body text-xs text-on-surface-variant">No files would be shared.</div>
+                      ) : (
+                        <ul className="mt-2 list-disc pl-4 space-y-0.5">
+                          {previewData.sample.map((p) => <li key={p} className="font-mono text-xs break-all text-on-surface-variant dark:text-outline">{p}</li>)}
+                        </ul>
+                      )}
+                    </div>
+                  </>
+                ) : previewError ? (
+                  <div className="rounded-xl bg-error-container px-3 py-2 font-body text-xs text-on-error-container">{previewError}</div>
+                ) : (
+                  <div className="font-body text-xs text-on-surface-variant">No preview yet.</div>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 border-t border-outline-variant/15 bg-surface-container-low px-4 py-3 dark:bg-surface-variant/20">
+                <button type="button" onClick={() => setPreviewOpen(false)} className="rounded-xl px-4 py-2 font-label text-sm text-on-surface-variant">Close</button>
+                <button type="button" onClick={() => { setPreviewOpen(false); if (state.status === "connected") { setRescanning(true); setRescanError(null); setUnavailableShares(null); send({ type: "shares:rescan" }); } }} className="rounded-xl bg-primary px-5 py-2 font-label text-sm font-semibold text-on-primary">Rescan now</button>
               </div>
             </div>
           </div>,
@@ -654,7 +719,7 @@ export function SharesSection() {
         document.body
       )}
 
-      <SectionCard title="Share filters" description="Patterns excluded from shares (case-insensitive, * wildcard). Trailing \ means folder.">
+      <SectionCard title="Share filters" description="Patterns excluded from shares (case-insensitive, * wildcard). Trailing \ means folder." actions={<SectionSaveButton section="transfers" />}>
         <TextFieldControl
           label="Filters"
           description="One pattern per line. Defaults include @eaDir\, #recycle\, desktop.ini, Thumbs.db."
@@ -664,6 +729,51 @@ export function SharesSection() {
           onChange={(v) => setOption("transfers", "share_filters", v.split("\n").map((s) => s.trim()).filter(Boolean))}
           onReset={() => setOption("transfers", "share_filters", defaults.transfers.share_filters)}
         />
+      </SectionCard>
+
+      <SectionCard title="Excluded paths" description="Extra globs excluded from shares (same *→.* rules as Share filters; trailing \ means folder). Slskd-style per-path exclusions.">
+        <TextFieldControl
+          label="Exclusions"
+          description="One pattern per line. Examples: *.key, .env, wallet*, .git\ . Preview before rescanning."
+          value={(t.exclusions ?? []).join("\n")}
+          multiline
+          placeholder="*.key&#10;.env&#10;wallet*&#10;.git\"
+          onChange={(v) => setOption("transfers", "exclusions", v.split("\n").map((s) => s.trim()).filter(Boolean))}
+          onReset={() => setOption("transfers", "exclusions", defaults.transfers.exclusions)}
+        />
+        {secretHits && secretHits.length > 0 && (
+          <div className="mt-3 rounded-xl bg-error-container px-3 py-3 font-body text-xs leading-relaxed text-on-error-container">
+            <div className="font-semibold">Potential secrets exposed — would be shared:</div>
+            <ul className="mt-1 list-disc pl-4">
+              {secretHits.slice(0, 20).map((p) => (
+                <li key={p} className="font-mono break-all">{p}</li>
+              ))}
+            </ul>
+            <div className="mt-2">Add patterns above like <span className="font-mono">.env</span>, <span className="font-mono">*.key</span>, <span className="font-mono">wallet*</span>, <span className="font-mono">.git\</span> then Preview/Rescan. Default <span className="font-mono">.*</span> already hides dotfiles.</div>
+          </div>
+        )}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            aria-label="Preview shares"
+            onClick={() => {
+              if (state.status !== "connected") return;
+              setPreviewLoading(true);
+              setPreviewError(null);
+              setPreviewData(null);
+              setPreviewOpen(true);
+              send({ type: "shares:preview", exclusions: (t.exclusions ?? []) } as unknown as never);
+              setTimeout(() => setPreviewLoading((v) => (v ? false : v)), 15000);
+            }}
+            disabled={state.status !== "connected" || previewLoading}
+            className="inline-flex h-10 min-h-10 items-center justify-center gap-1.5 rounded-xl bg-secondary-container px-4 font-label text-xs font-semibold uppercase tracking-widest text-on-secondary-container shadow-sm transition-colors hover:bg-secondary-container/80 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
+          >
+            <span className={`material-symbols-outlined text-[18px] ${previewLoading ? "animate-spin" : ""}`}>{previewLoading ? "progress_activity" : "visibility"}</span>
+            {previewLoading ? "Previewing…" : "Preview"}
+          </button>
+          <span className="font-body text-xs text-on-surface-variant dark:text-outline">{mounted ? `${(t.exclusions ?? []).length} pattern(s)` : ""} · dry-run shows top 20 files</span>
+        </div>
+        {previewError && <div className="mt-2 rounded-xl bg-error-container px-3 py-2 font-body text-xs text-on-error-container">{previewError}</div>}
       </SectionCard>
 
       <SectionCard title="Rescan" description="Re-scan all shared folders now — including /data mounts you just added.">
@@ -709,6 +819,17 @@ export function SharesSection() {
                 ))}
               </ul>
               <div className="mt-2">WSL (bun): use absolute WSL path like <span className="font-mono">/home/magnus/Music</span> or <span className="font-mono">/mnt/c/Users/you/Music</span>. Docker: mount host folder into container (e.g. <span className="font-mono">-v /home/you/Music:/data/Music:ro</span>) then share <span className="font-mono">/data/Music</span>. Check bridge <span className="font-mono">/health?json</span> <span className="font-mono">dataDir</span> + <span className="font-mono">/api/files?path=/</span>.</div>
+            </div>
+          )}
+          {secretHits && secretHits.length > 0 && (
+            <div className="rounded-xl bg-error-container px-3 py-3 font-body text-xs leading-relaxed text-on-error-container">
+              <div className="font-semibold">Potential secrets exposed — would be shared:</div>
+              <ul className="mt-1 list-disc pl-4">
+                {secretHits.slice(0, 20).map((p) => (
+                  <li key={p} className="font-mono break-all">{p}</li>
+                ))}
+              </ul>
+              <div className="mt-2">Add to Excluded paths above like <span className="font-mono">.env</span>, <span className="font-mono">*.key</span>, <span className="font-mono">wallet*</span>, <span className="font-mono">.git\</span> then Preview/Rescan.</div>
             </div>
           )}
           {state.status !== "connected" && (
@@ -759,6 +880,39 @@ export function SharesSection() {
             { value: "both", label: "Everyone can view buddy & trusted (on request)" },
           ]}
         />
+      </SectionCard>
+
+      <SectionCard title="Auto-rename after scrape" description="When enabled, successfully scraped files are renamed using the template. Supports {track} (01, 02…), {artist}, {title}. Extension is kept. Missing tags → skipped. Collisions → (2), (3)…" actions={<SectionSaveButton section="transfers" />}>
+        <ToggleControl
+          label="Enable auto-rename after scrape"
+          description="Rename files in /files after a successful scrape when the required tags exist. Renames happen in-place on the worker."
+          checked={!!t.auto_rename_enabled}
+          onChange={(v) => setOption("transfers", "auto_rename_enabled", v)}
+        />
+        <TextFieldControl
+          label="Rename template"
+          description="Template for the new basename (extension kept). Tokens: {track} {artist} {title}. Example with default: 01. Pink Floyd - Speak to Me.flac"
+          value={t.rename_template ?? defaults.transfers.rename_template}
+          placeholder={defaults.transfers.rename_template}
+          onChange={(v) => setOption("transfers", "rename_template", v)}
+          onReset={() => setOption("transfers", "rename_template", defaults.transfers.rename_template)}
+        />
+        {(() => {
+          const tmpl = (t.rename_template ?? "").trim();
+          const allowed = new Set(["track", "artist", "title"]);
+          const found = [...tmpl.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
+          const unknown = found.filter((x) => !allowed.has(x));
+          const hasToken = found.length > 0 && found.every((x) => allowed.has(x));
+          return (
+            <div className="font-body text-xs">
+              {!tmpl ? <span className="text-outline">Enter a template containing at least one of {"{track} {artist} {title}"}.</span> :
+                unknown.length ? <span className="text-error">Unknown token(s): {unknown.map((x) => `{${x}}`).join(", ")} — allowed: {"{track} {artist} {title}"}.</span> :
+                !hasToken ? <span className="text-error">Template must contain at least one of {"{track} {artist} {title}"}.</span> :
+                <span className="text-on-surface-variant dark:text-outline">Template looks valid — preview: <span className="font-mono">{tmpl.replace("{track}", "01").replace("{artist}", "Artist").replace("{title}", "Title")}.flac</span></span>
+              }
+            </div>
+          );
+        })()}
       </SectionCard>
     </div>
   );

@@ -510,27 +510,30 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (isDemo) return;
     if (autoLoginAttempted.current) return;
     autoLoginAttempted.current = true;
-    const timer = setTimeout(() => {
-      if (stateRef.current.status !== "idle") return;
-      try {
-        if (sessionStorage.getItem("__mockLoggedIn")) return;
-      } catch {}
-      // Respect server.auto_connect_startup=false (settings-audit P0)
-      try {
-        const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
-        if (raw) {
-          const parsed = JSON.parse(raw) as { server?: { auto_connect_startup?: boolean } };
-          if (parsed?.server?.auto_connect_startup === false) return;
-        }
-      } catch {}
-      const creds = loadCreds();
-      if (creds?.username && creds?.password) {
-        if (stateRef.current.status === "idle" || stateRef.current.status === "failed") {
-          login(creds);
-        }
+    if (stateRef.current.status !== "idle") return;
+    try {
+      if (sessionStorage.getItem("__mockLoggedIn")) return;
+    } catch {}
+    // Respect server.auto_connect_startup=false (settings-audit P0)
+    try {
+      const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
+      if (raw) {
+        const parsed = JSON.parse(raw) as { server?: { auto_connect_startup?: boolean } };
+        if (parsed?.server?.auto_connect_startup === false) return;
       }
-    }, 50);
-    return () => clearTimeout(timer);
+    } catch {}
+    const creds = loadCreds();
+    if (creds?.username && creds?.password) {
+      // Optimistic shell: skip the login screen straight to the app (e.g. /search
+      // redirects on `connected`). ReconnectBanner covers `reconnecting`. The real
+      // login:result below either confirms (reconnecting:false) or bounces to
+      // `failed` (auth failure clears creds; guards route back to login).
+      // NB: login() first — connectSocket reads the (still idle) stateRef and would
+      // overwrite an optimistic setState issued before it. The optimistic update
+      // last wins via batching; later async WS callbacks see the updated state.
+      login(creds);
+      setState({ status: "connected", user: creds.username, error: undefined, reconnecting: true });
+    }
   }, [login]);
 
   const send = useCallback((msg: BridgeInboundMessage) => {

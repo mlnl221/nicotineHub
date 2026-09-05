@@ -4,6 +4,7 @@ import { useConfig } from "@/lib/config/provider";
 import { useTheme } from "@/components/ThemeProvider";
 import {
   SectionCard,
+  SectionSaveButton,
   ToggleControl,
   SelectControl,
   RadioGroupControl,
@@ -28,6 +29,7 @@ export function UiSection() {
     <SectionCard
       title="Appearance"
       description="Theme, language and display formatting for this browser client."
+      actions={<SectionSaveButton section="ui" />}
     >
       <ToggleControl
         label="Dark mode"

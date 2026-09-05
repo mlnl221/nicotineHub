@@ -93,6 +93,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   tabsRef.current = tabs;
   const pendingOpenRef = useRef<Set<string>>(new Set());
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const nextOffsetRef = useRef<Map<string, number>>(new Map());
   // track pending folder request per tab to avoid cross-tab stale updates when same username in multiple tabs
   const pendingFolderRef = useRef<Map<string, string>>(new Map());
 
@@ -144,27 +145,57 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
         const off = m.offset ?? 0;
         const more = !!m.hasMore && !hasError;
         const pageFolders = m.folders || [];
-        if (more) {
-          // More pages cached server-side — fetch next before clearing the timeout.
-          // Offset = already-held folders + this page (pages arrive in WS order).
-          const held = tabsRef.current
-            .filter((t) => t.username.toLowerCase() === lower)
-            .reduce((n, t) => Math.max(n, t.folders.length), 0);
-          try { send({ type: "browse:page", username: m.username, offset: held + pageFolders.length, limit: 200 }); } catch {}
-        }
-        setTabs((prev) => prev.map((t) => {
-          if (t.username.toLowerCase() !== lower) return t;
-          if (hasError) {
+        if (hasError) {
+          // fail all tabs for this user
+          setTabs((prev) => prev.map((t) => {
+            if (t.username.toLowerCase() !== lower) return t;
             const timer = timersRef.current.get(t.id);
             if (timer) { clearTimeout(timer); timersRef.current.delete(t.id); }
+            nextOffsetRef.current.delete(t.id);
             return { ...t, loading: false, error: errMsg || "Failed to fetch shares" };
+          }));
+          return;
+        }
+        // Dedupe req for paging: only fetch next if this page's offset matches tracker
+        const isFreshStart = off === 0;
+        if (more) {
+          // Schedule next page from authoritative nextOffset per tab (avoids held+page race when two chains interleave)
+          // Use the max tracker seen for this user, default 200 after first page
+          const tabIds = tabsRef.current.filter((t) => t.username.toLowerCase() === lower).map((t) => t.id);
+          for (const tid of tabIds) {
+            const expected = nextOffsetRef.current.get(tid) ?? 0;
+            // First page should have offset 0; subsequent pages arrive at expected
+            if (off === 0 && expected !== 0) continue;
+            if (off !== 0 && off !== expected) continue;
+            const nextOff = off + pageFolders.length;
+            nextOffsetRef.current.set(tid, nextOff);
+            try { send({ type: "browse:page", username: m.username, offset: nextOff, limit: 200 }); } catch {}
           }
-          const merged = off > 0 ? [...t.folders, ...pageFolders] : pageFolders;
-          if (more) return { ...t, loading: true, error: null, folders: merged };
-          const timer = timersRef.current.get(t.id);
-          if (timer) { clearTimeout(timer); timersRef.current.delete(t.id); }
-          return { ...t, loading: false, error: null, folders: merged };
-        }));
+        } else {
+          // Final page — clear trackers for this user
+          for (const tid of tabsRef.current.filter((t) => t.username.toLowerCase() === lower).map((t) => t.id)) nextOffsetRef.current.delete(tid);
+        }
+        setTabs((prev) => {
+          // Dedupe: skip page if off > 0 and already beyond current length (replayed second chain)
+          const maxLen = prev.filter((t) => t.username.toLowerCase() === lower).reduce((n, t) => Math.max(n, t.folders.length), 0);
+          if (off > 0 && off > maxLen) return prev;
+          return prev.map((t) => {
+            if (t.username.toLowerCase() !== lower) return t;
+            // Page dedupe: if we already hold >= off+page, skip append
+            if (off > 0 && t.folders.length >= off + pageFolders.length) {
+              // check overlap by name to avoid assuming offset alignment after prior dedupe
+              const names = new Set(t.folders.map((f) => f.name));
+              if (pageFolders.every((p) => names.has(p.name))) return t;
+            }
+            const seen = off === 0 ? new Set<string>() : new Set(t.folders.map((f) => f.name));
+            const novel = off === 0 ? pageFolders : pageFolders.filter((p) => !seen.has(p.name));
+            const merged = off === 0 ? novel : [...t.folders, ...novel];
+            if (more) return { ...t, loading: true, error: null, folders: merged };
+            const timer = timersRef.current.get(t.id);
+            if (timer) { clearTimeout(timer); timersRef.current.delete(t.id); }
+            return { ...t, loading: false, error: null, folders: merged };
+          });
+        });
       } else if (isFolderMsg || isLegacyFolderError) {
         const m = msg as unknown as { username: string; folder: string; token: number; files: BrowseFile[]; error?: string };
         const lower = m.username.toLowerCase();
@@ -219,7 +250,8 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const requestShares = useCallback((id: string, username: string) => {
-    setTabs((prev) => prev.map((t) => t.id === id ? { ...t, loading: true, error: null } : t));
+    setTabs((prev) => prev.map((t) => t.id === id ? { ...t, loading: true, error: null, folders: [] } : t));
+    nextOffsetRef.current.set(id, 0);
     const existingTimer = timersRef.current.get(id);
     if (existingTimer) { clearTimeout(existingTimer); timersRef.current.delete(id); }
     if (state.status !== "connected") return;
@@ -267,6 +299,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   const closeBrowse = useCallback((id: string) => {
     const timer = timersRef.current.get(id);
     if (timer) { clearTimeout(timer); timersRef.current.delete(id); }
+    nextOffsetRef.current.delete(id);
     pendingFolderRef.current.delete(id);
     const idx = tabsRef.current.findIndex((t) => t.id === id);
     const next = tabsRef.current.filter((t) => t.id !== id);

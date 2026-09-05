@@ -12,6 +12,7 @@ import { ContextMenu } from "@/components/ui/ContextMenu";
 import { privateChatMenu, userMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
 import { highlightKeywords, usernameHotspotClass } from "@/lib/chatFormat";
+import { usePaneWidth } from "@/lib/usePaneWidth";
 import { isDemo } from "@/lib/demo";
 
 function PrivateChatInner() {
@@ -26,6 +27,7 @@ function PrivateChatInner() {
   const [filter, setFilter] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
+  const [pmW, onPmDown] = usePaneWidth("nicotineHub.privatechat.asideW");
 
   useEffect(() => {
     if (state.status === "failed") router.replace("/");
@@ -100,7 +102,7 @@ function PrivateChatInner() {
 
         <div className="flex flex-1 overflow-hidden min-h-0" style={isDemo ? ({ marginTop: "var(--demo-banner-h)" } as React.CSSProperties) : undefined}>
           {/* Left: Active Conversations */}
-          <aside className="hidden w-80 flex-col border-r border-outline-variant/15 bg-surface md:flex">
+          <aside className="hidden flex-col border-r border-outline-variant/15 bg-surface md:flex" style={{ width: pmW }}>
             <div className="border-b border-outline-variant/15 p-3 space-y-3">
               <div className="flex gap-2">
                 <input
@@ -191,6 +193,7 @@ function PrivateChatInner() {
               )}
             </div>
           </aside>
+          <div role="separator" aria-orientation="vertical" aria-label="Resize conversations" onPointerDown={onPmDown} className="hidden md:flex w-2 shrink-0 cursor-col-resize items-center justify-center hover:bg-primary/10 touch-none select-none" style={{ touchAction: "none" }}><div className="h-8 w-0.5 rounded-full bg-outline-variant/40" /></div>
 
           {/* Center: Messages + Mobile picker */}
           <section className="flex flex-1 flex-col overflow-hidden min-h-0" onContextMenu={(e) => {

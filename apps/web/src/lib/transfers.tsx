@@ -14,6 +14,7 @@ import { useSession } from "@/lib/session";
 import type { Transfer, TransferStatsMessage } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
 import { mockDemoTransfers } from "@/lib/demo/fixtures";
+import { workerFetch } from "@/lib/worker";
 
 interface TransfersApi {
   transfers: Transfer[];
@@ -184,11 +185,29 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
   }, [state.status]);
 
+  // trigger worker media scan on finished download (fire-and-forget, tab-open only)
+  const triggerScan = useCallback((t: Transfer | { id: string; fileName: string; size: number; downloadUrl?: string; username?: string; virtualPath?: string }) => {
+    const id = t.id;
+    const username = (t as Transfer).username ?? id.split("::")[0] ?? "";
+    const virtualPath = (t as Transfer).virtualPath ?? id.split("::").slice(1).join("::") ?? "";
+    const fileName = (t as Transfer).fileName ?? (t as { fileName: string }).fileName ?? virtualPath.split("\\").pop() ?? "";
+    const size = (t as Transfer).size ?? (t as { size: number }).size ?? 0;
+    const downloadUrl = (t as { downloadUrl?: string }).downloadUrl ?? "";
+    const destinationPath = ""; // worker will resolve via DATA_DIR if needed
+    // Do not block — log and swallow
+    workerFetch("/scan", {
+      method: "POST",
+      body: JSON.stringify({ fileName, size, username, virtualPath, transferId: id, downloadUrl, destinationPath }),
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     const unsub = subscribe((msg) => {
       if (msg.type === "transfer:update") {
+        const becameFinished = msg.transfer.status === "Finished" && !msg.transfer.isUpload;
         setTransfers((prev) => {
           const idx = prev.findIndex((t) => t.id === msg.transfer.id);
+          const wasFinished = idx >= 0 ? prev[idx].status === "Finished" : false;
           if (idx >= 0) {
             const next = [...prev];
             next[idx] = msg.transfer;
@@ -196,6 +215,7 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
           }
           return [...prev, msg.transfer];
         });
+        if (becameFinished) triggerScan(msg.transfer);
       } else if (msg.type === "transfer:queue") {
         setTransfers((prev) => prev.map((t) => (t.id === msg.id ? { ...t, queuePosition: msg.place, status: "Queued" as const } : t)));
       } else if (msg.type === "transfer:finished") {
@@ -206,6 +226,22 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
               : t,
           ),
         );
+        // fire worker scan for finished download
+        const dummy: Transfer = {
+          id: msg.id,
+          username: msg.id.split("::")[0] ?? "",
+          virtualPath: msg.id.split("::").slice(1).join("::") ?? msg.fileName,
+          fileName: msg.fileName,
+          size: msg.size,
+          current: msg.size,
+          speed: 0,
+          avgSpeed: 0,
+          timeLeft: null,
+          status: "Finished",
+          queuePosition: null,
+          isUpload: false,
+        };
+        triggerScan({ ...dummy, downloadUrl: (msg as { downloadUrl?: string }).downloadUrl } as unknown as Transfer);
         // Optionally trigger browser download via hidden link (Phase 5 OPFS handling deferred)
         // We keep it non-intrusive: UI will show Finished with downloadUrl available
       } else if (msg.type === "transfer:removed") {
@@ -215,7 +251,7 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
       }
     });
     return unsub;
-  }, [subscribe]);
+  }, [subscribe, triggerScan]);
 
   const requestDownload = useCallback(
     (opts: { username: string; virtualPath: string; size: number; fileName?: string }) => {

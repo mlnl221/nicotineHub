@@ -1,6 +1,6 @@
 # r/Soulseek → Nicotine Hub Improvement Plan — 2026-09-02 (moved to proposals 2026-09-03)
 
-> **Status: PROPOSAL — partial.** Worker scaffold + scrape/spectrum/tag/verify/analyze landed in `5c65ea9` (record: `docs/architecture.md` `## Worker`); worker plan doc deleted. Unbuilt backlog below: share safety, ProveIt, wildcard bans, webhook, HoneyPot.
+> **Status: PROPOSAL — partial.** Worker scaffold + scrape/spectrum/tag/verify/analyze landed in `5c65ea9` + **share safety landed in `feat/share-safety`** + **P1 wildcard+slop+webhook landed in `feat/share-safety` (second push)** + **P2 quality filter + flac-t + HoneyPot landed in `feat/share-safety` (third push)** (record: `docs/architecture.md` `## Worker` + `apps/web/src/lib/filter.ts:137` + `apps/worker/app.py:608` + `apps/bridge/src/transfers.ts:701`); worker plan doc deleted. Unbuilt backlog: **B ProveIt only** (A, C, E, Quality, HoneyPot DONE; D,F,G DONE).
 > **Decisions locked 2026-09-02:** scope **Full P0–P2** (P3 deferred), ProveIt `hash(user+week)` rotating.
 > **Sources:** `r_soulseek_posts.jsonl` (4763) + `r_soulseek_comments.jsonl` (50604) in `~/projects/improvement_docs/`
 > **Snapshot:** retrieved_on up to 2026, covers 2002–2026 nostalgia through TikTok + vibe-coded slop era.
@@ -27,11 +27,11 @@ Reddit pain clusters on **quality**, **slop/leech automation**, **share safety**
 
 ---
 
-## 0.1 Worker architecture — extracted
+## 0.1 Worker architecture — landed in `5c65ea9`
 
-**Big architectural change → worker landed in `5c65ea9`; record is `docs/architecture.md` (`## Worker`).**
+**Big architectural change → worker landed in `5c65ea9`; record is `docs/architecture.md` `## Worker` + `docs/spectrum.md`. Worker plan doc deleted (was `worker_service_plan.md`).**
 
-Summary: separate Python FastAPI service `apps/worker:8789` (own code, guided by smoked-salmon `BaseScraper`/`spectrals.py` but **do not copy**) owns scrape/spectrum/tag/verify. Bridge stays `SLSK`-only (`apps/bridge/src/spectrum.ts:12` → worker, no `fetch()` egress). Worker endpoints `POST /scrape`, `POST /spectrum`, `POST /tag|verify|analyze`, `GET /health`, volumes `bridge-data:/data:ro` + `/tmp/hub-spectrum`. Full design + cleanup checklist in `worker_service_plan.md:0`.
+Summary: separate Python FastAPI service `apps/worker:8789` (own code, guided by smoked-salmon `BaseScraper`/`spectrals.py` but **do not copy**) owns scrape/spectrum/tag/verify. Bridge stays `SLSK`-only (`apps/bridge/src/spectrum.ts:12` → worker, no `fetch()` egress). Worker endpoints `POST /scrape`, `POST /spectrum`, `POST /tag|verify|analyze`, `GET /health`, volumes `bridge-data:/data:ro` + ephemeral `/tmp/spectrals`. See `docs/architecture.md` `## Worker` for full endpoints + shared volumes.
 
 ---
 
@@ -50,7 +50,7 @@ Summary: separate Python FastAPI service `apps/worker:8789` (own code, guided by
 
 - **Mobile PWA** `TopBar`/`BottomNav`/`manifest` → answers `1rkop84` iOS + `1svgi2d`.
 - **Search filters** `filter.ts`/`filter.worker.ts` `WishlistInterval 104` → covers `1ahg6ry` 3.3.0 phrase searches.
-- **Spectrum** `sox` Full 2000×513 + Zoom 500×1025 (`README.md:46`) currently in bridge — **will be moved to worker** (see §3.5/§8). Post-download badge stays, generation leaves bridge.
+- **Spectrum** `sox` Full 2000×513 + Zoom 500×1025 — **migrated to worker `apps/worker/spectrals.py` in `5c65ea9`** (see `## Worker` + `docs/spectrum.md`). Post-download badge stays via `workerHttpBase()`, generation left bridge (410 stubs remain).
 - **`leech_detector`** (`plugins/builtin/leech_detector.ts`) + `banlist` → base gating (`docs/porting-status.md:10`).
 - **`LISTEN_PORT` + `PortMapper`** (`server.ts:185`) → covers `1inl4xu` port-forward (needs tooltip).
 - **Interests** `interests/page.tsx:296` → covers `1e47j8g` discovery.
@@ -59,75 +59,68 @@ Summary: separate Python FastAPI service `apps/worker:8789` (own code, guided by
 
 ## 3. Opportunities — grouped, with evidence and lazy solution (worker-aware)
 
-### 3.1 Share safety & per-item exclusion — P0 (stay in bridge)
+### 3.1 Share safety & per-item exclusion — P0 (DONE in `feat/share-safety`)
 
 **Posts:** `1pwgmya` 84/66, `1lkxgp6` 58/21, `1hpq2vf` 12/35. **Comments:** `1pwgmya:108`, `1hpq2vf:18` slskd `exclusions`, `1hpq2vf:25` “destroying structure”.
 
-**Has:** `SharesSection.tsx:66` `virtual_name/folder/accessible_to` + `share_filters` regex + `ShareDB` `public/buddy/trusted` (`shares.ts:24`, `shares.ts:384`) + `check_shares_available` banner. No per-path exclude, no preview, no secret heuristic.
+**DONE `feat/share-safety`:** `transfers.exclusions[]` (`defaults.ts:98` + `sync.tsx:25`) → `shares.ts:59` `exclusions` + `compileExclusions()` reused `*`→`.*` glob, `walkDir:567`/`walkDirAsync:630` + single-file guards + `server.ts:1386` `key==="exclusions"` + `session.ts:488` shim, **Preview** throwaway `previewWithExclusions()` (`shares:preview` → `shares:preview:result` `{counts, sample[20], excludedCount, secretHits}`) + **Secret heuristic** `isSecretFile()` (`.env|id_rsa|*.pem|*.key|wallet*|.git`) banner in `SharesSection.tsx` + `Rescan` `secretHits` (20). Panel only — skipped per-file ACL DB (add when per-user per-file ACL needed). `shares.json:exclusions` persisted (500 cap).
 
-**Lazy:** add `transfers.exclusions` globs (slskd style) in `defaults.ts:27` → `shares.ts:scanFsShares` filter pass + **Preview modal** dry-run listing top 20 exposed files, banner on `\.env|id_rsa|*.key|wallet|.git`. Panel only.
-
-```
-→ skipped: rewriting Plex lib, per-file ACL DB
-add when: per-user per-file ACL needed
-```
-
-**Files:** `apps/web/src/lib/config/defaults.ts:27`, `apps/web/src/components/settings/SharesSection.tsx:66`, `apps/bridge/src/shares.ts:125,364`, `apps/bridge/src/session.ts:1955`.
+**Files:** `apps/web/src/lib/config/defaults.ts:98`, `apps/web/src/components/settings/SharesSection.tsx:733`, `apps/bridge/src/shares.ts:59,191,567,630,681`, `apps/bridge/src/session.ts:488`, `apps/bridge/src/server.ts:1343,1386`.
 
 ---
 
-### 3.2 Anti-leech / anti-slop — P0+P1 (stay in bridge)
+### 3.2 Anti-leech / anti-slop — P0+P1 (P1 wildcard+slop DONE in `feat/share-safety`)
 
 **Posts:** `1rzsds8` 55/163, `1s8igsv` 39/57 `aurral_*`, `1oeg231` 79/37 `generate_random_credentials: [A-Za-z0-9]{8}`, `1n4vhrz` 94/38, `1oevauz` 96/26, `1tipagj` 18/28, `1s232m7` 26/9 ProveIt, `1tglltw` 16/27, `1noys3w` 0/33 HoneyPot.
 
 **Comments:** `1rzsds8:65` (slskd author) reputation, `1rzsds8:42` captcha word, `1rzsds8:20` `50 files/10 folders` slop signature (`1ulos96:19` batchdl artifact), `1tipagj:9` ProveIt, `1s232m7:3` “bans & messages”.
 
-**Has:** `leech_detector` + `banlist` + `UploadsSection` limits. Missing: ProveIt per-user, wildcard, honeypot badge.
+**Has:** `leech_detector` + `banlist` + `UploadsSection` limits. **P1 DONE:** `isUserBanned` now glob `*`/`?` case-sensitive (`networkfilter.ts:34`) + `TransferManager` queue aggregate `isSlopLike` (`transfers.ts:236`) + `TransferCard` pill (`TransferCard.tsx:90`).
 
 **Lazy (worker not needed, keep SLSK loop tight):**
 
-- **ProveIt `hash(user+week)` (P0 locked):** `apps/bridge/src/plugins/builtin/proveIt.ts` (≈80 lines, copy `leech_detector.ts`). `shouldBlockUser` → if unverified, `UploadDenied 50` + `MessageUser 22` word `hash(username+ISOWeek)[0:6]` (`djb2`/`sha256`). `verified.json` `{user, week}` valid 4 weeks, then re-challenge. No globals.
-- **Wildcard+slop badge (P1):** `banlist` glob `aurral_*` (`*`→`.*`) in `networkfilter.ts:70`, uploads `isSlopLike = pending.files<=60 && folders==10 && /^[A-Z0-9]{8,12}$/` badge.
-- **HoneyPot (P2 in-scope):** `if (filename==="!banned.txt") ban(user)` opt-in off.
+- **ProveIt `hash(user+week)` (P0 locked):** `apps/bridge/src/plugins/builtin/proveIt.ts` (≈80 lines, copy `leech_detector.ts`). `shouldBlockUser` → if unverified, `UploadDenied 50` + `MessageUser 22` word `hash(username+ISOWeek)[0:6]` (`djb2`/`sha256`). `verified.json` `{user, week}` valid 4 weeks, then re-challenge. No globals. **Still OPEN (B).**
+- **Wildcard+slop badge (P1 DONE):** `banlist` glob `aurral_*` (`*`→`.*`) in `networkfilter.ts:34`, uploads `isSlopLike = queued.files<=60 && folders==10 && /^[A-Z0-9]{8,12}$/` badge (`TransferCard.tsx:90`).
+- **HoneyPot (P2 in-scope):** `if (filename==="!banned.txt") ban(user)` opt-in off. **Still OPEN (H).**
 
 ```
 → skipped: community blocklist sync, reputation, country ban
 add when: slop still degrades throughput despite ProveIt
 ```
 
-**Files:** `apps/bridge/src/plugins/builtin/leech_detector.ts`, `server.ts:591`, `networkfilter.ts:70`, `app/uploads/page.tsx`.
+**Files:** `apps/bridge/src/plugins/builtin/leech_detector.ts`, `server.ts:591`, `networkfilter.ts:34`, `app/uploads/page.tsx`, `transfers.ts:236`, `protocol.ts:218`.
 
 ---
 
-### 3.3 Paste-link scrape engine — P1 (extracted to worker)
+### 3.3 Paste-link scrape engine — P1 (DONE in worker, `5c65ea9`)
 
-**Extracted → `worker_service_plan.md:2` (`POST /scrape`).** Short: `1vzc2al` 61/29 Discogs link, `1fwli2j` 176/24 etc. → worker owns own scraper (guided by `BaseScraper` but not copied), `SearchBar.tsx:72` → `fetch(WORKER_URL/scrape)` → `search:global`. Bridge stays clean. See worker plan for endpoints + cleanup list.
+**DONE → `apps/worker` `POST /scrape` (8 sources: discogs/bandcamp/apple/qobuz/tidal/musicbrainz/deezer/beatport) + `apps/web/src/lib/worker.ts:58` + `SearchBar.tsx:53`.** Short: `1vzc2al` 61/29 Discogs link, `1fwli2j` 176/24 etc. → worker owns own scraper (guided by `BaseScraper` but not copied), `SearchBar.tsx:53` → `workerFetch(/scrape)` → `search:global`. Bridge stays clean (no `fetch()` egress). `linkParser.ts` deleted. See `docs/architecture.md` `## Worker` for endpoint + SSRF/UA.
 
 ---
 
-### 3.4 Finished-download webhook — P1 (bridge or worker)
+### 3.4 Finished-download webhook — P1 (DONE via worker `POST /scan` in `feat/share-safety`)
 
 **Posts:** `1iu68qz` 23/30 (Synology vs QNAP), `1k9uk09` 7/28, `14ke746` 57/14, `1sfl7zs` 18/9 Feishin.
 
-**Lazy:** `MEDIA_SCAN_URL` env + Settings Downloads webhook. On `TransferManager:Finished` (`transfers.ts:991`) `fetch(webhook,{method:"POST"})` 5 s fire-and-forget. Keep in bridge (simpler) or host in worker `POST /scan` that worker calls `fetch(MEDIA_SCAN_URL)` — either works; pick bridge to avoid worker dependency for trivial fetch.
+**DONE `feat/share-safety`:** worker `POST /scan` (`apps/worker/app.py:754` `ScanIn` + `tokens.py:media_scan_url` 0600) validates `http(s)` + no creds, forwards `{event:"download.finished",eventType:"Download",fileName,size,username,virtualPath,destinationPath,transferId,downloadUrl}` to `MEDIA_SCAN_URL` with `Bearer <MEDIA_SCAN_TOKEN>` (5 s timeout, fire-and-forget). Web `transfers.tsx:201` `transfer:finished`/`transfer:update Finished` → `workerFetch("/scan")` (tab-open only, bridge stays SLSK-only). Settings → Worker → Media automation card (`WorkerSection.tsx:135`). Bridge `server.ts:1528` now accepts `media_scan_url`/`media_scan_token` (≤2048 chars, `http(s)` check) into `worker.json`.
 
 ```
-→ skipped: DLNA server, Symfonium inside Hub
+→ skipped: DLNA server, Symfonium inside Hub (worker webhook covers Plex/Navidrome/n8n)
 ```
 
-**Files:** `apps/bridge/src/transfers.ts:904`, `apps/web/src/components/settings/DownloadsSection.tsx:7`.
+**Files:** `apps/worker/app.py:754`, `apps/worker/tokens.py:17`, `apps/bridge/src/server.ts:1528`, `apps/web/src/lib/transfers.tsx:201`, `apps/web/src/components/settings/WorkerSection.tsx:135`.
 
 ---
 
-### 3.5 Spectrum — P2 heavy → migrate to worker (extracted)
+### 3.5 Spectrum — P2 heavy → migrated to worker (DONE, `5c65ea9`)
 
-**Extracted → `worker_service_plan.md:2` (`POST /spectrum`).** Short: `1p0iosj`/`1ufawq3` etc. → worker owns own `sox` Full 2000×513 + Zoom (`spectrum.ts:12` → worker), bridge strips `sox`/`oxipng`, web `bridgeHttpBase()` → `workerHttpBase()`. See worker plan for full file removals + `sox` wrapper details.
+**DONE → `apps/worker` `POST /spectrum/request` + `GET /spectrum/{stem}/full|zoom` (`spectrals.py` `sox` Full 2000×513 + Zoom 500×1025, `ffmpeg` transcode, `oxipng` best-effort) + `apps/web/src/lib/spectrum.tsx` → `workerHttpBase()`.** Short: `1p0iosj`/`1ufawq3` etc. → worker owns `sox`; bridge `spectrum.ts` deleted, `Dockerfile:63` stripped `sox`, `server.ts` now 410 `moved to worker`, web `bridgeHttpBase()` → `workerHttpBase()`. See `docs/architecture.md` `## Worker` + `docs/spectrum.md`.
 
 ---
 
-### 3.6 Tag / verify / analyze — future worker extensions (extracted)
+### 3.6 Tag / verify / analyze — landed in worker (`5c65ea9`, honest subset)
 
-**Extracted → `worker_service_plan.md:2` (`POST /tag|verify|analyze`).** Short: `1e6jn8g` etc. → worker `POST /tag`/`verify`/`analyze` own impl. See worker plan.
+**DONE (subset) → `apps/worker` `POST /tag|/tag/write|/tag/scrape|/tag/bulk` + `POST /verify|/verify/bulk` + `POST /analyze|/analyze/bulk` (`mutagen`/`ffmpeg` FFT knee, `numpy` when present).** Short: `1e6jn8g` etc. → worker owns tag/verify/analyze; `POST /verify` currently returns `{flacOk, upconvert, mqa, logScore, logChecksum, durationMismatch}` with `upconvert/logScore/logChecksum/durationMismatch = null` until spectral checks land (only `flacOk` + MQA sniff honest today); `POST /analyze` returns `cutoffHz/likelyTranscode` via 30s `ffmpeg→wav` + FFT when `numpy` present else `null`. See `docs/architecture.md` `## Worker`.
 
 ---
 
@@ -145,29 +138,30 @@ add when: slop still degrades throughput despite ProveIt
 
 ---
 
-## 4. Prioritized implementation order — Full P0–P2 + worker
+## 4. Prioritized implementation order — Full P0–P2 + worker (updated 2026-09-03: 0/D/F/G landed)
 
-| Phase | Scope | Verify |
-|---|---|---|
-| **0 — Worker scaffold** | **Extracted to `worker_service_plan.md:4` Phase 0** — `apps/worker/` FastAPI own impl (do not copy) + `POST /scrape` + `GET /health` + `compose.yaml` worker:8789 | See worker plan `worker_service_plan.md:4` for verify `curl /health?json` |
-| **A — Share safety (P0)** | `defaults.transfers.exclusions[]` + `SharesSection` preview modal + `shares.ts:scanFsShares` exclude | `/tmp` with `.env`, preview warns; `bun test && bun run build` |
-| **B — ProveIt `hash(user+week)` (P0)** | `apps/bridge/src/plugins/builtin/proveIt.ts`, `verified.json` 4-week TTL, `server.ts:591` bypass | Unverified → `UploadDenied 50`+PM `abc123`; correct word → success; week rolls |
-| **C — Wildcard+slop badge (P1)** | `networkfilter.ts` glob, `uploads/page.tsx` badge `slop-like` | `aurral_*` blocks, `50/1000`+`[A-Z0-9]{8}` badge |
-| **D — Scrape engine (P1)** | **Extracted to `worker_service_plan.md:2` `POST /scrape`** | See worker plan |
-| **E — Webhook (P1)** | `MEDIA_SCAN_URL` in `transfers.ts:991` | Finish → `docker logs bridge` shows `POST` |
-| **F — Migrate spectrum (P2)** | **Extracted to `worker_service_plan.md:2` `POST /spectrum`** | See worker plan |
-| **G — Tag/verify (P2 opt)** | **Extracted to `worker_service_plan.md:2` `POST /tag|verify`** | See worker plan |
-| **H — HoneyPot (P2)** | `honeyPot.ts` plugin | `!banned.txt` → ban |
+| Phase | Scope | Status | Verify |
+|---|---|---|---|
+| **0 — Worker scaffold** | `apps/worker/` FastAPI own impl (do not copy) + `POST /scrape` (8 sources) + `GET /health` + `compose.yaml` `worker:8789` | **DONE `5c65ea9`** — `docs/architecture.md` `## Worker` | `curl -sf http://localhost:8789/health \| jq .sources` → 8 sources |
+| **A — Share safety (P0)** | `defaults.transfers.exclusions[]` + `SharesSection` preview modal + `shares.ts:scanFsShares` exclude (`\.env\|id_rsa\|*.key\|wallet\|.git` banner) | **DONE `feat/share-safety`** — `shares.ts:59` + `sync.tsx:25` + `server.ts:1343` preview + `SharesSection.tsx:733` | `/tmp` with `.env` → preview `secretHits`, `bun test` 116 pass + `bun run build` + Playwright `Settings→Shares` → `Excluded paths` + `Preview` modal |
+| **B — ProveIt `hash(user+week)` (P0)** | `apps/bridge/src/plugins/builtin/proveIt.ts`, `verified.json` 4-week TTL, `server.ts:591` bypass | **OPEN** | Unverified → `UploadDenied 50`+PM `abc123`; correct word → success; week rolls |
+| **C — Wildcard+slop badge (P1)** | `networkfilter.ts` glob (`*`→`.*` user glob; IP `*` already) + `transfers.ts` `isSlopLike` + `TransferCard` pill | **DONE `feat/share-safety`** — `networkfilter.ts:34` + `transfers.ts:236` + `protocol.ts:218` | `aurral_*` blocks (case-sensitive), `50/60`+10 folders+`[A-Z0-9]{8,12}` → `Slop-like` badge in Uploads |
+| **D — Scrape engine (P1)** | `apps/worker` `POST /scrape` + web `SearchBar→workerFetch` + delete `linkParser.ts` | **DONE `5c65ea9`** — `docs/architecture.md` `## Worker` | Paste Discogs URL in global search → `scrapeRelease` → `query` |
+| **E — Webhook (P1)** | `worker POST /scan` (was `MEDIA_SCAN_URL` in `transfers.ts:991`) | **DONE `feat/share-safety`** — `worker/app.py:754` + `WorkerSection` Media automation + `transfers.tsx:201` relay | Finish (tab open) → worker forwards POST (5s, Bearer), `curl /scan` → `media_scan:true` |
+| **P2 — Quality filter + badge** | `filter.ts` `quality` + `FilterBar` + `ResultsList` badge + `fixtures` hi-res | **DONE `feat/share-safety`** — `protocol.ts:160` + `filter.ts:137` + `ResultsList.tsx:128` | `lossless|320|hi-res|VBR` filters, `FLAC 44.1/16`/`HI-RES` badges, `bun test` + Settings→Searches Quality |
+| **F — Migrate spectrum (P2)** | `apps/worker` `POST /spectrum/request` + `GET /spectrum/{stem}/full\|zoom` + web `workerHttpBase()` | **DONE `5c65ea9`** — `docs/architecture.md` `## Worker` + `docs/spectrum.md` | Finished flac → `Analyze Spectrum` → Full+Zoom PNGs, `curl -I .../full` 304 |
+| **G — Tag/verify/analyze (P2 opt)** | `apps/worker` `POST /tag|verify|analyze` (+ bulk/write/scrape) + `flac -t` + bulk `cutoffHz` | **DONE `feat/share-safety`** — `app.py:608` `flac -t` + `analyze/bulk` `cutoffHz` | `flacOk` via `flac -t`, `bulk` now `cutoffHz/likelyTranscode`, `pytest` 15 pass |
+| **H — HoneyPot (P2)** | `transfers.ts:701` inline `honeypot_enabled` + `banlist:updated` + `UploadsSection` | **DONE `feat/share-safety`** — `transfers.ts:701` + `server.ts:1528` + `BannedUsersSection` sync | `!banned.txt` exact case-insensitive → ban (buddies exempt), `Uploads→HoneyPot` toggle |
 
-Deferred P3: `POST /notify` in worker or bridge. **Worker tasks: see `worker_service_plan.md:4` for full Phase 0/F/G.**
+Deferred P3: `POST /notify` in worker or bridge (still deferred — no code). Unbuilt backlog: **B ProveIt only** (A, C, D, E, F, G, P2 Quality, H DONE).
 
-Each phase: git worktree → `bun test && bun run build` → `docker compose up --build` (worker when needed) → `curl -sf http://localhost:8788/health` + `curl -sf http://localhost:8789/health` + `cp apps/web/.env.example apps/web/.env`. After build: `cp ~/projects/improvement_docs/r_soulseek_improvement_plan.md docs/improvements/r_soulseek_improvement_plan.md && cp ~/projects/improvement_docs/../nicotine_mobile/docs/improvements/worker_service_plan.md docs/improvements/worker_service_plan.md`.
+Each phase: git worktree → `bun test && bun run build` → `docker compose up --build` (worker when needed) → `curl -sf http://localhost:8789/health \| jq` + `cp apps/web/.env.example apps/web/.env`. Doc sync after build: `cp docs/proposals/r_soulseek_improvement_plan.md ~/projects/improvement_docs/r_soulseek_improvement_plan.md`.
 
 ---
 
-## 5. Code to remove / move to worker — extracted
+## 5. Code to remove / move to worker — DONE in `5c65ea9`
 
-**Full cleanup checklist → `worker_service_plan.md:3`.** Summary: delete `apps/bridge/src/spectrum.ts:1` (334 lines), `spectrum.test.ts:4`, `server.ts:192`/`720`/`1509` spectrum handlers, `transfers.ts:1489`, `Dockerfile:62` `sox` apk → worker `spectrals.py` own + `GET /spectrum`; delete `apps/web/src/lib/linkParser.ts` → worker `sources/*.py` own; update `apps/web/src/lib/spectrum.tsx:32` `bridgeHttpBase()` → `workerHttpBase()`. See worker plan for complete table. Net ~400 lines deleted from bridge, new worker service, `docs/architecture.md#worker` added (see §7 below).
+**Cleanup landed — record `docs/architecture.md` `## Worker` + `docs/spectrum.md`.** Deleted `apps/bridge/src/spectrum.ts:1` (334 lines), `spectrum.test.ts:4`, `server.ts:192`/`720`/`1509` spectrum handlers (now 410 `moved to worker`), `transfers.ts:1489` synth stub trimmed, `Dockerfile:62` `sox` apk (`sox/flac/ffmpeg` → `apps/worker/Dockerfile` `python:3.11-slim` + `spectrals.py` own); deleted `apps/web/src/lib/linkParser.ts` → `apps/worker/sources/*.py` own (8 sources); updated `apps/web/src/lib/spectrum.tsx:32` `bridgeHttpBase()` → `workerHttpBase()` via `apps/web/src/lib/worker.ts`. Net ~400 lines deleted from bridge, new worker service, `docs/architecture.md` `## Worker` added.
 
 ---
 
@@ -202,4 +196,6 @@ Minor: `MEDIA_SCAN_URL` → `MEDIA_SCAN_TOKEN` Bearer if needed; `WORKER_TOKEN` 
 
 ---
 
-*Next: start Phase 0 worker scaffold — `git worktree add ../nicotine_mobile-feat_worker -b feat/worker stage && mkdir -p apps/worker && implement apps/worker/sources/base.py + per-source scrapers from scratch guided by ~/projects/smoked-salmon/src/salmon/sources/base.py:26 (do not copy) && rm apps/bridge/src/spectrum.ts && rm apps/bridge/Dockerfile:62 apk line && cp ~/projects/improvement_docs/r_soulseek_improvement_plan.md docs/improvements/r_soulseek_improvement_plan.md` per AGENTS.md:worktree ports.*
+*Next (unbuilt P0–P2): **A DONE, C DONE, E DONE, P2 Quality DONE, H DONE** `feat/share-safety` → **B ProveIt** `proveIt.ts` `hash(user+week)` only. Worker (0/D/F/G) already landed in `5c65ea9`; see `docs/architecture.md` `## Worker`.*
+
+(End of file - total 205 lines)

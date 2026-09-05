@@ -41,6 +41,7 @@ interface SearchApi {
   startSearch: (query: string, opts?: { mode?: SearchMode; target?: string }) => void;
   stopSearch: (id: string) => void;
   closeTab: (id: string) => void;
+  retrySearch: (id: string) => void;
   setActive: (id: string) => void;
   setFilters: (id: string, partial: Partial<FilterState>) => void;
   clearFilters: (id: string) => void;
@@ -116,6 +117,27 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     setActiveId(null);
     counter.current = 0;
   }, [state.status]);
+
+  // Re-send searching tabs on WS reconnect (nicotine parity: searches survive socket flaps)
+  const prevConnected = useRef(state.status === "connected");
+  useEffect(() => {
+    const was = prevConnected.current;
+    const now = state.status === "connected";
+    prevConnected.current = now;
+    if (!was && now) {
+      for (const t of tabsRef.current) {
+        if (t.status !== "searching") continue;
+        const q = t.query;
+        const mode = t.mode;
+        const target = t.target;
+        if (mode === "user" && target) send({ type: "search:user", searchId: t.id, username: target, query: q } as unknown as never);
+        else if (mode === "room" && target) send({ type: "search:room", searchId: t.id, room: target, query: q } as unknown as never);
+        else if (mode === "wishlist") send({ type: "search:wishlist", searchId: t.id, query: q } as unknown as never);
+        else if (mode === "buddies") send({ type: "search", searchId: t.id, query: q });
+        else send({ type: "search", searchId: t.id, query: q });
+      }
+    }
+  }, [state.status, send]);
 
   useEffect(() => {
     const unsub = subscribe((msg) => {
@@ -200,7 +222,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       const id = `s${++counter.current}`;
       const defilter = settings.searches.defilter;
       const initialFilters: FilterState = settings.searches.enablefilters
-        ? { include: defilter.include, exclude: defilter.exclude, size: defilter.fileSize, bitrate: defilter.bitrate, freeSlot: defilter.freeSlots, country: defilter.country, fileType: defilter.fileType, length: defilter.length, publicOnly: defilter.publicFiles }
+        ? { include: defilter.include, exclude: defilter.exclude, size: defilter.fileSize, bitrate: defilter.bitrate, freeSlot: defilter.freeSlots, country: defilter.country, fileType: defilter.fileType, length: defilter.length, publicOnly: defilter.publicFiles, quality: (defilter as unknown as { quality?: string }).quality ?? "" }
         : emptyFilters();
       setTabs((prev) => [
         ...prev,
@@ -277,6 +299,23 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     [send],
   );
 
+  const retrySearch = useCallback(
+    (id: string) => {
+      const t = tabsRef.current.find((x) => x.id === id);
+      if (!t) return;
+      setTabs((prev) => prev.map((x) => (x.id === id ? { ...x, status: "searching" as const, reason: undefined } : x)));
+      const q = t.query;
+      const mode = t.mode;
+      const target = t.target;
+      if (mode === "user" && target) send({ type: "search:user", searchId: id, username: target, query: q } as unknown as never);
+      else if (mode === "room" && target) send({ type: "search:room", searchId: id, room: target, query: q } as unknown as never);
+      else if (mode === "wishlist") send({ type: "search:wishlist", searchId: id, query: q } as unknown as never);
+      else if (mode === "buddies") send({ type: "search", searchId: id, query: q });
+      else send({ type: "search", searchId: id, query: q });
+    },
+    [send],
+  );
+
   const setFilters = useCallback((id: string, partial: Partial<FilterState>) => {
     setTabs((prev) =>
       prev.map((t) => (t.id === id ? { ...t, filters: { ...t.filters, ...partial } } : t)),
@@ -293,8 +332,8 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   );
 
   const api = useMemo<SearchApi>(
-    () => ({ tabs, activeId, activeTab, startSearch, stopSearch, closeTab, setActive: setActiveId, setFilters, clearFilters }),
-    [tabs, activeId, activeTab, startSearch, stopSearch, closeTab, setFilters, clearFilters],
+    () => ({ tabs, activeId, activeTab, startSearch, stopSearch, closeTab, retrySearch, setActive: setActiveId, setFilters, clearFilters }),
+    [tabs, activeId, activeTab, startSearch, stopSearch, closeTab, retrySearch, setFilters, clearFilters],
   );
 
   return <SearchContext.Provider value={api}>{children}</SearchContext.Provider>;
