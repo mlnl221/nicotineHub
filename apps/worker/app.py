@@ -11,11 +11,13 @@ POST /verify, POST /analyze, POST /analyze/bulk.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import os
 import subprocess
 import time
+import urllib.parse
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
@@ -612,6 +614,7 @@ async def verify(body: FileIn):
            "logScore": None, "logChecksum": None, "durationMismatch": None}
     try:
         from mutagen import File as _mut_file
+        import shutil
 
         audio = _mut_file(path)
         if audio is None:
@@ -619,7 +622,14 @@ async def verify(body: FileIn):
             return out
         ext = path.suffix.lstrip(".").lower()
         if ext == "flac":
-            out["flacOk"] = audio.info is not None
+            if shutil.which("flac"):
+                try:
+                    r = subprocess.run(["flac", "-t", "--totally-silent", str(path)], capture_output=True, timeout=30)
+                    out["flacOk"] = r.returncode == 0
+                except Exception:
+                    out["flacOk"] = audio.info is not None
+            else:
+                out["flacOk"] = audio.info is not None
         raw = dict(getattr(audio, "tags", None) or {})
         blob = " ".join(str(v) for v in raw.values())[:2000].lower()
         if "mqa" in blob or "mqaencoder" in str(raw.keys()).lower():
@@ -646,6 +656,7 @@ async def verify_bulk(body: BulkVerifyIn):
             continue
         try:
             from mutagen import File as _mut_file
+            import shutil
             audio = _mut_file(path)
             if audio is None:
                 out.append({"fileName": fname, "flacOk": False})
@@ -653,7 +664,14 @@ async def verify_bulk(body: BulkVerifyIn):
             ext = path.suffix.lstrip(".").lower()
             entry: dict = {"fileName": fname, "path": str(path), "flacOk": None, "mqa": None}
             if ext == "flac":
-                entry["flacOk"] = audio.info is not None
+                if shutil.which("flac"):
+                    try:
+                        r = subprocess.run(["flac", "-t", "--totally-silent", str(path)], capture_output=True, timeout=30)
+                        entry["flacOk"] = r.returncode == 0
+                    except Exception:
+                        entry["flacOk"] = audio.info is not None
+                else:
+                    entry["flacOk"] = audio.info is not None
             raw = dict(getattr(audio, "tags", None) or {})
             blob = " ".join(str(v) for v in raw.values())[:2000].lower()
             if "mqa" in blob or "mqaencoder" in str(raw.keys()).lower():
@@ -743,10 +761,81 @@ async def analyze_bulk(body: BulkAnalyzeIn):
             if entry["bitDepth"]:
                 attrs.append([5, int(entry["bitDepth"])])
             entry["attrs"] = attrs
+            # spectral cutoff — opt-in style, best-effort, cached via _cutoff_hz internal file
+            try:
+                cutoff = _cutoff_hz(path)
+                if cutoff:
+                    entry["cutoffHz"] = cutoff
+                    entry["likelyTranscode"] = cutoff < 17000
+            except Exception:
+                pass
             out.append(entry)
         except Exception as e:
             out.append({"fileName": fname, "error": str(e)[:200]})
     return {"results": out}
+
+
+class ScanIn(BaseModel):
+    fileName: str = Field(min_length=1, max_length=512)
+    size: int = Field(default=0, ge=0, le=10**13)
+    username: str = Field(default="", max_length=256)
+    virtualPath: str = Field(default="", max_length=1024)
+    transferId: str = Field(default="", max_length=1024)
+    downloadUrl: str = Field(default="", max_length=1024)
+    destinationPath: str = Field(default="", max_length=1024)
+
+
+def _valid_scan_url(url: str) -> bool:
+    if not url or len(url) > 2048:
+        return False
+    if not url.lower().startswith(("http://", "https://")):
+        return False
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if not parsed.netloc:
+            return False
+        if parsed.username or parsed.password:
+            return False
+        # no creds, netloc present, scheme ok
+        return True
+    except Exception:
+        return False
+
+
+@app.post("/scan", dependencies=[Depends(require_auth)])
+async def scan(body: ScanIn):
+    target = tokens.get("MEDIA_SCAN_URL").strip()
+    if not target:
+        return JSONResponse({"detail": "media scan not configured — set MEDIA_SCAN_URL in Worker settings"}, status_code=422)
+    if not _valid_scan_url(target):
+        return JSONResponse({"detail": "configured MEDIA_SCAN_URL invalid"}, status_code=422)
+    token = tokens.get("MEDIA_SCAN_TOKEN").strip()
+    payload = {
+        "event": "download.finished",
+        "eventType": "Download",
+        "fileName": body.fileName,
+        "size": body.size,
+        "username": body.username,
+        "virtualPath": body.virtualPath,
+        "destinationPath": body.destinationPath,
+        "transferId": body.transferId,
+        "downloadUrl": body.downloadUrl,
+        "source": "nicotine-hub-bridge",
+    }
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    # fire-and-forget with 5s timeout, never relay body
+    try:
+        import aiohttp
+        timeout = aiohttp.ClientTimeout(total=5)
+        async with aiohttp.ClientSession(timeout=timeout) as sess:
+            async with sess.post(target, json=payload, headers=headers, allow_redirects=False) as resp:
+                # consume but don't log body
+                await resp.text()
+                return {"ok": True, "forwarded": True, "status": resp.status}
+    except Exception as e:
+        return JSONResponse({"detail": f"scan forward failed: {e}"[:300]}, status_code=502)
 
 
 def _cutoff_hz(path: Path) -> int | None:

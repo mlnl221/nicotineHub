@@ -200,7 +200,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       const id = `s${++counter.current}`;
       const defilter = settings.searches.defilter;
       const initialFilters: FilterState = settings.searches.enablefilters
-        ? { include: defilter.include, exclude: defilter.exclude, size: defilter.fileSize, bitrate: defilter.bitrate, freeSlot: defilter.freeSlots, country: defilter.country, fileType: defilter.fileType, length: defilter.length, publicOnly: defilter.publicFiles }
+        ? { include: defilter.include, exclude: defilter.exclude, size: defilter.fileSize, bitrate: defilter.bitrate, freeSlot: defilter.freeSlots, country: defilter.country, fileType: defilter.fileType, length: defilter.length, publicOnly: defilter.publicFiles, quality: (defilter as unknown as { quality?: string }).quality ?? "" }
         : emptyFilters();
       setTabs((prev) => [
         ...prev,

@@ -59,6 +59,9 @@ export class ShareDB {
   private shareFilters: string[] = [".*", ".*\\", "@eaDir\\", "#recycle\\", "#snapshot\\", "desktop.ini", "Thumbs.db"];
   private fileFilterRegexes: RegExp[] = [];
   private folderFilterRegexes: RegExp[] = [];
+  private exclusions: string[] = [];
+  private exclusionFileRegexes: RegExp[] = [];
+  private exclusionFolderRegexes: RegExp[] = [];
   private fileMtimes = new Map<string, number>(); // realPath -> mtimeMs for incremental rescan (pynicotine shares.py:616)
   private watchers: Array<ReturnType<typeof import("node:fs").watch>> = [];
   private virtual2real = new Map<string, string>();
@@ -68,10 +71,12 @@ export class ShareDB {
   private wordIndex = new Map<string, Set<ShareFile>>(); // word -> files containing word (lower, punctuation-split)
   private customRootsByLevel = new Map<PermissionLevel, [string, string][]>();
 
-  constructor(opts?: { dataDir?: string; shareFilters?: string[] }) {
+  constructor(opts?: { dataDir?: string; shareFilters?: string[]; exclusions?: string[] }) {
     this.dataDir = opts?.dataDir || defaultDataDir();
     if (opts?.shareFilters) this.setShareFilters(opts.shareFilters);
     else this.compileShareFilters();
+    if (opts?.exclusions) this.setExclusions(opts.exclusions);
+    else this.compileExclusions();
     this.load();
     // Auto-scan if folders empty and shared dirs exist on FS
     if (this.folders.length === 0 && this.publicFolders.length === 0) {
@@ -140,6 +145,7 @@ export class ShareDB {
         if (typeof raw.revealBuddyShares === "boolean") this.revealBuddyShares = raw.revealBuddyShares;
         if (typeof raw.revealTrustedShares === "boolean") this.revealTrustedShares = raw.revealTrustedShares;
         if (Array.isArray(raw.shareFilters)) { this.shareFilters = raw.shareFilters; this.compileShareFilters(); }
+        if (Array.isArray(raw.exclusions)) { this.exclusions = raw.exclusions; this.compileExclusions(); }
         this.loadCustomRoots(raw);
       }
       else if (Array.isArray(raw)) this.folders = raw;
@@ -147,6 +153,8 @@ export class ShareDB {
         if (Array.isArray(raw.publicFolders)) this.publicFolders = raw.publicFolders;
         if (Array.isArray(raw.buddyFolders)) this.buddyFolders = raw.buddyFolders;
         if (Array.isArray(raw.trustedFolders)) this.trustedFolders = raw.trustedFolders;
+        if (Array.isArray(raw.shareFilters)) { this.shareFilters = raw.shareFilters; this.compileShareFilters(); }
+        if (Array.isArray(raw.exclusions)) { this.exclusions = raw.exclusions; this.compileExclusions(); }
         this.loadCustomRoots(raw);
       }
     } catch {}
@@ -174,7 +182,7 @@ export class ShareDB {
     try {
       const p = sharesPath();
       mkdirSync(join(p, ".."), { recursive: true });
-      const payload = { folders: this.folders, publicFolders: this.publicFolders, buddyFolders: this.buddyFolders, trustedFolders: this.trustedFolders, shareFilters: this.shareFilters, revealBuddyShares: this.revealBuddyShares, revealTrustedShares: this.revealTrustedShares, customRoots: this.serializeCustomRoots() };
+      const payload = { folders: this.folders, publicFolders: this.publicFolders, buddyFolders: this.buddyFolders, trustedFolders: this.trustedFolders, shareFilters: this.shareFilters, exclusions: this.exclusions, revealBuddyShares: this.revealBuddyShares, revealTrustedShares: this.revealTrustedShares, customRoots: this.serializeCustomRoots() };
       writeFileSync(p, JSON.stringify(payload, null, 2));
       // strict: no mirror to DATA_DIR
     } catch {}
@@ -187,6 +195,183 @@ export class ShareDB {
   }
 
   getShareFilters(): string[] { return [...this.shareFilters]; }
+
+  setExclusions(patterns: string[]) {
+    this.exclusions = patterns.slice();
+    this.compileExclusions();
+    this.persist();
+  }
+
+  getExclusions(): string[] { return [...this.exclusions]; }
+
+  private compileExclusions() {
+    const fileFilters: string[] = [];
+    const folderFilters: string[] = [];
+    for (const pat of [...this.exclusions].sort()) {
+      if (!pat) continue;
+      const escaped = pat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\*/g, ".*");
+      if (escaped.endsWith("\\\\") || escaped.endsWith("\\\\.*")) {
+        folderFilters.push(escaped);
+      } else {
+        fileFilters.push(escaped);
+      }
+    }
+    this.exclusionFileRegexes = [];
+    this.exclusionFolderRegexes = [];
+    if (fileFilters.length) {
+      try {
+        this.exclusionFileRegexes = [new RegExp("(\\\\(" + fileFilters.join("|") + ")$)", "i")];
+      } catch {}
+    }
+    if (folderFilters.length) {
+      try {
+        this.exclusionFolderRegexes = [new RegExp("(\\\\(" + folderFilters.join("|") + ")$)", "i")];
+      } catch {}
+    }
+  }
+
+  isFileExcludedByExclusions(fileName: string): boolean {
+    if (this.exclusionFileRegexes.length === 0) return false;
+    const test = "\\" + fileName;
+    for (const re of this.exclusionFileRegexes) if (re.test(test)) return true;
+    return false;
+  }
+
+  isFolderExcludedByExclusions(folderName: string): boolean {
+    if (this.exclusionFolderRegexes.length === 0) return false;
+    let t = folderName;
+    if (!t.endsWith("\\")) t += "\\";
+    if (!t.startsWith("\\")) t = "\\" + t;
+    for (const re of this.exclusionFolderRegexes) if (re.test(t)) return true;
+    return false;
+  }
+
+  // Secret heuristic — files that look like leaked secrets (banner, not filter)
+  isSecretFile(virtualPath: string): boolean {
+    const base = virtualPath.split("\\").pop()?.toLowerCase() ?? "";
+    if (!base) return false;
+    if (base === ".env" || base.startsWith(".env.")) return true;
+    if (base === "id_rsa" || base === "id_ed25519") return true;
+    if (base.endsWith(".pem")) return true;
+    if (base.endsWith(".key")) return true;
+    if (base === "credentials.json") return true;
+    if (base.startsWith("wallet") && base !== "wallet.jpg" && base !== "wallet.png") return true;
+    // .git dir itself is secret if ever exposed as folder entry
+    if (base === ".git") return true;
+    return false;
+  }
+
+  private collectSecretHits(folders: ShareFolder[], limit = 20): string[] {
+    const hits: string[] = [];
+    for (const f of folders) {
+      if (f.name.toLowerCase().includes(".git")) {
+        if (hits.length < limit) hits.push(f.name + "\\ (.git folder)");
+        if (hits.length >= limit) break;
+      }
+      for (const file of f.files) {
+        if (this.isSecretFile(file.name)) {
+          if (hits.length < limit) hits.push(file.name);
+          if (hits.length >= limit) break;
+        }
+        // also flag files inside .git virtual path
+        if (file.name.toLowerCase().includes("\\.git\\")) {
+          if (hits.length < limit && !hits.includes(file.name)) hits.push(file.name);
+          if (hits.length >= limit) break;
+        }
+      }
+      if (hits.length >= limit) break;
+    }
+    return hits;
+  }
+
+  getSecretHits(limit = 20): string[] {
+    return this.collectSecretHits(this.folders, limit);
+  }
+
+  /** Throwaway preview — dry-run scan with overridden exclusions without mutating live state. */
+  async previewWithExclusions(exclusionsOverride?: string[]): Promise<{ counts: { dirs: number; files: number }; sample: string[]; excludedCount: number; secretHits: string[] }> {
+    const makeTmp = (excls: string[]) => {
+      const tmp = new ShareDB({ dataDir: this.dataDir });
+      // override filters without persisting (avoid tmp persist side-effect)
+      // @ts-expect-error private
+      tmp.shareFilters = [...this.shareFilters];
+      // @ts-expect-error private
+      tmp.compileShareFilters();
+      // suppress auto-scan side effects: clear folders populated by ctor if any, then set desired exclusions
+      tmp.publicFolders = [];
+      tmp.buddyFolders = [];
+      tmp.trustedFolders = [];
+      // @ts-expect-error private
+      tmp.folders = [];
+      tmp.exclusions = excls.slice();
+      // @ts-expect-error private
+      tmp.compileExclusions();
+      // copy custom roots
+      // @ts-expect-error private
+      tmp.customRootsByLevel = new Map(this.customRootsByLevel);
+      // clear maps to isolate
+      // @ts-expect-error private
+      tmp.virtual2real = new Map();
+      // @ts-expect-error private
+      tmp.real2virtual = new Map();
+      // @ts-expect-error private
+      tmp.fileMtimes = new Map();
+      return tmp;
+    };
+
+    const excl = exclusionsOverride !== undefined ? exclusionsOverride : this.exclusions;
+    const tmpA = makeTmp(excl);
+    const scanA = async (db: ShareDB): Promise<ShareFolder[]> => {
+      const folders: ShareFolder[] = [];
+      // @ts-expect-error private
+      const rootsMap: Map<PermissionLevel, [string,string][]> = db.customRootsByLevel;
+      if (rootsMap.size > 0) {
+        for (const lvl of [PermissionLevel.PUBLIC, PermissionLevel.BUDDY, PermissionLevel.TRUSTED] as const) {
+          const roots = rootsMap.get(lvl);
+          if (!roots) continue;
+          const rescanned = await db.scanCustomRootsAsync(roots);
+          folders.push(...rescanned);
+        }
+        const publicRoots = rootsMap.get(PermissionLevel.PUBLIC);
+        if (!publicRoots || publicRoots.length === 0) {
+          const scanned = await db.scanFsSharesAsync();
+          folders.push(...scanned);
+        }
+      } else {
+        const scanned = await db.scanFsSharesAsync();
+        folders.push(...scanned);
+      }
+      return folders;
+    };
+
+    const foldersA = await scanA(tmpA);
+    let excludedCount = 0;
+    let excludedSample: string[] = [];
+    // compute excluded diff vs no-exclusions baseline if exclusions non-empty
+    if (excl.length > 0) {
+      const tmpB = makeTmp([]);
+      const foldersB = await scanA(tmpB);
+      const setA = new Set(foldersA.flatMap(f => f.files.map(fi => fi.name)));
+      const missing: string[] = [];
+      let totalB = 0;
+      for (const f of foldersB) {
+        totalB += f.files.length;
+        for (const fi of f.files) if (!setA.has(fi.name)) missing.push(fi.name);
+      }
+      const totalA = foldersA.reduce((s, f) => s + f.files.length, 0);
+      excludedCount = Math.max(0, totalB - totalA);
+      excludedSample = missing.slice(0, 20);
+      // prefer showing excluded sample if caller wants? we return shared sample as primary, but keep missing for debug if needed
+      // For now primary sample is shared files; excludedCount is count, sample remains shared
+    }
+
+    const counts = { dirs: foldersA.length, files: foldersA.reduce((s, f) => s + f.files.length, 0) };
+    const allFilesA = foldersA.flatMap(f => f.files.map(fi => fi.name));
+    const sample = allFilesA.slice(0, 20);
+    const secretHits = this.collectSecretHits(foldersA, 20);
+    // if we have excludedSample and no shared sample, include hint? but spec wants exposed top 20
+    return { counts, sample, excludedCount, secretHits };
+  }
 
   private compileShareFilters() {
     // Mirrors pynicotine/shares.py Scanner.load_filters:
@@ -370,23 +555,31 @@ export class ShareDB {
       try {
         const stats = statSync(rPath);
         if (stats.isFile()) {
-          // single file share
-          const ext = extname(rPath).slice(1).toLowerCase();
+          // single file share — respect file filters + exclusions
           const fileName = `${vName}\\${basename(rPath)}`;
-          const prev = prevByName.get(fileName);
-          const mtime = stats.mtimeMs;
-          const prevMtime = this.fileMtimes.get(rPath);
-          if (prev && prevMtime === mtime) {
-            folders.push({ name: vName, files: [{ ...prev, size: stats.size }] });
+          const base = basename(rPath);
+          if (this.isFileFiltered(base) || this.isFileFiltered(fileName) || this.isFileExcludedByExclusions(base) || this.isFileExcludedByExclusions(fileName)) {
+            this.virtual2real.set(vName, rPath);
+            this.real2virtual.set(rPath, vName);
+            const existsVirtual = folders.find((f) => f.name === vName);
+            if (!existsVirtual) folders.push({ name: vName, files: [] });
           } else {
-            this.fileMtimes.set(rPath, mtime);
-            // attrs async not needed sync — use empty
-            folders.push({ name: vName, files: [{ name: fileName, size: stats.size, ext, attrs: [] }] });
+            const ext = extname(rPath).slice(1).toLowerCase();
+            const prev = prevByName.get(fileName);
+            const mtime = stats.mtimeMs;
+            const prevMtime = this.fileMtimes.get(rPath);
+            if (prev && prevMtime === mtime) {
+              folders.push({ name: vName, files: [{ ...prev, size: stats.size }] });
+            } else {
+              this.fileMtimes.set(rPath, mtime);
+              // attrs async not needed sync — use empty
+              folders.push({ name: vName, files: [{ name: fileName, size: stats.size, ext, attrs: [] }] });
+            }
+            this.virtual2real.set(vName, rPath);
+            this.real2virtual.set(rPath, vName);
+            this.virtual2real.set(fileName, rPath);
+            this.real2virtual.set(rPath, fileName);
           }
-          this.virtual2real.set(vName, rPath);
-          this.real2virtual.set(rPath, vName);
-          this.virtual2real.set(fileName, rPath);
-          this.real2virtual.set(rPath, fileName);
         } else if (stats.isDirectory()) {
           this.walkDir(rPath, vName, folders, prevByName);
         }
@@ -467,9 +660,9 @@ export class ShareDB {
   private walkDir(realPath: string, virtualPath: string, out: ShareFolder[], prevByName?: Map<string, ShareFile>) {
     let entries: string[];
     try { entries = readdirSync(realPath); } catch { return; }
-    // Check folder filter against virtual path (with trailing \)
+    // Check folder filter + exclusions against virtual path (with trailing \)
     const folderTest = `${virtualPath}\\`;
-    if (this.isFolderFiltered(folderTest) || this.isFolderFiltered(virtualPath)) return;
+    if (this.isFolderFiltered(folderTest) || this.isFolderFiltered(virtualPath) || this.isFolderExcludedByExclusions(folderTest) || this.isFolderExcludedByExclusions(virtualPath)) return;
     const files: ShareFile[] = [];
     // virtual2real for folder itself
     this.virtual2real.set(virtualPath, realPath);
@@ -480,10 +673,10 @@ export class ShareDB {
       try { st = statSync(full); } catch { continue; }
       if (st.isDirectory()) {
         const subVirtual = `${virtualPath}\\${ent}`;
-        if (this.isFolderFiltered(`${subVirtual}\\`) || this.isFolderFiltered(subVirtual)) continue;
+        if (this.isFolderFiltered(`${subVirtual}\\`) || this.isFolderFiltered(subVirtual) || this.isFolderExcludedByExclusions(`${subVirtual}\\`) || this.isFolderExcludedByExclusions(subVirtual)) continue;
         this.walkDir(full, subVirtual, out, prevByName);
       } else if (st.isFile()) {
-        if (this.isFileFiltered(ent) || this.isFileFiltered(`${virtualPath}\\${ent}`)) continue;
+        if (this.isFileFiltered(ent) || this.isFileFiltered(`${virtualPath}\\${ent}`) || this.isFileExcludedByExclusions(ent) || this.isFileExcludedByExclusions(`${virtualPath}\\${ent}`)) continue;
         // Skip hidden files on Win32 hidden attr — plain dotfile check for unix
         if (ent.startsWith(".")) {
           // honour share filter ".*": already matches dotfiles via regex; if not filtered, still skip hidden if share_filters contains ".*"
@@ -531,7 +724,7 @@ export class ShareDB {
     let entries: string[];
     try { entries = readdirSync(realPath); } catch { return; }
     const folderTest = `${virtualPath}\\`;
-    if (this.isFolderFiltered(folderTest) || this.isFolderFiltered(virtualPath)) return;
+    if (this.isFolderFiltered(folderTest) || this.isFolderFiltered(virtualPath) || this.isFolderExcludedByExclusions(folderTest) || this.isFolderExcludedByExclusions(virtualPath)) return;
     // prev map for async reuse
     const prevByName = new Map<string, ShareFile>();
     for (const fo of this.folders) for (const f of fo.files) prevByName.set(f.name, f);
@@ -544,10 +737,10 @@ export class ShareDB {
       try { st = statSync(full); } catch { continue; }
       if (st.isDirectory()) {
         const subVirtual = `${virtualPath}\\${ent}`;
-        if (this.isFolderFiltered(`${subVirtual}\\`) || this.isFolderFiltered(subVirtual)) continue;
+        if (this.isFolderFiltered(`${subVirtual}\\`) || this.isFolderFiltered(subVirtual) || this.isFolderExcludedByExclusions(`${subVirtual}\\`) || this.isFolderExcludedByExclusions(subVirtual)) continue;
         await this.walkDirAsync(full, subVirtual, out);
       } else if (st.isFile()) {
-        if (this.isFileFiltered(ent) || this.isFileFiltered(`${virtualPath}\\${ent}`)) continue;
+        if (this.isFileFiltered(ent) || this.isFileFiltered(`${virtualPath}\\${ent}`) || this.isFileExcludedByExclusions(ent) || this.isFileExcludedByExclusions(`${virtualPath}\\${ent}`)) continue;
         const ext = extname(ent).slice(1).toLowerCase();
         const vName = `${virtualPath}\\${ent}`;
         const mtime = st.mtimeMs;
@@ -588,23 +781,30 @@ export class ShareDB {
       try {
         const stats = statSync(rPath);
         if (stats.isFile()) {
-          const ext = extname(rPath).slice(1).toLowerCase();
           const fileName = `${vName}\\${basename(rPath)}`;
-          const prev = prevByName.get(fileName);
-          const mtime = stats.mtimeMs;
-          const prevMtime = this.fileMtimes.get(rPath);
-          if (prev && prevMtime === mtime) {
-            folders.push({ name: vName, files: [{ ...prev, size: stats.size }] });
+          const base = basename(rPath);
+          if (this.isFileFiltered(base) || this.isFileFiltered(fileName) || this.isFileExcludedByExclusions(base) || this.isFileExcludedByExclusions(fileName)) {
+            this.virtual2real.set(vName, rPath);
+            this.real2virtual.set(rPath, vName);
+            if (!folders.find((f) => f.name === vName)) folders.push({ name: vName, files: [] });
           } else {
-            this.fileMtimes.set(rPath, mtime);
-            // ponytail: bridge SLSK-only — attrs empty, worker handles TinyTag
-            const attrs: Array<[number, number]> = [];
-            folders.push({ name: vName, files: [{ name: fileName, size: stats.size, ext, attrs }] });
+            const ext = extname(rPath).slice(1).toLowerCase();
+            const prev = prevByName.get(fileName);
+            const mtime = stats.mtimeMs;
+            const prevMtime = this.fileMtimes.get(rPath);
+            if (prev && prevMtime === mtime) {
+              folders.push({ name: vName, files: [{ ...prev, size: stats.size }] });
+            } else {
+              this.fileMtimes.set(rPath, mtime);
+              // ponytail: bridge SLSK-only — attrs empty, worker handles TinyTag
+              const attrs: Array<[number, number]> = [];
+              folders.push({ name: vName, files: [{ name: fileName, size: stats.size, ext, attrs }] });
+            }
+            this.virtual2real.set(vName, rPath);
+            this.real2virtual.set(rPath, vName);
+            this.virtual2real.set(fileName, rPath);
+            this.real2virtual.set(rPath, fileName);
           }
-          this.virtual2real.set(vName, rPath);
-          this.real2virtual.set(rPath, vName);
-          this.virtual2real.set(fileName, rPath);
-          this.real2virtual.set(rPath, fileName);
         } else if (stats.isDirectory()) {
           await this.walkDirAsync(rPath, vName, folders);
         }
@@ -631,23 +831,30 @@ export class ShareDB {
       try {
         const stats = statSync(rPath);
         if (stats.isFile()) {
-          const ext = extname(rPath).slice(1).toLowerCase();
           const fileName = `${vName}\\${basename(rPath)}`;
-          const prev = prevByName.get(fileName);
-          const mtime = stats.mtimeMs;
-          const prevMtime = this.fileMtimes.get(rPath);
-          if (prev && prevMtime === mtime) {
-            folders.push({ name: vName, files: [{ ...prev, size: stats.size }] });
+          const base = basename(rPath);
+          if (this.isFileFiltered(base) || this.isFileFiltered(fileName) || this.isFileExcludedByExclusions(base) || this.isFileExcludedByExclusions(fileName)) {
+            this.virtual2real.set(vName, rPath);
+            this.real2virtual.set(rPath, vName);
+            if (!folders.find((f) => f.name === vName)) folders.push({ name: vName, files: [] });
           } else {
-            this.fileMtimes.set(rPath, mtime);
-            // ponytail: bridge SLSK-only — attrs empty, worker handles TinyTag
-            const attrs: Array<[number, number]> = [];
-            folders.push({ name: vName, files: [{ name: fileName, size: stats.size, ext, attrs }] });
+            const ext = extname(rPath).slice(1).toLowerCase();
+            const prev = prevByName.get(fileName);
+            const mtime = stats.mtimeMs;
+            const prevMtime = this.fileMtimes.get(rPath);
+            if (prev && prevMtime === mtime) {
+              folders.push({ name: vName, files: [{ ...prev, size: stats.size }] });
+            } else {
+              this.fileMtimes.set(rPath, mtime);
+              // ponytail: bridge SLSK-only — attrs empty, worker handles TinyTag
+              const attrs: Array<[number, number]> = [];
+              folders.push({ name: vName, files: [{ name: fileName, size: stats.size, ext, attrs }] });
+            }
+            this.virtual2real.set(vName, rPath);
+            this.real2virtual.set(rPath, vName);
+            this.virtual2real.set(fileName, rPath);
+            this.real2virtual.set(rPath, fileName);
           }
-          this.virtual2real.set(vName, rPath);
-          this.real2virtual.set(rPath, vName);
-          this.virtual2real.set(fileName, rPath);
-          this.real2virtual.set(rPath, fileName);
         } else if (stats.isDirectory()) {
           this.walkDir(rPath, vName, folders, prevByName);
         }

@@ -19,6 +19,8 @@ NAMES = {
     "TIDAL_COUNTRY": "tidal_country",
     "QOBUZ_APP_ID": "qobuz_app_id",
     "QOBUZ_USER_AUTH_TOKEN": "qobuz_user_auth_token",
+    "MEDIA_SCAN_URL": "media_scan_url",
+    "MEDIA_SCAN_TOKEN": "media_scan_token",
 }
 
 _cache: dict[str, str] = {}
@@ -72,4 +74,5 @@ def configured() -> dict[str, bool]:
         "discogs": bool(get("DISCOGS_TOKEN")),
         "tidal": bool(get("TIDAL_TOKEN")),
         "qobuz": bool(get("QOBUZ_APP_ID")),
+        "media_scan": bool(get("MEDIA_SCAN_URL")),
     }

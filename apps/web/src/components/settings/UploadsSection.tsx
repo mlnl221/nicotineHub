@@ -2,7 +2,7 @@
 
 import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
-import { SectionCard, ToggleControl, NumberControl, RadioGroupControl, SelectControl } from "@/components/settings/controls";
+import { SectionCard, ToggleControl, NumberControl, RadioGroupControl, SelectControl, TextFieldControl } from "@/components/settings/controls";
 
 export function UploadsSection() {
   const { settings, setOption } = useConfig();
@@ -141,6 +141,27 @@ export function UploadsSection() {
             { value: 6, label: "Retry" },
             { value: 7, label: "Browse folder" },
           ]}
+        />
+      </SectionCard>
+
+      <SectionCard
+        title="HoneyPot bait"
+        description="Trap for scanners that probe for a known bait file. When a peer requests the bait name, they are banned. Exact basename, case-insensitive. Default off. Buddies/privileged are exempt."
+      >
+        <ToggleControl
+          label="Enable HoneyPot"
+          description="When enabled, requesting !banned.txt (or names below) bans the requester."
+          checked={t.honeypot_enabled}
+          onChange={(v) => setOption("transfers", "honeypot_enabled", v)}
+        />
+        <TextFieldControl
+          label="Bait file names (one per line)"
+          description="Exact filenames, e.g. !banned.txt . Case-insensitive."
+          value={(t.honeypot_names ?? []).join("\n")}
+          multiline
+          placeholder="!banned.txt"
+          onChange={(v) => setOption("transfers", "honeypot_names", v.split("\n").map((s) => s.trim()).filter(Boolean))}
+          onReset={() => setOption("transfers", "honeypot_names", defaults.transfers.honeypot_names)}
         />
       </SectionCard>
     </div>

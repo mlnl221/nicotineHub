@@ -763,6 +763,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       });
       // Link session getter after creation
       (tm as unknown as { setSessionGetter: (fn: () => unknown) => void }).setSessionGetter(() => ws.data.session as unknown as never);
+      (tm as unknown as { setBanlistUpdatedCb: (cb: (b: string[], u: string) => void) => void }).setBanlistUpdatedCb((banlist, byUser) => {
+        const payload = JSON.stringify({ type: "banlist:updated", banlist, byUser, reason: "honeypot" });
+        try { ws.send(payload); } catch {}
+      });
       ws.data.transfers = tm;
       setTimeout(() => {
         for (const t of tm.list()) { try { ws.send(JSON.stringify({ type: "transfer:update", transfer: t })); } catch {} }
@@ -1343,11 +1347,23 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (data.type === "shares:rescan") {
         const session = requireLogin(); if (!session) return;
         (session as unknown as { rescanShares: () => Promise<unknown> }).rescanShares().then((folders: unknown) => {
-          const sdb = (session as unknown as { shareDBInstance: { getSharedCounts: () => { dirs:number; files:number }; getUnavailableShares: () => [string,string][] } }).shareDBInstance;
+          const sdb = (session as unknown as { shareDBInstance: { getSharedCounts: () => { dirs:number; files:number }; getUnavailableShares: () => [string,string][]; getSecretHits: (n?: number) => string[] } }).shareDBInstance;
           const counts = sdb.getSharedCounts();
           const unavailable = sdb.getUnavailableShares();
+          const secretHits = sdb.getSecretHits(20);
           if (unavailable.length) logger.warn("bridge", "rescan: some shares unavailable on bridge FS", { unavailable, counts });
-          ws.send(JSON.stringify({ type: "shares:rescanned", folders, counts, unavailable }));
+          if (secretHits.length) logger.warn("bridge", "rescan: secret-like files exposed", { secretHits });
+          ws.send(JSON.stringify({ type: "shares:rescanned", folders, counts, unavailable, secretHits }));
+        }).catch((e: Error) => ws.send(errorMessage(e.message)));
+        return;
+      }
+
+      if (data.type === "shares:preview") {
+        const session = requireLogin(); if (!session) return;
+        const rawExcl = (parsed as unknown as { exclusions?: unknown }).exclusions;
+        const exclusions = Array.isArray(rawExcl) ? (rawExcl as unknown[]).filter((s) => typeof s === "string").slice(0, 500) as string[] : undefined;
+        (session as unknown as { previewShares: (e?: string[]) => Promise<{ counts: { dirs:number; files:number }; sample: string[]; excludedCount: number; secretHits: string[] }> }).previewShares(exclusions).then((res) => {
+          ws.send(JSON.stringify({ type: "shares:preview:result", ...res }));
         }).catch((e: Error) => ws.send(errorMessage(e.message)));
         return;
       }
@@ -1385,6 +1401,12 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             }
             if (key === "share_filters" && Array.isArray(value)) {
               (session as unknown as { setShareFilters?: (f: string[]) => void })?.setShareFilters?.(value as string[]);
+            }
+            if (key === "exclusions" && Array.isArray(value)) {
+              const arr = (value as unknown[]).filter((s) => typeof s === "string") as string[];
+              if (arr.length <= 500) {
+                (session as unknown as { setExclusions?: (f: string[]) => void })?.setExclusions?.(arr);
+              }
             }
             if (key === "downloadfilters" || key === "enablefilters") {
               tm?.setConfig?.({ [key]: value });
@@ -1507,12 +1529,24 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           } else if (section === "plugins" && key === "enable") {
             (pluginManager as unknown as { setGlobalEnable?: (b: boolean) => void }).setGlobalEnable?.(Boolean(value));
             logger.info("bridge", `plugins ${Boolean(value) ? "enabled" : "disabled"} via config`, { enable: Boolean(value) });
-          } else if (section === "worker" && ["discogs_token", "tidal_token", "tidal_country", "qobuz_app_id", "qobuz_user_auth_token"].includes(key)) {
+          } else if (section === "worker" && ["discogs_token", "tidal_token", "tidal_country", "qobuz_app_id", "qobuz_user_auth_token", "media_scan_url", "media_scan_token"].includes(key)) {
             // Worker metadata tokens — write-only API. Merged into DATA_DIR/worker.json
             // (0600), read by the worker (env wins). Values never logged or returned.
-            if (typeof value !== "string" || value.length > 512) {
-              ws.send(errorMessage("Worker token must be a string ≤512 chars (empty clears it)."));
+            const maxLen = key === "media_scan_url" ? 2048 : 512;
+            if (typeof value !== "string" || value.length > maxLen) {
+              ws.send(errorMessage(`Worker value must be a string ≤${maxLen} chars (empty clears it).`));
               return;
+            }
+            if (key === "media_scan_url" && value) {
+              const v = value.trim();
+              if (!v.toLowerCase().startsWith("http://") && !v.toLowerCase().startsWith("https://")) {
+                ws.send(errorMessage("MEDIA_SCAN_URL must start with http:// or https://"));
+                return;
+              }
+              try {
+                const u = new URL(v);
+                if (u.username || u.password) { ws.send(errorMessage("MEDIA_SCAN_URL must not contain credentials")); return; }
+              } catch { ws.send(errorMessage("MEDIA_SCAN_URL invalid URL")); return; }
             }
             try {
               const p = join(CONFIG_DIR, "worker.json");

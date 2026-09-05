@@ -165,6 +165,7 @@ export interface FilterState {
   bitrate: string;
   length: string;
   country: string;
+  quality: string;
   freeSlot: boolean;
   publicOnly: boolean;
 }
@@ -178,6 +179,7 @@ export function emptyFilters(): FilterState {
     bitrate: "",
     length: "",
     country: "",
+    quality: "",
     freeSlot: false,
     publicOnly: false,
   };
@@ -220,6 +222,7 @@ export interface Transfer {
   status: TransferStatus;
   queuePosition: number | null;
   isUpload: boolean;
+  isSlopLike?: boolean;
 }
 
 export interface TransferUpdateMessage {

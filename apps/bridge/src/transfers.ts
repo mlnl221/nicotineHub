@@ -65,6 +65,7 @@ export interface BridgeTransfer {
   status: TransferStatus;
   queuePosition: number | null;
   isUpload: boolean;
+  isSlopLike?: boolean;
   token?: number;
   // internal
   _timer?: Timer;
@@ -142,6 +143,7 @@ export class TransferManager {
   private incompleteDir: string;
   private downloadsDir: string;
   private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
+  private onBanlistUpdated?: (banlist: string[], byUser: string) => void;
   private tokenCounter = Math.floor(Math.random() * 900000) + 10000;
   private statsManager: StatsManager;
   private userUpdateCounter = new Map<string, number>();
@@ -187,6 +189,8 @@ export class TransferManager {
     geoblockcc: [""] as string[],
     usecustomgeoblock: false,
     customgeoblock: "Sorry, your country is blocked",
+    honeypot_enabled: false as boolean,
+    honeypot_names: ["!banned.txt"] as string[],
     buddies: [] as string[],
     privilegedUsers: [] as string[],
   };
@@ -232,9 +236,44 @@ export class TransferManager {
     this.sessionGetter = getter;
   }
 
+  setBanlistUpdatedCb(cb: (banlist: string[], byUser: string) => void) {
+    this.onBanlistUpdated = cb;
+  }
+
   setConfig(partial: Partial<typeof this.config>) {
     Object.assign(this.config, partial);
     try { const ul = this.getUploadLimit(); if (ul) this.uploadBucket.configure(ul); const dl = this.getDownloadLimit(); if (dl) this.downloadBucket.configure(dl); } catch {}
+  }
+
+  private isSlopUsername(username: string): boolean {
+    return /^[A-Z0-9]{8,12}$/.test(username);
+  }
+
+  private getSlopStats(username: string): { files: number; folders: Set<string> } {
+    let files = 0;
+    const folders = new Set<string>();
+    for (const t of this.transfers.values()) {
+      if (t.username !== username || !t.isUpload) continue;
+      if (t.status !== "Queued") continue;
+      files++;
+      const idx = t.virtualPath.lastIndexOf("\\");
+      const folder = idx >= 0 ? t.virtualPath.slice(0, idx) : t.virtualPath;
+      folders.add(folder);
+    }
+    return { files, folders };
+  }
+
+  private updateSlopForUser(username: string) {
+    if (!this.isSlopUsername(username)) {
+      let changed = false;
+      for (const t of this.transfers.values()) if (t.username === username && t.isSlopLike) { t.isSlopLike = false; changed = true; this.emit(t); }
+      return;
+    }
+    const { files, folders } = this.getSlopStats(username);
+    const isSlop = files > 0 && files <= 60 && folders.size === 10;
+    for (const t of this.transfers.values()) if (t.username === username) {
+      if (!!t.isSlopLike !== isSlop) { t.isSlopLike = isSlop; this.emit(t); }
+    }
   }
 
   getStatsSummary() {
@@ -661,6 +700,31 @@ export class TransferManager {
   /** Handle incoming QueueUpload from peer (they want to download from us). */
   handleQueueUpload(username: string, virtualPath: string, peerIp?: string) {
     const id = `${username}::${virtualPath}`;
+    // HoneyPot bait — exact basename case-insensitive, default off, buddies exempt
+    const baseName = fileNameOf(virtualPath);
+    const honeyLower = baseName.toLowerCase();
+    const honeyNames = (this.config.honeypot_names || []).map((s: string) => s.toLowerCase().trim()).filter(Boolean);
+    const isHoney = this.config.honeypot_enabled && honeyNames.includes(honeyLower);
+    if (isHoney) {
+      const isBuddy = this.config.buddies.includes(username) || this.config.privilegedUsers.includes(username);
+      if (!isBuddy) {
+        if (!this.config.banlist.includes(username)) {
+          this.config.banlist = [...this.config.banlist, username];
+        }
+        try {
+          const sess = this.sessionGetter?.() as unknown as { setNetworkFilters?: (o: unknown) => void };
+          sess?.setNetworkFilters?.({ banlist: this.config.banlist });
+        } catch {}
+        try { this.onBanlistUpdated?.(this.config.banlist, username); } catch {}
+        const t: BridgeTransfer = { id, username, virtualPath, fileName: baseName, size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Banned", queuePosition: null, isUpload: true };
+        this.transfers.set(id, t);
+        this.emit(t);
+        this.emitStats();
+        this.persist();
+        try { logger.warn("honeypot", "banned via honeypot", { username, virtualPath, ip: peerIp || "" }); } catch {}
+        return t;
+      }
+    }
     // 0. Ban/Geoblock check before queuing (nicotine networkfilter.py)
     const ip = peerIp || "";
     const country = ip ? getCountryCode(ip) : "";
@@ -673,7 +737,7 @@ export class TransferManager {
       geoblock: this.config.geoblock,
       geoblockcc: this.config.geoblockcc,
     });
-    if (this.config.banlist.includes(username) || block.blocked) {
+    if (block.blocked) {
       const isGeo = block.reason === "Geoblocked";
       const banMsg = isGeo ? (this.config.usecustomgeoblock ? this.config.customgeoblock : "Sorry, your country is blocked") : (this.config.usecustomban ? this.config.customban : "Banned, don't bother retrying");
       // If geoblock with empty IP, defer — allow queue and re-check later via handlePeerAddressResolved
@@ -808,6 +872,7 @@ export class TransferManager {
     };
     this.transfers.set(id, t);
     this.emit(t);
+    this.updateSlopForUser(username);
     this.emitStats();
     this.persist();
     // schedule upload queue check (FIFO) after 100ms
@@ -907,6 +972,7 @@ export class TransferManager {
     this.globalUpdateCounter++;
     this.userUpdateCounter.set(candidate.username, this.globalUpdateCounter);
     this.emit(candidate);
+    this.updateSlopForUser(candidate.username);
     this.emitStats();
     this.statsManager.recordUploadStarted();
     const token = this.tokenCounter++ >>> 0;

@@ -153,6 +153,12 @@ export function SearchesSection() {
           value={s.defilter.length}
           onChange={(v) => setOption("searches", "defilter", { ...s.defilter, length: v })}
         />
+        <TextFieldControl
+          label="Quality"
+          description="lossless | 320 | hi-res | !transcode"
+          value={(s.defilter as unknown as { quality?: string }).quality ?? ""}
+          onChange={(v) => setOption("searches", "defilter", { ...s.defilter, quality: v } as unknown as typeof s.defilter)}
+        />
         <ToggleControl
           label="Only free slots"
           description="Only show results from users with a free upload slot."
