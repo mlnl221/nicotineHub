@@ -43,6 +43,7 @@ export default function FilesPage() {
                   <div className="font-label text-sm font-semibold text-amber-900 dark:text-amber-200">Demo preview</div>
                   <div className="mt-1 font-body text-xs leading-relaxed text-amber-800 dark:text-amber-200/80">
                     Showing fake <span className="font-mono">/data</span> on Vercel (4 folders + 2 files at root, nested Music/Jazz/Blue Note etc). Click folders to navigate — all mocked, no bridge. On Docker you see your real mounted <span className="font-mono">/data</span> (e.g. <span className="font-mono">/home/user/m/data:/data</span>).
+                    <span className="mt-1 block font-medium">🎧 Try it: open <span className="font-mono">/data/Music/Demo</span> — 2 playable Vorbis samples (<span className="font-mono">01. DJ Satomi - Waves.ogg</span> &amp; <span className="font-mono">12. Zombie Nation - Kernkraft 400 …ogg</span>, ~80kbps, ~2 MB) with working Play / Analyze / Mediainfo / Spectrum. No FLACs are committed — small Vorbis demos only.</span>
                   </div>
                 </div>
               </div>

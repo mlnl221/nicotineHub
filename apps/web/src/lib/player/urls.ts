@@ -39,6 +39,14 @@ export function downloadPlayUrl(downloadUrl: string, fileName: string): { url: s
 export function dataFilePlayUrl(absPath: string): { url: string; viaWorker: boolean } | null {
   const play = playabilityOf(absPath);
   if (play === "no") return null;
+  // Demo: two real Vorbis samples live in public/demo-audio, no bridge needed
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    const base = absPath.replace(/\\/g, "/").split("/").pop() ?? "";
+    if (base === "01. DJ Satomi - Waves.ogg") return { url: "/demo-audio/01-dj-satomi-waves.ogg", viaWorker: false };
+    if (base === "12. Zombie Nation - Kernkraft 400 (DJ Gius Video Cut).ogg") return { url: "/demo-audio/12-zombie-nation-kernkraft-400.ogg", viaWorker: false };
+    if (absPath === "/data/Music/Demo/01. DJ Satomi - Waves.ogg") return { url: "/demo-audio/01-dj-satomi-waves.ogg", viaWorker: false };
+    if (absPath === "/data/Music/Demo/12. Zombie Nation - Kernkraft 400 (DJ Gius Video Cut).ogg") return { url: "/demo-audio/12-zombie-nation-kernkraft-400.ogg", viaWorker: false };
+  }
   if (play === "native") return { url: bridgeFetchUrl(`/api/files/raw?path=${encodeURIComponent(absPath)}`), viaWorker: false };
   return { url: workerAudioUrl(absPath), viaWorker: true };
 }

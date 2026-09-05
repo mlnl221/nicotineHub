@@ -53,12 +53,32 @@ function getDemoEntry(): SpectrumEntry {
     zoomBlobUrl: DEMO_ZOOM_URL,
   };
 }
+function getDemoAudioEntry(id: string): SpectrumEntry | null {
+  // id is absolute /data path in Files view, or any fileName basename
+  const base = id.replace(/\\/g, "/").split("/").pop() ?? id;
+  if (base === "01. DJ Satomi - Waves.ogg" || id === "/data/Music/Demo/01. DJ Satomi - Waves.ogg") {
+    const full = "/demo-spectra/dj-satomi-waves-full.png";
+    const zoom = "/demo-spectra/dj-satomi-waves-zoom.png";
+    return { id, etag: '"demo-waves"', hash: "demo-waves", fullUrl: full, zoomUrl: zoom, status: "done" as const, fromCache: true as const, fullBlobUrl: full, zoomBlobUrl: zoom };
+  }
+  if (base === "12. Zombie Nation - Kernkraft 400 (DJ Gius Video Cut).ogg" || id === "/data/Music/Demo/12. Zombie Nation - Kernkraft 400 (DJ Gius Video Cut).ogg") {
+    const full = "/demo-spectra/zombie-nation-kernkraft400-full.png";
+    const zoom = "/demo-spectra/zombie-nation-kernkraft400-zoom.png";
+    return { id, etag: '"demo-kern"', hash: "demo-kern", fullUrl: full, zoomUrl: zoom, status: "done" as const, fromCache: true as const, fullBlobUrl: full, zoomBlobUrl: zoom };
+  }
+  return null;
+}
 
 export function SpectrumProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<Map<string, SpectrumEntry>>(() => {
     if (isDemo) {
       const m = new Map<string, SpectrumEntry>();
       m.set(DEMO_SPECTRUM_TRANSFER_ID, getDemoEntry());
+      // Pre-seed the two demo audio files so Analyze Spectrum is instant
+      const waves = getDemoAudioEntry("/data/Music/Demo/01. DJ Satomi - Waves.ogg");
+      const kern = getDemoAudioEntry("/data/Music/Demo/12. Zombie Nation - Kernkraft 400 (DJ Gius Video Cut).ogg");
+      if (waves) m.set(waves.id, waves);
+      if (kern) m.set(kern.id, kern);
       return m;
     }
     return new Map();
@@ -120,15 +140,27 @@ export function SpectrumProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const requestSpectrum = useCallback((id: string, opts?: SpectrumRequestOpts) => {
-    if (isDemo && id === DEMO_SPECTRUM_TRANSFER_ID) {
-      // Demo: already have spectrum, just ensure it's done
-      setEntries((prev) => {
-        if (prev.has(id) && prev.get(id)?.status === "done") return prev;
-        const next = new Map(prev);
-        next.set(id, getDemoEntry());
-        return next;
-      });
-      return;
+    if (isDemo) {
+      if (id === DEMO_SPECTRUM_TRANSFER_ID) {
+        // Demo: already have spectrum, just ensure it's done
+        setEntries((prev) => {
+          if (prev.has(id) && prev.get(id)?.status === "done") return prev;
+          const next = new Map(prev);
+          next.set(id, getDemoEntry());
+          return next;
+        });
+        return;
+      }
+      const demoAudio = getDemoAudioEntry(id) ?? (opts?.fileName ? getDemoAudioEntry(opts.fileName) : null);
+      if (demoAudio) {
+        setEntries((prev) => {
+          if (prev.has(id) && prev.get(id)?.status === "done") return prev;
+          const next = new Map(prev);
+          next.set(id, { ...demoAudio, id });
+          return next;
+        });
+        return;
+      }
     }
     if (!opts?.fileName) {
       setEntries((prev) => {

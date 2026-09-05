@@ -278,6 +278,83 @@ export function mockBuddies(): import("@/lib/buddies").Buddy[] {
 
 export const DEMO_SPECTRUM_TRANSFER_ID = "KernkraftDemo::Music\\12 Kernkraft 400 (DJ Gius Video Cut).flac";
 
+// Demo audio — two real Vorbis -q1 samples shipped in public/demo-audio (playable in demo only)
+export const DEMO_AUDIO_DISPLAY = {
+  waves: "01. DJ Satomi - Waves.ogg",
+  kern: "12. Zombie Nation - Kernkraft 400 (DJ Gius Video Cut).ogg",
+} as const;
+export const DEMO_AUDIO_PUBLIC: Record<string, string> = {
+  "/data/Music/Demo/01. DJ Satomi - Waves.ogg": "/demo-audio/01-dj-satomi-waves.ogg",
+  "/data/Music/Demo/12. Zombie Nation - Kernkraft 400 (DJ Gius Video Cut).ogg": "/demo-audio/12-zombie-nation-kernkraft-400.ogg",
+};
+export const DEMO_AUDIO_ABS = Object.keys(DEMO_AUDIO_PUBLIC);
+export const DEMO_AUDIO_SPECTRA: Record<string, { full: string; zoom: string }> = {
+  "/data/Music/Demo/01. DJ Satomi - Waves.ogg": { full: "/demo-spectra/dj-satomi-waves-full.png", zoom: "/demo-spectra/dj-satomi-waves-zoom.png" },
+  "/data/Music/Demo/12. Zombie Nation - Kernkraft 400 (DJ Gius Video Cut).ogg": { full: "/demo-spectra/zombie-nation-kernkraft400-full.png", zoom: "/demo-spectra/zombie-nation-kernkraft400-zoom.png" },
+};
+
+export function isDemoAudioPath(fileName: string): boolean {
+  const base = fileName.replace(/\\/g, "/").split("/").pop() ?? fileName;
+  return base === DEMO_AUDIO_DISPLAY.waves || base === DEMO_AUDIO_DISPLAY.kern || DEMO_AUDIO_ABS.includes(fileName) || Object.values(DEMO_AUDIO_PUBLIC).some((u) => fileName.endsWith(u.split("/").pop()!));
+}
+export function demoAudioPublicUrl(fileName: string): string | null {
+  if (DEMO_AUDIO_PUBLIC[fileName]) return DEMO_AUDIO_PUBLIC[fileName];
+  const base = fileName.replace(/\\/g, "/").split("/").pop() ?? "";
+  for (const [abs, url] of Object.entries(DEMO_AUDIO_PUBLIC)) if (abs.endsWith(base)) return url;
+  return null;
+}
+export function demoSpectrumUrls(fileName: string): { full: string; zoom: string } | null {
+  if (DEMO_AUDIO_SPECTRA[fileName]) return DEMO_AUDIO_SPECTRA[fileName];
+  const base = fileName.replace(/\\/g, "/").split("/").pop() ?? "";
+  for (const [abs, urls] of Object.entries(DEMO_AUDIO_SPECTRA)) if (abs.endsWith(base)) return urls;
+  return null;
+}
+export function demoMediainfoResult(fileName: string): import("@/lib/worker").MediainfoResult | null {
+  const base = fileName.replace(/\\/g, "/").split("/").pop() ?? fileName;
+  const abs = DEMO_AUDIO_ABS.find((p) => p.endsWith(base)) ?? (DEMO_AUDIO_ABS.includes(fileName) ? fileName : null);
+  if (!abs) return null;
+  const isWaves = abs.includes("Waves");
+  const tracks: Array<Record<string, unknown>> = isWaves
+    ? [
+        { "@type": "General", Format: "Ogg", FileSize: "2071670", Duration: "220.293", Duration_String3: "00:03:40.293", OverallBitRate: "75233", OverallBitRate_String: "75.2 kb/s", Title: "Waves", Album: "Demo", Performer: "DJ Satomi", Composer: "Giuseppe Borgoni", Genre: "Hands Up; House", Recorded_Date: "2004", Encoded_Application: "Lavc59.37.100 libvorbis" },
+        { "@type": "Audio", Format: "Vorbis", Duration: "220.293", BitRate: "80000", BitRate_String: "80.0 kb/s", Channels: "2", Channels_String: "2 channels", SamplingRate: "44100", SamplingRate_String: "44.1 kHz", Compression_Mode: "Lossy", Encoded_Library: "Lavf59.27.100" },
+      ]
+    : [
+        { "@type": "General", Format: "Ogg", FileSize: "2005058", Duration: "208.533", Duration_String3: "00:03:28.533", OverallBitRate: "76921", OverallBitRate_String: "76.9 kb/s", Title: "Kernkraft 400 (DJ Gius Video Cut)", Album: "Demo", Performer: "Zombie Nation", Genre: "Dance", Recorded_Date: "2000", Encoded_Application: "Lavc59.37.100 libvorbis" },
+        { "@type": "Audio", Format: "Vorbis", Duration: "208.533", BitRate: "80000", BitRate_String: "80.0 kb/s", Channels: "2", Channels_String: "2 channels", SamplingRate: "44100", SamplingRate_String: "44.1 kHz", Compression_Mode: "Lossy", Encoded_Library: "Lavf59.27.100" },
+      ];
+  const summary = {
+    format: "Ogg" as string | null,
+    duration: (isWaves ? "00:03:40.293" : "00:03:28.533") as string | null,
+    fileSize: (isWaves ? "1.98 MiB" : "1.91 MiB") as string | null,
+    overallBitRate: (isWaves ? "75.2 kb/s" : "76.9 kb/s") as string | null,
+    video: null as null,
+    audio: [{ format: "Vorbis", codecId: null, channels: "2 channels", samplingRate: "44.1 kHz", bitRate: "80.0 kb/s", bitDepth: null, duration: isWaves ? "00:03:40.293" : "00:03:28.533" }],
+    textCount: 0,
+  };
+  const raw = isWaves
+    ? `General\nComplete name                            : ${abs}\nFormat                                   : Ogg\nFile size                                : 1.98 MiB\nDuration                                 : 3 min 40 s\nOverall bit rate mode                    : Variable\nOverall bit rate                         : 75.2 kb/s\nAlbum                                    : Demo\nTrack name                               : Waves\nPerformer                                : DJ Satomi\nComposer                                 : Giuseppe Borgoni\nGenre                                    : Hands Up; House\nRecorded date                            : 2004\nWriting application                      : Lavc59.37.100 libvorbis\n\nAudio\nID                                       : 3227128 (0x313DF8)\nFormat                                   : Vorbis\nDuration                                 : 3 min 40 s\nBit rate mode                            : Variable\nBit rate                                 : 80.0 kb/s\nChannel(s)                               : 2 channels\nSampling rate                            : 44.1 kHz\nCompression mode                         : Lossy\nWriting library                          : Lavf59.27.100\n`
+    : `General\nComplete name                            : ${abs}\nFormat                                   : Ogg\nFile size                                : 1.91 MiB\nDuration                                 : 3 min 28 s\nOverall bit rate mode                    : Variable\nOverall bit rate                         : 76.9 kb/s\nAlbum                                    : Demo\nTrack name                               : Kernkraft 400 (DJ Gius Video Cut)\nPerformer                                : Zombie Nation\nGenre                                    : Dance\nRecorded date                            : 2000\nWriting application                      : Lavc59.37.100 libvorbis\n\nAudio\nID                                       : 3780384015 (0xE154150F)\nFormat                                   : Vorbis\nDuration                                 : 3 min 28 s\nBit rate mode                            : Variable\nBit rate                                 : 80.0 kb/s\nChannel(s)                               : 2 channels\nSampling rate                            : 44.1 kHz\nCompression mode                         : Lossy\nWriting library                          : Lavf59.27.100\n`;
+  return { fileName: abs, path: abs, tracks, summary, raw };
+}
+export function demoAnalyzeResult(fileName: string): { bitrate: number | null; vbr: string | null; sampleRate: number | null; bitDepth: number | null; cutoffHz: number | null; likelyTranscode: boolean | null; confidence: number } | null {
+  if (!isDemoAudioPath(fileName)) return null;
+  // q=1 Vorbis ~80kbps VBR, 44.1kHz, lossy cutoff ~16kHz, not a transcode
+  return { bitrate: 80, vbr: "VBR", sampleRate: 44100, bitDepth: null, cutoffHz: 16000, likelyTranscode: false, confidence: 0.92 };
+}
+export function demoTagResult(fileName: string): import("@/lib/worker").TagReadResult | null {
+  if (!isDemoAudioPath(fileName)) return null;
+  const base = fileName.replace(/\\/g, "/").split("/").pop() ?? "";
+  const isWaves = base.includes("Waves") || fileName.includes("Waves");
+  return isWaves
+    ? { tags: { artist: "DJ Satomi", title: "Waves", album: "Demo", genre: "Hands Up; House", date: "2004", encoder: "Lavc59.37.100 libvorbis" }, info: { bitrate: 80, sampleRate: 44100, channels: 2, duration: 220.293, format: "Ogg Vorbis" }, coverArtApplied: false, fileName, path: fileName }
+    : { tags: { artist: "Zombie Nation", title: "Kernkraft 400 (DJ Gius Video Cut)", album: "Demo", genre: "Dance", date: "2000", encoder: "Lavc59.37.100 libvorbis" }, info: { bitrate: 80, sampleRate: 44100, channels: 2, duration: 208.533, format: "Ogg Vorbis" }, coverArtApplied: false, fileName, path: fileName };
+}
+export function demoVerifyResult(fileName: string): { flacOk: boolean | null; mqa: boolean | null; upconvert: null } | null {
+  if (!isDemoAudioPath(fileName)) return null;
+  return { flacOk: null, mqa: false, upconvert: null };
+}
+
 export function mockDemoTransfers(): import("@/lib/protocol").Transfer[] {
   // One downloading, one uploading — both Transferring with animated progress
   const dlSize = 85_000_000; // ~85 MB
@@ -424,11 +501,16 @@ const DEMO_FILE_TREE: Record<string, BridgeFileEntry[]> = {
     demoFile("/data/WELCOME.txt", "WELCOME.txt", "file", 890, 1),
   ],
   "/data/Music": [
+    demoFile("/data/Music/Demo", "Demo", "directory", 0, 1),
     demoFile("/data/Music/Jazz", "Jazz", "directory", 0, 3),
     demoFile("/data/Music/Electronic", "Electronic", "directory", 0, 4),
     demoFile("/data/Music/Hip-Hop", "Hip-Hop", "directory", 0, 6),
     demoFile("/data/Music/Soul", "Soul", "directory", 0, 8),
     demoFile("/data/Music/Collection.nfo", "Collection.nfo", "file", 1_200, 15),
+  ],
+  "/data/Music/Demo": [
+    demoFile("/data/Music/Demo/01. DJ Satomi - Waves.ogg", "01. DJ Satomi - Waves.ogg", "file", 2_071_670, 1),
+    demoFile("/data/Music/Demo/12. Zombie Nation - Kernkraft 400 (DJ Gius Video Cut).ogg", "12. Zombie Nation - Kernkraft 400 (DJ Gius Video Cut).ogg", "file", 2_005_058, 1),
   ],
   "/data/Music/Jazz": [
     demoFile("/data/Music/Jazz/Blue Note", "Blue Note", "directory", 0, 3),

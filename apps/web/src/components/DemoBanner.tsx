@@ -89,7 +89,7 @@ export function DemoBanner() {
       >
         <span className="material-symbols-outlined text-[16px] shrink-0">science</span>
         <span className="font-label text-xs font-semibold uppercase tracking-widest">
-          Demo — 2 searches, 2 chats, 2 shares, 2 profiles, 2 buddies &amp; transfer preview mocked •{" "}
+          Demo — 2 searches, 2 chats, 2 shares, 2 profiles, 2 buddies &amp; transfer preview mocked • 🔊 <a href="/files" className="underline hover:no-underline">/data/Music/Demo</a> playable (Waves / Kernkraft 400) — try Play / Analyze / Mediainfo / Spectrum •{" "}
           <a href="https://github.com/mlnl221/nicotineHub" target="_blank" rel="noopener noreferrer" className="underline hover:no-underline">
             GitHub
           </a>
@@ -120,7 +120,7 @@ export function DemoBanner() {
       className="sticky top-0 z-[60] flex items-center justify-center gap-2 bg-tertiary-fixed px-3 py-2 pr-10 text-center text-on-tertiary-fixed shadow-sm md:pr-3">
       <span className="material-symbols-outlined text-[16px] shrink-0">science</span>
       <span className="font-label text-xs font-semibold uppercase tracking-widest">
-        Demo — 2 searches, 2 chats, 2 shares, 2 profiles, 2 buddies &amp; transfer preview mocked •{" "}
+        Demo — 2 searches, 2 chats, 2 shares, 2 profiles, 2 buddies &amp; transfer preview mocked • 🔊 <a href="/files" className="underline hover:no-underline">/data/Music/Demo</a> playable (Waves / Kernkraft 400) — try Play / Analyze / Mediainfo / Spectrum •{" "}
         <a href="https://github.com/mlnl221/nicotineHub" target="_blank" rel="noopener noreferrer" className="underline hover:no-underline">
           GitHub
         </a>

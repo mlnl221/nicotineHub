@@ -37,6 +37,8 @@ apps/bridge/dist/data/ip_country_data.csv
 .vscode/
 *.tsbuildinfo
 
+# demo safety — large FLACs must never be committed (demo ships small Vorbis .ogg only)
+*.flac
 # python (worker)
 __pycache__/
 *.py[cod]
