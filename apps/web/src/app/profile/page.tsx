@@ -7,6 +7,7 @@ import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
+import { PageHeader } from "@/components/PageHeader";
 import { useProfileTabs } from "@/lib/profile-tabs";
 import { ProfileTabs } from "@/components/profile/ProfileTabs";
 import { ProfileView } from "@/components/profile/ProfileView";
@@ -67,17 +68,11 @@ function TabbedProfileInner() {
       <Sidebar />
       <TopBar title="Profiles" subtitle={`${tabs.length}/10 tabs • User profiles`} />
       <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
-        <header className="hidden md:flex sticky top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
-          <div>
-            <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">User Profiles</h2>
-            <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">{tabs.length}/10 tabs • {activeTab ? `Viewing ${activeTab.username}` : "Look up any Soulseek user"}</p>
-          </div>
-          <div className="flex items-center gap-2 md:gap-4">
-            <Link href="/settings?tab=user-profile#user-profile" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Profile settings">
-              <span className="material-symbols-outlined">settings</span>
-            </Link>
-          </div>
-        </header>
+        <PageHeader
+          title="User Profiles"
+          subtitle={`${tabs.length}/10 tabs • ${activeTab ? `Viewing ${activeTab.username}` : "Look up any Soulseek user"}`}
+          settingsHref="/settings?tab=user-profile#user-profile"
+        />
         <div className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-lowest/80 backdrop-blur-xl border-b border-outline-variant/10">
           <div className="mx-auto w-full max-w-screen-2xl px-4 sm:px-6 md:px-10 py-3 flex flex-col gap-3">
             <div className="flex gap-2">

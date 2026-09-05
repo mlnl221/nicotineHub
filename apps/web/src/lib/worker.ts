@@ -70,6 +70,16 @@ export interface SpectrumRequestResult {
 }
 
 export async function requestWorkerSpectrum(opts: { fileName: string; size?: number; token?: number }): Promise<SpectrumRequestResult> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    try {
+      const { demoSpectrumUrls } = await import("@/lib/demo/fixtures");
+      const urls = demoSpectrumUrls(opts.fileName);
+      if (urls) return { etag: '"demo-vorbis"', hash: "demo-vorbis", urls, fromCache: true };
+    } catch {}
+    const base = opts.fileName.replace(/\\/g, "/").split("/").pop() ?? "";
+    if (base === "01. DJ Satomi - Waves.ogg") return { etag: '"demo-waves"', hash: "demo-waves", urls: { full: "/demo-spectra/dj-satomi-waves-full.png", zoom: "/demo-spectra/dj-satomi-waves-zoom.png" }, fromCache: true };
+    if (base === "12. Zombie Nation - Kernkraft 400 (DJ Gius Video Cut).ogg") return { etag: '"demo-kern"', hash: "demo-kern", urls: { full: "/demo-spectra/zombie-nation-kernkraft400-full.png", zoom: "/demo-spectra/zombie-nation-kernkraft400-zoom.png" }, fromCache: true };
+  }
   const res = await workerFetch("/spectrum/request", { method: "POST", body: JSON.stringify(opts) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Spectrum failed (${res.status})`);
@@ -99,6 +109,9 @@ export interface TagReadResult {
 }
 
 export async function readTags(fileName: string): Promise<TagReadResult> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    try { const { demoTagResult } = await import("@/lib/demo/fixtures"); const r = demoTagResult(fileName); if (r) return r; } catch {}
+  }
   const res = await workerFetch("/tag", { method: "POST", body: JSON.stringify({ fileName }) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Tag read failed (${res.status})`);
@@ -106,6 +119,9 @@ export async function readTags(fileName: string): Promise<TagReadResult> {
 }
 
 export async function writeTags(fileName: string, tags: Record<string, string | null>, removeTags: string[] = []): Promise<TagReadResult> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    try { const { isDemoAudioPath } = await import("@/lib/demo/fixtures"); if (isDemoAudioPath(fileName)) throw new Error("Tags are read-only in demo — not saved."); } catch (e) { if (e instanceof Error && e.message.includes("read-only")) throw e; }
+  }
   const res = await workerFetch("/tag/write", { method: "POST", body: JSON.stringify({ fileName, tags, removeTags }) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Tag write failed (${res.status})`);
@@ -129,6 +145,11 @@ export interface TagScrapeResult {
 }
 
 export async function scrapeTags(fileName: string, url: string, apply = false, rename?: { enabled: boolean; template: string }): Promise<TagScrapeResult> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    try { const { demoScrapeResult } = await import("@/lib/demo/fixtures"); const r = demoScrapeResult(fileName, url, apply); if (r) return r; } catch (e) { if (e instanceof Error) throw e; }
+    // If demo file but unknown URL, let the throw above surface; otherwise fall through
+    try { const { isDemoAudioPath } = await import("@/lib/demo/fixtures"); if (isDemoAudioPath(fileName)) throw new Error("Demo scrape supports the two linked Discogs releases only."); } catch (e) { if (e instanceof Error && e.message.includes("Demo scrape")) throw e; }
+  }
   const payload: Record<string, unknown> = { fileName, url, apply };
   if (rename) { payload.renameEnabled = rename.enabled; payload.renameTemplate = rename.template; }
   const res = await workerFetch("/tag/scrape", { method: "POST", body: JSON.stringify(payload) });
@@ -138,6 +159,9 @@ export async function scrapeTags(fileName: string, url: string, apply = false, r
 }
 
 export async function bulkReadTags(files: string[]): Promise<{ results: Array<{ fileName: string; tags?: Record<string, string>; info?: Record<string, unknown>; coverArtApplied?: boolean; error?: string }> }> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    try { const { demoTagResult } = await import("@/lib/demo/fixtures"); const mapped = files.map((f) => { const r = demoTagResult(f); return r ? { fileName: f, tags: r.tags, info: r.info, coverArtApplied: r.coverArtApplied } : null; }); if (mapped.every(Boolean)) return { results: mapped as Array<{ fileName: string; tags?: Record<string, string>; info?: Record<string, unknown>; coverArtApplied?: boolean; error?: string }> }; } catch {}
+  }
   const res = await workerFetch("/tag/bulk", { method: "POST", body: JSON.stringify({ files }) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Bulk tag read failed (${res.status})`);
@@ -145,6 +169,9 @@ export async function bulkReadTags(files: string[]): Promise<{ results: Array<{ 
 }
 
 export async function bulkAnalyze(files: string[]): Promise<{ results: Array<Record<string, unknown>> }> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    try { const { demoAnalyzeResult } = await import("@/lib/demo/fixtures"); const mapped = files.map((f) => demoAnalyzeResult(f)); if (mapped.every(Boolean)) return { results: mapped.map((r, i) => ({ fileName: files[i], ...(r as Record<string, unknown>) })) }; } catch {}
+  }
   const res = await workerFetch("/analyze/bulk", { method: "POST", body: JSON.stringify({ files }) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Bulk analyze failed (${res.status})`);
@@ -152,6 +179,9 @@ export async function bulkAnalyze(files: string[]): Promise<{ results: Array<Rec
 }
 
 export async function verifyFile(fileName: string): Promise<{ flacOk: boolean | null; mqa: boolean | null; upconvert?: unknown }> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    try { const { demoVerifyResult } = await import("@/lib/demo/fixtures"); const r = demoVerifyResult(fileName); if (r) return r as { flacOk: boolean | null; mqa: boolean | null }; } catch {}
+  }
   const res = await workerFetch("/verify", { method: "POST", body: JSON.stringify({ fileName }) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Verify failed (${res.status})`);
@@ -159,6 +189,9 @@ export async function verifyFile(fileName: string): Promise<{ flacOk: boolean | 
 }
 
 export async function analyzeFile(fileName: string): Promise<{ bitrate: number | null; vbr: string | null; sampleRate: number | null; bitDepth: number | null; cutoffHz: number | null; likelyTranscode: boolean | null; confidence: number }> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    try { const { demoAnalyzeResult } = await import("@/lib/demo/fixtures"); const r = demoAnalyzeResult(fileName); if (r) return r as { bitrate: number | null; vbr: string | null; sampleRate: number | null; bitDepth: number | null; cutoffHz: number | null; likelyTranscode: boolean | null; confidence: number }; } catch {}
+  }
   const res = await workerFetch("/analyze", { method: "POST", body: JSON.stringify({ fileName }) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Analyze failed (${res.status})`);
@@ -166,6 +199,9 @@ export async function analyzeFile(fileName: string): Promise<{ bitrate: number |
 }
 
 export async function bulkVerify(files: string[]): Promise<{ results: Array<Record<string, unknown>> }> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    try { const { demoVerifyResult } = await import("@/lib/demo/fixtures"); const mapped = files.map((f) => demoVerifyResult(f)); if (mapped.every(Boolean)) return { results: mapped.map((r, i) => ({ fileName: files[i], ...(r as Record<string, unknown>) })) }; } catch {}
+  }
   const res = await workerFetch("/verify/bulk", { method: "POST", body: JSON.stringify({ files }) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Bulk verify failed (${res.status})`);
@@ -196,6 +232,9 @@ export async function renameFile(fileName: string, newName: string): Promise<{ o
 }
 
 export async function getMediainfo(fileName: string): Promise<MediainfoResult> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    try { const { demoMediainfoResult } = await import("@/lib/demo/fixtures"); const r = demoMediainfoResult(fileName); if (r) return r; } catch {}
+  }
   const res = await workerFetch("/mediainfo", { method: "POST", body: JSON.stringify({ fileName }) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Mediainfo failed (${res.status})`);
@@ -203,6 +242,13 @@ export async function getMediainfo(fileName: string): Promise<MediainfoResult> {
 }
 
 export async function bulkRequestSpectrum(files: Array<{ fileName: string; size?: number; token?: number }>): Promise<Array<{ fileName: string; ok: boolean; etag?: string; error?: string }>> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    try {
+      const { demoSpectrumUrls } = await import("@/lib/demo/fixtures");
+      const demoOnly = files.every((f) => demoSpectrumUrls(f.fileName));
+      if (demoOnly) return files.map((f) => ({ fileName: f.fileName, ok: true, etag: '"demo-vorbis"' }));
+    } catch {}
+  }
   const results: Array<{ fileName: string; ok: boolean; etag?: string; error?: string }> = [];
   for (const f of files) {
     try {

@@ -241,7 +241,7 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
 
   return (
     <div className="flex flex-col">
-      <header className="sticky top-0 z-10 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-8 py-4 md:py-6 flex flex-col gap-3 md:gap-4 border-b border-outline-variant/10">
+      <header className="md:sticky md:top-0 z-10 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-8 py-4 md:py-6 flex flex-col gap-3 md:gap-4 border-b border-outline-variant/10">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className={`flex items-center gap-4 min-w-0 flex-1 ${profile.info && !profile.info.slotsavail ? "opacity-60" : ""}`} title={profile.info && !profile.info.slotsavail ? "Slots full" : undefined}>
             {profile.info?.pic && showPic ? (

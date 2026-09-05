@@ -167,7 +167,16 @@ export function FileExplorer({
 
   const handleDirScrape = async (dir: BridgeFileEntry) => {
     if (isDemo) {
-      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Demo", body: "Scrape Directory is disabled in demo" } }));
+      // Demo: only /data/Music/Demo is scrape-able via offline mock
+      if (dir.path === "/data/Music/Demo") {
+        const { mockFileExplorerResponse } = await import("@/lib/demo/fixtures");
+        const data = mockFileExplorerResponse(dir.path);
+        const AUDIO = new Set(["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"]);
+        const audio = data.entries.filter((e) => e.type === "file" && AUDIO.has(e.name.split(".").pop()?.toLowerCase() ?? "")).map((e) => e.path).slice(0, 50);
+        if (audio.length) setDirScrapeFiles(audio);
+        return;
+      }
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Demo", body: "Scrape Directory — only /data/Music/Demo is available in demo" } }));
       return;
     }
     setDirLoading(true);
@@ -216,11 +225,16 @@ export function FileExplorer({
     return crumbs;
   })();
 
+  const DEMO_AUDIO_NAMES = new Set(["01. DJ Satomi - Waves.ogg", "12. Zombie Nation - Kernkraft 400 (DJ Gius Video Cut).ogg"]);
+  const isDemoPlayable = (e: BridgeFileEntry) => DEMO_AUDIO_NAMES.has(e.name) || e.path === "/data/Music/Demo/01. DJ Satomi - Waves.ogg" || e.path === "/data/Music/Demo/12. Zombie Nation - Kernkraft 400 (DJ Gius Video Cut).ogg";
   const dirs = entries.filter((e) => e.type === "directory");
   const files = entries.filter((e) => e.type !== "directory");
   const audioFiles = files.filter((e) => {
     const ext = e.name.toLowerCase().split(".").pop() ?? "";
-    return !isDemo && ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"].includes(ext);
+    const isAudioExt = ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"].includes(ext);
+    if (!isAudioExt) return false;
+    if (!isDemo) return true;
+    return isDemoPlayable(e);
   });
   const audioIds = audioFiles.map((e) => e.path);
 
@@ -562,7 +576,8 @@ export function FileExplorer({
             ))}
             {showFiles && files.filter((e) => e.type !== "symlink").map((e, idx) => {
               const ext = e.name.toLowerCase().split(".").pop() ?? "";
-              const isAudio = !isDemo && ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"].includes(ext);
+              const isAudioExt = ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"].includes(ext);
+              const isAudio = isDemo ? isDemoPlayable(e) : isAudioExt;
               const isImage = !isDemo && ["jpg","jpeg","png","gif","webp","bmp","ico"].includes(ext);
               const checked = bulk.has(e.path);
               const isFocused = focusedIdx === audioIds.indexOf(e.path);
@@ -717,12 +732,14 @@ export function FileExplorer({
           items={(() => {
             const e = menuAnchor.file;
             if (e.type === "directory") {
+              const isDemoDirScrapeable = isDemo && e.path === "/data/Music/Demo";
               return fileExplorerDirMenu(e, {
-                onScrapeDir: isDemo || dirLoading ? undefined : () => handleDirScrape(e),
+                onScrapeDir: (isDemo && !isDemoDirScrapeable) || dirLoading ? undefined : () => handleDirScrape(e),
               });
             }
             const ext = e.name.toLowerCase().split(".").pop() ?? "";
-            const isAudio = !isDemo && ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"].includes(ext);
+            const isAudioExt = ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"].includes(ext);
+            const isAudio = isDemo ? (e.name === "01. DJ Satomi - Waves.ogg" || e.name === "12. Zombie Nation - Kernkraft 400 (DJ Gius Video Cut).ogg" || e.path === "/data/Music/Demo/01. DJ Satomi - Waves.ogg" || e.path === "/data/Music/Demo/12. Zombie Nation - Kernkraft 400 (DJ Gius Video Cut).ogg") : isAudioExt;
             const entry = getEntry(e.path);
             const hasSpectrum = entry?.status === "done" && (!!entry.fullBlobUrl || !!entry.fullUrl);
             return fileExplorerMenu(e, {
@@ -734,7 +751,7 @@ export function FileExplorer({
               onAnalyze: isAudio ? () => handleSingleAnalyze(e.path) : undefined,
               onSpectrum: isAudio ? () => handleSingleSpectrum(e.path) : undefined,
               onPlay: isAudio ? () => playFile(e.path, e.name, e.size) : undefined,
-              onMediainfo: isDemo ? undefined : () => setMediainfoFile(e.path),
+              onMediainfo: isAudio || !isDemo ? () => setMediainfoFile(e.path) : undefined,
               onRename: isDemo ? undefined : () => setRenamePath(e.path),
             });
           })()}
@@ -745,7 +762,7 @@ export function FileExplorer({
         (() => {
           const entry = getEntry(spectrumModal.file.path);
           const base = getWorkerHttpBase();
-          const abs = (u?: string) => (u ? (u.startsWith("blob:") || u.startsWith("http") ? u : `${base}${u}`) : null);
+          const abs = (u?: string) => (u ? (u.startsWith("blob:") || u.startsWith("http") || u.startsWith("/") ? u : `${base}${u}`) : null);
           const fullSrc = entry?.fullBlobUrl || abs(entry?.fullUrl) || null;
           const zoomSrc = entry?.zoomBlobUrl || abs(entry?.zoomUrl) || null;
           const hasSpectrum = !!fullSrc || !!zoomSrc;

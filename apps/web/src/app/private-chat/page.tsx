@@ -1,12 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { Suspense, useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
+import { PageHeader } from "@/components/PageHeader";
 import { usePrivateChat } from "@/lib/privateChat";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { privateChatMenu, userMenu } from "@/lib/context-menu/menus";
@@ -72,33 +72,27 @@ function PrivateChatInner() {
       <Sidebar />
       <TopBar title={topBarTitle} subtitle={topBarSubtitle} />
       <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 bg-surface-dim dark:bg-inverse-surface pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
-        <header className="hidden md:flex sticky top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
-          <div>
-            <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Private Chat</h2>
-            <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">
-              {users.length} conversations
-              {activeUser ? <span className="hidden md:inline"> • {activeUser}</span> : null}
-              <span className="md:hidden font-label text-xs"> • {activeUser || `${users.length} chats`}</span>
-            </p>
-          </div>
-          <div className="flex items-center gap-2 md:gap-4">
-            {activeUser ? (
-              <>
-                <span className="hidden md:inline-flex items-center gap-2 rounded-full bg-primary-fixed/20 px-3 py-1 font-label text-xs font-semibold text-primary">
-                  <span className="h-2 w-2 rounded-full bg-green-500" /> {activeUser}
-                </span>
-                <button onClick={() => router.push(`/profile/${encodeURIComponent(activeUser)}`)} className="hidden md:flex rounded-lg bg-surface-container-high px-4 py-2 font-label text-xs font-semibold hover:bg-surface-variant">Profile</button>
-                <button onClick={() => router.push(`/browse/${encodeURIComponent(activeUser)}`)} className="hidden md:flex rounded-lg bg-surface-container-high px-4 py-2 font-label text-xs font-semibold hover:bg-surface-variant">Browse</button>
-              </>
-            ) : null}
-            {users.length > 1 ? (
-              <button onClick={() => { if (confirm("Close all chats?")) closeAll(); }} className="hidden md:inline-flex rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container">Close All</button>
-            ) : null}
-            <Link href="/settings?tab=chats#chats" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Chat settings">
-              <span className="material-symbols-outlined">settings</span>
-            </Link>
-          </div>
-        </header>
+        <PageHeader
+          title="Private Chat"
+          subtitle={`${users.length} conversations${activeUser ? ` • ${activeUser}` : ""}`}
+          settingsHref="/settings?tab=chats#chats"
+          actions={
+            <>
+              {activeUser ? (
+                <>
+                  <span className="hidden md:inline-flex items-center gap-2 rounded-full bg-primary-fixed/20 px-3 py-1 font-label text-xs font-semibold text-primary">
+                    <span className="h-2 w-2 rounded-full bg-green-500" /> {activeUser}
+                  </span>
+                  <button onClick={() => router.push(`/profile/${encodeURIComponent(activeUser)}`)} className="hidden md:flex rounded-lg bg-surface-container-high px-4 py-2 font-label text-xs font-semibold hover:bg-surface-variant">Profile</button>
+                  <button onClick={() => router.push(`/browse/${encodeURIComponent(activeUser)}`)} className="hidden md:flex rounded-lg bg-surface-container-high px-4 py-2 font-label text-xs font-semibold hover:bg-surface-variant">Browse</button>
+                </>
+              ) : null}
+              {users.length > 1 ? (
+                <button onClick={() => { if (confirm("Close all chats?")) closeAll(); }} className="hidden md:inline-flex rounded-lg bg-surface-container-high px-3 py-2 font-label text-xs hover:bg-error-container hover:text-on-error-container">Close All</button>
+              ) : null}
+            </>
+          }
+        />
 
         <div className="flex flex-1 overflow-hidden min-h-0" style={isDemo ? ({ marginTop: "var(--demo-banner-h)" } as React.CSSProperties) : undefined}>
           {/* Left: Active Conversations */}

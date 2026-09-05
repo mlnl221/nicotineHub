@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 
 type Props = {
   title: string;
@@ -12,7 +13,7 @@ type Props = {
   downloadSpeed?: string;
   uploadSpeed?: string;
   showSpeeds?: boolean;
-  settingsHref: string;
+  settingsHref?: string;
   actions?: React.ReactNode;
 };
 
@@ -61,13 +62,16 @@ export function PageHeader({
           </>
         ) : null}
         {actions}
-        <Link
-          href={settingsHref}
-          className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center shrink-0"
-          aria-label="Settings"
-        >
-          <span className="material-symbols-outlined">settings</span>
-        </Link>
+        <ThemeToggleButton />
+        {settingsHref ? (
+          <Link
+            href={settingsHref}
+            className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center shrink-0"
+            aria-label="Settings"
+          >
+            <span className="material-symbols-outlined">settings</span>
+          </Link>
+        ) : null}
       </div>
     </header>
   );
