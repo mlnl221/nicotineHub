@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "@/lib/session";
+import { RequireAuth } from "@/components/RequireAuth";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
@@ -366,12 +366,9 @@ function DownloadsInner() {
 }
 
 export default function DownloadsPage() {
-  const { state } = useSession();
-  const router = useRouter();
-  useEffect(() => {
-    if (state.status === "failed") router.replace("/");
-  }, [state.status, router]);
-  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
-  if (state.status !== "connected") return null;
-  return <DownloadsInner />;
+  return (
+    <RequireAuth>
+      <DownloadsInner />
+    </RequireAuth>
+  );
 }

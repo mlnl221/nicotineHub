@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { RequireAuth } from "@/components/RequireAuth";
 import { useSession } from "@/lib/session";
 import { useTransfers } from "@/lib/transfers";
 import { Sidebar } from "@/components/Sidebar";
@@ -106,9 +106,16 @@ function StatisticsSummaryCard() {
 }
 
 export default function DiagnosticsPage() {
+  return (
+    <RequireAuth>
+      <DiagnosticsInner />
+    </RequireAuth>
+  );
+}
+
+function DiagnosticsInner() {
   const { state, send, subscribe } = useSession();
   const { settings } = useConfig();
-  const router = useRouter();
   const transfersApi = useTransfers();
 
   const [health, setHealth] = useState<DiagnosticsHealth | null>(null);
@@ -122,11 +129,6 @@ export default function DiagnosticsPage() {
   const logRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
   const [bridgeUrlDisplay, setBridgeUrlDisplay] = useState("same-origin (proxied /ws)");
-
-  useEffect(() => {
-    if (state.status === "idle" || state.status === "connecting") return;
-    if (state.status !== "connected") router.replace("/");
-  }, [state.status, router]);
 
   // subscribe to diagnostics WS messages
   useEffect(() => {
@@ -277,17 +279,6 @@ export default function DiagnosticsPage() {
         : `${proto}//${window.location.hostname}:8787/ws`);
     } catch {}
   }, []);
-
-  if (state.status !== "connected") {
-    if (state.status === "idle" || state.status === "connecting") {
-      return (
-        <div className="flex min-h-screen items-center justify-center bg-surface-dim dark:bg-inverse-surface">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        </div>
-      );
-    }
-    return null;
-  }
 
   const stats = transfersApi.stats;
 
