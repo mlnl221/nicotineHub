@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { scrapeTags } from "@/lib/worker";
 import { useConfig } from "@/lib/config/provider";
+import { isDemo } from "@/lib/demo";
 
 type Props = {
   open: boolean;
@@ -69,12 +70,13 @@ export function BulkScrapeModal({ open, files, onClose, onRenamed }: Props) {
           skipped++;
         }
       }
-      const parts = [`Applied to ${ok}/${files.length} files: ${preview?.artist ?? ""} — ${preview?.album ?? ""}`];
+      const isDemoDir = isDemo && files.some((f) => f.includes("Waves") || f.includes("Kernkraft"));
+      const parts = [`Applied to ${ok}/${files.length} files: ${preview?.artist ?? ""} — ${preview?.album ?? ""}${isDemoDir ? " (demo — not saved)" : ""}`];
       if (autoRenameEnabled) {
         parts.push(`Renamed ${renamed}${skipped ? `, skipped ${skipped} (missing tags)` : ""} using ${renameTemplate}`);
       }
       setDone(parts.join(" · "));
-      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Scrape applied", body: `${ok} files${renamed ? `, ${renamed} renamed` : ""}` } }));
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: isDemoDir ? "Scrape preview (demo)" : "Scrape applied", body: `${ok} files${isDemoDir ? " (demo — not saved)" : ""}${renamed ? `, ${renamed} renamed` : ""}` } }));
       if (newPaths.length && onRenamed) onRenamed(newPaths);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -112,6 +114,11 @@ export function BulkScrapeModal({ open, files, onClose, onRenamed }: Props) {
           {done ? <div className="rounded-xl bg-green-100 dark:bg-green-900/30 px-4 py-3 font-body text-xs text-green-800 dark:text-green-200">{done}</div> : null}
           <div className="rounded-xl bg-surface-container-low p-4 ghost-border space-y-3">
             <label className="font-label text-xs font-semibold">Release URL (Discogs/Bandcamp/MusicBrainz/Deezer/Beatport/Apple/Qobuz/Tidal) — 1 URL only</label>
+            {isDemo && files.some((f) => f.includes("Waves") || f.includes("Kernkraft")) ? (
+              <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 px-3 py-2 space-y-1 ghost-border">
+                <div className="font-label text-[11px] font-semibold text-amber-900 dark:text-amber-200">Demo — try: <span className="font-mono break-all">https://www.discogs.com/release/3681871-DJ-Satomi-Waves</span> (Waves) or <span className="font-mono break-all">https://www.discogs.com/release/131668-Zombie-Nation-Kernkraft-400</span> (Kernkraft) — offline mock, not saved.</div>
+              </div>
+            ) : null}
             <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://www.discogs.com/release/..." className="w-full rounded-xl bg-surface-container-lowest px-3 py-2.5 min-h-11 font-body text-sm ghost-border outline-none" />
             <div className="flex gap-2">
               <button disabled={loading || !url.trim()} onClick={handlePreview} className="flex-1 rounded-xl bg-surface-container-high px-4 py-2 font-label text-xs font-semibold disabled:opacity-40">{loading ? "Fetching…" : "Preview"}</button>

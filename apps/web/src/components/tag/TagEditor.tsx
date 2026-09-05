@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { readTags, writeTags, scrapeTags, verifyFile, analyzeFile, requestWorkerSpectrum, getWorkerHttpBase, workerFetchHeaders } from "@/lib/worker";
+import { isDemo } from "@/lib/demo";
 
 type Props = {
   open: boolean;
@@ -87,6 +88,11 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
     setError(null);
     try {
       const res = await requestWorkerSpectrum({ fileName });
+      // Demo: static /demo-spectra files are same-origin, no worker fetch needed
+      if (res.urls.full.startsWith("/demo-spectra") || res.urls.full.startsWith("/demo/")) {
+        setSpectrum({ fullBlobUrl: res.urls.full, zoomBlobUrl: res.urls.zoom, etag: res.etag });
+        return;
+      }
       const base = getWorkerHttpBase();
       // ponytail: no If-None-Match on first fetch — would 304 and leave blob empty
       const headers = { ...workerFetchHeaders() } as Record<string, string>;
@@ -106,9 +112,18 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
     }
   };
 
+  // demo helpers
+  const isDemoFile = isDemo && (fileName.includes("Waves") || fileName.includes("Kernkraft"));
+  const demoSuggestedUrl = fileName.includes("Waves") ? "https://www.discogs.com/release/3681871-DJ-Satomi-Waves" : fileName.includes("Kernkraft") ? "https://www.discogs.com/release/131668-Zombie-Nation-Kernkraft-400" : "";
+  const isSaveDisabled = loading || saving || (isDemo && isDemoFile);
+
   if (!open) return null;
 
   const handleSave = async () => {
+    if (isDemo && isDemoFile) {
+      setError("Tags are read-only in demo — not saved (static /demo-audio). Try Scrape preview instead.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -131,17 +146,18 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
     setScrapeResult(null);
     try {
       const res = await scrapeTags(fileName, url, apply);
+      const note = isDemo && isDemoFile ? " (demo — not saved)" : "";
       if (apply) {
-        // re-read after apply
-        setTags(res.tags || {});
-        setInfo((res.info as Record<string, unknown>) || info);
-        setScrapeResult(`Applied ${res.source}: ${res.artist} — ${res.album} (${res.year ?? "?"})`);
-        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Tags updated from scraper", body: `${res.source}: ${res.artist} — ${res.album}` } }));
+        // re-read after apply (demo just shows, does not persist)
+        if (res.tags) setTags(res.tags as Record<string, string>);
+        if (res.info) setInfo((res.info as Record<string, unknown>) || info);
+        setScrapeResult(`Applied ${res.source}: ${res.artist} — ${res.album} (${res.year ?? "?"})${note}`);
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: isDemo && isDemoFile ? "Scrape preview (demo)" : "Tags updated from scraper", body: `${res.source}: ${res.artist} — ${res.album}${note}` } }));
       } else {
         // preview: fill form with suggested
         const sug = res.suggested || {};
         setTags((prev) => ({ ...prev, ...Object.fromEntries(Object.entries(sug).filter(([k]) => !k.startsWith("_"))) }));
-        setScrapeResult(`Found ${res.source}: ${res.artist} — ${res.album} (${res.year ?? "?"}) • Not yet saved`);
+        setScrapeResult(`Found ${res.source}: ${res.artist} — ${res.album} (${res.year ?? "?"}) • Not yet saved${note}`);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -215,6 +231,16 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
               <div className="rounded-xl bg-surface-container-low p-4 ghost-border space-y-3">
                 <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Scrape tags</h4>
                 <p className="font-body text-xs text-outline">Paste a release URL (Discogs / Bandcamp / MusicBrainz / Deezer / Beatport / Apple / Qobuz / Tidal) to fill artist/album/year.</p>
+                {isDemo && isDemoFile ? (
+                  <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 px-3 py-2.5 space-y-1.5 ghost-border">
+                    <div className="font-label text-[11px] font-semibold text-amber-900 dark:text-amber-200">Demo — try this Discogs URL for this track</div>
+                    <div className="flex gap-2 items-center">
+                      <span className="flex-1 font-mono text-[11px] break-all text-amber-800 dark:text-amber-200/80">{demoSuggestedUrl}</span>
+                      <button type="button" onClick={() => setScrapeUrl(demoSuggestedUrl)} className="shrink-0 rounded-full bg-amber-600 px-3 py-1.5 font-label text-[11px] font-semibold text-white hover:bg-amber-700">Use</button>
+                    </div>
+                    <div className="font-body text-[11px] text-amber-800/70 dark:text-amber-200/60">Preview &amp; Apply work offline (demo mock) — not saved.</div>
+                  </div>
+                ) : null}
                 <div className="flex gap-2">
                   <input
                     value={scrapeUrl}
@@ -289,7 +315,7 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
         {/* Footer */}
         <div className="px-6 py-4 border-t border-outline-variant/10 bg-surface-container-low/60 flex items-center justify-between gap-3 shrink-0">
           <button onClick={onClose} className="rounded-full bg-surface-container-high px-5 py-2.5 font-label text-xs font-semibold">Cancel</button>
-          <button disabled={loading || saving} onClick={handleSave} className="rounded-full bg-primary px-6 py-2.5 font-label text-xs font-bold text-on-primary disabled:opacity-40 hover:bg-primary-container flex items-center gap-2">
+          <button disabled={isSaveDisabled} title={isDemo && isDemoFile ? "Read-only in demo — not saved (static /demo-audio). Try Scrape preview instead." : undefined} onClick={handleSave} className="rounded-full bg-primary px-6 py-2.5 font-label text-xs font-bold text-on-primary disabled:opacity-40 hover:bg-primary-container flex items-center gap-2">
             {saving ? <span className="h-3 w-3 animate-spin rounded-full border border-on-primary border-t-transparent" /> : <span className="material-symbols-outlined text-[16px]">save</span>}
             Save tags
           </button>

@@ -119,6 +119,9 @@ export async function readTags(fileName: string): Promise<TagReadResult> {
 }
 
 export async function writeTags(fileName: string, tags: Record<string, string | null>, removeTags: string[] = []): Promise<TagReadResult> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    try { const { isDemoAudioPath } = await import("@/lib/demo/fixtures"); if (isDemoAudioPath(fileName)) throw new Error("Tags are read-only in demo — not saved."); } catch (e) { if (e instanceof Error && e.message.includes("read-only")) throw e; }
+  }
   const res = await workerFetch("/tag/write", { method: "POST", body: JSON.stringify({ fileName, tags, removeTags }) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Tag write failed (${res.status})`);
@@ -142,6 +145,11 @@ export interface TagScrapeResult {
 }
 
 export async function scrapeTags(fileName: string, url: string, apply = false, rename?: { enabled: boolean; template: string }): Promise<TagScrapeResult> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    try { const { demoScrapeResult } = await import("@/lib/demo/fixtures"); const r = demoScrapeResult(fileName, url, apply); if (r) return r; } catch (e) { if (e instanceof Error) throw e; }
+    // If demo file but unknown URL, let the throw above surface; otherwise fall through
+    try { const { isDemoAudioPath } = await import("@/lib/demo/fixtures"); if (isDemoAudioPath(fileName)) throw new Error("Demo scrape supports the two linked Discogs releases only."); } catch (e) { if (e instanceof Error && e.message.includes("Demo scrape")) throw e; }
+  }
   const payload: Record<string, unknown> = { fileName, url, apply };
   if (rename) { payload.renameEnabled = rename.enabled; payload.renameTemplate = rename.template; }
   const res = await workerFetch("/tag/scrape", { method: "POST", body: JSON.stringify(payload) });

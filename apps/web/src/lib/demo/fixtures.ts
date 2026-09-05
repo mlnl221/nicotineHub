@@ -355,6 +355,62 @@ export function demoVerifyResult(fileName: string): { flacOk: boolean | null; mq
   return { flacOk: null, mqa: false, upconvert: null };
 }
 
+export const DEMO_SCRAPE_URLS = {
+  waves: "https://www.discogs.com/release/3681871-DJ-Satomi-Waves",
+  kern: "https://www.discogs.com/release/131668-Zombie-Nation-Kernkraft-400",
+} as const;
+
+export function demoScrapeResult(fileName: string, url: string, apply: boolean): import("@/lib/worker").TagScrapeResult | null {
+  if (!isDemoAudioPath(fileName)) return null;
+  const normUrl = url.trim().replace(/\/$/, "");
+  const isWavesFile = fileName.includes("Waves");
+  const isKernFile = fileName.includes("Kernkraft");
+  const isWavesUrl = normUrl.includes("3681871");
+  const isKernUrl = normUrl.includes("131668");
+  const isKnownUrl = isWavesUrl || isKernUrl;
+  if (!isKnownUrl) throw new Error("Demo scrape supports the two linked Discogs releases only — paste the suggested URL for this track.");
+  if ((isWavesFile && isKernUrl) || (isKernFile && isWavesUrl)) throw new Error(`That URL is for the other demo track — use ${isWavesFile ? DEMO_SCRAPE_URLS.waves : DEMO_SCRAPE_URLS.kern} for this file.`);
+  // Build per-track data matching the A1 / track 1 entry
+  const isWaves = isWavesFile;
+  const artist = isWaves ? "DJ Satomi" : "Zombie Nation";
+  const album = isWaves ? "Waves" : "Kernkraft 400";
+  const year: number = isWaves ? 2004 : 2000;
+  const track_count: number = isWaves ? 3 : 4;
+  const title = isWaves ? "Waves (Onda Radio Mix)" : "Kernkraft 400 (DJ Gius Video Cut)";
+  const tracknumber = isWaves ? "A1" : "1";
+  const genre = isWaves ? "Italodance" : "Hard House";
+  const suggested: Record<string, string> = {
+    artist,
+    albumartist: artist,
+    album,
+    title,
+    genre,
+    date: String(year),
+    year: String(year),
+    tracknumber: tracknumber,
+    track_total: String(track_count),
+    _source: "discogs",
+    _query: `${artist} - ${album}`,
+  };
+  const tags = { ...suggested };
+  // strip private keys for applied view but keep info
+  const new_tags = { artist, title, album, date: String(year), genre, tracknumber };
+  const info: Record<string, unknown> = isWaves ? { bitrate: 80, sampleRate: 44100, channels: 2, duration: 220.293, format: "Ogg Vorbis" } : { bitrate: 80, sampleRate: 44100, channels: 2, duration: 208.533, format: "Ogg Vorbis" };
+  return {
+    artist,
+    album,
+    year,
+    track_count,
+    source: "discogs",
+    confidence: 0.95,
+    url: isWaves ? DEMO_SCRAPE_URLS.waves : DEMO_SCRAPE_URLS.kern,
+    suggested,
+    applied: apply,
+    tags: apply ? new_tags : undefined,
+    info: apply ? info : undefined,
+  };
+}
+
 export function mockDemoTransfers(): import("@/lib/protocol").Transfer[] {
   // One downloading, one uploading — both Transferring with animated progress
   const dlSize = 85_000_000; // ~85 MB
