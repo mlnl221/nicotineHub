@@ -118,7 +118,7 @@ Modify accordingly if running with unRAID or setting up with Portainer.
 
 - Logging is optional
 - Host port mapping might need to be changed to not collide with other apps
-- Change `BASE_DOCKER_DATA_PATH` to match your setup. Can be simply `./data`
+- Change `BASE_DOCKER_CONFIG_PATH` (`./config`) and `BASE_DOCKER_DATA_PATH` (`./data`) to match your setup
 - Set a custom network if needed
 - Forward `LISTEN_PORT` `60754` TCP+UDP on your router for Soulseek searches (or use `network_mode: host` for UPnP)
 
@@ -135,6 +135,7 @@ services:
       - 60754:60754
       - 60754:60754/udp
     volumes:
+      - ${BASE_DOCKER_CONFIG_PATH:-./config}:/config
       - ${BASE_DOCKER_DATA_PATH:-./data}:/data
       # - /home/you/Music:/data/Music:ro  # add shares via Settings → Shares
     environment:
@@ -148,6 +149,7 @@ services:
     ports:
       - 8789:8789
     volumes:
+      - ${BASE_DOCKER_CONFIG_PATH:-./config}:/config:ro
       - ${BASE_DOCKER_DATA_PATH:-./data}:/data
 
   web:
