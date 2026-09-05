@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { bridgeFetchUrl, bridgeFetchHeaders, type BridgeFileEntry } from "@/lib/bridgeHttp";
 import { isDemo } from "@/lib/demo";
-import { mockFileExplorerResponse } from "@/lib/demo/fixtures";
+import { mockFileExplorerResponse, uniqueDemoName } from "@/lib/demo/fixtures";
 import { TagEditor } from "@/components/tag/TagEditor";
 import { BulkBar } from "@/components/tag/BulkBar";
 import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
@@ -752,6 +752,8 @@ export function FileExplorer({
               onSpectrum: isAudio ? () => handleSingleSpectrum(e.path) : undefined,
               onPlay: isAudio ? () => playFile(e.path, e.name, e.size) : undefined,
               onMediainfo: isAudio || !isDemo ? () => setMediainfoFile(e.path) : undefined,
+              // Directories take the fileExplorerDirMenu branch above (no rename) —
+              // files only, mirroring the server's "directories cannot be renamed"
               onRename: () => setRenamePath(e.path),
             });
           })()}
@@ -817,7 +819,7 @@ export function FileExplorer({
         document.body
       ) : null}
       {mediainfoFile ? <MediainfoModal filePath={mediainfoFile} onClose={() => setMediainfoFile(null)} /> : null}
-      {renamePath ? <RenameModal filePath={renamePath} onClose={() => setRenamePath(null)} onRenamed={(newPath) => { if (isDemo) { const newName = newPath.split("/").pop() ?? newPath; setEntries((prev) => prev.map((en) => en.path === renamePath ? { ...en, path: newPath, name: newName } : en)); try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Renamed (demo — not saved)", body: newName } })); } catch {} } else { fetchDir(current); markSharesDirtyIfNeeded(newPath); try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Renamed", body: newPath.split("/").pop() || newPath } })); } catch {} } }} /> : null}
+      {renamePath ? <RenameModal filePath={renamePath} onClose={() => setRenamePath(null)} onRenamed={(newPath) => { if (isDemo) { const normOld = renamePath.replace(/\\/g, "/"); const dirLen = normOld.lastIndexOf("/") + 1; const dir = renamePath.slice(0, dirLen); const newBase = newPath.replace(/\\/g, "/").split("/").pop() ?? newPath; const siblings = entries.filter((en) => en.path !== renamePath && en.path.replace(/\\/g, "/").startsWith(normOld.slice(0, dirLen)) && !en.path.replace(/\\/g, "/").slice(dirLen).includes("/")).map((en) => en.path.replace(/\\/g, "/").split("/").pop() as string); const { name: finalName, suffixed } = uniqueDemoName(siblings, newBase); const finalPath = `${dir}${finalName}`; setEntries((prev) => prev.map((en) => en.path === renamePath ? { ...en, path: finalPath, name: finalName } : en)); try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: suffixed ? "Renamed (demo — auto-suffixed, not saved)" : "Renamed (demo — not saved)", body: finalName } })); } catch {} } else { fetchDir(current); markSharesDirtyIfNeeded(newPath); try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Renamed", body: newPath.split("/").pop() || newPath } })); } catch {} } }} /> : null}
     </div>
   );
 }

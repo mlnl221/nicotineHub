@@ -360,66 +360,112 @@ export const DEMO_SCRAPE_URLS = {
   kern: "https://www.discogs.com/release/131668-Zombie-Nation-Kernkraft-400",
 } as const;
 
-export function demoReleaseScrape(url: string): import("@/lib/worker").ScrapeResult {
+export type DemoReleaseId = "waves" | "kern";
+
+// Single source of truth for the two demo Discogs releases (mirrors apps/worker scrapers).
+// Both demoReleaseScrape (link-paste) and demoScrapeResult (tag scrape) read from here.
+export const DEMO_RELEASE_META: Record<DemoReleaseId, {
+  artist: string; album: string; year: number; track_count: number;
+  title: string; tracknumber: string; genre: string; duration: number;
+  urlId: string; url: string;
+}> = {
+  waves: { artist: "DJ Satomi", album: "Waves", year: 2004, track_count: 3, title: "Waves (Onda Radio Mix)", tracknumber: "A1", genre: "Italodance", duration: 220.293, urlId: "3681871", url: DEMO_SCRAPE_URLS.waves },
+  kern: { artist: "Zombie Nation", album: "Kernkraft 400", year: 2000, track_count: 4, title: "Kernkraft 400 (DJ Gius Video Cut)", tracknumber: "1", genre: "Hard House", duration: 208.533, urlId: "131668", url: DEMO_SCRAPE_URLS.kern },
+};
+
+export function matchDemoReleaseId(url: string): DemoReleaseId | null {
   const normUrl = url.trim().replace(/\/$/, "");
-  if (normUrl.includes("3681871")) {
-    return { artist: "DJ Satomi", album: "Waves", year: 2004, track_count: 3, query: "DJ Satomi - Waves", source: "discogs", confidence: 0.95, url: DEMO_SCRAPE_URLS.waves };
+  for (const [id, meta] of Object.entries(DEMO_RELEASE_META) as Array<[DemoReleaseId, (typeof DEMO_RELEASE_META)[DemoReleaseId]]>) {
+    if (normUrl.includes(meta.urlId)) return id;
   }
-  if (normUrl.includes("131668")) {
-    return { artist: "Zombie Nation", album: "Kernkraft 400", year: 2000, track_count: 4, query: "Zombie Nation - Kernkraft 400", source: "discogs", confidence: 0.95, url: DEMO_SCRAPE_URLS.kern };
-  }
-  throw new Error("Demo link-paste supports the two Discogs releases from the demo tracks — running a raw search instead.");
+  return null;
+}
+
+export function matchDemoReleaseFile(fileName: string): DemoReleaseId | null {
+  if (!isDemoAudioPath(fileName)) return null;
+  if (fileName.includes("Waves")) return "waves";
+  if (fileName.includes("Kernkraft")) return "kern";
+  return null;
+}
+
+export function demoReleaseScrape(url: string): import("@/lib/worker").ScrapeResult {
+  const id = matchDemoReleaseId(url);
+  if (!id) throw new Error("Demo link-paste supports the two Discogs releases from the demo tracks — running a raw search instead.");
+  const meta = DEMO_RELEASE_META[id];
+  return { artist: meta.artist, album: meta.album, year: meta.year, track_count: meta.track_count, query: `${meta.artist} - ${meta.album}`, source: "discogs", confidence: 0.95, url: meta.url };
 }
 
 export function demoScrapeResult(fileName: string, url: string, apply: boolean): import("@/lib/worker").TagScrapeResult | null {
-  if (!isDemoAudioPath(fileName)) return null;
-  const normUrl = url.trim().replace(/\/$/, "");
-  const isWavesFile = fileName.includes("Waves");
-  const isKernFile = fileName.includes("Kernkraft");
-  const isWavesUrl = normUrl.includes("3681871");
-  const isKernUrl = normUrl.includes("131668");
-  const isKnownUrl = isWavesUrl || isKernUrl;
-  if (!isKnownUrl) throw new Error("Demo scrape supports the two linked Discogs releases only — paste the suggested URL for this track.");
-  if ((isWavesFile && isKernUrl) || (isKernFile && isWavesUrl)) throw new Error(`That URL is for the other demo track — use ${isWavesFile ? DEMO_SCRAPE_URLS.waves : DEMO_SCRAPE_URLS.kern} for this file.`);
+  const fileId = matchDemoReleaseFile(fileName);
+  if (!fileId) return null;
+  const urlId = matchDemoReleaseId(url);
+  if (!urlId) throw new Error("Demo scrape supports the two linked Discogs releases only — paste the suggested URL for this track.");
+  if (urlId !== fileId) throw new Error(`That URL is for the other demo track — use ${DEMO_RELEASE_META[fileId].url} for this file.`);
   // Build per-track data matching the A1 / track 1 entry
-  const isWaves = isWavesFile;
-  const artist = isWaves ? "DJ Satomi" : "Zombie Nation";
-  const album = isWaves ? "Waves" : "Kernkraft 400";
-  const year: number = isWaves ? 2004 : 2000;
-  const track_count: number = isWaves ? 3 : 4;
-  const title = isWaves ? "Waves (Onda Radio Mix)" : "Kernkraft 400 (DJ Gius Video Cut)";
-  const tracknumber = isWaves ? "A1" : "1";
-  const genre = isWaves ? "Italodance" : "Hard House";
+  const meta = DEMO_RELEASE_META[fileId];
   const suggested: Record<string, string> = {
-    artist,
-    albumartist: artist,
-    album,
-    title,
-    genre,
-    date: String(year),
-    year: String(year),
-    tracknumber: tracknumber,
-    track_total: String(track_count),
+    artist: meta.artist,
+    albumartist: meta.artist,
+    album: meta.album,
+    title: meta.title,
+    genre: meta.genre,
+    date: String(meta.year),
+    year: String(meta.year),
+    tracknumber: meta.tracknumber,
+    track_total: String(meta.track_count),
     _source: "discogs",
-    _query: `${artist} - ${album}`,
+    _query: `${meta.artist} - ${meta.album}`,
   };
-  const tags = { ...suggested };
   // strip private keys for applied view but keep info
-  const new_tags = { artist, title, album, date: String(year), genre, tracknumber };
-  const info: Record<string, unknown> = isWaves ? { bitrate: 80, sampleRate: 44100, channels: 2, duration: 220.293, format: "Ogg Vorbis" } : { bitrate: 80, sampleRate: 44100, channels: 2, duration: 208.533, format: "Ogg Vorbis" };
+  const new_tags = { artist: meta.artist, title: meta.title, album: meta.album, date: String(meta.year), genre: meta.genre, tracknumber: meta.tracknumber };
+  const info: Record<string, unknown> = { bitrate: 80, sampleRate: 44100, channels: 2, duration: meta.duration, format: "Ogg Vorbis" };
   return {
-    artist,
-    album,
-    year,
-    track_count,
+    artist: meta.artist,
+    album: meta.album,
+    year: meta.year,
+    track_count: meta.track_count,
     source: "discogs",
     confidence: 0.95,
-    url: isWaves ? DEMO_SCRAPE_URLS.waves : DEMO_SCRAPE_URLS.kern,
+    url: meta.url,
     suggested,
     applied: apply,
     tags: apply ? new_tags : undefined,
     info: apply ? info : undefined,
   };
+}
+
+// Shared rename validation — mirrors apps/worker/app.py _sanitize_filename (subset:
+// blank, path separators, controls) plus the RenameModal client checks, so demo,
+// dialog, and server reject the same names. Returns the trimmed name or throws.
+export function validateRenameBasename(newName: string): string {
+  const trimmed = newName.trim();
+  if (!trimmed) throw new Error("Name cannot be empty");
+  if (trimmed.includes("/") || trimmed.includes("\\") || trimmed.includes("\x00")) throw new Error("Name cannot contain / or \\");
+  return trimmed;
+}
+
+// Pure path splice for renames: "dir/base" + validated name → { dir, base, name, newPath }.
+// Handles both /data-style and Soulseek C:\-style separators.
+export function spliceRenamePath(fileName: string, validatedName: string): { dir: string; base: string; name: string; newPath: string } {
+  const norm = fileName.replace(/\\/g, "/");
+  const idx = norm.lastIndexOf("/");
+  const dir = idx === -1 ? "" : fileName.slice(0, idx + 1);
+  const base = idx === -1 ? fileName : fileName.slice(idx + 1);
+  return { dir, base, name: validatedName, newPath: `${dir}${validatedName}` };
+}
+
+// Collision suffix — mirrors apps/worker/app.py _unique_dest ("stem (2).ext", from n=2).
+// siblings are basenames in the same directory (excluding the file being renamed).
+export function uniqueDemoName(siblings: string[], desired: string): { name: string; suffixed: boolean } {
+  if (!siblings.includes(desired)) return { name: desired, suffixed: false };
+  const dot = desired.lastIndexOf(".");
+  const stem = dot === -1 ? desired : desired.slice(0, dot);
+  const suffix = dot === -1 ? "" : desired.slice(dot);
+  for (let n = 2; n < 1000; n++) {
+    const alt = `${stem} (${n})${suffix}`;
+    if (!siblings.includes(alt)) return { name: alt, suffixed: true };
+  }
+  return { name: desired, suffixed: false };
 }
 
 export function mockDemoTransfers(): import("@/lib/protocol").Transfer[] {
