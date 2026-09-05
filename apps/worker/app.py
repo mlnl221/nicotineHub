@@ -18,6 +18,7 @@ import os
 import subprocess
 import time
 import urllib.parse
+import uuid
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
@@ -1223,11 +1224,18 @@ def _parse_range(header: str | None, size: int):
 
 
 def _file_chunks(path: Path, start: int, end: int, chunk: int = 1 << 20):
-    with open(path, "rb") as f:
+    try:
+        f = open(path, "rb")
+    except OSError:
+        return
+    with f:
         f.seek(start)
         remaining = end - start + 1
         while remaining > 0:
-            data = f.read(min(chunk, remaining))
+            try:
+                data = f.read(min(chunk, remaining))
+            except OSError:
+                break
             if not data:
                 break
             remaining -= len(data)
@@ -1262,20 +1270,66 @@ def _transcode_cache_key(src: Path) -> str:
     return f"{h}.opus"
 
 
+# Max age of an in-progress transcode temp before the cache trim treats it as
+# orphaned (crashed ffmpeg / killed worker). Must stay far above any legit
+# transcode duration (ffmpeg timeout is 180 s) — a trim must never delete a
+# live `*.tmp.opus`, otherwise it becomes the very race this fixes.
+_TRANSCODE_TMP_MAX_AGE_S = 3600
+
+
 def _trim_transcode_cache() -> None:
+    """Evict oldest cached opus files over budget; sweep stale transcode tmps.
+
+    In-progress `*.tmp.opus` files are excluded from size accounting and are
+    only swept when older than _TRANSCODE_TMP_MAX_AGE_S — concurrent
+    same-file transcodes each own a unique tmp (see _transcode_to_opus), so
+    the trim must never delete a fresh tmp or it reintroduces the race.
+    """
     try:
         TRANSCODE_DIR.mkdir(parents=True, exist_ok=True)
-        files = sorted(TRANSCODE_DIR.glob("*.opus"), key=lambda p: p.stat().st_mtime)
-        total = sum(p.stat().st_size for p in files)
-        while files and total > TRANSCODE_CACHE_BYTES:
-            old = files.pop(0)
-            try:
-                total -= old.stat().st_size
-                old.unlink()
-            except OSError:
-                pass
     except OSError:
-        pass
+        return
+    try:
+        entries = list(TRANSCODE_DIR.glob("*.opus"))
+    except OSError:
+        return
+    # Sweep orphaned tmps by age; never touch a live one.
+    now = time.time()
+    for tmp in entries:
+        if not tmp.name.endswith(".tmp.opus"):
+            continue
+        try:
+            if now - tmp.stat().st_mtime > _TRANSCODE_TMP_MAX_AGE_S:
+                tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+    sized: list[tuple[Path, int]] = []
+    total = 0
+    for p in entries:
+        if p.name.endswith(".tmp.opus"):
+            continue
+        try:
+            size = p.stat().st_size
+        except OSError:
+            continue
+        sized.append((p, size))
+        total += size
+    sized.sort(key=lambda item: _safe_mtime(item[0]))
+    for old, size in sized:
+        if total <= TRANSCODE_CACHE_BYTES:
+            break
+        try:
+            old.unlink()
+            total -= size
+        except OSError:
+            pass
+
+
+def _safe_mtime(p: Path) -> float:
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def _transcode_to_opus(src: Path) -> Path | None:
@@ -1291,7 +1345,12 @@ def _transcode_to_opus(src: Path) -> Path | None:
     out = TRANSCODE_DIR / _transcode_cache_key(src)
     if out.exists() and out.stat().st_size > 1000:
         return out
-    tmp = out.with_suffix(".tmp.opus")
+    # Unique tmp per attempt: concurrent same-file transcodes must never share
+    # an output path — shared tmps let one ffmpeg truncate another's output and
+    # let a loser's unlink delete the winner's file before replace() (spurious
+    # 422s, or worse a promoted corrupt file). os.replace() below is atomic, so
+    # concurrent winners serialize at the filesystem: last-wins, always whole.
+    tmp = out.with_name(f"{out.stem}.{uuid.uuid4().hex}.tmp.opus")
     try:
         r = subprocess.run(
             ["ffmpeg", "-y", "-i", str(src), "-vn", "-c:a", "libopus", "-b:a", "128k", str(tmp)],
@@ -1310,6 +1369,50 @@ def _transcode_to_opus(src: Path) -> Path | None:
     return None
 
 
+# Single-flight transcode: concurrent same-file /audio hits share one ffmpeg
+# instead of each spawning its own (CPU + transient disk per attempt, and
+# pressure on the shared to_thread pool that also serves spectrum/mediainfo).
+# Mirrors spectrals.ensure_spectrum: per-key in-flight task + semaphore +
+# double-checked cache inside. Unique tmps in _transcode_to_opus stay as the
+# safety net for distinct keys racing the pool.
+_transcode_sem = asyncio.Semaphore(2)
+_transcode_in_flight: dict[str, asyncio.Task[Path | None]] = {}
+
+
+async def ensure_opus(src: Path) -> Path | None:
+    """Cached transcode with cross-request coalescing. None on failure."""
+    try:
+        key = _transcode_cache_key(src)
+    except OSError:
+        return None
+    out = TRANSCODE_DIR / key
+    try:
+        if out.exists() and out.stat().st_size > 1000:
+            return out
+    except OSError:
+        pass
+    task = _transcode_in_flight.get(key)
+    if task is None:
+        task = asyncio.create_task(_generate_opus(src, key))
+        _transcode_in_flight[key] = task
+        task.add_done_callback(lambda _t: _transcode_in_flight.pop(key, None))
+    try:
+        return await task
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+async def _generate_opus(src: Path, key: str) -> Path | None:
+    async with _transcode_sem:
+        out = TRANSCODE_DIR / key
+        try:
+            if out.exists() and out.stat().st_size > 1000:
+                return out
+        except OSError:
+            pass
+        return await asyncio.to_thread(_transcode_to_opus, src)
+
+
 @app.get("/audio", dependencies=[Depends(require_auth)])
 async def audio(file: str, request: Request):
     """Playable audio for the browser mini-player.
@@ -1324,10 +1427,15 @@ async def audio(file: str, request: Request):
         return resolved
     ext = resolved.suffix.lstrip(".").lower()
     if ext in AUDIO_TRANSCODE_EXTS:
-        out = await asyncio.to_thread(_transcode_to_opus, resolved)
+        out = await ensure_opus(resolved)
         if out is None:
             return JSONResponse({"detail": f"cannot transcode .{ext} for browser playback"}, status_code=422)
-        return _ranged_audio_response(out, request, "audio/ogg", f"{resolved.stem}.opus")
+        try:
+            return _ranged_audio_response(out, request, "audio/ogg", f"{resolved.stem}.opus")
+        except OSError:
+            # Cache evicted between transcode and serve (trim race) — report
+            # transcode failure rather than an unhandled 500.
+            return JSONResponse({"detail": f"cannot transcode .{ext} for browser playback"}, status_code=422)
     if ext in AUDIO_NATIVE_EXTS:
         return _ranged_audio_response(resolved, request, AUDIO_MIME[ext], resolved.name)
     return JSONResponse({"detail": f".{ext or '?'} is not playable in the browser"}, status_code=415)

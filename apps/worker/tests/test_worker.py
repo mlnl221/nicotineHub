@@ -272,4 +272,112 @@ def test_sanitize_filename():
     assert worker_app._sanitize_filename("  my file .txt  ") == "my file .txt"
     assert worker_app._sanitize_filename("a/b.txt") is None
     assert worker_app._sanitize_filename("") is None
+
+
+def _make_wma(path, seconds=10):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+         "-i", f"sine=frequency=440:duration={seconds}",
+         "-c:a", "wmav2", str(path)],
+        capture_output=True, timeout=60,
+    )
+    assert r.returncode == 0, "ffmpeg wma synth failed"
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_audio_transcode_cold_and_warm(client, tmp_path, monkeypatch):
+    """Sequential /audio wma hits: cold transcode 200, warm cache 200."""
+    import app as worker_app
+
+    tc_dir = tmp_path / "transcodes"
+    monkeypatch.setattr(worker_app, "TRANSCODE_DIR", tc_dir)
+    _make_wma(tmp_path / "data" / "downloads" / "t.wma")
+
+    r1 = client.get("/audio", params={"file": "t.wma"})
+    assert r1.status_code == 200, r1.text[:200]
+    assert r1.headers["content-type"] == "audio/ogg"
+    assert r1.content[:4] == b"OggS"
+    assert len(r1.content) > 1000
+    r2 = client.get("/audio", params={"file": "t.wma"})
+    assert r2.status_code == 200
+    assert r2.content == r1.content
+    assert list(tc_dir.glob("*.tmp.opus")) == []
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_transcode_to_opus_concurrent_unique_tmp(tmp_path, monkeypatch):
+    """Concurrent _transcode_to_opus calls must not share/clobber tmps.
+
+    Regression test for the shared-tmp race: N parallel ffmpeg runs used to
+    write one `<hash>.tmp.opus` (mutual truncation + loser-unlink-wins →
+    None/422s or promoted corrupt files). Tmps are now unique per attempt, so
+    every caller gets a valid output. Sync function — threads are safe here
+    (no event loop involved, unlike TestClient).
+    """
+    import threading
+
+    import app as worker_app
+
+    tc_dir = tmp_path / "transcodes"
+    monkeypatch.setattr(worker_app, "TRANSCODE_DIR", tc_dir)
+    wma = tmp_path / "data" / "downloads" / "t.wma"
+    _make_wma(wma)
+
+    n = 4
+    barrier = threading.Barrier(n)
+    results: list = []
+    errors: list[str] = []
+
+    def run(i):
+        try:
+            barrier.wait(timeout=30)
+            results.append(worker_app._transcode_to_opus(wma))
+        except Exception as e:  # noqa: BLE001 — surfaced via assert below
+            errors.append(f"thread {i}: {e!r}")
+
+    threads = [threading.Thread(target=run, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=240)
+
+    assert not errors, errors
+    assert len(results) == n
+    assert all(r is not None for r in results), "transcode returned None under concurrency"
+    assert {str(r) for r in results} == {str(results[0])}, "divergent outputs"
+    assert results[0].read_bytes()[:4] == b"OggS"
+    assert list(tc_dir.glob("*.tmp.opus")) == []
+    assert len(list(tc_dir.glob("*.opus"))) == 1
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_audio_transcode_singleflight(tmp_path, monkeypatch):
+    """Concurrent ensure_opus calls coalesce onto a single ffmpeg run."""
+    import asyncio
+
+    import app as worker_app
+
+    tc_dir = tmp_path / "transcodes"
+    monkeypatch.setattr(worker_app, "TRANSCODE_DIR", tc_dir)
+    wma = tmp_path / "data" / "downloads" / "t.wma"
+    _make_wma(wma)
+
+    calls: list[str] = []
+    real_transcode = worker_app._transcode_to_opus
+
+    def counting_transcode(src):
+        calls.append(str(src))
+        return real_transcode(src)
+
+    monkeypatch.setattr(worker_app, "_transcode_to_opus", counting_transcode)
+
+    async def run_all():
+        return await asyncio.gather(*[worker_app.ensure_opus(wma) for _ in range(4)])
+
+    results = asyncio.run(run_all())
+    assert all(r is not None for r in results)
+    assert {str(r) for r in results} == {str(results[0])}
+    assert len(calls) == 1, f"expected 1 transcode, got {len(calls)}"
+    assert list(tc_dir.glob("*.tmp.opus")) == []
     assert worker_app._sanitize_filename("   ") is None
