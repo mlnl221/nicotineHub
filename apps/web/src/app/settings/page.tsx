@@ -7,6 +7,7 @@ import { useConfig } from "@/lib/config/provider";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
+import { PageHeader } from "@/components/PageHeader";
 import { SectionLoader, TabSwitchLoader } from "@/components/PageLoader";
 
 const NetworkSection = dynamic(() => import("@/components/settings/NetworkSection").then((m) => m.NetworkSection), { loading: () => <SectionLoader /> });
@@ -125,23 +126,29 @@ export default function SettingsPage() {
           }}
         />
 
-        <header className="relative z-10 hidden md:flex w-full items-center justify-between px-4 py-3 md:px-8 md:py-6">
-          <Link
-            href="/search"
-            className="flex items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant transition-colors hover:text-primary dark:text-outline dark:hover:text-primary-fixed"
-          >
-            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
-            Back to search
-          </Link>
-          <button
-            onClick={() => {
-              if (confirm("Reset all settings to their defaults?")) resetAll();
-            }}
-            className="glass-card rounded-xl px-4 py-2 font-label text-xs uppercase tracking-widest text-error transition-colors hover:bg-error-container"
-          >
-            Reset all
-          </button>
-        </header>
+        <PageHeader
+          title="Settings"
+          subtitle="App preferences across network, shares, chat and appearance — press Save per section."
+          actions={
+            <>
+              <Link
+                href="/search"
+                className="hidden items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant transition-colors hover:text-primary dark:text-outline dark:hover:text-primary-fixed md:flex"
+              >
+                <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                Back to search
+              </Link>
+              <button
+                onClick={() => {
+                  if (confirm("Reset all settings to their defaults?")) resetAll();
+                }}
+                className="glass-card rounded-xl px-4 py-2 font-label text-xs uppercase tracking-widest text-error transition-colors hover:bg-error-container"
+              >
+                Reset all
+              </button>
+            </>
+          }
+        />
 
         <div className="relative z-10 mx-auto w-full max-w-6xl flex-1 px-4 pt-4 pb-6 md:px-8 md:pt-2 md:pb-8">
           <h1 className="mb-1 font-headline text-3xl font-bold tracking-tight text-on-surface dark:text-inverse-primary md:text-4xl">

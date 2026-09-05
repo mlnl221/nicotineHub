@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { FileExplorer } from "@/components/files/FileExplorer";
+import { PageHeader } from "@/components/PageHeader";
 import { isDemo } from "@/lib/demo";
 
 export default function FilesPage() {
@@ -19,20 +20,19 @@ export default function FilesPage() {
       <TopBar title="Files" subtitle="Browse /data on the bridge" />
 
       <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
-        <header className="relative z-10 hidden w-full items-center justify-between px-4 py-3 md:flex md:px-8 md:py-6">
-          <div>
-            <h1 className="font-headline text-2xl font-bold tracking-tight text-on-surface dark:text-inverse-primary md:text-3xl">Files</h1>
-            <p className="font-body text-sm text-on-surface-variant dark:text-outline">
-              Browser-rendered Explorer for the container&apos;s <span className="font-mono">/data</span>. Pick a subdirectory to share.
-            </p>
-          </div>
-          {lastSelected && (
-            <div className="flex items-center gap-2 rounded-xl bg-primary-container px-3 py-2 text-xs text-on-primary-container">
-              <span className="material-symbols-outlined text-[16px]">check_circle</span>
-              <span className="font-mono">{lastSelected}</span>
-            </div>
-          )}
-        </header>
+        <PageHeader
+          title="Files"
+          subtitle="Browser-rendered Explorer for the container's /data. Pick a subdirectory to share."
+          settingsHref="/settings?tab=shares#shares"
+          actions={
+            lastSelected ? (
+              <div className="hidden md:flex items-center gap-2 rounded-xl bg-primary-container px-3 py-2 text-xs text-on-primary-container">
+                <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                <span className="font-mono">{lastSelected}</span>
+              </div>
+            ) : undefined
+          }
+        />
 
         <div className="relative z-10 mx-auto w-full max-w-6xl flex-1 px-4 pb-6 pt-4 md:px-8 md:pt-2 md:pb-8">
           {isDemo && (

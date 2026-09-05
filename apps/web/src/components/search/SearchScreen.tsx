@@ -1,8 +1,8 @@
 "use client";
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { PageHeader } from "@/components/PageHeader";
 import { useSearches } from "@/lib/search";
 import { applyFilters } from "@/lib/filter";
 import { useTransfers } from "@/lib/transfers";
@@ -99,30 +99,13 @@ export function SearchScreen() {
     }
   };
 
+  const searchSubtitle = activeTab
+    ? `${visibleRows.length} of ${activeTab.total} results${activeTab.status === "searching" ? " · searching…" : ""}${activeTab.mode !== "global" ? ` · ${activeTab.mode}${activeTab.target ? `:${activeTab.target}` : ""}` : ""} • ${tabs.length} tabs`
+    : `Find files across the network • ${tabs.length} tabs`;
+
   return (
     <div className="flex min-h-screen max-w-full overflow-x-hidden flex-col bg-surface-container-low dark:bg-inverse-surface" data-custom-menu>
-      <header className="hidden md:flex sticky top-0 z-30 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-10 py-4 md:py-8 flex-col md:flex-row md:justify-between md:items-end gap-3 md:gap-4 border-b border-outline-variant/10">
-        <div className="min-w-0 flex-1">
-          <h2 className="hidden md:block font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight">Search</h2>
-          <p className="font-body text-on-surface-variant dark:text-outline text-xs md:text-sm mt-1">
-            {activeTab ? (
-              <>
-                {visibleRows.length} of {activeTab.total} results
-                {activeTab.status === "searching" ? " · searching…" : ""}
-                {activeTab.mode !== "global" ? ` · ${activeTab.mode}${activeTab.target ? `:${activeTab.target}` : ""}` : ""}
-                <span className="hidden md:inline"> • {tabs.length} tabs</span>
-              </>
-            ) : (
-              <>Find files across the network • {tabs.length} tabs</>
-            )}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 md:gap-4 shrink-0">
-          <Link href="/settings?tab=searches#searches" className="hidden md:flex bg-primary-container text-on-primary-container p-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors items-center justify-center" aria-label="Search settings">
-            <span className="material-symbols-outlined">settings</span>
-          </Link>
-        </div>
-      </header>
+      <PageHeader title="Search" subtitle={searchSubtitle} settingsHref="/settings?tab=searches#searches" />
       <div className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-low/95 backdrop-blur dark:bg-inverse-surface/95 border-b border-outline-variant/10">
         <SearchBar
           onSearch={startSearch}

@@ -8,6 +8,7 @@ import { useTransfers } from "@/lib/transfers";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
+import { PageHeader } from "@/components/PageHeader";
 import type { DiagEntry, DiagLevel, DiagnosticsHealth } from "@/lib/protocol";
 import { PortChecker } from "@/components/PortChecker";
 import { useConfig } from "@/lib/config/provider";
@@ -290,15 +291,16 @@ export default function DiagnosticsPage() {
       <TopBar title="Diagnostics" />
       <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <div className="pointer-events-none absolute inset-0 opacity-20" style={{ background: "radial-gradient(circle at 50% 0%, rgba(51,102,204,0.12) 0%, transparent 60%)" }} />
-        <header className="relative z-10 hidden md:flex w-full items-center justify-between px-4 py-3 md:px-10 md:py-6">
-          <div>
-            <h1 className="font-headline text-2xl font-light tracking-tight text-on-surface dark:text-inverse-primary">Diagnostics</h1>
-            <p className="font-body text-xs text-on-surface-variant dark:text-outline">System diagnostics and connection health — live logs (500 lines, persistent).</p>
-          </div>
-          <Link href="/search" className="hidden items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant transition-colors hover:text-primary dark:text-outline sm:flex">
-            <span className="material-symbols-outlined text-[16px]">arrow_back</span> Back to search
-          </Link>
-        </header>
+        <PageHeader
+          title="Diagnostics"
+          subtitle="System diagnostics and connection health — live logs (500 lines, persistent)."
+          settingsHref="/settings?tab=logging#logging"
+          actions={
+            <Link href="/search" className="hidden items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant transition-colors hover:text-primary dark:text-outline sm:flex">
+              <span className="material-symbols-outlined text-[16px]">arrow_back</span> Back to search
+            </Link>
+          }
+        />
 
         <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 md:gap-6 px-4 pb-6 md:px-10 md:pb-8">
           {/* Health cards + new panels */}
