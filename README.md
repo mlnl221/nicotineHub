@@ -94,7 +94,7 @@ Images are `oxipng -o 2 --strip all` compressed and stored **only in `/tmp/spect
 apps/bridge  — Bun bridge  (WebSocket `/ws` + `/health` + `/files/:token` + volume `DATA_DIR`, SLSK-only)
 apps/worker  — Python FastAPI (scrape/spectrum/tag on `:8789`, `bridge-data:/data:ro`)
 apps/web     — Next.js 15 PWA
-compose.yaml — web:3000 + bridge:8787/60754 + worker:8789 → bridge-data:/data
+compose.yaml — web:3000 (only published UI port) + bridge LISTEN_PORT + internal bridge:8787/worker:8789 → config:/config + data:/data
 ```
 
 ---
@@ -120,6 +120,7 @@ Modify accordingly if running with unRAID or setting up with Portainer.
 - Host port mapping might need to be changed to not collide with other apps
 - Change `BASE_DOCKER_CONFIG_PATH` (`./config`) and `BASE_DOCKER_DATA_PATH` (`./data`) to match your setup
 - Set a custom network if needed
+- Only `web:3000` + `LISTEN_PORT` are published: browsers reach bridge/worker through the web UI (same-origin `/ws` + `/api/*` proxy) — no `8787`/`8789` mapping needed
 - Forward `LISTEN_PORT` `60754` TCP+UDP on your router for Soulseek searches (or use `network_mode: host` for UPnP)
 
 Create `docker-compose.yml` and add the following. If you have an existing setup change to fit that.
@@ -131,7 +132,6 @@ services:
     image: ghcr.io/mlnl221/nicotinehub-bridge:latest
     restart: unless-stopped
     ports:
-      - 8787:8787
       - 60754:60754
       - 60754:60754/udp
     volumes:
@@ -146,8 +146,7 @@ services:
     container_name: nicotinehub-worker
     image: ghcr.io/mlnl221/nicotinehub-worker:latest
     restart: unless-stopped
-    ports:
-      - 8789:8789
+    # no ports: reached via web same-origin /api/worker proxy
     volumes:
       - ${BASE_DOCKER_CONFIG_PATH:-./config}:/config:ro
       - ${BASE_DOCKER_DATA_PATH:-./data}:/data
@@ -158,6 +157,8 @@ services:
     restart: unless-stopped
     ports:
       - 3000:3000
+    # - BRIDGE_TOKEN=changeme  # must match bridge when set (proxy fallback)
+    # - WORKER_TOKEN=changeme  # must match worker when set (proxy fallback)
 ```
 
 Then start with:
@@ -166,7 +167,7 @@ Then start with:
 docker compose up -d
 ```
 
-Open `http://localhost:3000` → Settings → Network check `LISTEN_PORT`, login with Soulseek creds (never stored). Health: `http://localhost:8787/health` + `http://localhost:8789/health`. See `docs/deployment.md` for `TAG` pinning (`TAG=v0.25.0 docker compose pull && up -d`), `BRIDGE_TOKEN`, and `network_mode: host`.
+Open `http://localhost:3000` → Settings → Network check `LISTEN_PORT`, login with Soulseek creds (never stored). Health: `http://localhost:3000/api/bridge/health` + `http://localhost:3000/api/worker/health` (proxied — bridge/worker publish no ports). See `docs/deployment.md` for `TAG` pinning (`TAG=v0.25.0 docker compose pull && up -d`), `BRIDGE_TOKEN`, and `network_mode: host`.
 
 ---
 

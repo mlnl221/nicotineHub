@@ -51,8 +51,9 @@ function bridgeHttpBase(): string {
       return `${u.protocol}//${u.host}`;
     } catch {}
   }
-  const scheme = window.location.protocol === "https:" ? "https:" : "http:";
-  return `${scheme}//${window.location.hostname}:8787`;
+  // Same-origin default: browser reaches the bridge through the web
+  // entrypoint (/api/bridge proxied), so no published bridge port needed.
+  return "/api/bridge";
 }
 
 function HealthCard({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
@@ -119,7 +120,7 @@ export default function DiagnosticsPage() {
   const [autoScroll, setAutoScroll] = useState(true);
   const logRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
-  const [bridgeUrlDisplay, setBridgeUrlDisplay] = useState("ws://localhost:8787/ws");
+  const [bridgeUrlDisplay, setBridgeUrlDisplay] = useState("same-origin (proxied /ws)");
 
   useEffect(() => {
     if (state.status === "idle" || state.status === "connecting") return;

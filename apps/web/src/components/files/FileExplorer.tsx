@@ -134,7 +134,7 @@ export function FileExplorer({
     } catch (e) {
       const msg = (e as Error).message;
       if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
-        setError("Cannot reach bridge. Is it running? Check NEXT_PUBLIC_BRIDGE_URL / localStorage.nicotineHub.bridgeUrl. On Docker: ensure bridge:8787 is reachable.");
+        setError("Cannot reach bridge. Is it running? The app tries same-origin (/api/bridge) first, then NEXT_PUBLIC_BRIDGE_URL / localStorage.nicotineHub.bridgeUrl.");
       } else {
         setError(msg);
       }

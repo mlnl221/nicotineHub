@@ -20,6 +20,15 @@ function getBridgeToken(): string | null {
 function getBridgeCandidates(): Array<{ httpBase: string; token: string | null }> {
   const out: Array<{ httpBase: string; token: string | null }> = [];
   const seen = new Set<string>();
+  // Same-origin first: /api/bridge on the web origin is proxied to the
+  // bridge, so no published bridge port is needed. Direct ports below
+  // remain as fallback for remote-bridge setups (Vercel demo, NAS).
+  if (typeof window !== "undefined") {
+    const token = getBridgeToken();
+    const key = `/api/bridge|${token ?? ""}`;
+    seen.add(key);
+    out.push({ httpBase: "/api/bridge", token });
+  }
   const add = (wsUrl: string | null | undefined) => {
     if (!wsUrl) return;
     try {

@@ -28,6 +28,7 @@ import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
 import { BulkScrapeModal } from "@/components/tag/BulkScrapeModal";
 import { useBulkSelection } from "@/lib/bulkSelection";
 import { bulkVerify, bulkAnalyze, bulkRequestSpectrum } from "@/lib/worker";
+import { bridgeFetchUrl } from "@/lib/bridgeHttp";
 import { humanSize, humanSpeed as _humanSpeed } from "@/lib/format";
 
 function humanSpeed(bps: number): string {
@@ -149,7 +150,7 @@ function DownloadsInner() {
     switch (action) {
       case 0: break;
       case 1: {
-        if (t.status === "Finished" && (t as unknown as { downloadUrl?: string }).downloadUrl) window.open((t as unknown as { downloadUrl: string }).downloadUrl, "_blank");
+        if (t.status === "Finished" && (t as unknown as { downloadUrl?: string }).downloadUrl) window.open(bridgeFetchUrl((t as unknown as { downloadUrl: string }).downloadUrl), "_blank");
         else window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Open", body: "No file to open" } }));
         break;
       }

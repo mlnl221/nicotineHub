@@ -5,18 +5,23 @@
 ## Docker Compose (build from source)
 
 ```bash
-docker compose up --build  # http://localhost:3000 + ws://localhost:8787/ws
+docker compose up --build  # http://localhost:3000 (only published UI port + LISTEN_PORT)
 ```
 
-`compose.yaml` builds all services from the monorepo root:
+`compose.yaml` builds all services from the monorepo root. Only `web:3000`
+and the Soulseek peer `LISTEN_PORT` are published — bridge `:8787` and
+worker `:8789` live on the compose network only; browsers reach them
+through the web entrypoint (same-origin `/ws` piped + `/api/bridge/*` +
+`/api/worker/*` proxied by `apps/web/proxy-server.js`):
 
-- `bridge` — `apps/bridge/Dockerfile` → `PORT=8787`, `LISTEN_PORT=60754`, `DATA_DIR=/data`, volume `bridge-data:/data`, `ports: 8787:8787 + 60754:60754` TCP+UDP (no `network_mode` key — bridge ports)
-- `worker` — `apps/worker/Dockerfile` → `:8789`, volumes `bridge-data:/data:ro`
-- `web` — `apps/web/Dockerfile` → `PORT=3000`
+- `bridge` — `apps/bridge/Dockerfile` → `PORT=8787`, `LISTEN_PORT`, `CONFIG_DIR=/config`, `DATA_DIR=/data`, volumes `config:/config` + `data:/data`, `ports:` = `LISTEN_PORT` TCP+UDP only (no `8787` publish, no `network_mode` key)
+- `worker` — `apps/worker/Dockerfile` → `:8789`, volumes `config:/config:ro` + `data:/data`, no `ports:` block
+- `web` — `apps/web/Dockerfile` → `PORT=3000` (`proxy-server.js` entry), `ports: 3000:3000`
 
-**Network mode — bridge ports (default) vs host**
+**Network mode — internal services (default) vs direct vs host**
 
-- **Bridge ports (default `compose.yaml`)**: `bridge` publishes `8787:8787` + `60754:60754` TCP+UDP. `LISTEN_PORT` host mapping is static at create time — changing the peer port in Settings → Network hot-swaps `Bun.listen` + `SetWaitPort` inside the container, but the *host* mapping needs `LISTEN_PORT=NEW docker compose up -d` to match. UPnP inside bridge-network sees the container IP — prefer manual port-forward or host mode for UPnP.
+- **Internal (default `compose.yaml`)**: bridge/worker have no published ports. The web entrypoint proxies everything same-origin, so LAN browsers only need `:3000`. `LISTEN_PORT` host mapping is static at create time — changing the peer port in Settings → Network hot-swaps `Bun.listen` + `SetWaitPort` inside the container, but the *host* mapping needs `LISTEN_PORT=NEW docker compose up -d` to match. UPnP inside bridge-network sees the container IP — prefer manual port-forward or host mode for UPnP.
+- **Direct (remote bridge/worker)**: publish `8787:8787` / `8789:8789` and set `NEXT_PUBLIC_BRIDGE_URL=ws://host:8787/ws` / `NEXT_PUBLIC_WORKER_URL=http://host:8789` (build-time) or the `localStorage` overrides — the client bypasses the proxy. Needed for split hosting (e.g. Vercel web + home bridge).
 - **Host mode**: add `network_mode: host` to `bridge` (and drop its `ports:`) — it binds directly to host `8787` + `LISTEN_PORT`, UPnP sees the host LAN IP, and Settings → Network port changes apply without `docker compose up -d`.
 
 Port-forwarding is parameterized: `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` (TCP+UDP) when in bridge mode; in host mode the port is host-direct. To use a different peer port, set `LISTEN_PORT` (see `docs/architecture.md#env-full` for `DATA_DIR/listen_port` persistence):
@@ -33,7 +38,7 @@ Images are published to GHCR on every `main` push and on version tags `v*.*.*`. 
 # latest (default)
 docker compose pull
 docker compose up -d
-# http://localhost:3000 + bridge ws://localhost:8787/ws
+# http://localhost:3000 (bridge/worker proxied same-origin — no extra ports)
 
 # pinned release — both services locked to the same version
 TAG=v0.2.0 docker compose pull

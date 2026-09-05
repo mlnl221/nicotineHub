@@ -50,7 +50,9 @@ Every `git worktree` must run on its own ports so it never collides with `main` 
   PORT=8788 LISTEN_PORT=60755 bun run --cwd apps/bridge dev   # -> ws://localhost:8788/ws
 
   # web (Next.js) — PORT env overrides the -p 3000 in apps/web/package.json:6
-  PORT=3001 NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws NEXT_PUBLIC_WORKER_URL=http://localhost:8789 bun run --cwd apps/web dev  # -> http://localhost:3001
+  # NOTE: web dev runs behind proxy-server.js (same-origin /ws + /api/* proxy).
+  # INNER_PORT (outer PORT+1) must also be free — set it explicitly per worktree.
+  PORT=3001 INNER_PORT=3101 NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws NEXT_PUBLIC_WORKER_URL=http://localhost:8789 BRIDGE_INTERNAL_URL=http://localhost:8788 WORKER_INTERNAL_URL=http://localhost:8789 bun run --cwd apps/web dev  # -> http://localhost:3001
   # or: echo "NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws" > apps/web/.env  (.env is gitignored)
 
   # worker (Python) — run from apps/worker with system python + PYTHONPATH, or docker
