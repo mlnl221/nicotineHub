@@ -60,6 +60,12 @@ export async function proxyToService(
     headers,
     redirect: "manual",
     cache: "no-store",
+    // Propagate client aborts: without this, a cancelled browser request
+    // (or a load-generator client timeout) leaves the server-side fetch
+    // running against bridge/worker indefinitely, piling up backlog under
+    // load. No total timeout here — legit /files/:token downloads stream
+    // for minutes; cancellation is the bound.
+    signal: req.signal,
   };
   if (req.method !== "GET" && req.method !== "HEAD" && req.body) {
     init.body = req.body;
