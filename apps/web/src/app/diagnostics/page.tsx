@@ -16,6 +16,7 @@ import { formatStrftime } from "@/lib/chatFormat";
 import { isDemo } from "@/lib/demo";
 import { useStatistics } from "@/lib/statistics";
 import { humanSize } from "@/lib/format";
+import { isBridgeProxied } from "@/lib/bridgeHttp";
 
 const LEVELS: DiagLevel[] = ["debug", "info", "warn", "error"];
 const LEVEL_COLOR: Record<DiagLevel, string> = {
@@ -269,7 +270,11 @@ export default function DiagnosticsPage() {
     if (isDemo) { setBridgeUrlDisplay("demo (offline — no bridge)"); return; }
     try {
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      setBridgeUrlDisplay(`${proto}//${window.location.hostname}:8787/ws`);
+      // Default compose stack reaches the bridge via same-origin /ws (proxied);
+      // direct :8787 only applies in bare dev / direct mode.
+      setBridgeUrlDisplay(isBridgeProxied()
+        ? `${proto}//${window.location.host}/ws (via web proxy)`
+        : `${proto}//${window.location.hostname}:8787/ws`);
     } catch {}
   }, []);
 

@@ -49,7 +49,7 @@ POST /spectrum/request {fileName, size?, token?} → resolve file → stat mtime
 RUN apt-get install -y sox flac ffmpeg curl && pip install -r requirements.txt
 ```
 
-`compose.yaml` shares `bridge-data:/data:ro` (worker reads finished downloads). The bridge image no longer installs audio tooling.
+`compose.yaml` shares `data:/data` (worker reads finished downloads). The bridge image no longer installs audio tooling.
 
 ## Attribution
 

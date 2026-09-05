@@ -499,7 +499,7 @@ export function FileExplorer({
               </div>
             </div>
             <div className="mt-3 rounded-xl bg-surface-container-high px-3 py-2 font-body text-xs text-on-surface-variant dark:bg-surface-variant/40 dark:text-outline">
-              Docker tip: ensure bridge is running on <span className="font-mono">:8787</span> and <span className="font-mono">CONFIG_DIR=/config + DATA_DIR=/data</span> is mounted (volume <span className="font-mono">config:/config + data:/data</span> or bind mount). If <span className="font-mono">BRIDGE_TOKEN</span> is set, add it in Settings → Network or <span className="font-mono">localStorage.nicotineHub.bridgeToken</span>.
+              Docker tip: the browser reaches the bridge through the web entrypoint (same-origin <span className="font-mono">/api/bridge</span> proxy — no published bridge port needed). Ensure <span className="font-mono">CONFIG_DIR=/config + DATA_DIR=/data</span> is mounted (volume <span className="font-mono">config:/config + data:/data</span> or bind mount). If <span className="font-mono">BRIDGE_TOKEN</span> is set, add it in Settings → Network or <span className="font-mono">localStorage.nicotineHub.bridgeToken</span>.
             </div>
           </div>
         )}

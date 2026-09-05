@@ -2,7 +2,8 @@
 
 /**
  * Helper to derive HTTP base URL for bridge REST APIs from the WS URL logic
- * used in session.tsx (localStorage.nicotineHub.bridgeUrl > NEXT_PUBLIC_BRIDGE_URL > hostname:8787).
+ * used in session.tsx (localStorage.nicotineHub.bridgeUrl > NEXT_PUBLIC_BRIDGE_URL >
+ * same-origin /ws, proxied to the bridge — no published :8787 needed).
  * Also handles BRIDGE_TOKEN via query param or Authorization header.
  */
 

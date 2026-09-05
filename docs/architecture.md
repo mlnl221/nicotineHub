@@ -4,7 +4,7 @@ This doc holds the technical details removed from `README.md` for brevity.
 
 ## Bridge
 
-The browser cannot open raw TCP; the bridge is the only SLSK speaker. JSON over `ws://host:8787/ws` is translated to Soulseek binary framing `[uint32 len][uint32 code][payload]` (little-endian; `PeerInit`/`D` use `[uint32 len][uint8 code][payload]`).
+The browser cannot open raw TCP; the bridge is the only SLSK speaker. JSON over same-origin `/ws` (the web entrypoint pipes it to the bridge; direct `ws://host:8787/ws` only in bare dev / direct mode) is translated to Soulseek binary framing `[uint32 len][uint32 code][payload]` (little-endian; `PeerInit`/`D` use `[uint32 len][uint8 code][payload]`).
 
 ```
 [ Browser (Next.js PWA :3000) ] --WS /ws + HTTP /api/*--> [ web proxy-server.js ]
@@ -12,7 +12,7 @@ The browser cannot open raw TCP; the bridge is the only SLSK speaker. JSON over 
                                                              |--/api/bridge/*--> [ Bun bridge :8787 ]
                                                              \--/api/worker/*--> [ Python worker :8789 ] --HTTP--> Discogs/Bandcamp/Apple/…
                                                                                     sox/flac/ffmpeg/numpy/mutagen (oxipng recompress skipped — not in image)
-                                                                                  \--volumes--> bridge-data:/data (RO)
+                                                                                   \--volumes--> data:/data
                                                                                      (finished downloads stream back through /api/bridge/files/:token)
 
 Bridge peer legs: `--P--> peers (messages)`, `--F--> file (raw bytes)`, `--D--> distrib (leaf only)`.

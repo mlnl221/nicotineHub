@@ -55,10 +55,13 @@ All captures from a local demo build (`NEXT_PUBLIC_DEMO=true`, mocked data) — 
 This is an almost 1:1 port of [nicotine-plus](https://nicotine-plus.org/) ([GitHub](https://github.com/nicotine-plus/nicotine-plus)) to a modern Next.js web app. Built on `doc/SLSKPROTOCOL.md`.
 
 ```
-[ Browser (Next.js PWA) ] --WS JSON--> [ Bun bridge :8787 ] --TCP--> server.slsknet.org:2242
-         |                    --HTTP--> [ Python worker :8789 ] --HTTP--> Discogs/Bandcamp/Apple/…
-                                                          --P2P--> peers
+[ Browser (Next.js PWA :3000) ] --WS /ws + HTTP /api/*--> [ web entrypoint ] --pipe--> [ Bun bridge :8787 ] --TCP--> server.slsknet.org:2242
+                                                                                      |--/api/bridge/*--> [ Bun bridge :8787 ]
+                                                                                      \--/api/worker/*--> [ Python worker :8789 ] --HTTP--> Discogs/Bandcamp/Apple/…
+                                                                                                                       --P2P--> peers (bridge)
 ```
+
+Only `web:3000` (+ Soulseek peer `LISTEN_PORT`) is published — browsers reach the bridge/worker through the web entrypoint (same-origin `/ws` + `/api/*` proxy), so `:8787`/`:8789` stay on the compose network. `NEXT_PUBLIC_BRIDGE_URL` / `NEXT_PUBLIC_WORKER_URL` re-enable direct mode (remote bridge/worker).
 
 The browser can't open raw TCP sockets, so the bridge translates JSON over WebSocket to Soulseek binary framing. Heavy work (link scraping, spectrum rendering, tagging) lives in the worker so the SLSK event loop stays clean. See `docs/architecture.md` for protocol and env details.
 
@@ -70,7 +73,7 @@ The browser can't open raw TCP sockets, so the bridge translates JSON over WebSo
 
 - **Search** — global, user, room, wishlist & buddies; tabs + live filters (size/bitrate/length/type/slot/country); paste a Discogs/Bandcamp/Apple/Qobuz/Tidal/MusicBrainz/Deezer/Beatport link to auto-identify the release (worker `POST /scrape`)
 - **Transfers** — queue, resume (`INCOMPLETE<md5>`), `GET /files/:token`, throttled streaming; **Analyze Spectrum** (see below) for finished audio via worker `sox` Full 2000×513 + Zoom 500×1025 (`oxipng`, shared `/tmp` cache)
-- **Worker (scrape/spectrum/tag)** — separate Python FastAPI service `:8789` for CPU/IO-heavy ops; bridge stays SLSK-only
+- **Worker (scrape/spectrum/tag)** — separate Python FastAPI service for CPU/IO-heavy ops (same-origin `/api/worker`; `:8789` internal only); bridge stays SLSK-only
 - **Browse** — shares & folders via peers
 - **Chat** — rooms + private, tickers, owned/member lists
 - **Social** — buddies, interests/recommendations/similar users
@@ -92,7 +95,7 @@ Images are `oxipng -o 2 --strip all` compressed and stored **only in `/tmp/spect
 
 ```
 apps/bridge  — Bun bridge  (WebSocket `/ws` + `/health` + `/files/:token` + volume `DATA_DIR`, SLSK-only)
-apps/worker  — Python FastAPI (scrape/spectrum/tag on `:8789`, `bridge-data:/data:ro`)
+apps/worker  — Python FastAPI (scrape/spectrum/tag via same-origin `/api/worker`; `:8789` internal only, volume `data:/data`)
 apps/web     — Next.js 15 PWA
 compose.yaml — web:3000 (only published UI port) + bridge LISTEN_PORT + internal bridge:8787/worker:8789 → config:/config + data:/data
 ```

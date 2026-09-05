@@ -2,7 +2,8 @@
 
 /**
  * Thin HTTP client for the worker service (scrape/spectrum/tag/verify/analyze).
- * Mirrors lib/bridgeHttp.ts: localStorage.nicotineHub.workerUrl > NEXT_PUBLIC_WORKER_URL > hostname:8789.
+ * Mirrors lib/bridgeHttp.ts: localStorage.nicotineHub.workerUrl > NEXT_PUBLIC_WORKER_URL >
+ * same-origin /api/worker, proxied to the worker — no published :8789 needed.
  * Auth via WORKER_TOKEN Bearer header (localStorage.nicotineHub.workerToken > NEXT_PUBLIC_WORKER_TOKEN).
  * The web never imports scraping/parsing deps — all heavy work stays in apps/worker.
  */
