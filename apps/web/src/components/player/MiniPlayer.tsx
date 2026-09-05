@@ -59,24 +59,43 @@ export function MiniPlayer() {
         >
           <span className="material-symbols-outlined text-[22px]">forward_10</span>
         </button>
+        <div className="relative hidden shrink-0 md:block">
+          <div className="peer">
+            <button
+              type="button"
+              onClick={toggleMute}
+              aria-label={muted || volume === 0 ? "Unmute" : "Mute"}
+              className="rounded-full px-1 py-2 font-label text-xs text-on-surface-variant hover:underline"
+            >
+              <span className="material-symbols-outlined text-[22px]">{muted || volume === 0 ? "volume_off" : "volume_up"}</span>
+            </button>
+          </div>
+          <div className="pointer-events-none absolute bottom-full left-1/2 z-50 -translate-x-1/2 px-4 pb-2 opacity-0 transition-opacity duration-150 hover:pointer-events-auto hover:opacity-100 peer-hover:pointer-events-auto peer-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
+            <div className="rounded-2xl bg-surface-container-lowest/95 px-3 pb-2 pt-3 shadow-[0_8px_40px_4px_rgb(0_0_0/0.10)] backdrop-blur-[20px] ghost-border dark:bg-surface-container-highest/95">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={Math.round((muted ? 0 : volume) * 100)}
+                onChange={(e) => setVolume(Number(e.target.value) / 100)}
+                aria-label="Volume"
+                className="h-24 w-6 accent-primary [direction:rtl] [writing-mode:vertical-lr]"
+              />
+              <div className="mt-1 text-center font-label text-[10px] tabular-nums text-on-surface-variant">
+                {Math.round((muted ? 0 : volume) * 100)}
+              </div>
+            </div>
+          </div>
+        </div>
         <button
           type="button"
           onClick={toggleMute}
           aria-label={muted || volume === 0 ? "Unmute" : "Mute"}
-          className="shrink-0 rounded-full px-1 py-2 font-label text-xs text-on-surface-variant hover:underline"
+          className="shrink-0 rounded-full px-1 py-2 font-label text-xs text-on-surface-variant hover:underline md:hidden"
         >
           <span className="material-symbols-outlined text-[22px]">{muted || volume === 0 ? "volume_off" : "volume_up"}</span>
         </button>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={1}
-          value={Math.round((muted ? 0 : volume) * 100)}
-          onChange={(e) => setVolume(Number(e.target.value) / 100)}
-          aria-label="Volume"
-          className="hidden w-24 shrink-0 accent-primary md:block"
-        />
         <div className="min-w-0 flex-1">
           <div className="truncate font-headline text-sm font-semibold text-on-surface dark:text-inverse-on-surface md:whitespace-normal md:line-clamp-2 md:text-base md:leading-snug">
             {track.title}
