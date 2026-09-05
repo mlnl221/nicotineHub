@@ -231,7 +231,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const expandFolders = (settings as unknown as { userbrowse?: { expand_folders?: string } }).userbrowse?.expand_folders ?? "all";
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
-      {!loading && folders.length === 0 ? (
+      {!loading && !error && folders.length === 0 ? (
         <div className="bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800 px-6 py-3 font-body text-sm text-amber-900 dark:text-amber-200">
           No shares available — this user shares no files or no shares are configured on the bridge. Check Settings → Shares and run a rescan (check_shares_available parity).
         </div>

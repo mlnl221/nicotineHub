@@ -1930,6 +1930,7 @@ export class SoulseekSession {
         if (created && now - created > PEER_ADDRESS_TIMEOUT_MS) {
           clearTimeout(pending.timer);
           this.peerAddressRequests.delete(user);
+          try { this.pendingPeerMessages.delete(user.toLowerCase()); } catch {}
         }
       }
       // pendingConnects timeout is handled per-token (45 s), but sweep stale just in case
@@ -2748,6 +2749,8 @@ export class SoulseekSession {
       logger.warn("browse", "browse timeout", { username });
       this.pendingBrowseShares.delete(key);
       this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);
+      // leak fix: stale queued P/SharedFileListRequest was blocking fresh dials via reusingDial (pendingPeerMessages >0 treated as in-flight)
+      try { this.pendingPeerMessages.delete(key); } catch {}
       // More helpful: peer may be offline, firewalled, or our LISTEN_PORT not forwarded
       this.emitBrowse({ type: "browse-error", username, error: "Timed out fetching shares — peer may be offline, firewalled, or your LISTEN_PORT not port-forwarded (check Diagnostics → Network)" });
     }, 30000);
@@ -2790,7 +2793,16 @@ export class SoulseekSession {
     const code = msg.length >= 8 ? msg.readUInt32LE(4) : -1;
     // Coalesce rapid re-clicks: one pending dial per user, extra messages just queue
     const keyLower = username.toLowerCase();
-    const reusingDial = this.peerAddressRequests.has(username) || (cachedCheck && Date.now() - cachedCheck.updated < USER_ADDRESS_TTL_MS && this.peerStates.size > 0) || this.pendingPeerQueue.some((p) => p.username.toLowerCase() === keyLower) || (this.pendingPeerMessages.get(keyLower)?.length ?? 0) > 0;
+    const now = Date.now();
+    const pendingReq = this.peerAddressRequests.get(username);
+    const isLivePending = !!pendingReq && (now - (pendingReq.createdAt ?? 0) < PEER_ADDRESS_TIMEOUT_MS);
+    const hasLiveSocketForUser = !!(cachedCheck && now - cachedCheck.updated < USER_ADDRESS_TTL_MS && (() => {
+      for (const [, st] of this.peerStates) if (st.username?.toLowerCase() === keyLower && st.connType === connType) return true;
+      return false;
+    })());
+    // Only coalesce if there's a live GetPeerAddress in flight or a live socket for this exact user+type.
+    // Stale pendingPeerMessages alone (leftover from timed-out browse) must NOT count as in-flight or dials deadlock.
+    const reusingDial = isLivePending || hasLiveSocketForUser;
     // Light dedupe log only when coalescing, not on every click
     if (reusingDial) logger.debug("browse", "ensurePeerAndSend coalesced (in-flight dial)", { username, connType, code, pendingSize: this.pendingBrowseShares.size });
     else logger.info("browse", "ensurePeerAndSend", { username, connType, code, msgLen: msg.length, hasCached: !!cachedCheck, hasPending, pendingSize: this.pendingBrowseShares.size });
@@ -2837,7 +2849,7 @@ export class SoulseekSession {
       return;
     }
     logger.info("browse", "requesting peer address", { username });
-    const timer = setTimeout(() => { this.peerAddressRequests.delete(username); logger.debug("browse", "GetPeerAddress timeout cleanup", { username }); }, PEER_ADDRESS_TIMEOUT_MS);
+    const timer = setTimeout(() => { this.peerAddressRequests.delete(username); try { this.pendingPeerMessages.delete(username.toLowerCase()); } catch {} logger.debug("browse", "GetPeerAddress timeout cleanup", { username }); }, PEER_ADDRESS_TIMEOUT_MS);
     const entry = { cbs: [(addr: PeerAddress) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); logger.info("browse", "peer address resolved", { username, ip: addr.ip, port: addr.port }); this.connectToPeerViaAddress(username, addr, connType, msg); }], timer, createdAt: Date.now() };
     this.peerAddressRequests.set(username, entry);
     this.serverSocket?.write(buildGetPeerAddress(username));
