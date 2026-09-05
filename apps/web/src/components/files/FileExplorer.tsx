@@ -16,6 +16,10 @@ import { useSpectrum } from "@/lib/spectrum";
 import { usePlayer } from "@/lib/player/store";
 import { dataFilePlayUrl, formatLabelOf, splitArtistTitle, toast } from "@/lib/player/urls";
 import { createPortal } from "react-dom";
+import { MediainfoModal } from "@/components/files/MediainfoModal";
+import { RenameModal } from "@/components/files/RenameModal";
+import { useConfig } from "@/lib/config/provider";
+import { useSession } from "@/lib/session";
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return "—";
@@ -82,6 +86,14 @@ export function FileExplorer({
   const { requestSpectrum, getEntry } = useSpectrum();
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; file: BridgeFileEntry } | null>(null);
   const [spectrumModal, setSpectrumModal] = useState<{ file: BridgeFileEntry; activeTab: "full" | "zoom" } | null>(null);
+  const [mediainfoFile, setMediainfoFile] = useState<string | null>(null);
+  const [renamePath, setRenamePath] = useState<string | null>(null);
+  const [sharesDirty, setSharesDirty] = useState<string[]>([]);
+  const [rescanning, setRescanning] = useState(false);
+  const [rescanError, setRescanError] = useState<string | null>(null);
+  const { settings } = useConfig();
+  const { state: sessionState, send, subscribe } = useSession();
+  const [secInfoOpen, setSecInfoOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -153,11 +165,11 @@ export function FileExplorer({
   };
 
   const breadcrumbs = (() => {
-    if (current === "/") return [{ label: "⌂ /", path: "/" }];
-    if (current === "/data") return [{ label: "⌂ /", path: "/" }, { label: "/data", path: "/data" }];
+    if (current === "/") return [{ label: "⌂", path: "/" }];
+    if (current === "/data") return [{ label: "⌂", path: "/" }, { label: "data", path: "/data" }];
     if (current.startsWith("/data/")) {
       const rest = current.slice("/data".length).split("/").filter(Boolean);
-      const crumbs: { label: string; path: string }[] = [{ label: "⌂ /", path: "/" }, { label: "/data", path: "/data" }];
+      const crumbs: { label: string; path: string }[] = [{ label: "⌂", path: "/" }, { label: "data", path: "/data" }];
       let acc = "/data";
       for (const p of rest) {
         acc += "/" + p;
@@ -166,7 +178,7 @@ export function FileExplorer({
       return crumbs;
     }
     const parts = current.slice(1).split("/").filter(Boolean);
-    const crumbs: { label: string; path: string }[] = [{ label: "⌂ /", path: "/" }];
+    const crumbs: { label: string; path: string }[] = [{ label: "⌂", path: "/" }];
     let acc = "";
     for (const p of parts) {
       acc += "/" + p;
@@ -262,6 +274,61 @@ export function FileExplorer({
     }
   };
 
+  const getShareMatches = useCallback((filePath: string): string[] => {
+    const t = (settings as unknown as { transfers?: { shared?: [string,string][]; buddyshared?: [string,string][]; trustedshared?: [string,string][] } }).transfers;
+    if (!t) return [];
+    const all: [string,string][] = [...(t.shared||[]), ...(t.buddyshared||[]), ...(t.trustedshared||[])];
+    const hits: string[] = [];
+    for (const [virtual, real] of all) {
+      const r = (real || "").replace(/\/+$/, "");
+      if (!r) continue;
+      if (filePath === r || filePath.startsWith(r + "/")) hits.push(virtual || r);
+    }
+    return [...new Set(hits)];
+  }, [settings]);
+
+  const markSharesDirtyIfNeeded = useCallback((filePath: string) => {
+    if (isDemo) return;
+    const m = getShareMatches(filePath);
+    if (m.length) {
+      setSharesDirty((prev) => [...new Set([...prev, ...m])]);
+      try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Renamed inside shared folder", body: `${m.join(", ")} — rescan needed to update what peers see.` } })); } catch {}
+    }
+  }, [getShareMatches]);
+
+  const handleSharesRescan = useCallback(() => {
+    if (isDemo) {
+      try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Demo", body: "Rescan is disabled in demo" } })); } catch {}
+      return;
+    }
+    if (sessionState.status !== "connected") {
+      toast("Not connected", "Connect to the bridge to rescan");
+      return;
+    }
+    setRescanning(true);
+    setRescanError(null);
+    try { send({ type: "shares:rescan" } as unknown as never); } catch (e) { setRescanning(false); setRescanError(e instanceof Error ? e.message : String(e)); }
+    setTimeout(() => setRescanning((v) => (v ? false : v)), 30_000);
+  }, [sessionState.status, send]);
+
+  useEffect(() => {
+    const unsub = subscribe((msg: unknown) => {
+      const m = msg as { type?: string; counts?: { dirs:number; files:number }; error?: string };
+      if (m.type === "shares:rescanned") {
+        if (rescanning) {
+          setRescanning(false);
+          setSharesDirty([]);
+          try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Shares rescanned", body: m.counts ? `${m.counts.dirs} dirs · ${m.counts.files} files` : "Done" } })); } catch {}
+          fetchDir(current);
+        }
+      } else if (m.type === "error" && rescanning) {
+        setRescanning(false);
+        setRescanError(m.error || "Rescan failed");
+      }
+    });
+    return () => { try { (unsub as unknown as () => void)(); } catch {} };
+  }, [subscribe, rescanning, fetchDir, current]);
+
   return (
     <div className="flex flex-col overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-sm dark:bg-surface-container-high">
       {/* Header */}
@@ -350,8 +417,25 @@ export function FileExplorer({
         </button>
       </div>
 
-      {/* Content */}
-      <div ref={listRef as unknown as React.RefObject<HTMLDivElement>} tabIndex={selectMode ? 0 : -1} onKeyDown={handleKeyDown} data-custom-menu className="min-h-[280px] flex-1 overflow-auto bg-surface-container-lowest dark:bg-surface-container-high/40 outline-none">
+      {/* Shares-dirty rescan strip */}
+      {sharesDirty.length > 0 && (
+        <div className="flex flex-col gap-2 border-b border-amber-500/20 bg-amber-50 px-3 py-2.5 dark:bg-amber-950/20 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="font-label text-xs font-semibold text-amber-900 dark:text-amber-200">Shared files changed{sharesDirty.length===1 ? ` — ${sharesDirty[0]}` : ` — ${sharesDirty.length} shares`} — rescan to update what peers see</div>
+            {rescanError ? <div className="mt-1 font-body text-xs text-error">{rescanError}</div> : null}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button type="button" onClick={() => setSharesDirty([])} className="rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs">Dismiss</button>
+            <button type="button" disabled={rescanning} onClick={handleSharesRescan} className="inline-flex items-center gap-1.5 rounded-full bg-amber-600 px-4 py-1.5 font-label text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50">
+              <span className={`material-symbols-outlined text-[16px] ${rescanning ? "animate-spin" : ""}`}>{rescanning ? "progress_activity" : "refresh"}</span>
+              {rescanning ? "Rescanning…" : "Rescan now"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Content — capped so 100+ rows scroll inside card, not the page */}
+      <div ref={listRef as unknown as React.RefObject<HTMLDivElement>} tabIndex={selectMode ? 0 : -1} onKeyDown={handleKeyDown} data-custom-menu className="min-h-[280px] max-h-[55vh] md:max-h-[60vh] flex-1 overflow-auto overscroll-contain bg-surface-container-lowest dark:bg-surface-container-high/40 outline-none">
         {loading && (
           <div className="space-y-2 p-3">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -528,15 +612,42 @@ export function FileExplorer({
       {/* Bulk bar per-page */}
       <BulkBar count={bulk.size} onClear={bulk.clear} onEdit={() => setBulkEditor(true)} onScrape={() => setBulkScrape(true)} onVerify={handleBulkVerify} onAnalyze={handleBulkAnalyze} onSpectrum={handleBulkSpectrum} />
 
-      {/* Footer note */}
-      <div className="border-t border-outline-variant/10 bg-surface-container-low px-3 py-2 dark:bg-surface-variant/20">
-        <div className="font-body text-[11px] leading-relaxed text-on-surface-variant dark:text-outline">
-          <span className="font-semibold">Security:</span> You start at <span className="font-mono">/data</span> but can navigate up to <span className="font-mono">/</span> (host root) — traversal outside <span className="font-mono">/</span> is blocked and symlink escapes are rejected. If <span className="font-mono">BRIDGE_TOKEN</span> is set, requests require <span className="font-mono">?token</span> or <span className="font-mono">Authorization: Bearer</span> (same as <span className="font-mono">/ws</span>, <span className="font-mono">/logs</span>).
+      {/* Footer — security hover (was always-visible) */}
+      <div className="relative border-t border-outline-variant/10 bg-surface-container-low px-3 py-2 dark:bg-surface-variant/20">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-label text-[11px] text-on-surface-variant dark:text-outline">Security</span>
+          <button
+            type="button"
+            data-testid="explorer-security-info"
+            aria-label="Security information"
+            aria-describedby="explorer-security-tooltip"
+            aria-expanded={secInfoOpen}
+            onMouseEnter={() => setSecInfoOpen(true)}
+            onMouseLeave={() => setSecInfoOpen(false)}
+            onFocus={() => setSecInfoOpen(true)}
+            onBlur={() => setSecInfoOpen(false)}
+            onClick={() => setSecInfoOpen((v) => !v)}
+            onKeyDown={(e) => { if (e.key === "Escape") setSecInfoOpen(false); }}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-surface-container-high hover:bg-surface-container-highest dark:bg-surface-variant"
+          >
+            <span className="material-symbols-outlined text-[16px] text-on-surface-variant">info</span>
+          </button>
         </div>
+        {secInfoOpen && (
+          <div
+            id="explorer-security-tooltip"
+            role="tooltip"
+            className="absolute bottom-full right-2 z-20 mb-2 max-w-[320px] rounded-xl bg-surface-container-highest p-3 shadow-[0_8px_24px_rgba(0,0,0,0.12)] ghost-border dark:bg-surface-variant"
+          >
+            <div className="font-body text-xs leading-relaxed text-on-surface-variant dark:text-outline">
+              <span className="font-semibold">Security:</span> You start at <span className="font-mono">/data</span> but can navigate up to <span className="font-mono">/</span> (host root) — traversal outside <span className="font-mono">/</span> is blocked and symlink escapes are rejected. If <span className="font-mono">BRIDGE_TOKEN</span> is set, requests require <span className="font-mono">?token</span> or <span className="font-mono">Authorization: Bearer</span> (same as <span className="font-mono">/ws</span>, <span className="font-mono">/logs</span>).
+            </div>
+          </div>
+        )}
       </div>
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} onSaved={() => fetchDir(current)} /> : null}
       {bulkEditor ? <BulkTagEditor open={bulkEditor} files={Array.from(bulk.selected)} onClose={() => setBulkEditor(false)} onSaved={() => { bulk.clear(); fetchDir(current); }} /> : null}
-      {bulkScrape || singleScrapeFile || dirScrapeFiles ? <BulkScrapeModal open={!!(bulkScrape || singleScrapeFile || dirScrapeFiles)} files={dirScrapeFiles ?? (singleScrapeFile ? [singleScrapeFile] : Array.from(bulk.selected))} onClose={() => { setBulkScrape(false); setSingleScrapeFile(null); setDirScrapeFiles(null); }} /> : null}
+      {bulkScrape || singleScrapeFile || dirScrapeFiles ? <BulkScrapeModal open={!!(bulkScrape || singleScrapeFile || dirScrapeFiles)} files={dirScrapeFiles ?? (singleScrapeFile ? [singleScrapeFile] : Array.from(bulk.selected))} onClose={() => { setBulkScrape(false); setSingleScrapeFile(null); setDirScrapeFiles(null); }} onRenamed={(paths) => { for (const p of paths) markSharesDirtyIfNeeded(p); if (paths.length) fetchDir(current); }} /> : null}
       {bulkResult && mounted ? createPortal(
         <div className="fixed inset-0 z-[100] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
           <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col overflow-hidden rounded-t-2xl md:rounded-2xl bg-surface-container-lowest shadow-xl ghost-border" onClick={(e) => e.stopPropagation()}>
@@ -583,6 +694,8 @@ export function FileExplorer({
               onAnalyze: isAudio ? () => handleSingleAnalyze(e.path) : undefined,
               onSpectrum: isAudio ? () => handleSingleSpectrum(e.path) : undefined,
               onPlay: isAudio ? () => playFile(e.path, e.name, e.size) : undefined,
+              onMediainfo: isDemo ? undefined : () => setMediainfoFile(e.path),
+              onRename: isDemo ? undefined : () => setRenamePath(e.path),
             });
           })()}
           onClose={() => setMenuAnchor(null)}
@@ -646,6 +759,8 @@ export function FileExplorer({
         })(),
         document.body
       ) : null}
+      {mediainfoFile ? <MediainfoModal filePath={mediainfoFile} onClose={() => setMediainfoFile(null)} /> : null}
+      {renamePath ? <RenameModal filePath={renamePath} onClose={() => setRenamePath(null)} onRenamed={(newPath) => { fetchDir(current); markSharesDirtyIfNeeded(newPath); try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Renamed", body: newPath.split("/").pop() || newPath } })); } catch {} }} /> : null}
     </div>
   );
 }

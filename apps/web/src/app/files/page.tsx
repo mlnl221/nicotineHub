@@ -80,17 +80,13 @@ export default function FilesPage() {
                 </button>
               </div>
             )}
-            <div className="mt-3 flex items-center gap-2">
+            <div className="relative mt-3 flex items-center gap-2">
               <button
                 type="button"
                 data-testid="files-info"
                 aria-label="About Explorer"
                 aria-describedby="files-info-tooltip"
                 aria-expanded={infoOpen}
-                onMouseEnter={() => setInfoOpen(true)}
-                onMouseLeave={() => setInfoOpen(false)}
-                onFocus={() => setInfoOpen(true)}
-                onBlur={() => setInfoOpen(false)}
                 onClick={() => setInfoOpen((v) => !v)}
                 onKeyDown={(e) => { if (e.key === "Escape") setInfoOpen(false); }}
                 className="inline-flex items-center gap-1.5 rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs font-medium text-on-surface-variant hover:bg-surface-container-highest dark:bg-surface-variant dark:text-outline"
@@ -102,7 +98,7 @@ export default function FilesPage() {
                   id="files-info-tooltip"
                   data-testid="files-info-tooltip"
                   role="tooltip"
-                  className="relative z-[70] max-w-sm rounded-xl bg-surface-container-highest p-3 shadow-lg ghost-border dark:bg-surface-variant"
+                  className="absolute bottom-full left-0 z-[70] mb-2 max-w-sm rounded-xl bg-surface-container-highest p-3 shadow-lg ghost-border dark:bg-surface-variant"
                 >
                   <div className="font-body text-xs leading-relaxed text-on-surface-variant dark:text-outline">
                     This is the browser replacement for <span className="font-mono">nautilus /data</span> / <span className="font-mono">explorer /data</span> / <span className="font-mono">xdg-open /data</span>. The container has no display server; this web UI is the Explorer. You start at <span className="font-mono">/data</span> but can navigate up to <span className="font-mono">/</span> (host root) — traversal outside <span className="font-mono">/</span> is blocked and symlink escapes are rejected. If <span className="font-mono">BRIDGE_TOKEN</span> is set, the bridge requires it for <span className="font-mono">/api/files</span> (same gate as <span className="font-mono">/ws</span>, <span className="font-mono">/logs</span>, <span className="font-mono">/diagnostics</span>, <span className="font-mono">/plugins</span>).

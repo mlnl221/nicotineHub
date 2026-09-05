@@ -103,6 +103,8 @@ export interface Settings {
     rescan_shares_hour: number;
     reveal_buddy_shares: boolean;
     reveal_trusted_shares: boolean;
+    auto_rename_enabled: boolean;
+    rename_template: string;
     incompletedir: string;
     downloaddir: string;
     uploaddir: string;
@@ -312,6 +314,8 @@ export const defaults: Settings = {
     rescan_shares_hour: 0,
     reveal_buddy_shares: false,
     reveal_trusted_shares: false,
+    auto_rename_enabled: false,
+    rename_template: "{track}. {artist} - {title}",
     incompletedir: "${NICOTINE_DATA_HOME}/incomplete",
     downloaddir: "${NICOTINE_DATA_HOME}/downloads",
     uploaddir: "${NICOTINE_DATA_HOME}/received",

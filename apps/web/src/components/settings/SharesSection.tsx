@@ -881,6 +881,39 @@ export function SharesSection() {
           ]}
         />
       </SectionCard>
+
+      <SectionCard title="Auto-rename after scrape" description="When enabled, successfully scraped files are renamed using the template. Supports {track} (01, 02…), {artist}, {title}. Extension is kept. Missing tags → skipped. Collisions → (2), (3)…" actions={<SectionSaveButton section="transfers" />}>
+        <ToggleControl
+          label="Enable auto-rename after scrape"
+          description="Rename files in /files after a successful scrape when the required tags exist. Renames happen in-place on the worker."
+          checked={!!t.auto_rename_enabled}
+          onChange={(v) => setOption("transfers", "auto_rename_enabled", v)}
+        />
+        <TextFieldControl
+          label="Rename template"
+          description="Template for the new basename (extension kept). Tokens: {track} {artist} {title}. Example with default: 01. Pink Floyd - Speak to Me.flac"
+          value={t.rename_template ?? defaults.transfers.rename_template}
+          placeholder={defaults.transfers.rename_template}
+          onChange={(v) => setOption("transfers", "rename_template", v)}
+          onReset={() => setOption("transfers", "rename_template", defaults.transfers.rename_template)}
+        />
+        {(() => {
+          const tmpl = (t.rename_template ?? "").trim();
+          const allowed = new Set(["track", "artist", "title"]);
+          const found = [...tmpl.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
+          const unknown = found.filter((x) => !allowed.has(x));
+          const hasToken = found.length > 0 && found.every((x) => allowed.has(x));
+          return (
+            <div className="font-body text-xs">
+              {!tmpl ? <span className="text-outline">Enter a template containing at least one of {"{track} {artist} {title}"}.</span> :
+                unknown.length ? <span className="text-error">Unknown token(s): {unknown.map((x) => `{${x}}`).join(", ")} — allowed: {"{track} {artist} {title}"}.</span> :
+                !hasToken ? <span className="text-error">Template must contain at least one of {"{track} {artist} {title}"}.</span> :
+                <span className="text-on-surface-variant dark:text-outline">Template looks valid — preview: <span className="font-mono">{tmpl.replace("{track}", "01").replace("{artist}", "Artist").replace("{title}", "Title")}.flac</span></span>
+              }
+            </div>
+          );
+        })()}
+      </SectionCard>
     </div>
   );
 }
