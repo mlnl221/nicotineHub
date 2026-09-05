@@ -1794,9 +1794,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       logger.debug("bridge", "unknown message type", { type: data.type });
       ws.send(errorMessage("Unknown message type."));
     },
-    close(ws) {
+    close(ws, code, reason) {
       try { (ws.data as unknown as { logUnsub?: () => void }).logUnsub?.(); } catch {}
-      logger.info("bridge", "ws close");
+      const sess = ws.data.session as unknown as { searches?: Map<unknown, unknown>; username?: string } | undefined;
+      const searchCount = sess?.searches?.size ?? 0;
+      logger.info("bridge", "ws close", { code, reason: reason ? String(reason).slice(0,200) : "", username: (sess as { username?: string })?.username ?? "", searches: searchCount });
       if (ws.data.session) {
         try { activeSessions.delete(ws.data.session); } catch {}
       }
