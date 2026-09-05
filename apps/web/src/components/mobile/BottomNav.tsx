@@ -11,14 +11,15 @@ type NavItem = { icon: string; label: string; href: string };
 
 const PRIMARY: NavItem[] = [
   { icon: "search", label: "Search", href: "/search" },
-  { icon: "downloading", label: "Transfers", href: "/downloads" },
+  { icon: "downloading", label: "Downloads", href: "/downloads" },
+  { icon: "upload", label: "Uploads", href: "/uploads" },
+  { icon: "folder_open", label: "Files", href: "/files" },
   { icon: "forum", label: "Chat", href: "/private-chat" },
 ];
 
 const MORE: NavItem[] = [
   { icon: "folder_managed", label: "Browse", href: "/browse" },
   { icon: "group", label: "Buddies", href: "/buddies" },
-  { icon: "upload", label: "Uploads", href: "/uploads" },
   { icon: "groups", label: "Chat Rooms", href: "/chat" },
   { icon: "account_circle", label: "Profiles", href: "/profile" },
   { icon: "interests", label: "Interests", href: "/interests" },
@@ -30,7 +31,9 @@ const MORE: NavItem[] = [
 function isActive(pathname: string, href: string) {
   if (pathname === href) return true;
   if (href === "/search" && pathname.startsWith("/search")) return true;
-  if (href === "/downloads" && (pathname.startsWith("/downloads") || pathname.startsWith("/uploads"))) return true;
+  if (href === "/downloads" && pathname.startsWith("/downloads")) return true;
+  if (href === "/uploads" && pathname.startsWith("/uploads")) return true;
+  if (href === "/files" && pathname.startsWith("/files")) return true;
   if (href === "/browse" && pathname.startsWith("/browse")) return true;
   if (href === "/buddies" && pathname.startsWith("/buddies")) return true;
   if (href === "/private-chat" && pathname.startsWith("/private-chat")) return true;
@@ -48,9 +51,9 @@ export function BottomNav() {
   const { t } = useI18n();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  const transferCount = mounted ? downloads.length + uploads.length : 0;
   const visibleMap = settings.ui.modes_visible || {};
-  const hrefToKey: Record<string, string> = { "/search": "search", "/downloads": "downloads", "/private-chat": "privateChat", "/browse": "browse", "/buddies": "buddies", "/uploads": "uploads", "/chat": "chat", "/profile": "profile", "/interests": "interests", "/diagnostics": "diagnostics", "/statistics": "statistics", "/settings": "settings" };
+  const hrefToKey: Record<string, string> = { "/search": "search", "/downloads": "downloads", "/uploads": "uploads", "/files": "files", "/private-chat": "privateChat", "/browse": "browse", "/buddies": "buddies", "/chat": "chat", "/profile": "profile", "/interests": "interests", "/diagnostics": "diagnostics", "/statistics": "statistics", "/settings": "settings" };
+  const primaryFiltered = mounted ? PRIMARY.filter((i) => visibleMap[hrefToKey[i.href]] !== false) : PRIMARY;
   const moreFiltered = mounted ? MORE.filter((i) => visibleMap[hrefToKey[i.href]] !== false) : MORE;
   const moreActive = mounted && moreFiltered.some((i) => isActive(pathname, i.href));
 
@@ -92,15 +95,18 @@ export function BottomNav() {
       </div>
 
       <nav className="fixed bottom-0 left-0 right-0 z-50 flex flex-col rounded-t-xl bg-surface-container-lowest/80 backdrop-blur-xl shadow-[0_-4px_20px_rgba(0,0,0,0.06)] border-t border-outline-variant/10 dark:bg-surface-container-low/90 md:hidden overflow-hidden max-w-full">
-        <div className="flex items-center gap-0 px-1 sm:px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] w-full max-w-full">
-          {PRIMARY.map((item) => {
+        <div className="flex items-center gap-0 px-1 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] w-full max-w-full">
+          {primaryFiltered.map((item) => {
             const active = mounted ? isActive(pathname, item.href) : false;
-            const showBadge = item.href === "/downloads" && transferCount > 0;
+            const showDownloadsBadge = item.href === "/downloads" && mounted && downloads.length > 0;
+            const showUploadsBadge = item.href === "/uploads" && mounted && uploads.length > 0;
+            const badgeCount = item.href === "/downloads" ? downloads.length : item.href === "/uploads" ? uploads.length : 0;
+            const showBadge = showDownloadsBadge || showUploadsBadge;
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex flex-1 min-w-0 flex-col items-center justify-center rounded-full px-2 py-2 min-h-11 text-center transition-all active:scale-90 relative ${
+                className={`flex flex-1 min-w-0 flex-col items-center justify-center rounded-full px-1 py-2 min-h-11 text-center transition-all active:scale-90 relative ${
                   active
                     ? "bg-primary-container/20 text-primary dark:bg-primary-fixed-dim/20 dark:text-primary-fixed-dim"
                     : "text-on-surface-variant opacity-70 hover:text-primary"
@@ -110,10 +116,10 @@ export function BottomNav() {
                 <span className="material-symbols-outlined text-[22px] leading-none shrink-0" style={active ? ({ fontVariationSettings: "'FILL' 1" } as React.CSSProperties) : undefined}>
                   {item.icon}
                 </span>
-                <span className={`font-label text-[9px] uppercase tracking-widest mt-0.5 leading-none truncate w-full ${active ? "font-bold" : ""}`}>{t(item.label)}</span>
+                <span className={`font-label text-[8px] uppercase tracking-widest mt-0.5 leading-none truncate w-full ${active ? "font-bold" : ""}`}>{t(item.label)}</span>
                 {showBadge && (
-                  <span className="absolute -top-0.5 right-1 min-w-[16px] h-4 rounded-full bg-tertiary px-1 text-[10px] leading-4 text-center text-on-tertiary font-bold">
-                    {transferCount > 99 ? "99+" : transferCount}
+                  <span className="absolute -top-0.5 right-0.5 min-w-[16px] h-4 rounded-full bg-tertiary px-1 text-[10px] leading-4 text-center text-on-tertiary font-bold">
+                    {badgeCount > 99 ? "99+" : badgeCount}
                   </span>
                 )}
               </Link>
@@ -122,10 +128,10 @@ export function BottomNav() {
           <button
             onClick={() => setMoreOpen((v) => !v)}
             aria-label="More navigation"
-            className={`flex flex-1 min-w-0 flex-col items-center justify-center rounded-full px-2 py-2 min-h-11 text-center transition-all active:scale-90 ${moreActive || moreOpen ? "bg-primary-container/20 text-primary dark:bg-primary-fixed-dim/20 dark:text-primary-fixed-dim" : "text-on-surface-variant opacity-70"}`}
+            className={`flex flex-1 min-w-0 flex-col items-center justify-center rounded-full px-1 py-2 min-h-11 text-center transition-all active:scale-90 ${moreActive || moreOpen ? "bg-primary-container/20 text-primary dark:bg-primary-fixed-dim/20 dark:text-primary-fixed-dim" : "text-on-surface-variant opacity-70"}`}
           >
             <span className="material-symbols-outlined text-[22px] leading-none shrink-0">{moreOpen ? "close" : "more_horiz"}</span>
-            <span className={`font-label text-[9px] uppercase tracking-widest mt-0.5 leading-none truncate w-full ${moreActive ? "font-bold" : ""}`}>More</span>
+            <span className={`font-label text-[8px] uppercase tracking-widest mt-0.5 leading-none truncate w-full ${moreActive ? "font-bold" : ""}`}>More</span>
           </button>
         </div>
       </nav>
