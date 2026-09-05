@@ -18,13 +18,17 @@ services:
       # Homelab hardening: optionally restrict browser origins (e.g. ALLOWED_ORIGINS=https://hub.example.com,http://nas:3000)
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
     ports:
-      - "8787:8787"
-      - "40598:40598"
-      - "40598:40598/udp"
-    # Homelab: bridge ports are published so the browser can ws://nas:8787/ws directly.
+      # Browser traffic (WS /ws + HTTP) goes through the web entrypoint
+      # (same-origin /ws + /api/bridge), so 8787 is NOT published — the
+      # bridge lives on the compose network only. LISTEN_PORT below is
+      # Soulseek peer traffic and MUST stay published TCP+UDP.
+      - "${LISTEN_PORT:-40598}:${LISTEN_PORT:-40598}"
+      - "${LISTEN_PORT:-40598}:${LISTEN_PORT:-40598}/udp"
+    # Homelab: browsers reach the bridge through the web entrypoint only
+    # (same-origin /ws + /api/bridge via proxy-server.js) — no 8787 publish.
     # LISTEN_PORT is the host port — changing it in Settings → Network (portrange) writes CONFIG_DIR/listen_port (+ CONFIG_DIR/host.env for .env sync) and hot-swaps Bun.listen + reconnects Soulseek (SetWaitPort) without WS restart; UI stays up, Save triggers fresh connect. The *host* mapping is static at create time: `LISTEN_PORT=NEW docker compose up -d` to change it.
     # UPnP auto-maps if `server.upnp` is enabled (default true, toggle in Network) but sees the container IP in bridge mode — prefer manual forward, or add `network_mode: host` (then drop `ports:`) so UPnP sees the host LAN IP.
-    # For reverse-proxy only (internal): services: { bridge: { ports: !["127.0.0.1:8787:8787"] } } and set NEXT_PUBLIC_BRIDGE_URL via web env.
+    # Direct bridge access (remote setups): publish 8787 and set NEXT_PUBLIC_BRIDGE_URL=ws://host:8787/ws via web env.
     volumes:
       - config:/config
       - data:/data
@@ -53,8 +57,9 @@ services:
       QOBUZ_USER_AUTH_TOKEN: "${QOBUZ_USER_AUTH_TOKEN:-}"
       TIDAL_TOKEN: "${TIDAL_TOKEN:-}"
       TIDAL_COUNTRY: "${TIDAL_COUNTRY:-US}"
-    ports:
-      - "8789:8789"
+    # No published ports: browsers reach the worker through the web
+    # entrypoint (same-origin /api/worker). Direct access (remote setups):
+    # add `8789:8789` and set NEXT_PUBLIC_WORKER_URL=http://host:8789.
     volumes:
       - config:/config:ro
       - data:/data
@@ -73,7 +78,14 @@ services:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
       PORT: "3000"
-      NEXT_PUBLIC_WORKER_URL: "${NEXT_PUBLIC_WORKER_URL:-http://localhost:8789}"
+      # Service targets default to compose DNS in the web Dockerfile
+      # (BRIDGE_INTERNAL_URL=http://bridge:8787, WORKER_INTERNAL_URL=http://worker:8789).
+      # Leave NEXT_PUBLIC_* unset for same-origin proxying; set them only
+      # for direct remote-service access (baked at build time).
+      NEXT_PUBLIC_WORKER_URL: "${NEXT_PUBLIC_WORKER_URL:-}"
+      # Server-side proxy auth fallback (browser Bearer is forwarded first).
+      BRIDGE_TOKEN: "${BRIDGE_TOKEN:-}"
+      WORKER_TOKEN: "${WORKER_TOKEN:-}"
     ports:
       - "3000:3000"
     healthcheck:

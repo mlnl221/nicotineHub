@@ -67,8 +67,12 @@ function bridgeUrl(): string {
     return configured;
   }
 
+  // No override and no build-time URL: same-origin /ws through the web
+  // entrypoint (proxy-server.js pipes it to the bridge), so bridge :8787
+  // needs no published host port. Remote-bridge setups (Vercel demo, NAS)
+  // keep working via localStorage override or NEXT_PUBLIC_BRIDGE_URL above.
   const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const base = `${scheme}//${window.location.hostname}:8787/ws`;
+  const base = `${scheme}//${window.location.host}/ws`;
   const tok = bridgeToken();
   if (tok) return `${base}?token=${encodeURIComponent(tok)}`;
   return base;

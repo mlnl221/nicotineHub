@@ -2,7 +2,8 @@
 
 /**
  * Thin HTTP client for the worker service (scrape/spectrum/tag/verify/analyze).
- * Mirrors lib/bridgeHttp.ts: localStorage.nicotineHub.workerUrl > NEXT_PUBLIC_WORKER_URL > hostname:8789.
+ * Mirrors lib/bridgeHttp.ts: localStorage.nicotineHub.workerUrl > NEXT_PUBLIC_WORKER_URL >
+ * same-origin /api/worker, proxied to the worker — no published :8789 needed.
  * Auth via WORKER_TOKEN Bearer header (localStorage.nicotineHub.workerToken > NEXT_PUBLIC_WORKER_TOKEN).
  * The web never imports scraping/parsing deps — all heavy work stays in apps/worker.
  */
@@ -24,11 +25,10 @@ export function getWorkerHttpBase(): string {
   } catch {}
   const configured = process.env.NEXT_PUBLIC_WORKER_URL;
   if (configured) return configured.replace(/\/$/, "");
-  const scheme = window.location.protocol === "https:" ? "https:" : "http:";
-  const host = window.location.hostname || "localhost";
-  // Worktree quad: web 3001 -> worker 8789, web 3002 -> worker 8791
-  const port = window.location.port === "3001" ? "8789" : window.location.port === "3002" ? "8791" : "8789";
-  return `${scheme}//${host}:${port}`;
+  // Same-origin default: /api/worker on the web origin (proxied to the
+  // worker), so worker :8789 needs no published host port. Remote-worker
+  // setups keep working via localStorage override or NEXT_PUBLIC_WORKER_URL.
+  return "/api/worker";
 }
 
 export function workerFetchHeaders(extra?: Record<string, string>): Record<string, string> {

@@ -8,9 +8,9 @@ This file is for AI coding agents working in this repo. See https://agents.md fo
 
 Mobile-first / browser-first Soulseek web client (beyond MVP — full 1:1 bridge). Monorepo with Bun workspaces.
 
-- `apps/bridge` — Bun: Soulseek 1:1 bridge over raw TCP (`server.slsknet.org:2242`, P/F/D leaf) + WebSocket at `ws://host:8787/ws` + `/health` + `/files/:token` + volumes `CONFIG_DIR` (`/config`, autobrr parity) + `DATA_DIR` (`/data`)
+- `apps/bridge` — Bun: Soulseek 1:1 bridge over raw TCP (`server.slsknet.org:2242`, P/F/D leaf) + WebSocket via web same-origin `/ws` (piped to internal `bridge:8787`; direct `ws://host:8787/ws` only in bare dev / direct mode) + `/health` + `/files/:token` + volumes `CONFIG_DIR` (`/config`, autobrr parity) + `DATA_DIR` (`/data`)
 - `apps/web` — Next.js 15 (App Router) + Tailwind v4 PWA, mobile shell `TopBar`/`BottomNav`, pages for search (multi-mode), downloads/uploads (F streaming), browse, chat, buddies, interests, profiles
-- `compose.yaml` — `web:3000` + `bridge:8787/60754` + `worker:8789` (no reverse proxy; `LISTEN_PORT` default 60754, editable in Settings → Network)
+- `compose.yaml` — `web:3000` is the sole browser entrypoint (same-origin `/ws` + `/api/bridge/*` + `/api/worker/*` proxied to internal `bridge:8787`/`worker:8789`, neither published) + peer `LISTEN_PORT` (default 60754, editable in Settings → Network)
 
 Reference protocol: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plus/nicotine-plus) and `apps/bridge/src/soulseek.ts` (framing: `[uint32 len][uint32 code][payload]`).
 
@@ -50,7 +50,9 @@ Every `git worktree` must run on its own ports so it never collides with `main` 
   PORT=8788 LISTEN_PORT=60755 bun run --cwd apps/bridge dev   # -> ws://localhost:8788/ws
 
   # web (Next.js) — PORT env overrides the -p 3000 in apps/web/package.json:6
-  PORT=3001 NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws NEXT_PUBLIC_WORKER_URL=http://localhost:8789 bun run --cwd apps/web dev  # -> http://localhost:3001
+  # NOTE: web dev runs behind proxy-server.js (same-origin /ws + /api/* proxy).
+  # INNER_PORT (outer PORT+1) must also be free — set it explicitly per worktree.
+  PORT=3001 INNER_PORT=3101 NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws NEXT_PUBLIC_WORKER_URL=http://localhost:8789 BRIDGE_INTERNAL_URL=http://localhost:8788 WORKER_INTERNAL_URL=http://localhost:8789 bun run --cwd apps/web dev  # -> http://localhost:3001
   # or: echo "NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws" > apps/web/.env  (.env is gitignored)
 
   # worker (Python) — run from apps/worker with system python + PYTHONPATH, or docker
