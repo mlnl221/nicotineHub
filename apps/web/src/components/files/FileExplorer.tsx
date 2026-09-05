@@ -752,7 +752,7 @@ export function FileExplorer({
               onSpectrum: isAudio ? () => handleSingleSpectrum(e.path) : undefined,
               onPlay: isAudio ? () => playFile(e.path, e.name, e.size) : undefined,
               onMediainfo: isAudio || !isDemo ? () => setMediainfoFile(e.path) : undefined,
-              onRename: isDemo ? undefined : () => setRenamePath(e.path),
+              onRename: () => setRenamePath(e.path),
             });
           })()}
           onClose={() => setMenuAnchor(null)}
@@ -817,7 +817,7 @@ export function FileExplorer({
         document.body
       ) : null}
       {mediainfoFile ? <MediainfoModal filePath={mediainfoFile} onClose={() => setMediainfoFile(null)} /> : null}
-      {renamePath ? <RenameModal filePath={renamePath} onClose={() => setRenamePath(null)} onRenamed={(newPath) => { fetchDir(current); markSharesDirtyIfNeeded(newPath); try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Renamed", body: newPath.split("/").pop() || newPath } })); } catch {} }} /> : null}
+      {renamePath ? <RenameModal filePath={renamePath} onClose={() => setRenamePath(null)} onRenamed={(newPath) => { if (isDemo) { const newName = newPath.split("/").pop() ?? newPath; setEntries((prev) => prev.map((en) => en.path === renamePath ? { ...en, path: newPath, name: newName } : en)); try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Renamed (demo — not saved)", body: newName } })); } catch {} } else { fetchDir(current); markSharesDirtyIfNeeded(newPath); try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Renamed", body: newPath.split("/").pop() || newPath } })); } catch {} } }} /> : null}
     </div>
   );
 }

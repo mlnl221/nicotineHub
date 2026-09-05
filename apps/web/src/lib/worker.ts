@@ -56,6 +56,10 @@ export interface ScrapeResult {
 }
 
 export async function scrapeRelease(url: string): Promise<ScrapeResult> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    const { demoReleaseScrape } = await import("@/lib/demo/fixtures");
+    return demoReleaseScrape(url);
+  }
   const res = await workerFetch("/scrape", { method: "POST", body: JSON.stringify({ url }) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Scrape failed (${res.status})`);
@@ -225,6 +229,18 @@ export interface MediainfoResult {
 }
 
 export async function renameFile(fileName: string, newName: string): Promise<{ ok: boolean; newPath: string; fileName: string; suffixed: boolean }> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    const trimmed = newName.trim();
+    if (!trimmed) throw new Error("Name cannot be empty");
+    if (trimmed.includes("/") || trimmed.includes("\\") || trimmed.includes("\x00")) throw new Error("Name cannot contain / or \\");
+    const sep = fileName.includes("/") ? "/" : "\\";
+    const idx = fileName.lastIndexOf(sep);
+    const dir = idx === -1 ? "" : fileName.slice(0, idx + 1);
+    const base = idx === -1 ? fileName : fileName.slice(idx + 1);
+    if (trimmed === base) return { ok: true, newPath: fileName, fileName, suffixed: false };
+    const newPath = `${dir}${trimmed}`;
+    return { ok: true, newPath, fileName: newPath, suffixed: false };
+  }
   const res = await workerFetch("/rename", { method: "POST", body: JSON.stringify({ fileName, newName }) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Rename failed (${res.status})`);

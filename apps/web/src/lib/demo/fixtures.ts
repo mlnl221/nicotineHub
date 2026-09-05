@@ -360,6 +360,17 @@ export const DEMO_SCRAPE_URLS = {
   kern: "https://www.discogs.com/release/131668-Zombie-Nation-Kernkraft-400",
 } as const;
 
+export function demoReleaseScrape(url: string): import("@/lib/worker").ScrapeResult {
+  const normUrl = url.trim().replace(/\/$/, "");
+  if (normUrl.includes("3681871")) {
+    return { artist: "DJ Satomi", album: "Waves", year: 2004, track_count: 3, query: "DJ Satomi - Waves", source: "discogs", confidence: 0.95, url: DEMO_SCRAPE_URLS.waves };
+  }
+  if (normUrl.includes("131668")) {
+    return { artist: "Zombie Nation", album: "Kernkraft 400", year: 2000, track_count: 4, query: "Zombie Nation - Kernkraft 400", source: "discogs", confidence: 0.95, url: DEMO_SCRAPE_URLS.kern };
+  }
+  throw new Error("Demo link-paste supports the two Discogs releases from the demo tracks — running a raw search instead.");
+}
+
 export function demoScrapeResult(fileName: string, url: string, apply: boolean): import("@/lib/worker").TagScrapeResult | null {
   if (!isDemoAudioPath(fileName)) return null;
   const normUrl = url.trim().replace(/\/$/, "");

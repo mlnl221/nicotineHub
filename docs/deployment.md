@@ -108,4 +108,14 @@ gh workflow run promote.yml                      # or wait for Monday schedule
 
 See `AGENTS.md#git-worktrees` for per-worktree port isolation (`3000/8787/60754/8789` → `3001/8788/60755/8789` …) and `compose.override.yaml` usage for local port overrides.
 
+## Vercel demo (frontend-only)
+
+The public demo ([nicotine-hub-web-phi.vercel.app](https://nicotine-hub-web-phi.vercel.app/)) hosts **only `apps/web`** — the bridge (raw TCP to `server.slsknet.org:2242`) and worker (`sox`/`oxipng`, `/data` volume) cannot run on Vercel. Demo mode (`NEXT_PUBLIC_DEMO=true`) mocks both: any login works, search/chat/profiles/browse use fixtures, link-paste identifies two sample Discogs releases, and Files rename succeeds in-memory (reverts on reload).
+
+Vercel project settings:
+
+- **Root Directory:** `apps/web` (the repo-root `vercel.json` is ignored with this setting)
+- **Production env:** `NEXT_PUBLIC_DEMO=true`; leave `NEXT_PUBLIC_BRIDGE_URL` / `NEXT_PUBLIC_WORKER_URL` empty or unset
+- **Deploys from:** `main` (production URL), so `stage → main` promotion publishes the demo
+
 

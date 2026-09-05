@@ -20,7 +20,7 @@
 
 <p align="center">
   <strong>Try before you install → <a href="https://nicotine-hub-web-phi.vercel.app/">https://nicotine-hub-web-phi.vercel.app/</a></strong><br/>
-  No bridge required. Enter any username/password to explore search, chat, profiles &amp; browse with mocked data.<br/>
+  No bridge required. Enter any username/password to explore search (including link-paste for two sample Discogs releases), chat, profiles, browse &amp; Files (rename is mocked in-memory) with mocked data.<br/>
   <em>Downloads/uploads are disabled in the demo.</em>
 </p>
 
