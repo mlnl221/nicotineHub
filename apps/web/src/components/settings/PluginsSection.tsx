@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useSession } from "@/lib/session";
 import type { PluginInfo } from "@/lib/protocol";
-import { SectionCard, ToggleControl } from "@/components/settings/controls";
+import { SectionCard, SectionSaveButton, ToggleControl } from "@/components/settings/controls";
 import { useConfig } from "@/lib/config/provider";
 import { isDemo } from "@/lib/demo";
 
@@ -61,7 +61,7 @@ export function PluginsSection() {
   if (isDemo) {
     return (
       <div className="flex flex-col gap-6">
-        <SectionCard title="Plugins" description="Demo mode — bridge plugin runtime disabled.">
+        <SectionCard title="Plugins" description="Demo mode — bridge plugin runtime disabled." actions={<SectionSaveButton section="plugins" />}>
           <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs text-on-surface-variant dark:bg-surface-container-highest/40">
             Plugins require a running bridge (DATA_DIR/plugins). In the Vercel demo, all logins are mocked and transfers disabled, so plugin install/toggle is not available. Run locally (<span className="font-mono">bun run dev</span> or <span className="font-mono">docker compose up</span>) to manage plugins.
           </div>
@@ -197,6 +197,7 @@ export function PluginsSection() {
       <SectionCard
         title="Plugins"
         description="TS/JS-only plugins (parity with nicotine-plus pynicotine/pluginsystem.py — Python .py is blocked). Plugins run on the bridge with full Node access — only install trusted code. Settings persist in DATA_DIR/plugins.json."
+        actions={<SectionSaveButton section="plugins" />}
       >
         <div className="rounded-xl bg-amber-500/10 px-4 py-3 font-body text-xs leading-relaxed text-amber-900 dark:text-amber-200">
           <span className="font-semibold">Security:</span> Plugins have unrestricted filesystem &amp; network access on the bridge (same as nicotine-plus desktop). Only <span className="font-mono">.ts</span>/<span className="font-mono">.js</span> plugins are allowed — Python (<span className="font-mono">.py</span>) and other languages are blocked (both zip and GitHub). Review source before installing — you assume full risk. GitHub installs are restricted to <span className="font-mono">github.com</span> / <span className="font-mono">githubusercontent.com</span> (10 s, 20 MB zip / 200 KB single file) and validated (zip-slip, path-traversal, 1 GiB, <span className="font-mono">export class Plugin extends BasePlugin</span> + <span className="font-mono">types.js</span> import, TS syntax). Built-ins <span className="font-mono">core_commands</span> / <span className="font-mono">spamfilter</span> are try/catch-only, no VM isolation.

@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY apps/worker/requirements.txt ./
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends sox flac ffmpeg curl \
+    && apt-get install -y --no-install-recommends sox flac ffmpeg curl mediainfo \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir -r requirements.txt \
     && mkdir -p /tmp/spectrals && chmod 777 /tmp/spectrals \

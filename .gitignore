@@ -15,8 +15,8 @@ compose.override.yaml
 
 # local data dirs (bridge CONFIG_DIR/DATA_DIR fallback: ./config, ./data, /tmp; holds
 # worker.json with secret tokens when saved via Settings → Worker)
-config/
-data/
+/config/
+/data/
 apps/bridge/data/
 apps/bridge/config/
 
@@ -42,3 +42,6 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+
+.playwright-mcp/
+test-results/

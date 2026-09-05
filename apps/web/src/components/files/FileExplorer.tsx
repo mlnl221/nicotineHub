@@ -13,7 +13,14 @@ import { bulkVerify, bulkAnalyze, bulkRequestSpectrum, verifyFile, analyzeFile, 
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { fileExplorerDirMenu, fileExplorerMenu } from "@/lib/context-menu/menus";
 import { useSpectrum } from "@/lib/spectrum";
+import { usePlayer } from "@/lib/player/store";
+import { dataFilePlayUrl, formatLabelOf, splitArtistTitle, toast } from "@/lib/player/urls";
 import { createPortal } from "react-dom";
+import { MediainfoModal } from "@/components/files/MediainfoModal";
+import { RenameModal } from "@/components/files/RenameModal";
+import { ImageHoverCard } from "@/components/files/ImageHoverCard";
+import { useConfig } from "@/lib/config/provider";
+import { useSession } from "@/lib/session";
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return "—";
@@ -56,6 +63,17 @@ export function FileExplorer({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tagFile, setTagFile] = useState<string | null>(null);
+  const { play } = usePlayer();
+
+  const playFile = useCallback((absPath: string, name: string, size?: number) => {
+    const target = dataFilePlayUrl(absPath);
+    if (!target) {
+      toast("Not playable", `${name} cannot play in the browser — download it instead.`);
+      return;
+    }
+    const { artist, title } = splitArtistTitle(name);
+    play({ title, artist, src: target.url, formatLabel: formatLabelOf(name), transcoding: target.viaWorker, fileKey: absPath, size });
+  }, [play]);
   const [selectMode, setSelectMode] = useState(false);
   const bulk = useBulkSelection();
   const [bulkEditor, setBulkEditor] = useState(false);
@@ -69,10 +87,21 @@ export function FileExplorer({
   const { requestSpectrum, getEntry } = useSpectrum();
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; file: BridgeFileEntry } | null>(null);
   const [spectrumModal, setSpectrumModal] = useState<{ file: BridgeFileEntry; activeTab: "full" | "zoom" } | null>(null);
+  const [mediainfoFile, setMediainfoFile] = useState<string | null>(null);
+  const [renamePath, setRenamePath] = useState<string | null>(null);
+  const [sharesDirty, setSharesDirty] = useState<string[]>([]);
+  const [rescanning, setRescanning] = useState(false);
+  const [rescanError, setRescanError] = useState<string | null>(null);
+  const { settings } = useConfig();
+  const { state: sessionState, send, subscribe } = useSession();
+  const [secInfoOpen, setSecInfoOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const fetchDir = useCallback(async (path: string) => {
+  const currentRef = useRef(current);
+  useEffect(() => { currentRef.current = current; }, [current]);
+
+  const fetchDir = useCallback(async (path: string, opts?: { push?: boolean }) => {
     if (isDemo) {
       setLoading(true);
       setError(null);
@@ -97,6 +126,11 @@ export function FileExplorer({
       setCurrent(data.path);
       setParent(data.parent);
       setEntries(data.entries);
+      if (opts?.push && typeof window !== "undefined" && !isDemo) {
+        try {
+          window.history.pushState({ explorer: data.path }, "", window.location.href);
+        } catch {}
+      }
     } catch (e) {
       const msg = (e as Error).message;
       if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
@@ -110,6 +144,26 @@ export function FileExplorer({
   }, []);
 
   useEffect(() => { fetchDir(initialPath); }, [fetchDir, initialPath]);
+
+  // Browser back walks up directories (invisible history entries, same URL)
+  useEffect(() => {
+    if (isDemo || typeof window === "undefined") return;
+    try {
+      const st = window.history.state as { explorer?: string } | null;
+      if (!st?.explorer) {
+        window.history.replaceState({ explorer: currentRef.current }, "", window.location.href);
+      }
+    } catch {}
+    const onPop = (e: PopStateEvent) => {
+      const st = e.state as { explorer?: string } | null;
+      const target = st?.explorer;
+      if (typeof target === "string" && target !== currentRef.current) {
+        fetchDir(target);
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [fetchDir]);
 
   const handleDirScrape = async (dir: BridgeFileEntry) => {
     if (isDemo) {
@@ -140,11 +194,11 @@ export function FileExplorer({
   };
 
   const breadcrumbs = (() => {
-    if (current === "/") return [{ label: "⌂ /", path: "/" }];
-    if (current === "/data") return [{ label: "⌂ /", path: "/" }, { label: "/data", path: "/data" }];
+    if (current === "/") return [{ label: "⌂", path: "/" }];
+    if (current === "/data") return [{ label: "⌂", path: "/" }, { label: "data", path: "/data" }];
     if (current.startsWith("/data/")) {
       const rest = current.slice("/data".length).split("/").filter(Boolean);
-      const crumbs: { label: string; path: string }[] = [{ label: "⌂ /", path: "/" }, { label: "/data", path: "/data" }];
+      const crumbs: { label: string; path: string }[] = [{ label: "⌂", path: "/" }, { label: "data", path: "/data" }];
       let acc = "/data";
       for (const p of rest) {
         acc += "/" + p;
@@ -153,7 +207,7 @@ export function FileExplorer({
       return crumbs;
     }
     const parts = current.slice(1).split("/").filter(Boolean);
-    const crumbs: { label: string; path: string }[] = [{ label: "⌂ /", path: "/" }];
+    const crumbs: { label: string; path: string }[] = [{ label: "⌂", path: "/" }];
     let acc = "";
     for (const p of parts) {
       acc += "/" + p;
@@ -249,6 +303,61 @@ export function FileExplorer({
     }
   };
 
+  const getShareMatches = useCallback((filePath: string): string[] => {
+    const t = (settings as unknown as { transfers?: { shared?: [string,string][]; buddyshared?: [string,string][]; trustedshared?: [string,string][] } }).transfers;
+    if (!t) return [];
+    const all: [string,string][] = [...(t.shared||[]), ...(t.buddyshared||[]), ...(t.trustedshared||[])];
+    const hits: string[] = [];
+    for (const [virtual, real] of all) {
+      const r = (real || "").replace(/\/+$/, "");
+      if (!r) continue;
+      if (filePath === r || filePath.startsWith(r + "/")) hits.push(virtual || r);
+    }
+    return [...new Set(hits)];
+  }, [settings]);
+
+  const markSharesDirtyIfNeeded = useCallback((filePath: string) => {
+    if (isDemo) return;
+    const m = getShareMatches(filePath);
+    if (m.length) {
+      setSharesDirty((prev) => [...new Set([...prev, ...m])]);
+      try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Renamed inside shared folder", body: `${m.join(", ")} — rescan needed to update what peers see.` } })); } catch {}
+    }
+  }, [getShareMatches]);
+
+  const handleSharesRescan = useCallback(() => {
+    if (isDemo) {
+      try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Demo", body: "Rescan is disabled in demo" } })); } catch {}
+      return;
+    }
+    if (sessionState.status !== "connected") {
+      toast("Not connected", "Connect to the bridge to rescan");
+      return;
+    }
+    setRescanning(true);
+    setRescanError(null);
+    try { send({ type: "shares:rescan" } as unknown as never); } catch (e) { setRescanning(false); setRescanError(e instanceof Error ? e.message : String(e)); }
+    setTimeout(() => setRescanning((v) => (v ? false : v)), 30_000);
+  }, [sessionState.status, send]);
+
+  useEffect(() => {
+    const unsub = subscribe((msg: unknown) => {
+      const m = msg as { type?: string; counts?: { dirs:number; files:number }; error?: string };
+      if (m.type === "shares:rescanned") {
+        if (rescanning) {
+          setRescanning(false);
+          setSharesDirty([]);
+          try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Shares rescanned", body: m.counts ? `${m.counts.dirs} dirs · ${m.counts.files} files` : "Done" } })); } catch {}
+          fetchDir(current);
+        }
+      } else if (m.type === "error" && rescanning) {
+        setRescanning(false);
+        setRescanError(m.error || "Rescan failed");
+      }
+    });
+    return () => { try { (unsub as unknown as () => void)(); } catch {} };
+  }, [subscribe, rescanning, fetchDir, current]);
+
   return (
     <div className="flex flex-col overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-sm dark:bg-surface-container-high">
       {/* Header */}
@@ -276,7 +385,7 @@ export function FileExplorer({
           {parent !== null && (
             <button
               type="button"
-              onClick={() => fetchDir(parent ?? "/")}
+              onClick={() => fetchDir(parent ?? "/", { push: true })}
               className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs font-medium text-on-surface-variant hover:bg-surface-container-highest dark:bg-surface-variant dark:text-outline"
             >
               <span className="material-symbols-outlined text-[16px]">arrow_upward</span> Up
@@ -297,7 +406,7 @@ export function FileExplorer({
             {i > 0 && <span className="text-outline/60">/</span>}
             <button
               type="button"
-              onClick={() => fetchDir(c.path)}
+              onClick={() => fetchDir(c.path, { push: true })}
               className={`rounded-full px-2 py-0.5 font-label text-xs ${i === breadcrumbs.length - 1 ? "bg-primary-container font-semibold text-on-primary-container" : "bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest dark:bg-surface-variant dark:text-outline"}`}
             >
               {c.label}
@@ -337,8 +446,25 @@ export function FileExplorer({
         </button>
       </div>
 
-      {/* Content */}
-      <div ref={listRef as unknown as React.RefObject<HTMLDivElement>} tabIndex={selectMode ? 0 : -1} onKeyDown={handleKeyDown} data-custom-menu className="min-h-[280px] flex-1 overflow-auto bg-surface-container-lowest dark:bg-surface-container-high/40 outline-none">
+      {/* Shares-dirty rescan strip */}
+      {sharesDirty.length > 0 && (
+        <div className="flex flex-col gap-2 border-b border-amber-500/20 bg-amber-50 px-3 py-2.5 dark:bg-amber-950/20 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="font-label text-xs font-semibold text-amber-900 dark:text-amber-200">Shared files changed{sharesDirty.length===1 ? ` — ${sharesDirty[0]}` : ` — ${sharesDirty.length} shares`} — rescan to update what peers see</div>
+            {rescanError ? <div className="mt-1 font-body text-xs text-error">{rescanError}</div> : null}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button type="button" onClick={() => setSharesDirty([])} className="rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs">Dismiss</button>
+            <button type="button" disabled={rescanning} onClick={handleSharesRescan} className="inline-flex items-center gap-1.5 rounded-full bg-amber-600 px-4 py-1.5 font-label text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50">
+              <span className={`material-symbols-outlined text-[16px] ${rescanning ? "animate-spin" : ""}`}>{rescanning ? "progress_activity" : "refresh"}</span>
+              {rescanning ? "Rescanning…" : "Rescan now"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Content — capped so 100+ rows scroll inside card, not the page */}
+      <div ref={listRef as unknown as React.RefObject<HTMLDivElement>} tabIndex={selectMode ? 0 : -1} onKeyDown={handleKeyDown} data-custom-menu className="min-h-[280px] max-h-[55vh] md:max-h-[60vh] flex-1 overflow-auto overscroll-contain bg-surface-container-lowest dark:bg-surface-container-high/40 outline-none">
         {loading && (
           <div className="space-y-2 p-3">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -397,7 +523,7 @@ export function FileExplorer({
               <button
                 key={e.path}
                 type="button"
-                onClick={() => fetchDir(e.path)}
+                onClick={() => fetchDir(e.path, { push: true })}
                 onContextMenu={(ev) => {
                   ev.preventDefault();
                   ev.stopPropagation();
@@ -426,7 +552,7 @@ export function FileExplorer({
                 </div>
                 <button
                   type="button"
-                  onClick={() => fetchDir(e.path)}
+                  onClick={() => fetchDir(e.path, { push: true })}
                   className="rounded-full bg-surface-container-high px-2 py-1 font-label text-[11px] text-on-surface-variant hover:bg-surface-container-highest"
                   title="Try to enter symlink (blocked if it escapes /)"
                 >
@@ -437,12 +563,13 @@ export function FileExplorer({
             {showFiles && files.filter((e) => e.type !== "symlink").map((e, idx) => {
               const ext = e.name.toLowerCase().split(".").pop() ?? "";
               const isAudio = !isDemo && ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus","mp2","alac"].includes(ext);
+              const isImage = !isDemo && ["jpg","jpeg","png","gif","webp","bmp","ico"].includes(ext);
               const checked = bulk.has(e.path);
               const isFocused = focusedIdx === audioIds.indexOf(e.path);
               const spectrumEntry = getEntry(e.path);
               const hasSpectrum = spectrumEntry?.status === "done" && (!!spectrumEntry.fullBlobUrl || !!spectrumEntry.fullUrl);
               const isGenerating = spectrumEntry?.status === "queued" || spectrumEntry?.status === "generating";
-              return (
+              const row = (
               <div
                 key={e.path}
                 onClick={() => selectMode && isAudio && (isFocused ? bulk.toggleRange(e.path, audioIds) : bulk.toggle(e.path, audioIds))}
@@ -458,7 +585,7 @@ export function FileExplorer({
                   <input type="checkbox" checked={checked} onChange={() => bulk.toggle(e.path)} onClick={(ev) => ev.stopPropagation()} className="h-4 w-4 shrink-0 accent-primary" />
                 ) : null}
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-container-high text-on-surface-variant dark:bg-surface-variant dark:text-outline">
-                  <span className="material-symbols-outlined text-[18px]">{isAudio ? "audio_file" : "description"}</span>
+                  <span className="material-symbols-outlined text-[18px]">{isImage ? "image" : isAudio ? "audio_file" : "description"}</span>
                 </span>
                 <div className="min-w-0 flex-1" onClick={() => selectMode && isAudio && bulk.toggle(e.path)}>
                   <div className="truncate font-body text-sm text-on-surface dark:text-inverse-on-surface flex items-center gap-1.5">
@@ -478,9 +605,24 @@ export function FileExplorer({
                         <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" /> generating
                       </span>
                     ) : null}
+                    {isImage ? (
+                      <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-secondary-container/70 px-2 py-0.5 font-label text-[10px] font-semibold text-on-secondary-container">
+                        <span className="material-symbols-outlined text-[12px]">image</span> image
+                      </span>
+                    ) : null}
                   </div>
                   <div className="truncate font-mono text-[11px] text-on-surface-variant dark:text-outline">{formatSize(e.size)} · {formatMtime(e.mtime)}</div>
                 </div>
+                {isAudio && !selectMode ? (
+                  <button
+                    type="button"
+                    onClick={() => playFile(e.path, e.name, e.size)}
+                    className="inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1.5 font-label text-xs font-medium text-on-primary"
+                    title="Play in browser"
+                  >
+                    <span className="material-symbols-outlined text-[14px]" style={{ fontVariationSettings: "'FILL' 1" }}>play_arrow</span> Play
+                  </button>
+                ) : null}
                 {isAudio && !selectMode ? (
                   <button
                     type="button"
@@ -496,6 +638,11 @@ export function FileExplorer({
                 ) : null}
               </div>
               );
+              return isImage ? (
+                <ImageHoverCard key={e.path} absPath={e.path} fileName={e.name}>
+                  {row}
+                </ImageHoverCard>
+              ) : row;
             })}
           </div>
           </>
@@ -505,15 +652,42 @@ export function FileExplorer({
       {/* Bulk bar per-page */}
       <BulkBar count={bulk.size} onClear={bulk.clear} onEdit={() => setBulkEditor(true)} onScrape={() => setBulkScrape(true)} onVerify={handleBulkVerify} onAnalyze={handleBulkAnalyze} onSpectrum={handleBulkSpectrum} />
 
-      {/* Footer note */}
-      <div className="border-t border-outline-variant/10 bg-surface-container-low px-3 py-2 dark:bg-surface-variant/20">
-        <div className="font-body text-[11px] leading-relaxed text-on-surface-variant dark:text-outline">
-          <span className="font-semibold">Security:</span> You start at <span className="font-mono">/data</span> but can navigate up to <span className="font-mono">/</span> (host root) — traversal outside <span className="font-mono">/</span> is blocked and symlink escapes are rejected. If <span className="font-mono">BRIDGE_TOKEN</span> is set, requests require <span className="font-mono">?token</span> or <span className="font-mono">Authorization: Bearer</span> (same as <span className="font-mono">/ws</span>, <span className="font-mono">/logs</span>).
+      {/* Footer — security hover (was always-visible) */}
+      <div className="relative border-t border-outline-variant/10 bg-surface-container-low px-3 py-2 dark:bg-surface-variant/20">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-label text-[11px] text-on-surface-variant dark:text-outline">Security</span>
+          <button
+            type="button"
+            data-testid="explorer-security-info"
+            aria-label="Security information"
+            aria-describedby="explorer-security-tooltip"
+            aria-expanded={secInfoOpen}
+            onMouseEnter={() => setSecInfoOpen(true)}
+            onMouseLeave={() => setSecInfoOpen(false)}
+            onFocus={() => setSecInfoOpen(true)}
+            onBlur={() => setSecInfoOpen(false)}
+            onClick={() => setSecInfoOpen((v) => !v)}
+            onKeyDown={(e) => { if (e.key === "Escape") setSecInfoOpen(false); }}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-surface-container-high hover:bg-surface-container-highest dark:bg-surface-variant"
+          >
+            <span className="material-symbols-outlined text-[16px] text-on-surface-variant">info</span>
+          </button>
         </div>
+        {secInfoOpen && (
+          <div
+            id="explorer-security-tooltip"
+            role="tooltip"
+            className="absolute bottom-full right-2 z-20 mb-2 max-w-[320px] rounded-xl bg-surface-container-highest p-3 shadow-[0_8px_24px_rgba(0,0,0,0.12)] ghost-border dark:bg-surface-variant"
+          >
+            <div className="font-body text-xs leading-relaxed text-on-surface-variant dark:text-outline">
+              <span className="font-semibold">Security:</span> You start at <span className="font-mono">/data</span> but can navigate up to <span className="font-mono">/</span> (host root) — traversal outside <span className="font-mono">/</span> is blocked and symlink escapes are rejected. If <span className="font-mono">BRIDGE_TOKEN</span> is set, requests require <span className="font-mono">?token</span> or <span className="font-mono">Authorization: Bearer</span> (same as <span className="font-mono">/ws</span>, <span className="font-mono">/logs</span>).
+            </div>
+          </div>
+        )}
       </div>
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} onSaved={() => fetchDir(current)} /> : null}
       {bulkEditor ? <BulkTagEditor open={bulkEditor} files={Array.from(bulk.selected)} onClose={() => setBulkEditor(false)} onSaved={() => { bulk.clear(); fetchDir(current); }} /> : null}
-      {bulkScrape || singleScrapeFile || dirScrapeFiles ? <BulkScrapeModal open={!!(bulkScrape || singleScrapeFile || dirScrapeFiles)} files={dirScrapeFiles ?? (singleScrapeFile ? [singleScrapeFile] : Array.from(bulk.selected))} onClose={() => { setBulkScrape(false); setSingleScrapeFile(null); setDirScrapeFiles(null); }} /> : null}
+      {bulkScrape || singleScrapeFile || dirScrapeFiles ? <BulkScrapeModal open={!!(bulkScrape || singleScrapeFile || dirScrapeFiles)} files={dirScrapeFiles ?? (singleScrapeFile ? [singleScrapeFile] : Array.from(bulk.selected))} onClose={() => { setBulkScrape(false); setSingleScrapeFile(null); setDirScrapeFiles(null); }} onRenamed={(paths) => { for (const p of paths) markSharesDirtyIfNeeded(p); if (paths.length) fetchDir(current); }} /> : null}
       {bulkResult && mounted ? createPortal(
         <div className="fixed inset-0 z-[100] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
           <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col overflow-hidden rounded-t-2xl md:rounded-2xl bg-surface-container-lowest shadow-xl ghost-border" onClick={(e) => e.stopPropagation()}>
@@ -559,6 +733,9 @@ export function FileExplorer({
               onVerify: isAudio ? () => handleSingleVerify(e.path) : undefined,
               onAnalyze: isAudio ? () => handleSingleAnalyze(e.path) : undefined,
               onSpectrum: isAudio ? () => handleSingleSpectrum(e.path) : undefined,
+              onPlay: isAudio ? () => playFile(e.path, e.name, e.size) : undefined,
+              onMediainfo: isDemo ? undefined : () => setMediainfoFile(e.path),
+              onRename: isDemo ? undefined : () => setRenamePath(e.path),
             });
           })()}
           onClose={() => setMenuAnchor(null)}
@@ -622,6 +799,8 @@ export function FileExplorer({
         })(),
         document.body
       ) : null}
+      {mediainfoFile ? <MediainfoModal filePath={mediainfoFile} onClose={() => setMediainfoFile(null)} /> : null}
+      {renamePath ? <RenameModal filePath={renamePath} onClose={() => setRenamePath(null)} onRenamed={(newPath) => { fetchDir(current); markSharesDirtyIfNeeded(newPath); try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Renamed", body: newPath.split("/").pop() || newPath } })); } catch {} }} /> : null}
     </div>
   );
 }

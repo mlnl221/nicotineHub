@@ -17,7 +17,7 @@ export function ReconnectBanner() {
         style={{ top: "calc(var(--demo-banner-h, 0px) + env(safe-area-inset-top, 0px))" }}
       >
         <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-700/30 border-t-amber-700 dark:border-amber-300/30 dark:border-t-amber-300" aria-hidden />
-        <span>Reconnecting…</span>
+        <span>Reconnecting to bridge…</span>
         <span className="hidden sm:inline font-normal opacity-70">you can keep browsing</span>
       </div>
     );

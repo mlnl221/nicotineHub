@@ -43,6 +43,33 @@ export interface ErrorMessage {
 }
 
 /* ------------------------------------------------------------------ *
+ * Config — per-section explicit save, persisted to CONFIG_DIR/settings.json
+ * ------------------------------------------------------------------ */
+
+export interface ConfigUpdateRequest {
+  type: "config:update";
+  section: string;
+  key: string;
+  value: unknown;
+}
+
+export interface ConfigUpdatedMessage {
+  type: "config:updated";
+  section: string;
+  key: string;
+  value?: unknown;
+}
+
+export interface ConfigGetRequest {
+  type: "config:get";
+}
+
+export interface ConfigStateMessage {
+  type: "config:state";
+  settings: Record<string, Record<string, unknown>>;
+}
+
+/* ------------------------------------------------------------------ *
  * Search
  * ------------------------------------------------------------------ */
 
@@ -789,6 +816,8 @@ export type BridgeOutboundMessage =
   | SpectrumReadyMessage
   | SpectrumErrorMessage
   | SharesRescannedMessage
+  | ConfigUpdatedMessage
+  | ConfigStateMessage
   | PongMessage;
 
 export interface SpectrumRequest {
@@ -834,4 +863,6 @@ export type BridgeInboundMessage =
   | SpectrumRequest
   | SpectrumStatusRequest
   | SharesRescanRequest
+  | ConfigUpdateRequest
+  | ConfigGetRequest
   | PingRequest;

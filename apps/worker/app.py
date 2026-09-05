@@ -6,7 +6,7 @@ Own implementation throughout (scraper *pattern* only guided by smoked-salmon).
 Endpoints: GET /health, POST /scrape, POST /spectrum/request,
 GET /spectrum/{stem}/full|zoom, GET /spectrum/{stem},
 POST /tag, POST /tag/write, POST /tag/scrape, POST /tag/bulk,
-POST /verify, POST /analyze, POST /analyze/bulk.
+POST /verify, POST /analyze, POST /analyze/bulk, POST /mediainfo, POST /rename.
 """
 
 from __future__ import annotations
@@ -514,6 +514,139 @@ class TagScrapeIn(BaseModel):
     fileName: str = Field(min_length=1, max_length=1024)
     url: str = Field(min_length=8, max_length=2048)
     apply: bool = Field(default=False)
+    # Optional auto-rename on apply: template like "{track}. {artist} - {title}"
+    # Tokens: {track} zero-padded 2-digit, {artist}, {title}. Must contain >=1 token.
+    renameTemplate: str | None = Field(default=None, max_length=256)
+    renameEnabled: bool = Field(default=False)
+
+
+def _sanitize_filename(name: str) -> str | None:
+    """Filesystem-safe basename (no dirs). None if invalid."""
+    raw = name.strip()
+    if not raw or raw in (".", ".."):
+        return None
+    # reject path separators and control/unsafe chars
+    if "/" in raw or "\\" in raw or "\x00" in raw:
+        return None
+    if any(ord(c) < 32 for c in raw):
+        return None
+    if len(raw) > 255:
+        raw = raw[:255]
+    # Windows trailing dots/spaces break peers + Soulseek
+    raw = raw.strip().rstrip(" .")
+    if not raw or raw in (".", ".."):
+        return None
+    return raw
+
+
+def _unique_dest(dir_path: Path, desired: str) -> Path:
+    """Auto-suffix (2),(3)... before ext if desired exists, like transfers."""
+    cand = dir_path / desired
+    if not cand.exists():
+        return cand
+    stem = Path(desired).stem
+    suffix = Path(desired).suffix
+    n = 2
+    while n < 1000:
+        alt = f"{stem} ({n}){suffix}"
+        cand2 = dir_path / alt
+        if not cand2.exists():
+            return cand2
+        n += 1
+    return cand
+
+
+_RENAME_TEMPLATE_TOKENS = {"track", "artist", "title"}
+_RENAME_TOKEN_RE = None  # lazy
+
+
+def _render_rename_template(template: str, track: str | None, artist: str | None, title: str | None) -> str | None:
+    """Render template or None if missing required tags / invalid."""
+    import re
+    global _RENAME_TOKEN_RE
+    if _RENAME_TOKEN_RE is None:
+        _RENAME_TOKEN_RE = re.compile(r"\{(\w+)\}")
+    found = set(_RENAME_TOKEN_RE.findall(template))
+    if not found:
+        return None
+    if not found.issubset(_RENAME_TEMPLATE_TOKENS):
+        return None
+    # need at least one present
+    if found & _RENAME_TEMPLATE_TOKENS == set():
+        return None
+    # track zero-pad
+    track_out = ""
+    if track:
+        m = re.match(r"^\s*(\d+)", track)
+        if m:
+            try:
+                track_out = f"{int(m.group(1)):02d}"
+            except ValueError:
+                track_out = track.strip()
+        else:
+            track_out = track.strip()
+    vals = {
+        "track": track_out,
+        "artist": (artist or "").strip().replace("/", "-").replace("\\", "-"),
+        "title": (title or "").strip().replace("/", "-").replace("\\", "-"),
+    }
+    # missing required tag → skip rename
+    for tok in found:
+        if not vals.get(tok):
+            return None
+    out = template
+    for k, v in vals.items():
+        out = out.replace("{" + k + "}", v)
+    # reject if still has unmatched brace token left
+    if "{" in out or "}" in out:
+        return None
+    return out.strip() or None
+
+
+def _do_rename(src: Path, desired_basename: str) -> Path | str:
+    """Rename src to dir/desired_basename (unique). Returns new Path or error string."""
+    sanitized = _sanitize_filename(desired_basename)
+    if not sanitized:
+        return "invalid filename"
+    # keep extension from desired, but ensure not empty
+    dest = _unique_dest(src.parent, sanitized)
+    try:
+        # refuse to rename directories (files only)
+        if src.is_dir():
+            return "directories cannot be renamed"
+        src.rename(dest)
+        return dest
+    except FileExistsError:
+        return "destination already exists"
+    except OSError as e:
+        return str(e)[:200]
+
+
+class RenameIn(BaseModel):
+    fileName: str = Field(min_length=1, max_length=1024)
+    newName: str = Field(min_length=1, max_length=255)
+
+
+@app.post("/rename", dependencies=[Depends(require_auth)])
+async def rename_file(body: RenameIn):
+    path = _resolve_or_404(body.fileName)
+    if isinstance(path, JSONResponse):
+        return path
+    if path.is_dir():
+        return JSONResponse({"detail": "directories cannot be renamed"}, status_code=422)
+    sanitized = _sanitize_filename(body.newName)
+    if not sanitized:
+        return JSONResponse({"detail": "invalid filename — no path separators, control chars, or blank names"}, status_code=422)
+    # refuse if caller tried to sneak an extension change that empties name; still allow
+    dest = _unique_dest(path.parent, sanitized)
+    # if requested name existed and we suffixed, dest != sanitized; that's the auto-suffix path
+    try:
+        path.rename(dest)
+    except FileExistsError:
+        return JSONResponse({"detail": "destination already exists"}, status_code=409)
+    except OSError as e:
+        return JSONResponse({"detail": str(e)[:300]}, status_code=500)
+    return {"ok": True, "newPath": str(dest), "fileName": dest.name, "suffixed": dest.name != sanitized}
 
 
 @app.post("/tag/scrape", dependencies=[Depends(require_auth)])
@@ -576,7 +709,55 @@ async def tag_scrape(body: TagScrapeIn):
         # re-read
         try:
             new_tags, new_info, cover = _read_tags_and_info(path)
-            return {"artist": found.artist, "album": found.album, "year": found.year, "track_count": found.track_count, "query": suggested["_query"], "source": found.source, "confidence": _confidence(found.source), "url": url, "suggested": suggested, "applied": True, "tags": new_tags, "info": new_info}
+            # optional rename on apply
+            rename_result = None
+            if body.renameEnabled and body.renameTemplate:
+                tmpl = body.renameTemplate.strip()
+                if tmpl:
+                    import re as _re2
+                    found_tokens = set((_RENAME_TOKEN_RE or _re2.compile(r"\{(\w+)\}")).findall(tmpl))
+                    if found_tokens and not found_tokens.issubset(_RENAME_TEMPLATE_TOKENS):
+                        return JSONResponse({"detail": f"unknown template token — allowed: {sorted(_RENAME_TEMPLATE_TOKENS)}"}, status_code=422)
+                    if not found_tokens:
+                        return JSONResponse({"detail": "rename template must contain at least one of {track} {artist} {title}"}, status_code=422)
+                    # derive track/artist/title from freshly written tags
+                    tnum = new_tags.get("tracknumber") or new_tags.get("track") or ""
+                    art = new_tags.get("artist") or new_tags.get("albumartist") or found.artist or ""
+                    tit = new_tags.get("title") or ""
+                    desired_base = _render_rename_template(tmpl, tnum, art, tit)
+                    if desired_base is None:
+                        # missing required tag → skip, report
+                        rename_result = {"skipped": True, "reason": "missing track/artist/title tag for template"}
+                    else:
+                        # preserve extension from original file
+                        ext = path.suffix
+                        if not desired_base.lower().endswith(ext.lower()) and ext:
+                            desired_base = desired_base + ext
+                        sanitized = _sanitize_filename(desired_base)
+                        if not sanitized:
+                            rename_result = {"skipped": True, "reason": "invalid filename from template"}
+                        else:
+                            dest = _unique_dest(path.parent, sanitized)
+                            try:
+                                if path.is_dir():
+                                    rename_result = {"skipped": True, "reason": "directories cannot be renamed"}
+                                else:
+                                    path.rename(dest)
+                                    rename_result = {"renamed": True, "newPath": str(dest), "suffixed": dest.name != sanitized}
+                                    path = dest
+                            except OSError as e:
+                                rename_result = {"skipped": True, "reason": str(e)[:200]}
+                            # re-read after rename to keep tags consistent (path changed)
+                            try:
+                                new_tags, new_info, cover = _read_tags_and_info(path)
+                            except Exception:
+                                pass
+            payload: dict = {"artist": found.artist, "album": found.album, "year": found.year, "track_count": found.track_count, "query": suggested["_query"], "source": found.source, "confidence": _confidence(found.source), "url": url, "suggested": suggested, "applied": True, "tags": new_tags, "info": new_info}
+            if rename_result is not None:
+                payload["rename"] = rename_result
+                if rename_result.get("newPath"):
+                    payload["newPath"] = rename_result["newPath"]
+            return payload
         except Exception:
             pass
     return {"artist": found.artist, "album": found.album, "year": found.year, "track_count": found.track_count, "query": suggested["_query"], "source": found.source, "confidence": _confidence(found.source), "url": url, "suggested": suggested, "applied": False}
@@ -890,3 +1071,263 @@ def _cutoff_hz(path: Path) -> int | None:
                 os.unlink(tmp)
         except OSError:
             pass
+
+
+MEDIAINFO_TIMEOUT = 30
+MEDIAINFO_CAP = 2_000_000  # raw text cap (chars)
+
+
+def _mediainfo_track_summary(tracks: list[dict]) -> dict:
+    """Summarize mediainfo JSON tracks into a small UI-friendly dict."""
+    general = next((t for t in tracks if t.get("@type") == "General"), {})
+    videos = [t for t in tracks if t.get("@type") == "Video"]
+    audios = [t for t in tracks if t.get("@type") == "Audio"]
+    texts = [t for t in tracks if t.get("@type") == "Text"]
+    return {
+        "format": general.get("Format") or general.get("Format_String") or None,
+        "duration": general.get("Duration_String3") or general.get("Duration") or general.get("Duration_String") or None,
+        "fileSize": general.get("FileSize_String") or general.get("FileSize") or None,
+        "overallBitRate": general.get("OverallBitRate_String") or general.get("OverallBitRate") or None,
+        "video": [
+            {
+                "format": v.get("Format") or v.get("Format_String") or None,
+                "codecId": v.get("CodecID") or v.get("Format_Profile") or None,
+                "width": v.get("Width"),
+                "height": v.get("Height"),
+                "frameRate": v.get("FrameRate_String") or v.get("FrameRate") or None,
+                "bitRate": v.get("BitRate_String") or v.get("BitRate") or None,
+                "duration": v.get("Duration_String3") or v.get("Duration") or None,
+            }
+            for v in videos
+        ] if videos else None,
+        "audio": [
+            {
+                "format": a.get("Format") or a.get("Format_String") or None,
+                "codecId": a.get("CodecID") or None,
+                "channels": a.get("Channels_String") or a.get("Channels") or None,
+                "samplingRate": a.get("SamplingRate_String") or a.get("SamplingRate") or None,
+                "bitRate": a.get("BitRate_String") or a.get("BitRate") or None,
+                "bitDepth": a.get("BitDepth") or a.get("BitDepth_String") or None,
+                "duration": a.get("Duration_String3") or a.get("Duration") or None,
+            }
+            for a in audios
+        ] if audios else None,
+        "textCount": len(texts),
+    }
+
+
+@app.post("/mediainfo", dependencies=[Depends(require_auth)])
+async def mediainfo(body: FileIn):
+    """Run `mediainfo` on a file under DATA_DIR and return parsed JSON + raw text."""
+    path = _resolve_or_404(body.fileName)
+    if isinstance(path, JSONResponse):
+        return path
+    # mediainfo CLI is stateless; cap resolved path
+    if not path.is_file():
+        return JSONResponse({"detail": "not a file"}, status_code=422)
+    try:
+        st = path.stat()
+        if st.st_size > 20 * 1024 * 1024 * 1024:  # 20 GiB guard
+            return JSONResponse({"detail": "file too large for mediainfo"}, status_code=413)
+    except OSError:
+        pass
+
+    def _run(args: list[str]) -> subprocess.CompletedProcess:
+        return subprocess.run(args, capture_output=True, timeout=MEDIAINFO_TIMEOUT, text=True)
+
+    try:
+        proc_json = await asyncio.to_thread(_run, ["mediainfo", "--Output=JSON", str(path)])
+    except FileNotFoundError:
+        return JSONResponse({"detail": "mediainfo not installed on worker — rebuild the worker image"}, status_code=501)
+    except subprocess.TimeoutExpired:
+        return JSONResponse({"detail": "mediainfo timed out"}, status_code=504)
+    except Exception as e:
+        return JSONResponse({"detail": f"mediainfo failed: {e}"[:300]}, status_code=500)
+    if proc_json.returncode != 0 and not proc_json.stdout.strip():
+        err = (proc_json.stderr or proc_json.stdout or "mediainfo failed").strip()[:300]
+        return JSONResponse({"detail": err}, status_code=422)
+    raw_out = proc_json.stdout.strip()
+    if not raw_out:
+        return JSONResponse({"detail": "mediainfo produced no output"}, status_code=422)
+    try:
+        import json as _json
+        parsed = _json.loads(raw_out)
+        tracks = parsed.get("media", {}).get("track", []) if isinstance(parsed, dict) else []
+        if not isinstance(tracks, list):
+            tracks = []
+    except Exception:
+        return JSONResponse({"detail": "mediainfo JSON parse failed"}, status_code=422)
+    summary = _mediainfo_track_summary(tracks)
+    # second run for Inform-style raw text (small, header-only for most files)
+    raw_text = ""
+    try:
+        proc_text = await asyncio.to_thread(_run, ["mediainfo", str(path)])
+        raw_text = (proc_text.stdout or "").strip()[:MEDIAINFO_CAP]
+    except Exception:
+        raw_text = raw_out[:MEDIAINFO_CAP]
+    return {
+        "fileName": body.fileName,
+        "path": str(path),
+        "tracks": tracks,
+        "summary": summary,
+        "raw": raw_text or raw_out[:MEDIAINFO_CAP],
+    }
+
+
+# ---- in-browser audio: direct serve for native formats, ffmpeg→opus for exotic ----
+# Mirrors bridge AUDIO_MIME/TRANSCODE_EXTS (apps/bridge/src/files.ts).
+AUDIO_NATIVE_EXTS = {"mp3", "flac", "ogg", "oga", "opus", "wav", "m4a", "aac"}
+AUDIO_TRANSCODE_EXTS = {"wma", "wv", "ape", "aiff", "aif", "alac", "mp2"}
+AUDIO_MIME = {
+    "mp3": "audio/mpeg", "flac": "audio/flac", "ogg": "audio/ogg", "oga": "audio/ogg",
+    "opus": "audio/ogg", "wav": "audio/wav", "m4a": "audio/mp4", "aac": "audio/aac",
+}
+TRANSCODE_DIR = Path(os.environ.get("TRANSCODE_DIR", "/tmp/transcodes"))
+TRANSCODE_CACHE_BYTES = 500 * 1024 * 1024
+
+
+def _parse_range(header: str | None, size: int):
+    """Single bytes= range → (start, end) | 'unsatisfiable' | None. Multipart ignored."""
+    if not header or not header.startswith("bytes="):
+        return None
+    spec = header[6:].strip()
+    if "," in spec:
+        return None
+    s, _, e = spec.partition("-")
+    if s == "":
+        try:
+            suffix = int(e)
+        except ValueError:
+            return None
+        if suffix <= 0:
+            return None
+        return (max(0, size - suffix), size - 1)
+    try:
+        start = int(s)
+    except ValueError:
+        return None
+    if start < 0:
+        return None
+    if e == "":
+        end = size - 1
+    else:
+        try:
+            end = int(e)
+        except ValueError:
+            return None
+        if end < start:
+            return None
+    if start >= size:
+        return "unsatisfiable"
+    return (start, min(end, size - 1))
+
+
+def _file_chunks(path: Path, start: int, end: int, chunk: int = 1 << 20):
+    with open(path, "rb") as f:
+        f.seek(start)
+        remaining = end - start + 1
+        while remaining > 0:
+            data = f.read(min(chunk, remaining))
+            if not data:
+                break
+            remaining -= len(data)
+            yield data
+
+
+def _ranged_audio_response(path: Path, request: Request, media_type: str, filename: str):
+    from fastapi.responses import StreamingResponse
+
+    size = path.stat().st_size
+    base_headers = {
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": f'inline; filename="{filename}"',
+    }
+    parsed = _parse_range(request.headers.get("range"), size)
+    if parsed == "unsatisfiable":
+        return JSONResponse({"detail": "range not satisfiable"}, status_code=416,
+                            headers={**base_headers, "Content-Range": f"bytes */{size}"})
+    if parsed is None:
+        return StreamingResponse(_file_chunks(path, 0, size - 1), media_type=media_type,
+                                 headers={**base_headers, "Content-Length": str(size)})
+    start, end = parsed
+    return StreamingResponse(_file_chunks(path, start, end), status_code=206, media_type=media_type,
+                             headers={**base_headers, "Content-Range": f"bytes {start}-{end}/{size}",
+                                      "Content-Length": str(end - start + 1)})
+
+
+def _transcode_cache_key(src: Path) -> str:
+    st = src.stat()
+    h = hashlib.sha1(f"{src.resolve()}|{st.st_mtime_ns}|{st.st_size}".encode()).hexdigest()[:24]
+    return f"{h}.opus"
+
+
+def _trim_transcode_cache() -> None:
+    try:
+        TRANSCODE_DIR.mkdir(parents=True, exist_ok=True)
+        files = sorted(TRANSCODE_DIR.glob("*.opus"), key=lambda p: p.stat().st_mtime)
+        total = sum(p.stat().st_size for p in files)
+        while files and total > TRANSCODE_CACHE_BYTES:
+            old = files.pop(0)
+            try:
+                total -= old.stat().st_size
+                old.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+def _transcode_to_opus(src: Path) -> Path | None:
+    """ffmpeg → cached opus. None when ffmpeg missing/failed."""
+    import shutil
+
+    if not shutil.which("ffmpeg"):
+        return None
+    try:
+        TRANSCODE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    out = TRANSCODE_DIR / _transcode_cache_key(src)
+    if out.exists() and out.stat().st_size > 1000:
+        return out
+    tmp = out.with_suffix(".tmp.opus")
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(src), "-vn", "-c:a", "libopus", "-b:a", "128k", str(tmp)],
+            capture_output=True, timeout=180,
+        )
+        if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 1000:
+            tmp.replace(out)
+            _trim_transcode_cache()
+            return out
+        tmp.unlink(missing_ok=True)
+    except (OSError, subprocess.SubprocessError):
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return None
+
+
+@app.get("/audio", dependencies=[Depends(require_auth)])
+async def audio(file: str, request: Request):
+    """Playable audio for the browser mini-player.
+
+    Query `file`: basename, DATA_DIR-relative, or absolute /data path
+    (same resolution as tag/verify). Native formats stream directly;
+    wma/wv/ape/aiff/alac/mp2 transcode to cached opus. Others → 415,
+    ffmpeg failure → 422 (web shows a toast; original stays downloadable).
+    """
+    resolved = _resolve_or_404(file)
+    if isinstance(resolved, JSONResponse):
+        return resolved
+    ext = resolved.suffix.lstrip(".").lower()
+    if ext in AUDIO_TRANSCODE_EXTS:
+        out = await asyncio.to_thread(_transcode_to_opus, resolved)
+        if out is None:
+            return JSONResponse({"detail": f"cannot transcode .{ext} for browser playback"}, status_code=422)
+        return _ranged_audio_response(out, request, "audio/ogg", f"{resolved.stem}.opus")
+    if ext in AUDIO_NATIVE_EXTS:
+        return _ranged_audio_response(resolved, request, AUDIO_MIME[ext], resolved.name)
+    return JSONResponse({"detail": f".{ext or '?'} is not playable in the browser"}, status_code=415)

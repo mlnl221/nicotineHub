@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { listDirectory, normalizeRequestedPath, resolveSafePath } from "./files.ts";
+import { listDirectory, normalizeRequestedPath, resolveSafePath, parseRange, serveFileWithRanges } from "./files.ts";
 
 function makeTmpDataDir(): string {
   const tmp = mkdtempSync(join(tmpdir(), "nicotine-files-test-"));
@@ -115,6 +115,49 @@ describe("files — secure DATA_DIR browsing (Option A)", () => {
     const outLink = root2.entries.find((e) => e.name === "link_outside");
     if (outLink) {
       await expect(listDirectory("/link_outside", tmp)).rejects.toThrow(/escapes|traversal/);
+    }
+  });
+});
+
+describe("files — audio range serving", () => {
+  test("parseRange: open, closed, suffix, invalid", () => {
+    expect(parseRange(null, 100)).toBeNull();
+    expect(parseRange("bytes=0-99", 100)).toEqual({ start: 0, end: 99 });
+    expect(parseRange("bytes=50-", 100)).toEqual({ start: 50, end: 99 });
+    expect(parseRange("bytes=0-999", 100)).toEqual({ start: 0, end: 99 }); // clamped
+    expect(parseRange("bytes=-10", 100)).toEqual({ start: 90, end: 99 });
+    expect(parseRange("bytes=100-", 100)).toBe("unsatisfiable");
+    expect(parseRange("bytes=0-0,10-20", 100)).toBeNull(); // multipart ignored
+    expect(parseRange("bytes=abc-", 100)).toBeNull();
+    expect(parseRange("bytes=20-10", 100)).toBeNull();
+  });
+
+  test("serveFileWithRanges: 200 inline audio, 206 slice, 416 unsatisfiable", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "nicotine-range-test-"));
+    try {
+      const p = join(tmp, "song.mp3");
+      writeFileSync(p, Buffer.from("0123456789"));
+      const full = serveFileWithRanges(p, new Request("http://x/"), {}, "song.mp3");
+      expect(full.status).toBe(200);
+      expect(full.headers.get("content-type")).toBe("audio/mpeg");
+      expect(full.headers.get("content-disposition") ?? "").toMatch(/^inline/);
+      expect(full.headers.get("accept-ranges")).toBe("bytes");
+      expect(await full.text()).toBe("0123456789");
+
+      const part = serveFileWithRanges(p, new Request("http://x/", { headers: { range: "bytes=2-5" } }), {}, "song.mp3");
+      expect(part.status).toBe(206);
+      expect(part.headers.get("content-range")).toBe("bytes 2-5/10");
+      expect(await part.text()).toBe("2345");
+
+      const bad = serveFileWithRanges(p, new Request("http://x/", { headers: { range: "bytes=99-" } }), {}, "song.mp3");
+      expect(bad.status).toBe(416);
+
+      const dl = serveFileWithRanges(p, new Request("http://x/"), {}, "notes.txt");
+      expect((dl.headers.get("content-disposition") ?? "").startsWith("attachment")).toBe(true);
+      // NOTE: Bun runtime auto-infers content-type from the on-disk extension,
+      // so no assertion on content-type here (file on disk is .mp3).
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
     }
   });
 });

@@ -8,7 +8,7 @@ import { isDemo } from "@/lib/demo";
 
 export function LoginForm() {
   const { login, logout, state } = useSession();
-  const { settings, setOption } = useConfig();
+  const { settings, setOption, markSectionSaved } = useConfig();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showServer, setShowServer] = useState(false);
@@ -43,6 +43,7 @@ export function LoginForm() {
     const hostValue = host.trim() || DEFAULT_SERVER_HOST;
     const portValue = Number(port) || DEFAULT_SERVER_PORT;
     setOption("server", "server", { host: hostValue, port: portValue });
+    markSectionSaved("server"); // login form is an explicit submit — don't leave Network dirty
     setIsSubmitting(true);
     // Settings → Network host/port is authoritative: always send it (nicotine-plus server tuple parity).
     // Keep showServer toggle for UI disclosure, but login always respects Settings.
