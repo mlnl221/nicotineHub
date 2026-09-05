@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useSession } from "@/lib/session";
+import { isDemo } from "@/lib/demo";
 
 type HealthJson = {
   listenPort?: number;
@@ -109,12 +110,15 @@ export function PortChecker() {
   };
 
   useEffect(() => {
+    // Demo (Vercel): no bridge exists — never poll dead candidates
+    if (isDemo) return;
     fetchHealth();
     const id = setInterval(fetchHealth, 15000);
     return () => clearInterval(id);
   }, []);
 
   const check = async () => {
+    if (isDemo) return;
     setChecking(true);
     setResult(null);
     try {
@@ -211,13 +215,19 @@ export function PortChecker() {
           </div>
         </div>
       )}
-      <button
-        onClick={check}
-        disabled={checking}
-        className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary disabled:opacity-50"
-      >
-        {checking ? "Checking…" : "Check bridge & port"}
-      </button>
+      {isDemo ? (
+        <p className="rounded-xl bg-surface-container-high px-3 py-2 text-xs text-on-surface-variant dark:bg-surface-container-highest/40">
+          Bridge check unavailable in demo (offline — no bridge).
+        </p>
+      ) : (
+        <button
+          onClick={check}
+          disabled={checking}
+          className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary disabled:opacity-50"
+        >
+          {checking ? "Checking…" : "Check bridge & port"}
+        </button>
+      )}
       {result && (
         <div className={`mt-3 rounded-xl px-3 py-2 text-xs ${result.ok ? "bg-green-500/10 text-green-700 dark:text-green-300" : "bg-error-container text-on-error-container"}`}>
           {result.msg}
