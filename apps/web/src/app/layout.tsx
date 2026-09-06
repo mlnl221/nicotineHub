@@ -25,11 +25,47 @@ import { ReconnectBanner } from "@/components/ReconnectBanner";
 import { PlayerProvider } from "@/lib/player/store";
 import { MiniPlayer } from "@/components/player/MiniPlayer";
 
+const SITE_URL = "https://nicotine-hub-web-phi.vercel.app/";
+const SITE_NAME = "Nicotine Hub";
+const SITE_DESCRIPTION =
+  "Nicotine Hub is a mobile-first, browser-first Soulseek web client with Nicotine+ parity — search, downloads, uploads, chat and shares from any browser. Self-host with Docker.";
+
 export const metadata: Metadata = {
-  title: "Nicotine Hub",
-  description: "A mobile-first, browser-first Soulseek client.",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: "Nicotine Hub — Soulseek Web Client in Your Browser",
+    template: "%s | Nicotine Hub",
+  },
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  category: "Music",
+  authors: [{ name: "Nicotine Hub contributors" }],
+  creator: "Nicotine Hub contributors",
+  publisher: "Nicotine Hub contributors",
   manifest: "/manifest.webmanifest",
-  applicationName: "Nicotine Hub",
+  alternates: { canonical: "/" },
+  robots: { index: true, follow: true },
+  openGraph: {
+    type: "website",
+    url: "/",
+    siteName: SITE_NAME,
+    title: "Nicotine Hub — Soulseek Web Client in Your Browser",
+    description: SITE_DESCRIPTION,
+    images: [
+      {
+        url: "/opengraph-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Nicotine Hub — Soulseek web client",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Nicotine Hub — Soulseek Web Client in Your Browser",
+    description: SITE_DESCRIPTION,
+    images: ["/opengraph-image.png"],
+  },
   icons: {
     icon: [
       { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
@@ -78,6 +114,21 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html:
               "try{var t=localStorage.getItem('nicotineHub.theme')||localStorage.getItem('nicotine.theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}try{if(localStorage.getItem('nicotineHub.demoBannerDismissed')==='0'){document.documentElement.style.setProperty('--demo-banner-h','32px');}else{document.documentElement.style.setProperty('--demo-banner-h','0px');}}catch(e){document.documentElement.style.setProperty('--demo-banner-h','0px')}",
+          }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "SoftwareApplication",
+              name: SITE_NAME,
+              url: SITE_URL,
+              applicationCategory: "MultimediaApplication",
+              operatingSystem: "Web",
+              offers: { "@type": "Offer", price: 0, priceCurrency: "USD" },
+              isBasedOn: "https://nicotine-plus.org/",
+            }),
           }}
         />
       </head>
