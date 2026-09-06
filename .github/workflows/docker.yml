@@ -30,6 +30,9 @@ jobs:
           - image: web
             dockerfile: apps/web/Dockerfile
             package: nicotinehub-web
+          - image: worker
+            dockerfile: apps/worker/Dockerfile
+            package: nicotinehub-worker
     steps:
       - name: Checkout
         uses: actions/checkout@v4
