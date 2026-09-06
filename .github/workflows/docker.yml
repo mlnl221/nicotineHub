@@ -16,7 +16,19 @@ permissions:
   packages: write
 
 jobs:
-  docker:
+  # Native per-arch builds (no QEMU): amd64 always runs (incl. PR dry-run),
+  # arm64 only on publish. Each pushes a single-arch image by digest;
+  # the merge job assembles the multi-arch manifest.
+  prep:
+    runs-on: ubuntu-latest
+    outputs:
+      date: ${{ steps.d.outputs.date }}
+    steps:
+      - id: d
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+  build-amd64:
+    needs: prep
     # Only run on: push to main (publish), tags, manual, or PR stage -> main (dry-run)
     # This prevents docker builds on feature PRs (perf, per 4e79f46) while still testing stage promotion
     if: github.event_name != 'pull_request' || (github.base_ref == 'main' && github.head_ref == 'stage')
@@ -36,9 +48,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -69,18 +78,178 @@ jobs:
           flavor: |
             latest=false
 
-      - name: Build and push
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/amd64
+          # Publish: push single-arch image by digest. PR dry-run: build only.
+          outputs: ${{ github.event_name != 'pull_request' && format('type=image,name=ghcr.io/mlnl221/{0},push-by-digest=true,name-canonical=true,push=true', matrix.package) || 'type=cacheonly' }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             TAG=${{ steps.meta.outputs.version }}
             BUILD_TAG=${{ steps.meta.outputs.version }}
             COMMIT_SHA=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            BUILD_DATE=${{ needs.prep.outputs.date }}
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=${{ matrix.image }}-amd64
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-amd64
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image }}-amd64
+          path: ${{ runner.temp }}/digests/*
+          retention-days: 1
+
+  build-arm64:
+    needs: prep
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        include:
+          - image: bridge
+            dockerfile: apps/bridge/Dockerfile
+            package: nicotinehub-bridge
+          - image: web
+            dockerfile: apps/web/Dockerfile
+            package: nicotinehub-web
+          - image: worker
+            dockerfile: apps/worker/Dockerfile
+            package: nicotinehub-worker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/mlnl221/${{ matrix.package }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+          labels: |
+            org.opencontainers.image.licenses=GPL-3.0-or-later
+            org.opencontainers.image.source=https://github.com/mlnl221/nicotineHub
+            org.opencontainers.image.title=Nicotine Hub - ${{ matrix.image }}
+          flavor: |
+            latest=false
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/arm64
+          outputs: type=image,name=ghcr.io/mlnl221/${{ matrix.package }},push-by-digest=true,name-canonical=true,push=true
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            TAG=${{ steps.meta.outputs.version }}
+            BUILD_TAG=${{ steps.meta.outputs.version }}
+            COMMIT_SHA=${{ github.sha }}
+            BUILD_DATE=${{ needs.prep.outputs.date }}
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=${{ matrix.image }}-arm64
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-arm64
+
+      - name: Export digest
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image }}-arm64
+          path: ${{ runner.temp }}/digests/*
+          retention-days: 1
+
+  merge:
+    needs: [prep, build-amd64, build-arm64]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: bridge
+            package: nicotinehub-bridge
+          - image: web
+            package: nicotinehub-web
+          - image: worker
+            package: nicotinehub-worker
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ matrix.image }}-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/mlnl221/${{ matrix.package }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+          labels: |
+            org.opencontainers.image.licenses=GPL-3.0-or-later
+            org.opencontainers.image.source=https://github.com/mlnl221/nicotineHub
+            org.opencontainers.image.title=Nicotine Hub - ${{ matrix.image }}
+          flavor: |
+            latest=false
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          targs=""
+          for t in ${{ steps.meta.outputs.tags }}; do targs="$targs -t $t"; done
+          # shellcheck disable=SC2086
+          docker buildx imagetools create $targs \
+            $(printf 'ghcr.io/mlnl221/${{ matrix.package }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: docker buildx imagetools inspect ghcr.io/mlnl221/${{ matrix.package }}:${{ steps.meta.outputs.version }}
