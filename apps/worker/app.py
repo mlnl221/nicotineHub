@@ -100,7 +100,6 @@ async def health():
         "sources": sorted(s.source for s in SCRAPERS),
         "queueDepth": len(spectrals._in_flight),
         "auth": tokens.configured(),  # booleans only, never values
-        "allowedRoots": [str(r) for r in spectrals.allowed_roots()],
     }
 
 
@@ -150,7 +149,7 @@ async def spectrum_request(body: SpectrumIn):
         return JSONResponse({"detail": "not an audio file"}, status_code=422)
     path = spectrals.resolve_audio(body.fileName)
     if path is None:
-        return JSONResponse({"detail": "file not found in allowed roots"}, status_code=404)
+        return JSONResponse({"detail": "file not found"}, status_code=404)
     try:
         st = path.stat()
     except OSError:
@@ -213,53 +212,41 @@ def _stem_lookup(stem: str) -> dict | None:
 def _resolve_any(file_name: str) -> Path | None:
     """Resolve fileName which may be basename, relative path, or absolute path.
 
-    Security: all resolved paths must be inside ALLOWED_ROOTS (default DATA_DIR).
+    Homelab: any path on container disk is servable (no allowlist). ".." segments
+    are neutralized by Path.resolve() and only existing files resolve.
     Supports:
     - "/data/Music/artist/file.flac" or "/media/500SSD/file.flac" (absolute)
-    - "downloads/file.flac" or "Music/file.mp3" (relative to an allowed root)
+    - "downloads/file.flac" or "Music/file.mp3" (relative to DATA_DIR)
     - "file.flac" (basename search via spectrals.resolve_audio)
     - "Music\\Artist\\file.mp3" (virtual path — fallback to basename)
     """
     raw = file_name.strip().replace("\\", "/")
     if not raw or raw in (".", ".."):
         return None
-    roots = [r.resolve() for r in spectrals.allowed_roots()]
-    primary = roots[0] if roots else spectrals.data_dir().resolve()
+    primary = spectrals.data_dir().resolve()
 
-    def _allowed(p: Path) -> bool:
-        try:
-            resolved = p.resolve()
-        except OSError:
-            return False
-        return any(resolved == r or resolved.is_relative_to(r) for r in roots)
-
-    # 1. Absolute path containment check
+    # 1. Absolute path — any existing file on disk
     if raw.startswith("/"):
         try:
             cand = Path(raw).resolve()
-            if cand.is_file() and _allowed(cand):
+            if cand.is_file():
                 return cand
-            # Also try resolving without resolve symlink for existence
-            cand2 = (primary / raw.lstrip("/")).resolve()
-            if cand2.is_file() and _allowed(cand2):
-                return cand2
         except OSError:
             pass
-        # Absolute under a non-primary root, addressed relative to primary by mistake —
+        # Absolute path that doesn't exist as-is —
         # fall through to basename search below.
-    # 2. Relative path under an allowed root (e.g. "downloads/file.flac" or "Music/file.mp3")
+    # 2. Relative path under DATA_DIR (e.g. "downloads/file.flac" or "Music/file.mp3")
     if "/" in raw:
-        for root in roots:
-            try:
-                cand = (root / raw.lstrip("/")).resolve()
-                if cand.is_file() and _allowed(cand):
-                    return cand
-            except OSError:
-                pass
+        try:
+            cand = (primary / raw.lstrip("/")).resolve()
+            if cand.is_file():
+                return cand
+        except OSError:
+            pass
         try:
             # also try nested basename direct join under primary downloads
             cand2 = (primary / "downloads" / Path(raw).name).resolve()
-            if cand2.is_file() and _allowed(cand2):
+            if cand2.is_file():
                 return cand2
         except OSError:
             pass
@@ -268,18 +255,17 @@ def _resolve_any(file_name: str) -> Path | None:
         hit = spectrals.resolve_audio(base)
         if hit:
             return hit
-    # 4. Basename search (downloads + shallow scan across allowed roots)
+    # 4. Basename search (downloads + shallow scan under DATA_DIR)
     hit = spectrals.resolve_audio(raw)
     if hit:
         return hit
-    # 5. Direct allowed-roots search for file explorer shared files (depth 2)
+    # 5. Direct DATA_DIR search for file explorer shared files (depth 3)
     try:
         base = Path(raw).name
-        for root in roots:
-            for top in (root, root / "downloads", root / "uploads", root / "shared"):
-                found = spectrals._scan(top, base, root, depth=3)  # type: ignore
-                if found:
-                    return found
+        for top in (primary, primary / "downloads", primary / "uploads", primary / "shared"):
+            found = spectrals._scan(top, base, primary, depth=3)  # type: ignore
+            if found:
+                return found
     except Exception:
         pass
     return None
@@ -291,7 +277,7 @@ def _resolve_or_404(file_name: str) -> Path | JSONResponse:
         # fallback to old resolver for compat
         path = spectrals.resolve_audio(file_name)
     if path is None:
-        return JSONResponse({"detail": "file not found in allowed roots"}, status_code=404)
+        return JSONResponse({"detail": "file not found"}, status_code=404)
     return path
 
 
@@ -1134,7 +1120,7 @@ def _mediainfo_track_summary(tracks: list[dict]) -> dict:
 
 @app.post("/mediainfo", dependencies=[Depends(require_auth)])
 async def mediainfo(body: FileIn):
-    """Run `mediainfo` on a file under allowed roots and return parsed JSON + raw text."""
+    """Run `mediainfo` on a file anywhere on disk and return parsed JSON + raw text."""
     path = _resolve_or_404(body.fileName)
     if isinstance(path, JSONResponse):
         return path

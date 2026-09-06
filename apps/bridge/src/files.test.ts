@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { listDirectory, normalizeRequestedPath, resolveSafePath, parseRange, serveFileWithRanges, getAllowedRoots, isPathAllowed } from "./files.ts";
+import { listDirectory, normalizeRequestedPath, resolveSafePath, parseRange, serveFileWithRanges } from "./files.ts";
 
 function makeTmpDataDir(): string {
   const tmp = mkdtempSync(join(tmpdir(), "nicotine-files-test-"));
@@ -116,35 +116,6 @@ describe("files — secure DATA_DIR browsing (Option A)", () => {
     if (outLink) {
       await expect(listDirectory("/link_outside", tmp)).rejects.toThrow(/escapes|traversal/);
     }
-  });
-});
-
-describe("files — ALLOWED_ROOTS gating for /api/files/raw", () => {
-  const OLD_DATA = process.env.DATA_DIR;
-  const OLD_ALLOWED = process.env.ALLOWED_ROOTS;
-  afterEach(() => {
-    if (OLD_DATA === undefined) delete process.env.DATA_DIR; else process.env.DATA_DIR = OLD_DATA;
-    if (OLD_ALLOWED === undefined) delete process.env.ALLOWED_ROOTS; else process.env.ALLOWED_ROOTS = OLD_ALLOWED;
-  });
-
-  test("defaults to DATA_DIR only", () => {
-    process.env.DATA_DIR = "/data";
-    delete process.env.ALLOWED_ROOTS;
-    expect(getAllowedRoots()).toEqual([resolve("/data")]);
-    expect(isPathAllowed(resolve("/data/a.flac"))).toBe(true);
-    expect(isPathAllowed(resolve("/media/x.flac"))).toBe(false);
-  });
-
-  test("comma/colon separated roots all allowed, symlink escape rejected", () => {
-    process.env.DATA_DIR = "/data";
-    process.env.ALLOWED_ROOTS = "/data,/media";
-    expect(getAllowedRoots()).toEqual([resolve("/data"), resolve("/media")]);
-    expect(isPathAllowed(resolve("/media/500SSD/Orpheus/a.flac"))).toBe(true);
-    expect(isPathAllowed(resolve("/media/500SSD/Orpheus/a.flac"), resolve("/etc/passwd"))).toBe(false);
-    expect(isPathAllowed(resolve("/etc/passwd"))).toBe(false);
-    process.env.ALLOWED_ROOTS = "/data:/media/500SSD";
-    expect(isPathAllowed(resolve("/media/500SSD/Orpheus/a.flac"))).toBe(true);
-    expect(isPathAllowed(resolve("/media/other/a.flac"))).toBe(false);
   });
 });
 

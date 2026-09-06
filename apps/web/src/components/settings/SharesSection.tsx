@@ -359,7 +359,7 @@ export function SharesSection() {
               testId="shares-docker"
               content={
                 <>
-                  Use <span className="font-mono">Browse container</span> below to see the container filesystem (e.g. <span className="font-mono">/data</span>, <span className="font-mono">/media/…</span> — every host folder must be mounted into the container) and add any subdirectory as a share — the path is stored verbatim. This is the browser equivalent of <span className="font-mono">explorer /</span> (container has no display server). Playback/metadata in <span className="font-mono">/files</span> only works for paths under <span className="font-mono">ALLOWED_ROOTS</span> (default <span className="font-mono">/data</span>; add <span className="font-mono">/media</span> to allow it). For local device folders, use <span className="font-mono">Add folder</span> (File System Access API where available).
+                  Use <span className="font-mono">Browse container</span> below to see the container filesystem (e.g. <span className="font-mono">/data</span>, <span className="font-mono">/media/…</span> — every host folder must be mounted into the container) and add any subdirectory as a share — the path is stored verbatim. This is the browser equivalent of <span className="font-mono">explorer /</span> (container has no display server). Playback/metadata in <span className="font-mono">/files</span> works for any mounted path. For local device folders, use <span className="font-mono">Add folder</span> (File System Access API where available).
                 </>
               }
             />

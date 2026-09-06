@@ -29,32 +29,6 @@ def data_dir() -> Path:
     return Path(os.environ.get("DATA_DIR", "/data"))
 
 
-def allowed_roots() -> list[Path]:
-    """Readable roots for local preview. ALLOWED_ROOTS="/data,/media"; default DATA_DIR only."""
-    raw = os.environ.get("ALLOWED_ROOTS", "")
-    parts = [p.strip() for p in raw.replace(":", ",").split(",") if p.strip()]
-    if not parts:
-        parts = [str(data_dir())]
-    out: list[Path] = []
-    for p in parts:
-        try:
-            r = Path(p).resolve()
-        except OSError:
-            continue
-        if r not in out:
-            out.append(r)
-    return out or [data_dir().resolve()]
-
-
-def is_allowed(path: Path) -> bool:
-    """True when resolved path sits inside any allowed root."""
-    try:
-        resolved = path.resolve()
-    except OSError:
-        return False
-    return any(resolved == r or resolved.is_relative_to(r) for r in allowed_roots())
-
-
 def calculate_zoom_startpoint(duration: float | None) -> int:
     if isinstance(duration, (int, float)) and duration > 5:
         return int(duration // 2)
@@ -76,37 +50,44 @@ def is_audio_file(name: str) -> bool:
 
 
 def resolve_audio(file_name: str) -> Path | None:
-    """Find a finished download by basename under allowed roots (containment-checked)."""
-    base = os.path.basename(file_name.replace("\\", "/"))
+    """Find audio by absolute path (anywhere on disk), or by basename under DATA_DIR."""
+    raw = file_name.strip().replace("\\", "/")
+    if not raw or raw in (".", ".."):
+        return None
+    if raw.startswith("/"):
+        try:
+            cand = Path(raw).resolve()
+            if cand.is_file():
+                return cand
+        except OSError:
+            pass
+        return None
+    base = os.path.basename(raw)
     if not base or base in (".", ".."):
         return None
-    for root in allowed_roots():
-        # direct candidates first (mirrors old bridge lookup)
-        for cand in (root / "downloads" / base, root / base):
-            try:
-                if cand.is_file() and is_allowed(cand.resolve()):
-                    return cand.resolve()
-            except OSError:
-                continue
-        # shallow recursive scan of downloads/ then root (depth 2)
-        for top in (root / "downloads", root):
-            hit = _scan(top, base, root, depth=2)
-            if hit:
-                return hit
+    root = data_dir()
+    for cand in (root / "downloads" / base, root / base):
+        try:
+            if cand.is_file():
+                return cand.resolve()
+        except OSError:
+            continue
+    # shallow recursive scan of downloads/ then root (depth 2)
+    for top in (root / "downloads", root):
+        hit = _scan(top, base, depth=2)
+        if hit:
+            return hit
     return None
 
 
-def _scan(d: Path, target: str, root: Path, depth: int) -> Path | None:
+def _scan(d: Path, target: str, root: Path | None = None, depth: int = 2) -> Path | None:
     try:
         if not d.is_dir():
             return None
         for ent in d.iterdir():
             try:
-                resolved = ent.resolve()
-                if not is_allowed(resolved):
-                    continue
-                if ent.name == target and resolved.is_file():
-                    return resolved
+                if ent.name == target and ent.is_file():
+                    return ent.resolve()
                 if depth > 0 and ent.is_dir():
                     hit = _scan(ent, target, root, depth - 1)
                     if hit:
