@@ -13,6 +13,11 @@ node_modules/
 .env
 .env.local
 
+# python venvs (rebuilt in-image via uv sync; platform-specific)
+.venv/
+**/.venv/
+**/__pycache__/
+
 # repo files not needed inside the app images
 docs/
 compose.yaml

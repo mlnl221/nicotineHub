@@ -46,7 +46,8 @@ POST /spectrum/request {fileName, size?, token?} → resolve file → stat mtime
 `apps/worker/Dockerfile` (`python:3.11-slim`):
 
 ```dockerfile
-RUN apt-get install -y sox flac ffmpeg curl && pip install -r requirements.txt
+RUN apt-get install -y sox flac ffmpeg curl mediainfo  # system layer
+RUN uv sync --locked --no-dev --no-install-project     # deps from uv.lock
 ```
 
 `compose.yaml` shares `data:/data` (worker reads finished downloads). The bridge image no longer installs audio tooling.

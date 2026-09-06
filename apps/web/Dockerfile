@@ -5,7 +5,9 @@ WORKDIR /app
 COPY package.json bun.lock ./
 COPY apps/bridge/package.json apps/bridge/package.json
 COPY apps/web/package.json apps/web/package.json
-RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile && rm -rf node_modules/@playwright node_modules/playwright* node_modules/.bun/@playwright* node_modules/.bun/playwright* 2>/dev/null || true
+# Web-only install: skips root playwright/concurrently tarballs (~50MB, e2e-only).
+# If `bun run build` ever needs a dropped dep, revert to plain --frozen-lockfile.
+RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile --filter './apps/web'
 COPY apps/web apps/web
 WORKDIR /app/apps/web
 ARG TAG
@@ -24,6 +26,7 @@ ENV NEXT_PUBLIC_COMMIT_SHA=${COMMIT_SHA}
 ENV NEXT_PUBLIC_BUILD_DATE=${BUILD_DATE}
 ENV NEXT_PUBLIC_BRIDGE_URL=${NEXT_PUBLIC_BRIDGE_URL}
 ENV NEXT_PUBLIC_DEMO=${NEXT_PUBLIC_DEMO}
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN --mount=type=cache,target=/app/apps/web/.next/cache bun run build
 
 # ---- Runtime (Node): Next.js standalone server ----
