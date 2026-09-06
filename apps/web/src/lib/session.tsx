@@ -38,14 +38,23 @@ export interface SessionState {
   initialized?: boolean;
 }
 
+export interface LoginConflict {
+  currentUser: string;
+  attemptedUser: string;
+}
+
 interface SessionApi {
-  login: (req: Omit<LoginRequest, "type">) => void;
+  login: (req: Omit<LoginRequest, "type">, opts?: { force?: boolean; quiet?: boolean }) => void;
   logout: () => void;
   /** Send a raw message over the open bridge socket (queued if not yet open). */
   send: (msg: BridgeInboundMessage) => void;
   /** Subscribe to all inbound bridge messages (including search messages). */
   subscribe: (cb: (msg: BridgeOutboundMessage) => void) => () => void;
   state: SessionState;
+  /** Non-null when the server singleton is owned by another user — UI shows the takeover popup. */
+  conflict: LoginConflict | null;
+  /** true = retry pending login with force (take over); false = stay logged out. */
+  resolveConflict: (takeover: boolean) => void;
 }
 
 const SessionContext = createContext<SessionApi | null>(null);
@@ -204,6 +213,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
   }, []);
 
+  // Takeover flow: creds awaiting user confirmation + the conflict to display.
+  const [conflict, setConflict] = useState<LoginConflict | null>(null);
+  const pendingTakeover = useRef<(Omit<LoginRequest, "type"> & { force?: boolean }) | null>(null);
+
   const teardown = useCallback(() => {
     generation.current += 1;
     clearHeartbeat();
@@ -213,11 +226,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     sendQueue.current = [];
     const ws = socketRef.current;
     socketRef.current = null;
-    // Explicit logoff so the bridge drops the Soulseek server session
-    // immediately instead of relying on the WS close handshake.
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      try { ws.send(JSON.stringify({ type: "logout" })); } catch {}
-    }
+    // Detach only — closing a tab must NOT log out the shared server session.
+    // Global logoff is an explicit logout() (server broadcasts session:ended).
+    // Drop any pending seed so a later reconnect can't inherit a stale
+    // explicit flag and auto-challenge a foreign session.
+    seedRef.current = null;
+    seedExplicitRef.current = false;
     try { ws?.close(); } catch {}
   }, [clearHeartbeat, clearReconnect]);
 
@@ -227,17 +241,42 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       sessionStorage.removeItem("__mockTransfers");
       if (isDemo) clearDemoStorage();
     } catch {}
+    // Global logoff: the bridge drops the singleton Soulseek session, clears
+    // its vault, and broadcasts session:ended so ALL attached clients sign out.
+    try {
+      const ws = socketRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN && !isDemo) {
+        ws.send(JSON.stringify({ type: "logout" }));
+      }
+    } catch {}
     clearCreds();
     teardown();
     lastLogin.current = null;
+    pendingTakeover.current = null;
+    setConflict(null);
     setState({ status: "idle", reconnecting: false });
     // Protected pages render a spinner on `idle` — route home to the login form.
     router.replace("/");
   }, [teardown, router]);
 
-  const connectSocket = useCallback((loginReq: Omit<LoginRequest, "type">) => {
+  // Seed creds for this connection attempt — only sent if the server reports
+  // logged-out (silent auto flows never trigger a takeover; only the explicit
+  // login form can produce login:conflict).
+  const seedRef = useRef<(Omit<LoginRequest, "type"> & { force?: boolean }) | null>(null);
+  // True when the seed came from an explicit form submit (vs silent auto-login).
+  // An explicit different-user submit must reach the server (→ conflict popup),
+  // never silently attach to someone else's session.
+  const seedExplicitRef = useRef(false);
+
+  const sendLogin = useCallback((sock: WebSocket, req: Omit<LoginRequest, "type"> & { force?: boolean }) => {
+    const msg: LoginRequest = { type: "login", ...req };
+    try { sock.send(JSON.stringify(msg)); } catch {}
+  }, []);
+
+  const connectSocket = useCallback((loginReq: (Omit<LoginRequest, "type"> & { force?: boolean }) | null) => {
     const gen = ++generation.current;
     socketRef.current?.close();
+    seedRef.current = loginReq;
     // Background reconnect: keep UI on `connected` with subtle banner, don't flash fullscreen spinner
     if (stateRef.current.status === "connected" || stateRef.current.reconnecting) {
       setState((s) => ({ ...s, reconnecting: true, error: undefined }));
@@ -255,9 +294,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // flush queued sends
       const queued = [...sendQueue.current];
       sendQueue.current = [];
-      // send login first
-      const msg: LoginRequest = { type: "login", ...loginReq };
-      try { ws.send(JSON.stringify(msg)); } catch {}
+      // Status first: attach to the singleton when the server is already
+      // logged in (no per-client password needed). The session:status reply
+      // below either attaches us or seeds a login when logged out.
+      try { ws.send(JSON.stringify({ type: "session:status" })); } catch {}
       for (const q of queued) {
         if ((q as { type: string }).type === "login") continue;
         try { ws.send(JSON.stringify(q)); } catch {}
@@ -289,9 +329,81 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
 
       switch (data.type) {
+        case "session:status": {
+          // Singleton attach point: server already logged in → join it, no
+          // password needed. Logged out → seed a login from this attempt's
+          // creds (or this browser's stored creds) exactly once.
+          const d = data as unknown as { loggedIn?: boolean; username?: string };
+          if (d.loggedIn && d.username) {
+            const seed = seedRef.current;
+            const explicitMismatch =
+              !!seed?.username && !!seed?.password && seedExplicitRef.current && seed.username !== d.username;
+            if (explicitMismatch) {
+              // Explicit submit for a different user — forward so the server
+              // replies login:conflict (takeover popup), not a silent attach.
+              // Keep seedRef: the conflict handler needs it for the force retry.
+              sendLogin(ws, seed);
+              break;
+            }
+            seedRef.current = null;
+            seedExplicitRef.current = false;
+            setConflict(null);
+            setState({ status: "connected", user: d.username, error: undefined, reconnecting: false });
+            clearReconnect();
+            reconnectAttempts.current = 0;
+            shouldReconnect.current = true;
+          } else if (seedRef.current?.username && seedRef.current?.password) {
+            const seed = seedRef.current;
+            seedRef.current = null;
+            seedExplicitRef.current = false;
+            sendLogin(ws, seed);
+          } else {
+            const creds = loadCreds();
+            if (creds?.username && creds?.password) {
+              lastLogin.current = creds;
+              shouldReconnect.current = true;
+              sendLogin(ws, creds);
+            } else if (stateRef.current.status !== "connected" && !stateRef.current.reconnecting) {
+              setState({ status: "idle", reconnecting: false });
+            }
+          }
+          break;
+        }
+        case "login:conflict": {
+          // Singleton owned by another user — surface the takeover popup.
+          // Silent auto flows never reach here (only explicit form logins).
+          const d = data as unknown as { currentUser: string; attemptedUser: string };
+          pendingTakeover.current = seedRef.current ?? lastLogin.current;
+          seedRef.current = null;
+          seedExplicitRef.current = false;
+          shouldReconnect.current = false;
+          clearReconnect();
+          setConflict({ currentUser: d.currentUser, attemptedUser: d.attemptedUser });
+          setState((s) => ({ ...s, status: "failed", error: `Server is logged in as ${d.currentUser}.`, reconnecting: false }));
+          clearHeartbeat();
+          break;
+        }
+        case "session:ended": {
+          // Global logout (from any client) — every attached client signs out.
+          if (stateRef.current.status === "idle") break;
+          clearCreds();
+          lastLogin.current = null;
+          seedRef.current = null;
+          seedExplicitRef.current = false;
+          pendingTakeover.current = null;
+          setConflict(null);
+          teardown();
+          setState({ status: "idle", reconnecting: false });
+          router.replace("/");
+          break;
+        }
         case "login:result":
           if (data.ok) {
-            setState((s) => ({ ...s, status: "connected", user: loginReq.username, error: undefined, reconnecting: false }));
+            const user = loginReq?.username ?? seedRef.current?.username ?? lastLogin.current?.username ?? stateRef.current.user;
+            seedRef.current = null;
+            seedExplicitRef.current = false;
+            setConflict(null);
+            setState((s) => ({ ...s, status: "connected", user: user ?? s.user, error: undefined, reconnecting: false }));
             clearReconnect();
             reconnectAttempts.current = 0;
             shouldReconnect.current = true;
@@ -375,13 +487,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         }
         case "server:reconnected": {
           // Background reconnect succeeded (e.g. after port change) — restore connected without user re-login
-          setState((s) => ({ ...s, status: "connected", user: s.user ?? loginReq.username, error: undefined, reconnecting: false }));
+          setState((s) => ({ ...s, status: "connected", user: s.user ?? loginReq?.username, error: undefined, reconnecting: false }));
           clearReconnect();
           reconnectAttempts.current = 0;
           shouldReconnect.current = true;
           break;
         }
         case "error":
+          // Old-bridge compat: pre-singleton bridges reject session:status
+          // with "Unknown message type." — fall back to a direct login seed
+          // instead of stranding the client in failed.
+          if (/Unknown message type/i.test(data.error || "") && seedRef.current?.username && seedRef.current?.password) {
+            const seed = seedRef.current;
+            seedRef.current = null;
+            seedExplicitRef.current = false;
+            sendLogin(ws, seed);
+            break;
+          }
           if (stateRef.current.status !== "connected" && !stateRef.current.reconnecting) {
             setState((s) => ({ ...s, status: "failed", error: data.error, reconnecting: false }));
           }
@@ -410,7 +532,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           shouldReconnect.current = true;
         }
       }
-      if (shouldReconnect.current && lastLogin.current) {
+      // Reconnect even without local creds: an attached client (server
+      // singleton still logged in) re-attaches via status-first, no password.
+      if (shouldReconnect.current) {
         const wasConnected = stateRef.current.status === "connected" || !!stateRef.current.reconnecting;
         if (wasConnected) {
           setState((s) => ({ ...s, reconnecting: true }));
@@ -427,7 +551,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         );
       }
     };
-  }, [clearHeartbeat]);
+  }, [clearHeartbeat, sendLogin, teardown, router]);
 
   const scheduleReconnect = useCallback(() => {
     if (reconnectTimer.current) return;
@@ -439,7 +563,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         shouldReconnect.current = true;
       }
     }
-    if (!shouldReconnect.current || !lastLogin.current) return;
+    // Reconnect even without local creds: the server singleton may still be
+    // logged in, and status-first attach needs no password.
+    if (!shouldReconnect.current) return;
+    // Background reconnects are never explicit: drop any stale explicit flag
+    // (e.g. in-flight form submit interrupted by a socket drop) so a retry
+    // can never auto-challenge a foreign session — it attaches or seeds quiet.
+    seedExplicitRef.current = false;
     const attempt = reconnectAttempts.current++;
     const base = Math.min(RECONNECT_MAX_MS, RECONNECT_MIN_MS * Math.pow(2, attempt));
     const jitter = base * 0.2 * (Math.random() * 2 - 1);
@@ -453,7 +583,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           shouldReconnect.current = true;
         }
       }
-      if (!shouldReconnect.current || !lastLogin.current) return;
+      if (!shouldReconnect.current) return;
       // respect offline
       if (typeof navigator !== "undefined" && !navigator.onLine) {
         scheduleReconnect();
@@ -464,7 +594,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [connectSocket]);
 
   const login = useCallback(
-    (req: Omit<LoginRequest, "type">) => {
+    (req: Omit<LoginRequest, "type">, opts?: { force?: boolean; quiet?: boolean }) => {
       // Merge Settings host/port if caller didn't provide them (Settings → Network is authoritative)
       let mergedReq = req;
       if (!isDemo && !req.host && !req.port) {
@@ -515,10 +645,32 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       shouldReconnect.current = true;
       reconnectAttempts.current = 0;
       clearReconnect();
-      connectSocket(mergedReq);
+      setConflict(null);
+      // Explicit submits (form, takeover retry) may challenge a foreign
+      // session; quiet auto-logins always defer to the server singleton.
+      seedExplicitRef.current = !opts?.quiet;
+      connectSocket(opts?.force ? { ...mergedReq, force: true } : mergedReq);
     },
     [connectSocket, clearReconnect],
   );
+
+  const resolveConflict = useCallback((takeover: boolean) => {
+    if (takeover) {
+      const pending = pendingTakeover.current;
+      pendingTakeover.current = null;
+      if (pending?.username && pending?.password) {
+        // Explicit user-confirmed takeover of the singleton server session.
+        login(pending, { force: true });
+        return;
+      }
+    }
+    pendingTakeover.current = null;
+    setConflict(null);
+    lastLogin.current = null;
+    shouldReconnect.current = false;
+    clearReconnect();
+    setState({ status: "idle", reconnecting: false });
+  }, [login, clearReconnect]);
 
   // Homelab auto-login: if any creds are present (sessionStorage or cookie), auto-login on mount/reload
   // This handles port-change reconnect that restarts bridge/Docker and page reload, without requiring
@@ -549,10 +701,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // NB: login() first — connectSocket reads the (still idle) stateRef and would
       // overwrite an optimistic setState issued before it. The optimistic update
       // last wins via batching; later async WS callbacks see the updated state.
-      login(creds);
+      // quiet: defer to the server singleton (attach, never auto-takeover).
+      login(creds, { quiet: true });
       setState({ status: "connected", user: creds.username, error: undefined, reconnecting: true });
+    } else {
+      // No stored creds on THIS client — still check the server singleton:
+      // another device may have logged in already (attach needs no password).
+      // connectSocket sends session:status first; idle stays idle when logged out.
+      shouldReconnect.current = true;
+      connectSocket(null);
     }
-  }, [login]);
+  }, [login, connectSocket]);
 
   // First-run resolution marker — declared after the hydration + auto-login
   // effects so it runs after both in the same commit (all paths synchronous).
@@ -597,7 +756,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
     const onOnline = () => {
       ensureCreds();
-      if (shouldReconnect.current && lastLogin.current && (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN)) {
+      // No lastLogin guard (matches onclose): a cred-less attached client
+      // re-attaches via status-first connectSocket(null). Never explicit.
+      seedExplicitRef.current = false;
+      if (shouldReconnect.current && (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN)) {
         clearReconnect();
         reconnectAttempts.current = 0;
         connectSocket(lastLogin.current);
@@ -605,7 +767,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
     const onVis = () => {
       ensureCreds();
-      if (document.visibilityState === "visible" && shouldReconnect.current && lastLogin.current) {
+      // Background path — never explicit (see scheduleReconnect).
+      seedExplicitRef.current = false;
+      if (document.visibilityState === "visible" && shouldReconnect.current) {
         const ws = socketRef.current;
         if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
           clearReconnect();
@@ -631,8 +795,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [clearHeartbeat, clearReconnect]);
 
   const api = useMemo<SessionApi>(
-    () => ({ login, logout, send, subscribe, state: { ...state, initialized } }),
-    [login, logout, send, subscribe, state, initialized],
+    () => ({ login, logout, send, subscribe, state: { ...state, initialized }, conflict, resolveConflict }),
+    [login, logout, send, subscribe, state, initialized, conflict, resolveConflict],
   );
 
   return <SessionContext.Provider value={api}>{children}</SessionContext.Provider>;
