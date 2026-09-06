@@ -37,6 +37,7 @@ import {
   getSelfContainerId,
 } from "./docker.ts";
 import { logPrivateMessage, logRoomMessage, logRoomSystem } from "./chatLogger.ts";
+import { clearVault, loadVault, resolveLoginIntent, saveVault, type StoredCreds } from "./shared-session.ts";
 
 /* Schemas */
 
@@ -46,6 +47,16 @@ const LoginMessageSchema = z.object({
   password: z.string().min(1),
   host: z.string().max(255).optional(),
   port: z.number().int().min(1).max(65535).optional(),
+  // Explicit user-confirmed takeover from the login-conflict popup.
+  force: z.boolean().optional(),
+});
+
+const SessionStatusSchema = z.object({
+  type: z.literal("session:status"),
+});
+
+const AttachSchema = z.object({
+  type: z.literal("attach"),
 });
 
 const SearchMessageSchema = z.object({
@@ -365,6 +376,300 @@ function getGlobalPortMapperStatus(): { enabled: boolean; active: string | null;
 // Active Soulseek sessions across all WS connections (for global port sync)
 const activeSessions = new Set<SoulseekSession>();
 
+/* ── Shared singleton session ─────────────────────────────────────
+ * The bridge owns ONE Soulseek login (one account at a time). Every WS
+ * client attaches to it instead of opening its own Soulseek TCP
+ * connection (a second same-user login would get kicked — login fight).
+ * Event pushes fan out to all attached clients via broadcast().
+ */
+type AttachedClient = { send: (payload: string) => unknown };
+const attachedClients = new Set<AttachedClient>();
+
+function broadcast(payload: string): void {
+  for (const c of attachedClients) {
+    try { c.send(payload); } catch {}
+  }
+}
+
+function broadcastJson(msg: unknown): void {
+  let s: string;
+  try { s = JSON.stringify(msg); } catch { return; }
+  broadcast(s);
+}
+
+function sessionStatusPayload(): { type: "session:status"; loggedIn: boolean; username?: string } {
+  const loggedIn = !!sharedSession?.isLoggedIn;
+  return loggedIn && sharedSessionUser
+    ? { type: "session:status", loggedIn, username: sharedSessionUser }
+    : { type: "session:status", loggedIn: false };
+}
+
+let sharedSession: SoulseekSession | null = null;
+let sharedSessionUser: string | null = null;
+let sharedLoginOutcome: { success: true; banner: string; ipAddress: string; checksum: string; isSupporter: boolean } | null = null;
+let establishing = false;
+
+/** Single TransferManager owned by the singleton session (fresh per login, like before). */
+let sharedTransfers: TransferManager;
+
+function createSharedTransfers(): TransferManager {
+  const tm = new TransferManager({
+    dataDir: DATA_DIR,
+    onUpdate: (transfer) => broadcastJson({ type: "transfer:update", transfer }),
+    onRemoved: (id) => broadcastJson({ type: "transfer:removed", id }),
+    onStats: (stats) => broadcastJson({ type: "transfer:stats", ...stats }),
+    onQueue: (id, place) => broadcastJson({ type: "transfer:queue", id, place }),
+    onFinished: (id, fileName, size, downloadUrl) => broadcastJson({ type: "transfer:finished", id, fileName, size, downloadUrl }),
+    getSession: () => sharedSession as unknown as ReturnType<TransferManager["getByToken"]> extends never ? never : unknown as never,
+  });
+  tm.setSessionGetter(() => sharedSession as unknown as never);
+  tm.setBanlistUpdatedCb((banlist, byUser) => {
+    broadcastJson({ type: "banlist:updated", banlist, byUser, reason: "honeypot" });
+  });
+  return tm;
+}
+
+/** Event callbacks for the singleton session — all pushes fan out to every attached client. */
+function sharedSessionCallbacks() {
+  return {
+    onFileConnection: (token: number, socket: unknown) => {
+      try { (sharedTransfers as unknown as { handleFileConnection: (t: number, s: unknown) => void })?.handleFileConnection(token, socket as unknown as never); } catch {}
+    },
+    onFileChunk: (token: number, chunk: Buffer) => {
+      try { (sharedTransfers as unknown as { handleFileChunk: (t: number, c: Buffer) => void })?.handleFileChunk(token, chunk); } catch {}
+    },
+    getQueuePlace: (file: string) => {
+      try { return (sharedTransfers as unknown as { getQueuePlace: (f: string) => number })?.getQueuePlace(file) ?? 1; } catch { return 1; }
+    },
+    onUserEvent: (event: { type: string; username?: string; status?: unknown; stats?: unknown; peerAddress?: unknown }) => {
+      if (event.type === "user-status" && event.status) {
+        const st = event.status as { username: string; status: number; privileged: boolean };
+        pluginManager.userStatusNotification(st.username, st.status, st.privileged);
+      } else if (event.type === "user-stats" && event.stats) {
+        const st = event.stats as { username: string };
+        pluginManager.userStatsNotification(st.username, event.stats as never);
+      } else if (event.type === "peer-address" && event.peerAddress) {
+        const pa = event.peerAddress as { ip?: string; port?: number };
+        pluginManager.userResolveNotification(event.username ?? "", pa.ip ?? "", pa.port ?? 0);
+        try { (sharedTransfers as unknown as { handlePeerAddressResolved?: (u: string, ip: string) => void })?.handlePeerAddressResolved?.(event.username ?? "", pa.ip ?? ""); } catch {}
+      }
+      logger.debug("server", "user event", { type: event.type, username: event.username });
+      broadcastJson({ type: "userinfo:event", event });
+    },
+    onChatEvent: (event: { type: string; room?: string; username?: string; message?: string }) => {
+      if (event.type === "private-message" && event.username && event.message) {
+        const out = pluginManager.incomingPrivateChatEvent(event.username, event.message);
+        if (out === null) return;
+        const finalMsg = out?.[1] as string | undefined;
+        if (finalMsg !== undefined) event.message = finalMsg;
+        pluginManager.incomingPrivateChatNotification(event.username, event.message);
+      } else if (event.type === "say-chatroom" && event.room && event.username && event.message) {
+        const out = pluginManager.incomingPublicChatEvent(event.room, event.username, event.message);
+        if (out === null) return;
+        const finalMsg = out?.[2] as string | undefined;
+        if (finalMsg !== undefined) event.message = finalMsg;
+        pluginManager.incomingPublicChatNotification(event.room, event.username ?? "", event.message);
+      }
+      logger.debug("chat", "chat event", { type: event.type, room: event.room, username: event.username });
+      try {
+        if (event.type === "private-message" && event.username && event.message) {
+          const isAction = event.message.startsWith("/me ") || event.message.startsWith("* ");
+          const txt = isAction ? event.message.replace(/^\/(me)\s+|^\*\s+/, "") : event.message;
+          logPrivateMessage(event.username, event.username, txt, { isAction });
+        } else if (event.type === "say-chatroom" && event.room && event.username && event.message) {
+          const isAction = event.message.startsWith("/me ") || event.message.startsWith("* ");
+          const txt = isAction ? event.message.replace(/^\/(me)\s+|^\*\s+/, "") : event.message;
+          logRoomMessage(event.room, event.username, txt, { isAction });
+        } else if (event.type === "global-room-message" && event.room && event.username && event.message) {
+          const isAction = event.message.startsWith("/me ") || event.message.startsWith("* ");
+          const txt = isAction ? event.message.replace(/^\/(me)\s+|^\*\s+/, "") : event.message;
+          logRoomMessage(event.room, event.username, txt, { isAction, isGlobal: true, globalRoom: event.room });
+        }
+      } catch {}
+      broadcastJson({ type: "chat:event", event });
+    },
+    onRoomEvent: (event: { type: string; room?: string; username?: string; data?: unknown }) => {
+      if (event.type === "join-room" && event.room) pluginManager.joinChatroomNotification(event.room);
+      else if (event.type === "leave-room" && event.room) pluginManager.leaveChatroomNotification(event.room);
+      else if (event.type === "user-joined-room" && event.room && event.username) pluginManager.userJoinChatroomNotification(event.room, event.username);
+      else if (event.type === "user-left-room" && event.room && event.username) pluginManager.userLeaveChatroomNotification(event.room, event.username);
+      else if (event.type === "room-list" && event.data) {
+        // ignore
+      }
+      logger.debug("chat", "room event", { type: event.type, room: event.room });
+      broadcastJson({ type: "room:event", event });
+    },
+    onBrowseEvent: (event: { type: string; username: string; folders?: unknown[]; folder?: string; token?: number; files?: unknown[]; lockedFolders?: unknown[]; error?: string }) => {
+      logger.debug("server", "browse event", { type: event.type, username: event.username, folder: event.folder });
+      try {
+        if (event.type === "browse-shares") {
+          const seen = new Set<string>();
+          const out: unknown[] = [];
+          for (const f of (event.folders || [])) {
+            const name = (f as { name?: string }).name;
+            if (typeof name !== "string" || seen.has(name)) continue;
+            seen.add(name);
+            out.push(f);
+          }
+          try { browseCache.set(event.username.toLowerCase(), { folders: out as unknown[], ts: Date.now() }); } catch {}
+          const page = out.slice(0, 200);
+          const hasMore = out.length > 200;
+          const lockedCount = Array.isArray(event.lockedFolders) ? event.lockedFolders.length : 0;
+          // Stash the full result on every attached client so browse:page works per client.
+          for (const c of attachedClients) {
+            try { (c as unknown as Record<string, unknown>)._browseFull = out; } catch {}
+            try { (c as unknown as Record<string, unknown>)._browseUser = event.username; } catch {}
+          }
+          broadcastJson({ type: "browse:shares", username: event.username, folders: page as never, total: out.length, hasMore, offset: 0, lockedCount });
+        }
+        else if (event.type === "browse-folder") broadcastJson({ type: "browse:folder", username: event.username, folder: event.folder, token: event.token, files: event.files, folders: (event as { folders?: unknown }).folders });
+        else if (event.type === "browse-error") {
+          const isFolder = event.token !== undefined;
+          broadcastJson({
+            type: isFolder ? "browse:folder" : "browse:shares",
+            username: event.username,
+            error: event.error,
+            ...(isFolder ? { token: event.token, folder: event.folder } : {}),
+          });
+        }
+      } catch {}
+    },
+    onWishlistEvent: (event: { type: string; searchId: string; token?: number; rows?: unknown[]; reason?: string }) => {
+      if (event.type === "result" && event.rows && event.rows.length) {
+        broadcastJson({ type: "search:result", searchId: event.searchId, token: event.token, rows: event.rows });
+      } else if (event.type === "end" && event.reason) {
+        broadcastJson({ type: "search:end", searchId: event.searchId, reason: event.reason });
+      } else if (event.type === "result" && (!event.rows || event.rows.length === 0)) {
+        broadcastJson({ type: "search:start", searchId: event.searchId, token: event.token });
+      }
+    },
+    onTransferEvent: (event: { type: string; username?: string; file?: string; token?: number; place?: number; reason?: string }) => {
+      if (event.type === "queue-upload" && event.username && event.file) pluginManager.uploadQueuedNotification(event.username, event.file);
+      else if (event.type === "transfer-response" && event.username && event.file) {
+        pluginManager.uploadStartedNotification(event.username, event.file);
+      }
+      logger.debug("transfer", "transfer event", { type: event.type, username: event.username, file: event.file?.slice(0, 80), token: event.token });
+      broadcastJson({ type: "peer:transfer", event });
+      const tm = sharedTransfers;
+      if (!tm) return;
+      try {
+        if (event.type === "place-in-queue" && event.file && event.place !== undefined) {
+          (tm as unknown as { handlePlaceInQueueResponse: (f: string, p: number) => void }).handlePlaceInQueueResponse(event.file, event.place);
+        } else if (event.type === "transfer-request" && event.file && event.token !== undefined) {
+          (tm as unknown as { handleTransferRequest: (d: number, t: number, f: string) => void }).handleTransferRequest(1, event.token, event.file);
+        } else if (event.type === "transfer-response" && event.reason) {
+          const f = event.file || "";
+          (tm as unknown as { handleUploadDenied: (f: string, r: string) => void }).handleUploadDenied(f, event.reason);
+        } else if (event.type === "queue-upload" && event.file && event.username) {
+          (tm as unknown as { handleQueueUpload: (u: string, f: string) => void }).handleQueueUpload(event.username, event.file);
+        } else if (event.type === "upload-denied" && event.file) {
+          (tm as unknown as { handleUploadDenied: (f: string, r: string) => void }).handleUploadDenied(event.file, event.reason || "Cancelled");
+        } else if (event.type === "upload-failed" && event.file) {
+          (tm as unknown as { handleUploadFailed: (f: string) => void }).handleUploadFailed(event.file);
+        }
+      } catch {}
+    },
+    onServerEvent: (event: { type: string; listenPort?: number; attempt?: number; delay?: number; error?: string } & Record<string, unknown>) => {
+      if (event.type === "reconnect") pluginManager.serverConnectNotification();
+      else if (event.type === "reconnect-failed") pluginManager.serverDisconnectNotification(false);
+      else if (event.type === "reconnected") pluginManager.serverConnectNotification();
+      logger.info("server", "server reconnect", event as unknown as Record<string, unknown>);
+      try {
+        const { type: _t, ...rest } = event;
+        if (event.type === "reconnected") {
+          broadcastJson({ type: "server:reconnect", ok: true, listenPort: event.listenPort });
+          try { broadcastJson({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: event.listenPort, configDir: CONFIG_DIR, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: getGlobalPortMapperStatus() } }); } catch {}
+        } else {
+          broadcastJson({ type: "server:reconnect", ...rest, attempt: event.attempt, delay: event.delay, error: event.error });
+        }
+      } catch {}
+    },
+  };
+}
+
+/** Close + forget the singleton session (global logout / pre-replace teardown). */
+function teardownSharedSession(): void {
+  if (sharedSession) {
+    try { activeSessions.delete(sharedSession); } catch {}
+    try { sharedSession.close(); } catch {}
+  }
+  sharedSession = null;
+  sharedSessionUser = null;
+  sharedLoginOutcome = null;
+}
+
+/**
+ * Establish the singleton session. Broadcasts login:start/result to all
+ * attached clients. Persists the encrypted vault only after a successful
+ * login (bad passwords must never overwrite good vault creds).
+ */
+async function establishSharedSession(creds: StoredCreds): Promise<{ ok: boolean; error?: string }> {
+  if (establishing) return { ok: false, error: "Login already in progress." };
+  establishing = true;
+  try {
+    teardownSharedSession();
+    // Fresh transfer state per login (matches the old per-WS TransferManager).
+    try { sharedTransfers?.close(); } catch {}
+    sharedTransfers = createSharedTransfers();
+    const session = new SoulseekSession({
+      username: creds.username,
+      password: creds.password,
+      host: creds.host,
+      port: creds.port,
+      listenPort: LISTEN_PORT,
+      profile: defaultProfile(creds.username),
+      dataDir: DATA_DIR,
+      ...sharedSessionCallbacks(),
+    });
+    try { (session as unknown as { setUpnpEnabled?: (b: boolean) => void }).setUpnpEnabled?.(GLOBAL_UPNP_ENABLED); } catch {}
+    sharedSession = session;
+    sharedSessionUser = creds.username;
+    try { activeSessions.add(session); } catch {}
+    try { pluginManager.setSessionGetter(() => sharedSession as unknown as ReturnType<PluginManager["setSessionGetter"]> extends never ? never : unknown as never); } catch {}
+    broadcastJson({ type: "login:start" });
+    try {
+      const outcome = await session.login() as unknown as { success: true; banner: string; ipAddress: string; checksum: string; isSupporter: boolean };
+      logger.info("auth", "login success", { username: creds.username, ipAddress: outcome?.ipAddress });
+      sharedLoginOutcome = { success: true, banner: outcome?.banner ?? "", ipAddress: outcome?.ipAddress ?? "", checksum: outcome?.checksum ?? "", isSupporter: outcome?.isSupporter ?? false };
+      try { saveVault(CONFIG_DIR, creds); } catch (e) {
+        logger.warn("auth", "vault persist failed", { error: (e as Error).message });
+      }
+      broadcastJson({ type: "login:result", ok: true, data: sharedLoginOutcome });
+      // Push fresh transfer state to late attachers' UIs (empty right after login).
+      try {
+        for (const t of sharedTransfers.list()) broadcastJson({ type: "transfer:update", transfer: t });
+      } catch {}
+      return { ok: true };
+    } catch (err) {
+      logger.warn("auth", "login failed", { username: creds.username, error: (err as Error).message });
+      try { activeSessions.delete(session); } catch {}
+      teardownSharedSession();
+      try { clearVault(CONFIG_DIR); } catch {}
+      const error = (err as Error).message;
+      broadcastJson({ type: "login:result", ok: false, error });
+      broadcastJson(sessionStatusPayload());
+      return { ok: false, error };
+    }
+  } finally {
+    establishing = false;
+  }
+}
+
+/** Best-effort auto-login from the encrypted vault (bridge restarts). */
+async function restoreSharedSessionFromVault(): Promise<void> {
+  try {
+    const creds = loadVault(CONFIG_DIR);
+    if (!creds?.username || !creds?.password) return;
+    logger.info("auth", "restoring session from vault", { username: creds.username });
+    await establishSharedSession(creds);
+  } catch (e) {
+    logger.warn("auth", "vault restore failed", { error: (e as Error).message });
+  }
+}
+
+// Eager singleton TransferManager — initialized after pluginManager below
+// (per-login refresh happens in establishSharedSession).
+
 // Global plugin manager (shared across WS, but per-WS session getter is swapped)
 // Must be after CONFIG_DIR fallback — otherwise WSL uses stale "/config" and EACCES on persist.
 const pluginManager = new PluginManager({ dataDir: CONFIG_DIR });
@@ -375,6 +680,10 @@ pluginManager.registerBuiltin("leech_detector", leechManifest as unknown as Reco
 pluginManager.start().catch((e) => logger.warn("bridge", "plugin manager start failed", { error: (e as Error).message }));
 // expose for http handlers
 (globalThis as unknown as Record<string, unknown>).__pluginManager = pluginManager;
+
+// Singleton session wiring (must run after pluginManager exists).
+sharedTransfers = createSharedTransfers();
+try { pluginManager.setSessionGetter(() => sharedSession as unknown as ReturnType<PluginManager["setSessionGetter"]> extends never ? never : unknown as never); } catch {}
 
 // ── 5-minute in-memory caches (per-process, ephemeral) ──
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -873,26 +1182,16 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     open(ws) {
       ws.data = {};
       (ws.data as unknown as Record<string, unknown>).pluginManager = pluginManager;
-      // allow plugins to send to this ws's session; pluginManager is global, swap getter per ws on login
       logger.info("bridge", "ws open", { ip: (ws as unknown as { remoteAddress?: string }).remoteAddress });
-      const tm = new TransferManager({
-        dataDir: DATA_DIR,
-        onUpdate: (transfer) => { try { ws.send(JSON.stringify({ type: "transfer:update", transfer })); } catch {} },
-        onRemoved: (id) => { try { ws.send(JSON.stringify({ type: "transfer:removed", id })); } catch {} },
-        onStats: (stats) => { try { ws.send(JSON.stringify({ type: "transfer:stats", ...stats })); } catch {} },
-        onQueue: (id, place) => { try { ws.send(JSON.stringify({ type: "transfer:queue", id, place })); } catch {} },
-        onFinished: (id, fileName, size, downloadUrl) => { try { ws.send(JSON.stringify({ type: "transfer:finished", id, fileName, size, downloadUrl })); } catch {} },
-        getSession: () => ws.data.session as unknown as ReturnType<TransferManager["getByToken"]> extends never ? never : unknown as never,
-      });
-      // Link session getter after creation
-      (tm as unknown as { setSessionGetter: (fn: () => unknown) => void }).setSessionGetter(() => ws.data.session as unknown as never);
-      (tm as unknown as { setBanlistUpdatedCb: (cb: (b: string[], u: string) => void) => void }).setBanlistUpdatedCb((banlist, byUser) => {
-        const payload = JSON.stringify({ type: "banlist:updated", banlist, byUser, reason: "honeypot" });
-        try { ws.send(payload); } catch {}
-      });
-      ws.data.transfers = tm;
+      // Attach to the singleton session — no per-client Soulseek login.
+      try { attachedClients.add(ws as unknown as AttachedClient); } catch {}
       setTimeout(() => {
-        for (const t of tm.list()) { try { ws.send(JSON.stringify({ type: "transfer:update", transfer: t })); } catch {} }
+        try {
+          for (const t of sharedTransfers.list()) { try { ws.send(JSON.stringify({ type: "transfer:update", transfer: t })); } catch {} }
+        } catch {}
+        // Tell the newcomer whether the server is already logged in (any LAN
+        // client auto-attaches — no per-client cookie needed).
+        try { ws.send(JSON.stringify(sessionStatusPayload())); } catch {}
       }, 50);
       // Subscribe this socket to live diagnostics logs (all logged-in users OK — ws is already the auth boundary)
       const unsub = diagSubscribe((entry) => {
@@ -920,216 +1219,56 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (data.type === "login") {
         const result = LoginMessageSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid login message.")); return; }
-        const { username, password, host, port } = result.data;
-        logger.info("auth", "login attempt", { username, host: host || "server.slsknet.org", port: port || 2242, passLen: password.length, passPrefix: password.slice(0,5) });
-        // Close previous session if any
-        if (ws.data.session) {
-          try { activeSessions.delete(ws.data.session); } catch {}
-          ws.data.session?.close();
+        const { username, password, host, port, force } = result.data;
+        logger.info("auth", "login attempt", { username, host: host || "server.slsknet.org", port: port || 2242 });
+        // Singleton: one Soulseek login per bridge. Same-user → attach, no new TCP.
+        const intent = resolveLoginIntent({ loggedIn: !!sharedSession?.isLoggedIn, currentUser: sharedSessionUser, username, force });
+        if (intent === "attach") {
+          if (sharedLoginOutcome) ws.send(JSON.stringify({ type: "login:result", ok: true, data: sharedLoginOutcome }));
+          else ws.send(JSON.stringify(sessionStatusPayload()));
+          return;
         }
-        const session = new SoulseekSession({
-          username, password, host, port, listenPort: LISTEN_PORT, profile: defaultProfile(username), dataDir: DATA_DIR,
-          onFileConnection: (token, socket) => {
-            try { (ws.data.transfers as unknown as { handleFileConnection: (t:number,s:unknown)=>void })?.handleFileConnection(token, socket as unknown as never); } catch {}
-          },
-          onFileChunk: (token, chunk) => {
-            try { (ws.data.transfers as unknown as { handleFileChunk: (t:number,c:Buffer)=>void })?.handleFileChunk(token, chunk); } catch {}
-          },
-          getQueuePlace: (file: string) => {
-            try { return (ws.data.transfers as unknown as { getQueuePlace: (f:string)=>number })?.getQueuePlace(file) ?? 1; } catch { return 1; }
-          },
-          onUserEvent: (event) => {
-            // plugin hooks for user status/stats
-            if (event.type === "user-status" && event.status) {
-              pluginManager.userStatusNotification(event.status.username, event.status.status, event.status.privileged);
-            } else if (event.type === "user-stats" && event.stats) {
-              pluginManager.userStatsNotification(event.stats.username, event.stats);
-            } else if (event.type === "peer-address" && event.peerAddress) {
-              pluginManager.userResolveNotification(event.username ?? "", event.peerAddress.ip ?? "", event.peerAddress.port ?? 0);
-              // geoblock re-check for pending uploads
-              try { (ws.data.transfers as unknown as { handlePeerAddressResolved?: (u:string, ip:string)=>void })?.handlePeerAddressResolved?.(event.username ?? "", event.peerAddress.ip ?? ""); } catch {}
-            }
-            logger.debug("server", "user event", { type: event.type, username: event.username });
-            try { ws.send(JSON.stringify({ type: "userinfo:event", event })); } catch {}
-          },
-          onChatEvent: (event) => {
-            // plugin zap handling for incoming chat
-            if (event.type === "private-message" && event.username && event.message) {
-              const out = pluginManager.incomingPrivateChatEvent(event.username, event.message);
-              if (out === null) return;
-              const finalMsg = out?.[1] as string | undefined;
-              if (finalMsg !== undefined) event.message = finalMsg;
-              pluginManager.incomingPrivateChatNotification(event.username, event.message);
-            } else if (event.type === "say-chatroom" && event.room && event.username && event.message) {
-              const out = pluginManager.incomingPublicChatEvent(event.room, event.username, event.message);
-              if (out === null) return;
-              const finalMsg = out?.[2] as string | undefined;
-              if (finalMsg !== undefined) event.message = finalMsg;
-              pluginManager.incomingPublicChatNotification(event.room, event.username, event.message);
-            }
-            logger.debug("chat", "chat event", { type: event.type, room: event.room, username: event.username });
-            // nicotine-plus parity: write chat logs under CONFIG_DIR/logs (daily, only active rooms)
-            try {
-              if (event.type === "private-message" && event.username && event.message) {
-                const isAction = event.message.startsWith("/me ") || event.message.startsWith("* ");
-                const txt = isAction ? event.message.replace(/^\/(me)\s+|^\*\s+/, "") : event.message;
-                // incoming: tag is peer username
-                logPrivateMessage(event.username, event.username, txt, { isAction });
-              } else if (event.type === "say-chatroom" && event.room && event.username && event.message) {
-                const isAction = event.message.startsWith("/me ") || event.message.startsWith("* ");
-                const txt = isAction ? event.message.replace(/^\/(me)\s+|^\*\s+/, "") : event.message;
-                logRoomMessage(event.room, event.username, txt, { isAction });
-              } else if (event.type === "global-room-message" && event.room && event.username && event.message) {
-                const isAction = event.message.startsWith("/me ") || event.message.startsWith("* ");
-                const txt = isAction ? event.message.replace(/^\/(me)\s+|^\*\s+/, "") : event.message;
-                logRoomMessage(event.room, event.username, txt, { isAction, isGlobal: true, globalRoom: event.room });
-              }
-            } catch {}
-            try { ws.send(JSON.stringify({ type: "chat:event", event })); } catch {}
-          },
-          onRoomEvent: (event) => {
-            if (event.type === "join-room" && event.room) pluginManager.joinChatroomNotification(event.room);
-            else if (event.type === "leave-room" && event.room) pluginManager.leaveChatroomNotification(event.room);
-            else if (event.type === "user-joined-room" && event.room && event.username) pluginManager.userJoinChatroomNotification(event.room, event.username);
-            else if (event.type === "user-left-room" && event.room && event.username) pluginManager.userLeaveChatroomNotification(event.room, event.username);
-            else if (event.type === "room-list" && event.data) {
-              // ignore
-            }
-            logger.debug("chat", "room event", { type: event.type, room: event.room });
-            try { ws.send(JSON.stringify({ type: "room:event", event })); } catch {}
-          },
-          onBrowseEvent: (event) => {
-            logger.debug("server", "browse event", { type: event.type, username: event.username, folder: (event as { folder?: string }).folder });
-            try {
-              if (event.type === "browse-shares") {
-                // order-preserving dedupe by folder name — peers can emit dupes, and our 200-page paging
-                // must not amplify them into the cache
-                const deduped = (() => {
-                  const seen = new Set<string>();
-                  const out: unknown[] = [];
-                  for (const f of (event.folders as unknown[] || [])) {
-                    const name = (f as { name?: string }).name;
-                    if (typeof name !== "string" || seen.has(name)) continue;
-                    seen.add(name);
-                    out.push(f);
-                  }
-                  return out;
-                })();
-                // cache full shares for 5m paging
-                try { browseCache.set(event.username.toLowerCase(), { folders: deduped as unknown[], ts: Date.now() }); } catch {}
-                // trim API response: cap initial payload to 200 folders, client pages 50 at a time
-                const all = deduped as unknown[];
-                const page = all.slice(0, 200);
-                const hasMore = all.length > 200;
-                const lockedCount = Array.isArray(event.lockedFolders) ? event.lockedFolders.length : 0;
-                ws.send(JSON.stringify({ type: "browse:shares", username: event.username, folders: page as never, total: all.length, hasMore, offset: 0, lockedCount }));
-                // stash full result on ws for browse:page
-                (ws.data as unknown as Record<string, unknown>)._browseFull = all;
-                (ws.data as unknown as Record<string, unknown>)._browseUser = event.username;
-              }
-              else if (event.type === "browse-folder") ws.send(JSON.stringify({ type: "browse:folder", username: event.username, folder: event.folder, token: event.token, files: event.files, folders: event.folders }));
-              else if (event.type === "browse-error") {
-                const isFolder = (event as { token?: number }).token !== undefined;
-                ws.send(JSON.stringify({
-                  type: isFolder ? "browse:folder" : "browse:shares",
-                  username: event.username,
-                  error: event.error,
-                  ...(isFolder ? { token: (event as { token: number }).token, folder: (event as { folder: string }).folder } : {}),
-                }));
-              }
-            } catch {}
-          },
-          onWishlistEvent: (event) => {
-            if (event.type === "result" && event.rows && event.rows.length) {
-              try { ws.send(JSON.stringify({ type: "search:result", searchId: event.searchId, token: event.token, rows: event.rows })); } catch {}
-            } else if (event.type === "end" && event.reason) {
-              try { ws.send(JSON.stringify({ type: "search:end", searchId: event.searchId, reason: event.reason })); } catch {}
-            } else if (event.type === "result" && (!event.rows || event.rows.length === 0)) {
-              // start notification
-              try { ws.send(JSON.stringify({ type: "search:start", searchId: event.searchId, token: event.token })); } catch {}
-            }
-          },
-          onTransferEvent: (event) => {
-            // plugin transfer hooks
-            if (event.type === "queue-upload" && event.username && event.file) pluginManager.uploadQueuedNotification(event.username, event.file);
-            else if (event.type === "transfer-response" && event.username && event.file) {
-              // treat as started? use upload_started
-              pluginManager.uploadStartedNotification(event.username, event.file);
-            }
-            logger.debug("transfer", "transfer event", { type: event.type, username: event.username, file: event.file?.slice(0,80), token: event.token });
-            try { ws.send(JSON.stringify({ type: "peer:transfer", event })); } catch {}
-            // Delegate to TransferManager for queue / transfer-request handling
-            const tm = ws.data.transfers;
-            if (!tm) return;
-            try {
-              if (event.type === "place-in-queue" && event.file && event.place !== undefined) {
-                (tm as unknown as { handlePlaceInQueueResponse: (f: string, p: number) => void }).handlePlaceInQueueResponse(event.file, event.place);
-              } else if (event.type === "transfer-request" && event.file && event.token !== undefined) {
-                // direction 1 = upload (peer wants to send to us)
-                (tm as unknown as { handleTransferRequest: (d: number, t: number, f: string) => void }).handleTransferRequest(1, event.token, event.file);
-              } else if (event.type === "transfer-response" && event.reason) {
-                // treat as denied
-                const f = event.file || "";
-                (tm as unknown as { handleUploadDenied: (f: string, r: string) => void }).handleUploadDenied(f, event.reason);
-              } else if (event.type === "queue-upload" && event.file && event.username) {
-                (tm as unknown as { handleQueueUpload: (u: string, f: string) => void }).handleQueueUpload(event.username, event.file);
-              } else if (event.type === "upload-denied" && event.file) {
-                (tm as unknown as { handleUploadDenied: (f: string, r: string) => void }).handleUploadDenied(event.file, event.reason || "Cancelled");
-              } else if (event.type === "upload-failed" && event.file) {
-                (tm as unknown as { handleUploadFailed: (f: string) => void }).handleUploadFailed(event.file);
-              }
-            } catch {}
-          },
-          onServerEvent: (event) => {
-            if (event.type === "reconnect") pluginManager.serverConnectNotification();
-            else if (event.type === "reconnect-failed") pluginManager.serverDisconnectNotification(false);
-            else if (event.type === "reconnected") pluginManager.serverConnectNotification();
-            logger.info("server", "server reconnect", event as unknown as Record<string, unknown>);
-            try {
-              const { type: _t, ...rest } = event as unknown as Record<string, unknown> & { type: string };
-              if (event.type === "reconnected") {
-                ws.send(JSON.stringify({ type: "server:reconnect", ok: true, listenPort: (event as unknown as { listenPort: number }).listenPort }));
-                // Also push fresh health so UI can update without poll
-                try { ws.send(JSON.stringify({ type: "diagnostics:health", health: { ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: (event as unknown as { listenPort: number }).listenPort, configDir: CONFIG_DIR, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: getGlobalPortMapperStatus() } })); } catch {}
-              } else {
-                ws.send(JSON.stringify({ type: "server:reconnect", ...(rest as Record<string, unknown>), attempt: (event as unknown as { attempt?: number }).attempt, delay: (event as unknown as { delay?: number }).delay, error: (event as unknown as { error?: string }).error }));
-              }
-            } catch {}
-          },
+        if (intent === "conflict") {
+          // Different user while the singleton is active — client shows the
+          // takeover popup and re-sends with force:true only on explicit confirm.
+          ws.send(JSON.stringify({ type: "login:conflict", currentUser: sharedSessionUser, attemptedUser: username }));
+          return;
+        }
+        // "fresh" or user-confirmed "replace": (re)establish the singleton.
+        // Success fans out via broadcast; request-scoped failures reply here.
+        establishSharedSession({ username, password, host, port }).then((res) => {
+          if (!res.ok) {
+            try { ws.send(JSON.stringify({ type: "login:result", ok: false, error: res.error ?? "Login failed." })); } catch {}
+          }
+        }).catch((e: Error) => {
+          try { ws.send(JSON.stringify({ type: "login:result", ok: false, error: e.message })); } catch {}
         });
-        // Apply global UPnP setting before login (so portmapper uses correct flag on connect)
-        try { (session as unknown as { setUpnpEnabled?: (b:boolean)=>void }).setUpnpEnabled?.(GLOBAL_UPNP_ENABLED); } catch {}
-        ws.data.session = session;
-        try { activeSessions.add(session); } catch {}
-        // Ensure TransferManager can call back into session
-        try { ws.data.transfers?.setSessionGetter(() => session as unknown as never); } catch {}
-        try { pluginManager.setSessionGetter(() => session as unknown as ReturnType<PluginManager["setSessionGetter"]> extends never ? never : unknown as never); } catch {}
-        ws.send(JSON.stringify({ type: "login:start" }));
-        session.login()
-          .then((outcome) => {
-            logger.info("auth", "login success", { username, ip: (outcome as unknown as { ipAddress?: string }).ipAddress });
-            ws.send(JSON.stringify({ type: "login:result", ok: true, data: outcome }));
-          })
-          .catch((err: Error) => {
-            logger.warn("auth", "login failed", { username, error: err.message });
-            try { activeSessions.delete(session); } catch {}
-            ws.send(JSON.stringify({ type: "login:result", ok: false, error: err.message }));
-          });
+        return;
+      }
+
+      if (data.type === "session:status" || data.type === "attach") {
+        const statusParsed = data.type === "session:status" ? SessionStatusSchema.safeParse(parsed) : AttachSchema.safeParse(parsed);
+        if (!statusParsed.success) { ws.send(errorMessage("Invalid session message.")); return; }
+        ws.send(JSON.stringify(sessionStatusPayload()));
         return;
       }
 
       if (data.type === "logout") {
-        // Explicit logoff: drop the Soulseek server session immediately
-        // (client closes the WS right after; close() is idempotent backup).
-        try { if (ws.data.session) activeSessions.delete(ws.data.session); } catch {}
-        try { ws.data.session?.close(); } catch {}
-        logger.info("auth", "logout — soulseek session closed");
+        // Global logoff: drops the singleton Soulseek session for ALL clients,
+        // clears the vault, and tells every attached client to return to login.
+        teardownSharedSession();
+        try { clearVault(CONFIG_DIR); } catch {}
+        try { sharedTransfers?.close(); } catch {}
+        sharedTransfers = createSharedTransfers();
+        logger.info("auth", "logout — shared soulseek session closed");
+        broadcastJson({ type: "session:ended", reason: "logout" });
+        broadcastJson(sessionStatusPayload());
         return;
       }
 
-      // Helpers to enforce logged-in
+      // Helpers to enforce logged-in (singleton session shared by all clients)
       const requireLogin = (): SoulseekSession | null => {
-        const s = ws.data.session;
+        const s = sharedSession;
         if (!s || !s.isLoggedIn) { ws.send(errorMessage("Not logged in.")); return null; }
         return s;
       };
@@ -1149,19 +1288,19 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         logger.info("search", "search request", { searchId, query: finalQuery.slice(0,80), origQuery: query.slice(0,80) });
         const token = session.search(finalQuery, searchId, {
           onResult: (p) => {
-            logger.info("search", "search result → ws", { searchId, token: p.token, rows: p.rows?.length });
-            ws.send(JSON.stringify({ type: "search:result", ...p }));
+            logger.info("search", "search result → all clients", { searchId, token: p.token, rows: p.rows?.length });
+            broadcastJson({ type: "search:result", ...p });
           },
           onEnd: (p) => {
             logger.info("search", "search end", { searchId, reason: p.reason });
-            ws.send(JSON.stringify({ type: "search:end", ...p }));
+            broadcastJson({ type: "search:end", ...p });
           },
         });
         logger.info("search", "search dispatched", { searchId, token, query: finalQuery.slice(0,80) });
         if (token === 0) {
           logger.warn("search", "search failed to start (not logged in?)", { searchId, query: finalQuery.slice(0,80) });
           ws.send(JSON.stringify({ type: "search:end", searchId, reason: "error" }));
-        } else ws.send(JSON.stringify({ type: "search:start", searchId, token }));
+        } else broadcastJson({ type: "search:start", searchId, token });
         return;
       }
       if (data.type === "search:user") {
@@ -1173,10 +1312,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (out === null) return;
         const finalQuery = (out?.[1] as string) ?? query;
         const token = session.searchUser(username, finalQuery, searchId, {
-          onResult: (p) => ws.send(JSON.stringify({ type: "search:result", ...p })),
-          onEnd: (p) => ws.send(JSON.stringify({ type: "search:end", ...p })),
+          onResult: (p) => broadcastJson({ type: "search:result", ...p }),
+          onEnd: (p) => broadcastJson({ type: "search:end", ...p }),
         });
-        ws.send(JSON.stringify({ type: "search:start", searchId, token }));
+        broadcastJson({ type: "search:start", searchId, token });
         return;
       }
       if (data.type === "search:room") {
@@ -1188,10 +1327,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (out === null) return;
         const finalQuery = (out?.[1] as string) ?? query;
         const token = session.searchRoom(room, finalQuery, searchId, {
-          onResult: (p) => ws.send(JSON.stringify({ type: "search:result", ...p })),
-          onEnd: (p) => ws.send(JSON.stringify({ type: "search:end", ...p })),
+          onResult: (p) => broadcastJson({ type: "search:result", ...p }),
+          onEnd: (p) => broadcastJson({ type: "search:end", ...p }),
         });
-        ws.send(JSON.stringify({ type: "search:start", searchId, token }));
+        broadcastJson({ type: "search:start", searchId, token });
         return;
       }
       if (data.type === "search:wishlist") {
@@ -1203,10 +1342,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (out === null) return;
         const finalQuery = (out?.[0] as string) ?? query;
         const token = session.wishlistSearch(finalQuery, searchId, {
-          onResult: (p) => ws.send(JSON.stringify({ type: "search:result", ...p })),
-          onEnd: (p) => ws.send(JSON.stringify({ type: "search:end", ...p })),
+          onResult: (p) => broadcastJson({ type: "search:result", ...p }),
+          onEnd: (p) => broadcastJson({ type: "search:end", ...p }),
         });
-        ws.send(JSON.stringify({ type: "search:start", searchId, token }));
+        broadcastJson({ type: "search:start", searchId, token });
         return;
       }
       if (data.type === "search:buddies") {
@@ -1220,16 +1359,16 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const finalUsernames = (out?.[0] as string[]) ?? usernames;
         const finalQuery = (out?.[1] as string) ?? query;
         const token = (session as unknown as { searchBuddies: (u:string[], q:string, id:string, h: unknown)=>number }).searchBuddies(finalUsernames, finalQuery, searchId, {
-          onResult: (p: unknown) => ws.send(JSON.stringify({ type: "search:result", ...(p as object) })),
-          onEnd: (p: unknown) => ws.send(JSON.stringify({ type: "search:end", ...(p as object) })),
+          onResult: (p: unknown) => broadcastJson({ type: "search:result", ...(p as object) }),
+          onEnd: (p: unknown) => broadcastJson({ type: "search:end", ...(p as object) }),
         });
-        ws.send(JSON.stringify({ type: "search:start", searchId, token }));
+        broadcastJson({ type: "search:start", searchId, token });
         return;
       }
       if (data.type === "search:stop") {
         const result = StopMessageSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid stop message.")); return; }
-        ws.data.session?.cancelSearch(result.data.searchId);
+        sharedSession?.cancelSearch(result.data.searchId);
         return;
       }
       if (data.type === "search:page") {
@@ -1272,21 +1411,21 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const session = requireLogin(); if (!session) return;
         logger.info("transfer", "download request", { username: result.data.username, path: result.data.virtualPath.slice(0,80), size: result.data.size });
         session.queueUpload(result.data.username, result.data.virtualPath);
-        ws.data.transfers?.requestDownload(result.data.username, result.data.virtualPath, result.data.size, result.data.fileName);
+        sharedTransfers?.requestDownload(result.data.username, result.data.virtualPath, result.data.size, result.data.fileName);
         return;
       }
       if (data.type === "download:control") {
         const result = DownloadControlSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid download control.")); return; }
         logger.info("transfer", "download control", { id: result.data.id, action: result.data.action });
-        ws.data.transfers?.controlDownload(result.data.id, result.data.action);
+        sharedTransfers?.controlDownload(result.data.id, result.data.action);
         return;
       }
       if (data.type === "upload:control") {
         const result = UploadControlSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid upload control.")); return; }
         logger.info("transfer", "upload control", { id: result.data.id, action: result.data.action });
-        ws.data.transfers?.controlUpload(result.data.id, result.data.action);
+        sharedTransfers?.controlUpload(result.data.id, result.data.action);
         return;
       }
 
@@ -1495,8 +1634,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const result = ConfigUpdateSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid config:update")); return; }
         const { section, key, value } = result.data;
-        const session = ws.data.session;
-        const tm = ws.data.transfers as unknown as { setConfig?: (c: Record<string, unknown>) => void } | undefined;
+        const session = sharedSession;
+        const tm = sharedTransfers as unknown as { setConfig?: (c: Record<string, unknown>) => void } | undefined;
         // Bridge-relevant mappings
         try {
           if (section === "transfers") {
@@ -1731,11 +1870,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       }
 
       if (data.type === "statistics:request") {
-        const tm = ws.data.transfers as unknown as { getStatsSummary?: () => unknown } | undefined;
+        const tm = sharedTransfers as unknown as { getStatsSummary?: () => unknown } | undefined;
         const summary = tm?.getStatsSummary?.() ?? { total: null, session: null };
         // Library size comes from the login session's ShareDB (best-effort — absent pre-login).
         try {
-          const session = ws.data.session as unknown as { shareDBInstance?: { getSharedCounts?: () => { dirs: number; files: number }; getUnavailableShares?: () => unknown[] } } | undefined;
+          const session = sharedSession as unknown as { shareDBInstance?: { getSharedCounts?: () => { dirs: number; files: number }; getUnavailableShares?: () => unknown[] } } | undefined;
           const sdb = session?.shareDBInstance;
           if (sdb?.getSharedCounts) {
             (summary as Record<string, unknown>).shares = {
@@ -1750,7 +1889,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (data.type === "statistics:reset") {
         const result = StatsResetSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid statistics:reset")); return; }
-        const tm = ws.data.transfers as unknown as { resetStats?: () => void; getStatsSummary?: () => unknown } | undefined;
+        const tm = sharedTransfers as unknown as { resetStats?: () => void; getStatsSummary?: () => unknown } | undefined;
         try { tm?.resetStats?.(); } catch {}
         const summary = tm?.getStatsSummary?.() ?? { total: null, session: null };
         ws.send(JSON.stringify({ type: "statistics:response", ...summary as Record<string, unknown> }));
@@ -1954,14 +2093,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     },
     close(ws, code, reason) {
       try { (ws.data as unknown as { logUnsub?: () => void }).logUnsub?.(); } catch {}
-      const sess = ws.data.session as unknown as { searches?: Map<unknown, unknown>; username?: string } | undefined;
-      const searchCount = sess?.searches?.size ?? 0;
-      logger.info("bridge", "ws close", { code, reason: reason ? String(reason).slice(0,200) : "", username: (sess as { username?: string })?.username ?? "", searches: searchCount });
-      if (ws.data.session) {
-        try { activeSessions.delete(ws.data.session); } catch {}
-      }
-      ws.data.session?.close();
-      ws.data.transfers?.close();
+      try { attachedClients.delete(ws as unknown as AttachedClient); } catch {}
+      // Detach only — the singleton Soulseek session stays up for other clients.
+      const searchCount = (sharedSession as unknown as { searches?: Map<unknown, unknown> } | null)?.searches?.size ?? 0;
+      logger.info("bridge", "ws close (detach)", { code, reason: reason ? String(reason).slice(0,200) : "", user: sharedSessionUser ?? "", searches: searchCount });
       ws.data = {};
     },
   },
@@ -1974,4 +2109,6 @@ if (import.meta.main) {
   }
   diagLog("info", "bridge", `bridge listening on ws://localhost:${PORT}/ws ${BRIDGE_TOKEN ? "(token auth enabled)" : "(open)"} CONFIG_DIR=${CONFIG_DIR} DATA_DIR=${DATA_DIR} ${process.env.ALLOWED_ORIGINS ? `ALLOWED_ORIGINS=${process.env.ALLOWED_ORIGINS}` : ""}`, { port: PORT, listenPort: LISTEN_PORT });
   console.log(`Nicotine Hub bridge listening on ws://localhost:${PORT}/ws ${BRIDGE_TOKEN ? "(token auth enabled)" : "(open)"} CONFIG_DIR=${CONFIG_DIR} DATA_DIR=${DATA_DIR}`);
+  // Singleton session survives restarts via the encrypted vault — no per-client cookie needed.
+  void restoreSharedSessionFromVault();
 }

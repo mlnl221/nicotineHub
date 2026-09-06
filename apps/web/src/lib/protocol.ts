@@ -8,6 +8,40 @@ export interface LoginRequest {
   password: string;
   host?: string;
   port?: number;
+  /** Explicit user-confirmed takeover of the singleton server session. */
+  force?: boolean;
+}
+
+/* ------------------------------------------------------------------ *
+ * Shared server session — one Soulseek login per bridge, every client
+ * attaches. New clients need no password when the server is logged in.
+ * ------------------------------------------------------------------ */
+
+export interface SessionStatusRequest {
+  type: "session:status";
+}
+
+export interface AttachRequest {
+  type: "attach";
+}
+
+export interface SessionStatusMessage {
+  type: "session:status";
+  loggedIn: boolean;
+  username?: string;
+}
+
+/** Another user owns the singleton — client must confirm before force takeover. */
+export interface LoginConflictMessage {
+  type: "login:conflict";
+  currentUser: string;
+  attemptedUser: string;
+}
+
+/** The singleton session ended (global logout) — all clients return to login. */
+export interface SessionEndedMessage {
+  type: "session:ended";
+  reason?: string;
 }
 
 export interface LoginStartMessage {
@@ -786,6 +820,9 @@ export type BridgeOutboundMessage =
   | LoginStartMessage
   | LoginResultSuccess
   | LoginResultFailure
+  | SessionStatusMessage
+  | LoginConflictMessage
+  | SessionEndedMessage
   | ErrorMessage
   | SearchStartMessage
   | SearchResultMessage
@@ -838,6 +875,8 @@ export interface SpectrumStatusRequest {
 export type BridgeInboundMessage =
   | LoginRequest
   | LogoutRequest
+  | SessionStatusRequest
+  | AttachRequest
   | SearchRequest
   | SearchUserRequest
   | SearchRoomRequest

@@ -7,7 +7,7 @@ import { DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT } from "@/lib/config/defaults"
 import { isDemo } from "@/lib/demo";
 
 export function LoginForm() {
-  const { login, logout, state } = useSession();
+  const { login, logout, state, conflict, resolveConflict } = useSession();
   const { settings, setOption, markSectionSaved } = useConfig();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -64,16 +64,18 @@ export function LoginForm() {
           </div>
           <div>
             <h2 className="text-lg font-semibold text-on-surface">Logged in</h2>
-            <p className="text-sm text-on-surface-variant">Signed in as {username}</p>
+            <p className="text-sm text-on-surface-variant">Signed in as {state.user ?? username}</p>
+            <p className="mt-1 text-xs text-on-surface-variant/70">One shared login — all devices on your network use this session.</p>
           </div>
         </div>
 
         <button
           type="button"
           onClick={() => logout()}
+          title="Signs out every device — the server session is shared"
           className="w-full rounded-xl border border-outline-variant bg-surface-container-lowest py-3 font-label text-sm font-semibold text-on-surface transition-all active:scale-[0.98] hover:bg-surface-container"
         >
-          Sign out
+          Sign out all devices
         </button>
       </div>
     );
@@ -81,6 +83,32 @@ export function LoginForm() {
 
   return (
     <form onSubmit={handleSubmit} className="w-full">
+      {conflict ? (
+        <div role="alertdialog" aria-modal="true" aria-labelledby="takeover-title" className="mb-5 rounded-xl border border-error/40 bg-error-container px-4 py-4">
+          <h3 id="takeover-title" className="text-sm font-semibold text-on-error-container">
+            Server is already logged in as {conflict.currentUser}
+          </h3>
+          <p className="mt-1 text-sm text-on-error-container/90">
+            Taking over as {conflict.attemptedUser} signs out every device using {conflict.currentUser}.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={() => { setIsSubmitting(true); resolveConflict(true); }}
+              className="flex-1 rounded-lg bg-error px-4 py-2.5 font-label text-xs font-bold uppercase tracking-widest text-on-error transition-all active:scale-[0.98]"
+            >
+              Take over
+            </button>
+            <button
+              type="button"
+              onClick={() => resolveConflict(false)}
+              className="flex-1 rounded-lg border border-outline-variant px-4 py-2.5 font-label text-xs font-bold uppercase tracking-widest text-on-error-container transition-all active:scale-[0.98]"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div className="space-y-5">
         <div className="space-y-4">
           {state.status === "failed" && state.error ? (
@@ -190,7 +218,9 @@ export function LoginForm() {
             <p className="font-body text-[11px] leading-relaxed text-on-surface-variant/60">
               Your username and password are sent directly to the Soulseek server using its native
               protocol, which is <span className="font-semibold text-error/70">not encrypted</span>.
-              Only use credentials you trust. We do not store your password.
+              Only use credentials you trust. Your password is stored encrypted on your own server
+              so all your devices share one login — anyone on your home network can use the app
+              once you&apos;re signed in.
             </p>
           )}
         </div>
