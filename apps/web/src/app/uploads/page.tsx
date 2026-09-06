@@ -177,7 +177,7 @@ function UploadsInner() {
                   <span className="material-symbols-outlined text-tertiary text-xl">info</span>
                   <div>
                     <p className="font-label text-xs font-semibold text-on-tertiary-container dark:text-tertiary-fixed">No shared folders configured</p>
-                    <p className="font-label text-xs text-on-surface-variant mt-1">Uploads are queued but cannot start until you configure Shares (Settings → Shares). Queue remains inspectable — matching nicotine+.</p>
+                    <p className="font-label text-xs text-on-surface-variant mt-1">Uploads are queued but cannot start until you configure Shares (Settings → Shares). The queue stays visible in the meantime.</p>
                   </div>
                 </div>
                 <Link href="/downloads" className="mt-6 inline-flex font-label text-sm font-semibold text-primary hover:underline">View Downloads</Link>

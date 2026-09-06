@@ -701,7 +701,7 @@ export function SharesSection() {
                 <option value="buddy">Buddies</option>
                 <option value="trusted">Trusted buddies</option>
               </select>
-              <span className="mt-1 block font-body text-[11px] text-on-surface-variant dark:text-outline">Mirrors nicotine-plus PermissionLevel.PUBLIC/BUDDY/TRUSTED (shares.py:77).</span>
+              <span className="mt-1 block font-body text-[11px] text-on-surface-variant dark:text-outline">Public / Buddies / Trusted-buddies visibility levels.</span>
             </label>
             {dialogError && <div className="mb-3 rounded-xl bg-error-container px-3 py-2 font-body text-xs text-on-error-container">{dialogError}</div>}
             <div className="flex justify-end gap-2">
@@ -856,7 +856,7 @@ export function SharesSection() {
         />
         <SelectControl
           label="Buddy share visibility"
-          description="Who can see buddy/trusted shares without being a buddy. 'On request' entries show an indicator and require a message (pynicotine/shares visibility)."
+          description="Who can see buddy/trusted shares without being a buddy. 'On request' entries show an indicator and require a message."
           value={visibilityValue(t.reveal_buddy_shares, t.reveal_trusted_shares)}
           onChange={(v) => {
             if (v === "none") {

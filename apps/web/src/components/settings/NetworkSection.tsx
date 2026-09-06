@@ -250,7 +250,7 @@ export function NetworkSection() {
               ? `Inbound peer port. Bridge is currently on ${bridgePort ?? "—"} — click Save (top right) to hot-swap Bun.listen + reconnect Soulseek (WS stays up). Will re-advertise via SetWaitPort ${pendingPort}.`
               : bridgePort && bridgePort !== listenPort
                 ? `Inbound peer port. Bridge is currently on ${bridgePort} — pending save for ${listenPort}.`
-                : `Inbound peer port for direct searches & transfers. Requires port-forward of TCP+UDP ${pendingPort} on your VPN/router. Save triggers fresh connect (like nicotine-plus). Default ${DEFAULT_LISTEN_PORT} for VPN forward.`
+                : `Inbound peer port for direct searches & transfers. Requires port-forward of TCP+UDP ${pendingPort} on your VPN/router. Save triggers fresh connect. Default ${DEFAULT_LISTEN_PORT} for VPN forward.`
           }
           value={pendingPort}
           min={1024}
@@ -295,7 +295,7 @@ export function NetworkSection() {
         ) : null}
         <ToggleControl
           label="UPnP port mapping"
-          description="Automatically forward the listening port via UPnP/NAT-PMP (like nicotine-plus). Falls back from NAT-PMP to UPnP; renews every 2 h. Disable if your router doesn't support it or you forward manually."
+          description="Automatically forward the listening port via UPnP/NAT-PMP. Falls back from NAT-PMP to UPnP; renews every 2 h. Disable if your router doesn't support it or you forward manually."
           checked={server.upnp ?? true}
           onChange={(v) => setOption("server", "upnp", v)}
         />
@@ -400,12 +400,12 @@ export function NetworkSection() {
 
       <SectionCard
         title="Auto-join & watched users"
-        description="Rooms to auto-join after login and users to watch (like nicotine-plus server.autojoin / server.userlist). One per line."
+        description="Rooms to auto-join after login and users to watch. One per line."
         actions={<SectionSaveButton section="server" dirty={portDirty || serverDirty} onSave={handleSaveAll} />}
       >
         <TextFieldControl
           label="Auto-join rooms (autojoin)"
-          description="Rooms to join automatically after login (nicotine-plus autojoin)."
+          description="Rooms to join automatically after login."
           value={(server.autojoin ?? []).join("\n")}
           multiline
           placeholder="e.g. nicotine&#10;music"
@@ -413,7 +413,7 @@ export function NetworkSection() {
         />
         <TextFieldControl
           label="Watched users (userlist)"
-          description="Users to watch/status-poll after login (nicotine-plus userlist / buddies precursor)."
+          description="Users to watch/status-poll after login."
           value={(server.userlist ?? []).join("\n")}
           multiline
           placeholder="e.g. alice&#10;bob"
@@ -421,7 +421,7 @@ export function NetworkSection() {
         />
         <TextFieldControl
           label="Auto-search (autosearch)"
-          description="Searches to run automatically after login (nicotine-plus autosearch)."
+          description="Searches to run automatically after login."
           value={(server.autosearch ?? []).join("\n")}
           multiline
           placeholder="e.g. pink floyd flac&#10;jazz 192"
@@ -431,7 +431,7 @@ export function NetworkSection() {
 
       <SectionCard
         title="Auto-reply"
-        description="Away reply sent when you are marked away (nicotine-plus server.autoreply + autoaway → SetStatus 28). Leave empty to disable."
+        description="Away reply sent when you are marked away. Leave empty to disable."
         actions={<SectionSaveButton section="server" dirty={portDirty || serverDirty} onSave={handleSaveAll} />}
       >
         <TextFieldControl

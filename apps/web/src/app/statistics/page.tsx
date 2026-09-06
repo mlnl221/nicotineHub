@@ -23,7 +23,7 @@ function StatisticsInner() {
       <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <PageHeader
           title="Statistics"
-          subtitle="Transfer statistics — total and session (mirrors pynicotine Statistics)."
+          subtitle="Transfer statistics — total and session."
           settingsHref="/settings"
           actions={
             <Link href="/search" className="flex items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant hover:text-primary">
@@ -33,7 +33,7 @@ function StatisticsInner() {
         />
         <div className="relative z-10 mx-auto w-full max-w-3xl flex-1 px-4 py-6 md:px-10 md:py-8">
           <StatisticsPanel />
-          <p className="mt-4 text-xs text-on-surface-variant">Mirrors <code>Statistics</code> in <code>pynicotine/transfers.py</code> — total vs session.</p>
+          <p className="mt-4 text-xs text-on-surface-variant">Totals accumulate across runs; session resets on restart.</p>
         </div>
       </main>
       <BottomNav />

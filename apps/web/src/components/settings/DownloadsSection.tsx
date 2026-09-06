@@ -57,7 +57,7 @@ export function DownloadsSection() {
         />
         <SelectControl
           label="Grouping"
-          description="How downloads are grouped in the UI (mirrors pynicotine transfers groupdownloads)."
+          description="How downloads are grouped in the UI."
           value={t.groupdownloads}
           onChange={(v) => setOption("transfers", "groupdownloads", v)}
           options={[

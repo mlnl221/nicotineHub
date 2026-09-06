@@ -43,10 +43,10 @@ export function StatisticsPanel() {
         <h3 className="font-label text-sm font-semibold">Statistics</h3>
         <div className="flex gap-2">
           <button onClick={refresh} disabled={loading} className="rounded-lg bg-surface-container-high px-3 py-1 text-xs">{loading ? "…" : "Refresh"}</button>
-          <button onClick={() => { if (confirm("Reset all statistics? This mirrors pynicotine/transfers.py:Statistics reset.")) reset(); }} className="rounded-lg bg-error-container px-3 py-1 text-xs text-on-error-container">Reset</button>
+          <button onClick={() => { if (confirm("Reset all statistics?")) reset(); }} className="rounded-lg bg-error-container px-3 py-1 text-xs text-on-error-container">Reset</button>
         </div>
       </div>
-      <p className="mb-3 text-xs text-on-surface-variant">Since {fmtSince(t.since_timestamp)} — mirrors <code>pynicotine/transfers.py:Statistics</code></p>
+      <p className="mb-3 text-xs text-on-surface-variant">Since {fmtSince(t.since_timestamp)} — total vs session.</p>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
