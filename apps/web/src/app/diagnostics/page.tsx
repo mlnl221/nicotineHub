@@ -17,6 +17,7 @@ import { isDemo } from "@/lib/demo";
 import { useStatistics } from "@/lib/statistics";
 import { humanSize } from "@/lib/format";
 import { isBridgeProxied } from "@/lib/bridgeHttp";
+import { getWorkerHealth } from "@/lib/worker";
 
 const LEVELS: DiagLevel[] = ["debug", "info", "warn", "error"];
 const LEVEL_COLOR: Record<DiagLevel, string> = {
@@ -105,6 +106,52 @@ function StatisticsSummaryCard() {
   );
 }
 
+type WorkerHealth = {
+  ok: boolean;
+  version?: string;
+  uptime?: number;
+  sources?: string[];
+  queueDepth?: number;
+  auth?: { discogs: boolean; tidal: boolean; qobuz: boolean };
+};
+
+function WorkerHealthCard({ worker, latency }: { worker: WorkerHealth | null; latency: number | null }) {
+  if (isDemo) {
+    return (
+      <HealthCard title="Worker" icon="memory">
+        <span className="text-on-surface-variant dark:text-outline">demo (offline — no worker)</span>
+      </HealthCard>
+    );
+  }
+  if (!worker) {
+    return (
+      <HealthCard title="Worker" icon="memory">
+        <div className="flex items-center gap-2">
+          <span className="inline-block h-2 w-2 rounded-full bg-error" />
+          <span className="font-semibold">unreachable</span>
+        </div>
+        <div className="text-[11px] text-on-surface-variant">scrape/spectrum/tag disabled</div>
+      </HealthCard>
+    );
+  }
+  return (
+    <HealthCard title="Worker" icon="memory">
+      <div className="flex items-center gap-2">
+        <span className={`inline-block h-2 w-2 rounded-full ${worker.ok ? "bg-primary" : "bg-error"}`} />
+        <span className="font-semibold">{worker.ok ? "healthy" : "unreachable"}</span>
+        {latency !== null && <span className="text-on-surface-variant">· {latency} ms</span>}
+      </div>
+      <div>v{worker.version ?? "—"} · up {worker.uptime != null ? `${Math.floor(worker.uptime)}s` : "—"}</div>
+      <div className="text-[11px] text-on-surface-variant">
+        {(worker.sources ?? []).length} sources{(worker.sources ?? []).length ? `: ${worker.sources!.join(", ")}` : ""} · queue {worker.queueDepth ?? "—"}
+      </div>
+      <div className="text-[11px] text-on-surface-variant">
+        D{worker.auth?.discogs ? "✓" : "·"} T{worker.auth?.tidal ? "✓" : "·"} Q{worker.auth?.qobuz ? "✓" : "·"}
+      </div>
+    </HealthCard>
+  );
+}
+
 export default function DiagnosticsPage() {
   return (
     <RequireAuth>
@@ -120,6 +167,8 @@ function DiagnosticsInner() {
 
   const [health, setHealth] = useState<DiagnosticsHealth | null>(null);
   const [healthLatency, setHealthLatency] = useState<number | null>(null);
+  const [worker, setWorker] = useState<WorkerHealth | null>(null);
+  const [workerLatency, setWorkerLatency] = useState<number | null>(null);
   const [logs, setLogs] = useState<DiagEntry[]>([]);
   const [levelFilter, setLevelFilter] = useState<DiagLevel>("debug");
   const [scopeFilter, setScopeFilter] = useState<string>("all");
@@ -208,6 +257,34 @@ function DiagnosticsInner() {
     return () => clearInterval(timer);
   }, [state.status]);
 
+  // poll worker health (open endpoint, same-origin proxy) — independent of bridge WS
+  useEffect(() => {
+    if (isDemo) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval>;
+    const fetchWorker = async () => {
+      const start = performance.now();
+      try {
+        const w = await getWorkerHealth();
+        if (cancelled) return;
+        setWorkerLatency(Math.round(performance.now() - start));
+        setWorker(w ? {
+          ok: !!w.ok,
+          version: (w as WorkerHealth).version,
+          uptime: (w as WorkerHealth).uptime,
+          sources: (w as WorkerHealth).sources,
+          queueDepth: (w as WorkerHealth).queueDepth,
+          auth: (w as WorkerHealth).auth,
+        } : null);
+      } catch {
+        if (!cancelled) { setWorker(null); setWorkerLatency(null); }
+      }
+    };
+    fetchWorker();
+    timer = setInterval(fetchWorker, 15000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, []);
+
   // auto-scroll
   useEffect(() => {
     if (!autoScroll || paused) return;
@@ -273,9 +350,10 @@ function DiagnosticsInner() {
     try {
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
       // Default compose stack reaches the bridge via same-origin /ws (proxied);
-      // direct :8787 only applies in bare dev / direct mode.
+      // direct :8787 only applies in bare dev / direct mode. The browser-facing
+      // host below is the web entrypoint — the bridge itself is internal.
       setBridgeUrlDisplay(isBridgeProxied()
-        ? `${proto}//${window.location.host}/ws (via web proxy)`
+        ? "web proxy → bridge:8787 (internal, no published port)"
         : `${proto}//${window.location.hostname}:8787/ws`);
     } catch {}
   }, []);
@@ -299,7 +377,7 @@ function DiagnosticsInner() {
           }
         />
 
-        <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 md:gap-6 px-4 pb-6 md:px-10 md:pb-8">
+        <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 md:gap-6 px-4 pt-4 md:px-10 md:pt-6 pb-6 md:pb-8">
           {/* Health cards + new panels */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2">
             <PortChecker />
@@ -321,15 +399,21 @@ function DiagnosticsInner() {
               <div>Server server.slsknet.org:2242</div>
               <div className="text-[11px] text-on-surface-variant">Login {state.status==="connected" ? "ok" : state.status} · reconnect via bridge logs</div>
             </HealthCard>
-            <HealthCard title="Transfers" icon="downloading">
-              {stats ? (
-                <>
-                  <div>↓ {((stats.downloadSpeed||0)/1024).toFixed(1)} KB/s · ↑ {((stats.uploadSpeed||0)/1024).toFixed(1)} KB/s</div>
-                  <div>Active ↓ {stats.activeDownloads} ↑ {stats.activeUploads} · Queued ↓ {stats.queuedDownloads} ↑ {stats.queuedUploads}</div>
-                  <div className="text-[11px] text-on-surface-variant">Total {transfersApi.transfers.length} tracked</div>
-                </>
-              ) : <span className="text-on-surface-variant">No stats yet {isDemo ? "· demo offline" : ""}</span>}
-            </HealthCard>
+            <WorkerHealthCard worker={worker} latency={workerLatency} />
+          </div>
+
+          {/* Transfers one-line strip */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-surface px-4 py-2.5 ghost-border font-body text-xs text-on-surface-variant dark:bg-surface-container-low dark:text-outline" data-testid="diagnostics-transfers-strip">
+            <span className="inline-flex items-center gap-1.5 font-label font-semibold uppercase tracking-widest"><span className="material-symbols-outlined text-[16px] text-primary dark:text-primary-fixed">downloading</span>Transfers</span>
+            {stats ? (
+              <>
+                <span>↓ {((stats.downloadSpeed||0)/1024).toFixed(1)} KB/s · ↑ {((stats.uploadSpeed||0)/1024).toFixed(1)} KB/s</span>
+                <span>active ↓{stats.activeDownloads} ↑{stats.activeUploads} · queued ↓{stats.queuedDownloads} ↑{stats.queuedUploads}</span>
+                <span>{transfersApi.transfers.length} tracked</span>
+              </>
+            ) : (
+              <span>{isDemo ? "demo offline" : "idle — no active transfers"}</span>
+            )}
           </div>
 
           {/* Always-visible live tail */}
