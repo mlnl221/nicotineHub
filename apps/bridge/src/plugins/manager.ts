@@ -23,14 +23,14 @@ type PluginsFile = {
 
 const DEFAULT_PLUGINS_FILE: PluginsFile = { enable: true, enabled: [], plugins: {} };
 
-function dataDir(): string {
+function configDir(): string {
   return process.env.CONFIG_DIR || "/config";
 }
 function pluginsFilePath(): string {
-  return join(dataDir(), "plugins.json");
+  return join(configDir(), "plugins.json");
 }
 function userPluginsDir(): string {
-  return join(dataDir(), "plugins");
+  return join(configDir(), "plugins");
 }
 function builtinPluginsDirFallback(): string {
   // inside bridge image, builtins are compiled; fallback path for dev
@@ -53,7 +53,7 @@ function readPluginsFile(): PluginsFile {
 }
 function writePluginsFile(data: PluginsFile): void {
   try {
-    mkdirSync(dataDir(), { recursive: true });
+    mkdirSync(configDir(), { recursive: true });
     const tmp = pluginsFilePath() + ".tmp";
     writeFileSync(tmp, JSON.stringify(data, null, 2));
     // atomic
@@ -142,18 +142,18 @@ export class PluginManager {
     cli: {},
   };
   private builtinMap = new Map<string, { manifest: PluginManifest; loader: () => BasePlugin }>();
-  private dataDirStr = dataDir();
+  private configDirStr = configDir();
   // core shim injected per session
   private sessionGetter: (() => SessionLike | null) | null = null;
   private outputHandler: ((pluginName: string, text: string) => void) | null = null;
 
   constructor(
     private opts: {
-      dataDir?: string;
+      configDir?: string;
       sessionGetter?: () => SessionLike | null;
     } = {},
   ) {
-    if (opts.dataDir) this.dataDirStr = opts.dataDir;
+    if (opts.configDir) this.configDirStr = opts.configDir;
     if (opts.sessionGetter) this.sessionGetter = opts.sessionGetter;
   }
 
@@ -172,7 +172,7 @@ export class PluginManager {
 
   private ensureDirs(): void {
     try { mkdirSync(userPluginsDir(), { recursive: true }); } catch {}
-    try { mkdirSync(this.dataDirStr, { recursive: true }); } catch {}
+    try { mkdirSync(this.configDirStr, { recursive: true }); } catch {}
   }
 
   listInstalledPlugins(): string[] {
@@ -844,7 +844,7 @@ export class PluginManager {
 
 // Singleton used by server.ts (created lazily)
 export let globalPluginManager: PluginManager | null = null;
-export function getGlobalPluginManager(dataDir?: string): PluginManager {
-  if (!globalPluginManager) globalPluginManager = new PluginManager({ dataDir });
+export function getGlobalPluginManager(configDir?: string): PluginManager {
+  if (!globalPluginManager) globalPluginManager = new PluginManager({ configDir });
   return globalPluginManager;
 }

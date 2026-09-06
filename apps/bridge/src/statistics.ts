@@ -24,21 +24,21 @@ export interface Statistics {
   cancelled_uploads: number;
 }
 
-function defaultDataDir(): string {
+function defaultConfigDir(): string {
   return process.env.CONFIG_DIR || "/config";
 }
 
-function statsPath(dataDir: string): string {
-  return join(dataDir, "statistics.json");
+function statsPath(configDir: string): string {
+  return join(configDir, "statistics.json");
 }
 
 export class StatsManager {
   private stats: Statistics;
   private sessionStats: Statistics;
-  private dataDir: string;
+  private configDir: string;
 
-  constructor(opts?: { dataDir?: string }) {
-    this.dataDir = opts?.dataDir || defaultDataDir();
+  constructor(opts?: { configDir?: string }) {
+    this.configDir = opts?.configDir || defaultConfigDir();
     const loaded = this.load();
     if (loaded) {
       this.stats = normalize(loaded);
@@ -76,7 +76,7 @@ export class StatsManager {
   }
 
   private load(): Statistics | null {
-    const p = statsPath(this.dataDir);
+    const p = statsPath(this.configDir);
     if (!existsSync(p)) return null;
     try {
       const raw = JSON.parse(readFileSync(p, "utf8"));
@@ -87,7 +87,7 @@ export class StatsManager {
 
   persist() {
     try {
-      const p = statsPath(this.dataDir);
+      const p = statsPath(this.configDir);
       mkdirSync(join(p, ".."), { recursive: true });
       writeFileSync(p, JSON.stringify(this.stats, null, 2));
     } catch {}

@@ -441,7 +441,7 @@ describe("transfers — statistics breakdown (failed/cancelled + live)", () => {
       since_timestamp: 1, started_downloads: 5, completed_downloads: 4, downloaded_size: 100,
       started_uploads: 2, completed_uploads: 2, uploaded_size: 50,
     }));
-    const sm = new StatsManager({ dataDir: tmp });
+    const sm = new StatsManager({ configDir: tmp });
     expect(sm.getTotal().failed_downloads).toBe(0);
     expect(sm.getTotal().cancelled_uploads).toBe(0);
     expect(sm.getTotal().started_downloads).toBe(5);

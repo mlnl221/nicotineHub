@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
@@ -93,6 +94,8 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
   const [ipInfo, setIpInfo] = useState<{ ip: string; port: number; country?: string } | null>(null);
   const [loadingIp, setLoadingIp] = useState(false);
   const [showIp, setShowIp] = useState(false);
+  const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
+  const [lightbox, setLightbox] = useState(false);
 
   const picObjectUrl = useMemo(() => {
     if (!profile.info?.pic || !showPic) return null;
@@ -106,6 +109,13 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
   useEffect(() => {
     return () => { if (picObjectUrl) URL.revokeObjectURL(picObjectUrl); };
   }, [picObjectUrl]);
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setLightbox(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightbox]);
 
   const flash = (msg: string) => {
     setToast(msg);
@@ -245,15 +255,26 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className={`flex items-center gap-4 min-w-0 flex-1 ${profile.info && !profile.info.slotsavail ? "opacity-60" : ""}`} title={profile.info && !profile.info.slotsavail ? "Slots full" : undefined}>
             {profile.info?.pic && showPic ? (
-              <Image
-                src={picObjectUrl ?? profilePicSrc(profile.info.pic)}
-                alt={`${username} profile picture`}
-                width={64}
-                height={64}
-                unoptimized
-                loading="lazy"
-                className="h-16 w-16 rounded-full object-cover bg-surface-container-highest"
-              />
+              <button
+                type="button"
+                onClick={() => setLightbox(true)}
+                onMouseEnter={(e) => setHoverPos({ x: e.clientX, y: e.clientY })}
+                onMouseMove={(e) => setHoverPos({ x: e.clientX, y: e.clientY })}
+                onMouseLeave={() => setHoverPos(null)}
+                aria-label={`View full profile picture of ${username}`}
+                title="Hover to preview • Click for full view"
+                className="cursor-zoom-in rounded-full focus-visible:outline-2 focus-visible:outline-primary"
+              >
+                <Image
+                  src={picObjectUrl ?? profilePicSrc(profile.info.pic)}
+                  alt={`${username} profile picture`}
+                  width={64}
+                  height={64}
+                  unoptimized
+                  loading="lazy"
+                  className="h-16 w-16 rounded-full object-cover bg-surface-container-highest"
+                />
+              </button>
             ) : profile.info?.pic && !showPic ? (
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-surface-container-high ghost-border">
                 <span className="material-symbols-outlined text-outline">hide_image</span>
@@ -344,6 +365,87 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
         ) : null}
       </header>
 
+      {hoverPos && profile.info?.pic && showPic && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed z-[60] pointer-events-none hidden md:block"
+              style={{
+                left: Math.min(hoverPos.x + 16, window.innerWidth - 360),
+                top: Math.min(hoverPos.y + 16, window.innerHeight - 280),
+              }}
+            >
+              <div className="rounded-xl bg-surface-container-lowest shadow-xl ghost-border overflow-hidden w-[340px]">
+                <div className="px-3 py-2 bg-surface-container-high">
+                  <span className="font-label text-xs font-semibold truncate" title={username}>
+                    {username}
+                  </span>
+                </div>
+                <div className="bg-black flex items-center justify-center min-h-[180px] max-h-[260px] overflow-hidden">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={picObjectUrl ?? profilePicSrc(profile.info.pic)}
+                    alt={`${username} profile picture preview`}
+                    className="w-full h-auto max-h-[260px] object-contain"
+                  />
+                </div>
+                <div className="px-3 py-1.5 bg-surface-container-lowest font-label text-[10px] text-outline text-center">
+                  Click for full view
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {lightbox && profile.info?.pic && showPic && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[70] flex items-center justify-center p-2 sm:p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-label={`${username} profile picture`}
+              onClick={() => setLightbox(false)}
+            >
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+              <div
+                className="relative bg-surface-container-lowest rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden ghost-border"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20 shrink-0">
+                  <h3 className="font-headline text-sm font-semibold truncate" title={username}>
+                    {username}
+                  </h3>
+                  <button
+                    aria-label="Close full picture view"
+                    onClick={() => setLightbox(false)}
+                    autoFocus
+                    className="ml-3 p-2 rounded-full hover:bg-surface-container-high min-h-11 min-w-11 flex items-center justify-center"
+                  >
+                    <span className="material-symbols-outlined">close</span>
+                  </button>
+                </div>
+                <div className="flex-1 overflow-auto bg-black flex items-center justify-center p-2 min-h-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={picObjectUrl ?? profilePicSrc(profile.info.pic)}
+                    alt={`${username} profile picture full view`}
+                    className="max-w-full h-auto max-h-[70vh] object-contain"
+                  />
+                </div>
+                <div className="px-4 py-2.5 flex justify-end gap-2 bg-surface-container-low shrink-0">
+                  <button
+                    onClick={() => setLightbox(false)}
+                    className="px-4 py-2 rounded-full bg-primary text-on-primary font-label text-xs font-semibold"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+
       <div className="flex flex-col p-4 md:p-8 space-y-6 md:space-y-8 max-w-screen-2xl mx-auto w-full">
         {(() => {
           const hasAnyData = !!(
@@ -400,6 +502,16 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
           <section className="bg-surface dark:bg-surface-container-low rounded-xl p-6 ghost-border">
             <h3 className="font-label text-sm uppercase tracking-widest text-on-surface-variant dark:text-outline mb-3">Description</h3>
             <p className="font-body text-sm text-on-surface dark:text-on-surface whitespace-pre-wrap break-words">{linkify(profile.info.descr)}</p>
+          </section>
+        ) : !loading && !error ? (
+          <section className="bg-surface dark:bg-surface-container-low rounded-xl p-6 ghost-border">
+            <h3 className="font-label text-sm uppercase tracking-widest text-on-surface-variant dark:text-outline mb-3">Description</h3>
+            <p className="font-body text-sm text-on-surface-variant">No description yet.</p>
+            {isOwn ? (
+              <button onClick={() => router.push("/settings?tab=user-profile")} className="mt-3 inline-flex items-center gap-1 rounded-full bg-surface-container-lowest px-3 py-1.5 font-label text-xs hover:bg-surface-container-high">
+                <span className="material-symbols-outlined text-[16px]">edit</span> Add one in Settings
+              </button>
+            ) : null}
           </section>
         ) : null}
 
