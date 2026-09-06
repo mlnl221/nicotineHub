@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "@/lib/session";
 import { isDemo } from "@/lib/demo";
+import { InfoTooltip } from "@/components/ui/InfoTooltip";
 
 type HealthJson = {
   listenPort?: number;
@@ -202,12 +203,12 @@ export function PortChecker() {
   return (
     <div className="glass-panel rounded-2xl p-4">
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="font-label text-sm font-semibold">Port Checker</h3>
+        <h3 className="flex items-center gap-1.5 font-label text-sm font-semibold">
+          Port Checker
+          <InfoTooltip text={`Search results require a reachable inbound peer listener. Default LISTEN_PORT 60754 (configurable) must be port-forwarded (TCP) — edit in Settings → Network. With the Docker socket mounted + ALLOW_CONTAINER_RESTART=1 the bridge recreates itself so the host mapping follows, otherwise follow with LISTEN_PORT=<port> docker compose up -d. UPnP/NAT-PMP auto-forwards when enabled (toggle in Network, renews every 2 h). Currently ${health?.listenPort ?? 60754}.`} />
+        </h3>
         <span className={`h-2 w-2 rounded-full ${state.status === "connected" ? "bg-green-500" : "bg-outline"}`} title={state.status} />
       </div>
-      <p className="mb-3 text-xs text-on-surface-variant">
-        Search results require a reachable inbound peer listener. Default <code>LISTEN_PORT 60754</code> (configurable) must be port-forwarded (TCP, see README) — edit in Settings → Network. With the Docker socket mounted + <code>ALLOW_CONTAINER_RESTART=1</code> the bridge recreates itself so the host mapping follows, otherwise follow with <code>LISTEN_PORT=&lt;port&gt; docker compose up -d</code>. UPnP/NAT-PMP auto-forwards when enabled (toggle in Network, renews every 2 h). Currently <code>{health?.listenPort ?? 60754}</code>.
-      </p>
       {health && (
         <div className="mb-3 rounded-xl bg-surface-container-high px-3 py-2 text-xs dark:bg-surface-container-highest/40">
           <div className="flex flex-wrap gap-x-3 gap-y-1">

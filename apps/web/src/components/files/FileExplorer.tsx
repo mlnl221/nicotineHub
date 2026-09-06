@@ -806,7 +806,7 @@ export function FileExplorer({
                   )}
                 </div>
                 <div className="px-4 py-2.5 flex flex-wrap gap-2 justify-between items-center bg-surface-container-low shrink-0">
-                  <span className="font-label text-[11px] text-outline">sox Kaiser • -z 120 • cached in /tmp (wiped on reboot)</span>
+                  <span className="font-label text-[11px] text-outline">cached in /tmp (wiped on reboot)</span>
                   <div className="flex gap-2">
                     {fullSrc ? <a href={fullSrc} download={`${spectrumModal.file.name}-Full.png`} className="px-3 py-2 rounded-full bg-surface-container-high font-label text-xs font-semibold">Download Full</a> : null}
                     {zoomSrc ? <a href={zoomSrc} download={`${spectrumModal.file.name}-Zoom.png`} className="px-3 py-2 rounded-full bg-primary text-on-primary font-label text-xs font-semibold">Download Zoom</a> : null}

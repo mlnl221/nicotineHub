@@ -351,3 +351,56 @@ describe("transfers — file streaming (Phase 4 - download & upload)", () => {
     mgr.close();
   });
 });
+
+describe("transfers — statistics breakdown (failed/cancelled + live)", () => {
+  let tmp: string;
+  beforeEach(() => { tmp = makeTmpDir(); });
+  afterEach(() => { try { rmSync(tmp, { recursive: true, force: true }); } catch {} });
+
+  test("download cancel counts once, upload-failed counts failed", () => {
+    const { mgr } = makeManager(tmp);
+    mgr.requestDownload("alice", "a.mp3", 100);
+    mgr.controlDownload("alice::a.mp3", "cancel");
+    mgr.controlDownload("alice::a.mp3", "cancel"); // no double count
+    mgr.requestDownload("bob", "b.mp3", 100);
+    mgr.handleUploadFailed("b.mp3");
+    const summary = mgr.getStatsSummary() as unknown as {
+      total: { cancelled_downloads: number; failed_downloads: number };
+      live: { queuedDownloads: number };
+    };
+    expect(summary.total.cancelled_downloads).toBe(1);
+    expect(summary.total.failed_downloads).toBe(1);
+    expect(summary.live.queuedDownloads).toBe(0);
+    mgr.close();
+  });
+
+  test("denied + cancelled uploads count failed/cancelled", () => {
+    const { mgr } = makeManager(tmp);
+    // empty tmp dir → nothing shared → "File not shared." denials
+    const denied = mgr.handleQueueUpload("peerX", "ghost.mp3");
+    expect(denied.status).toBe("File not shared.");
+    mgr.handleQueueUpload("peerY", "ghost2.mp3");
+    mgr.controlUpload("peerX::ghost.mp3", "cancel"); // denied entry cancelled — failed already counted, cancel counts once
+    const summary = mgr.getStatsSummary() as unknown as {
+      total: { failed_uploads: number; cancelled_uploads: number };
+    };
+    expect(summary.total.failed_uploads).toBe(2);
+    expect(summary.total.cancelled_uploads).toBe(1);
+    mgr.close();
+  });
+
+  test("old statistics.json without new counters normalizes to 0", async () => {
+    const { StatsManager } = await import("./statistics.ts");
+    writeFileSync(join(tmp, "statistics.json"), JSON.stringify({
+      since_timestamp: 1, started_downloads: 5, completed_downloads: 4, downloaded_size: 100,
+      started_uploads: 2, completed_uploads: 2, uploaded_size: 50,
+    }));
+    const sm = new StatsManager({ dataDir: tmp });
+    expect(sm.getTotal().failed_downloads).toBe(0);
+    expect(sm.getTotal().cancelled_uploads).toBe(0);
+    expect(sm.getTotal().started_downloads).toBe(5);
+    sm.recordDownloadFailed();
+    expect(sm.getTotal().failed_downloads).toBe(1);
+    expect(sm.getSession().failed_downloads).toBe(1);
+  });
+});

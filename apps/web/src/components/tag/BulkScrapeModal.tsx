@@ -38,7 +38,7 @@ export function BulkScrapeModal({ open, files, onClose, onRenamed }: Props) {
       const r = await scrapeTags(files[0], u, false);
       setPreview({ artist: r.artist, album: r.album, year: r.year, source: r.source, track_count: r.track_count });
       if (r.track_count && Math.abs(r.track_count - files.length) > 1) {
-        setError(`Warning: track count ${r.track_count} differs from selected ${files.length} (±1 filter in salmon). Apply will still set uniform album/artist.`);
+        setError(`Warning: track count ${r.track_count} differs from selected ${files.length} (tolerance ±1). Apply will still set uniform album/artist.`);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -85,7 +85,7 @@ export function BulkScrapeModal({ open, files, onClose, onRenamed }: Props) {
     }
   };
 
-  // natural sort key like salmon _tracknumber_sort_key
+  // natural sort: numeric prefix then lexicographic
   const sorted = [...files].sort((a, b) => {
     const an = a.split("/").pop()?.split("\\").pop() || a;
     const bn = b.split("/").pop()?.split("\\").pop() || b;
@@ -104,7 +104,7 @@ export function BulkScrapeModal({ open, files, onClose, onRenamed }: Props) {
           <div className="flex justify-between gap-3">
             <div>
               <h2 className="font-headline text-lg font-bold">Bulk Scrape (1 URL)</h2>
-              <p className="font-mono text-xs text-outline">{files.length} files → one release URL (smoked-salmon single-dir = one release, positional zip ±1)</p>
+              <p className="font-mono text-xs text-outline">{files.length} files → one release URL (one directory = one release, positional match ±1)</p>
             </div>
             <button onClick={onClose} className="h-8 w-8 rounded-full bg-surface-container-high flex items-center justify-center"><span className="material-symbols-outlined text-[18px]">close</span></button>
           </div>
@@ -124,15 +124,15 @@ export function BulkScrapeModal({ open, files, onClose, onRenamed }: Props) {
               <button disabled={loading || !url.trim()} onClick={handlePreview} className="flex-1 rounded-xl bg-surface-container-high px-4 py-2 font-label text-xs font-semibold disabled:opacity-40">{loading ? "Fetching…" : "Preview"}</button>
               <button disabled={loading || applying || !url.trim() || !preview} onClick={handleApply} className="flex-1 rounded-xl bg-primary px-4 py-2 font-label text-xs font-bold text-on-primary disabled:opacity-40">{applying ? "Applying…" : "Apply to all"}</button>
             </div>
-            {preview ? <div className="rounded-xl bg-surface-container-lowest p-3 ghost-border font-body text-xs"><div><span className="font-semibold">Found:</span> {preview.source} — {preview.artist} — {preview.album} ({preview.year ?? "?"}) · tracks {preview.track_count ?? "?"}</div><div className="font-mono text-[10px] text-outline">Positional zip (natural sort, salmon combine_tracks:193) — files sorted by numeric prefix then lexicographic.</div></div> : null}
+            {preview ? <div className="rounded-xl bg-surface-container-lowest p-3 ghost-border font-body text-xs"><div><span className="font-semibold">Found:</span> {preview.source} — {preview.artist} — {preview.album} ({preview.year ?? "?"}) · tracks {preview.track_count ?? "?"}</div><div className="font-mono text-[10px] text-outline">Positional match (natural sort) — files sorted by numeric prefix then lexicographic.</div></div> : null}
             {autoRenameEnabled ? <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 px-3 py-2 font-body text-xs text-amber-900 dark:text-amber-200">Auto-rename enabled: <span className="font-mono">{renameTemplate}</span> — files will be renamed after tags are written. Manage in Settings → Shares.</div> : null}
           </div>
           <div className="rounded-xl bg-surface-container-low p-3 ghost-border space-y-2">
-            <h4 className="font-label text-xs font-semibold uppercase tracking-widest">Files (sorted natural, salmon _tracknumber_sort_key)</h4>
+            <h4 className="font-label text-xs font-semibold uppercase tracking-widest">Files (natural sort)</h4>
             <div className="max-h-[28vh] overflow-auto space-y-1 pr-1">
               {sorted.map((f, i) => <div key={f} className="flex items-center gap-2 rounded-lg bg-surface-container-lowest px-3 py-2"><span className="font-mono text-[10px] text-outline w-6 shrink-0">{i + 1}</span><span className="font-mono text-xs truncate flex-1" title={f}>{f.split("/").pop()?.split("\\").pop() || f}</span><span className="font-mono text-[10px] text-outline truncate max-w-[40%] hidden md:block" title={f}>{f}</span></div>)}
             </div>
-            <p className="font-body text-[11px] text-outline">v1 uniform: album/artist/year applied to all; title/artist per-file track mapping needs scraper tracklist (deferred). Sorted order matches salmon `combine_tracks` positional zip.</p>
+            <p className="font-body text-[11px] text-outline">v1 uniform: album/artist/year applied to all; title/artist per-file track mapping needs scraper tracklist (deferred). Sorted order is the positional match order.</p>
           </div>
         </div>
         <div className="px-6 py-4 border-t border-outline-variant/10 bg-surface-container-low/60 flex justify-between gap-3 shrink-0">

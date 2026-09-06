@@ -18,6 +18,46 @@ through the web entrypoint (same-origin `/ws` piped + `/api/bridge/*` +
 - `worker` — `apps/worker/Dockerfile` → `:8789`, volumes `config:/config:ro` + `data:/data`, no `ports:` block
 - `web` — `apps/web/Dockerfile` → `PORT=3000` (`proxy-server.js` entry), `ports: 3000:3000`
 
+## Sharing host folders (`/files` + Soulseek shares)
+
+Share paths are stored **verbatim** — Settings → Shares → Browse container shows the
+container filesystem, and the picked path (e.g. `/media/500SSD/Orpheus`) is what the
+bridge scans. Two mount patterns (paste into `compose.override.yaml`, both services):
+
+```yaml
+# Pattern 1 — mount host folders into the /data tree (simplest, no env change).
+services:
+  bridge:
+    volumes:
+      - /home/magnus/Downloads/NicotineHub:/data/NicotineHub
+      - /media/500SSD:/data/mediaLibrary:ro
+  worker:
+    volumes:
+      - /home/magnus/Downloads/NicotineHub:/data/NicotineHub
+      - /media/500SSD:/data/mediaLibrary:ro
+# Then share /data/NicotineHub and /data/mediaLibrary/Orpheus in Settings → Shares.
+```
+
+```yaml
+# Pattern 2 — keep the host path as its own root.
+services:
+  bridge:
+    volumes: [/media/500SSD:/media/500SSD:ro]
+    environment: { ALLOWED_ROOTS: "/data,/media" }
+  worker:
+    volumes: [/media/500SSD:/media/500SSD:ro]
+    environment: { ALLOWED_ROOTS: "/data,/media" }
+# Then share /media/500SSD/Orpheus in Settings → Shares.
+```
+
+Why `ALLOWED_ROOTS` exists: Soulseek sharing works for any mounted path, but
+in-browser playback (`/api/files/raw`) and worker tag/analyze/mediainfo only serve
+paths under these roots (default `/data`; comma/colon-separated). Outside them you
+get `403 file outside allowed roots` (bridge) / `404 file not found in allowed roots`
+(worker) even though the file lists fine. `/health?json` on both services reports the
+effective `allowedRoots`. Gotcha: `/data/media/…` and `/media/…` are different
+container paths — sharing the wrong one scans `0 files` and flags `unavailable`.
+
 **Network mode — internal services (default) vs direct vs host**
 
 - **Internal (default `compose.yaml`)**: bridge/worker have no published ports. The web entrypoint proxies everything same-origin, so LAN browsers only need `:3000`. `LISTEN_PORT` host mapping is static at create time — changing the peer port in Settings → Network hot-swaps `Bun.listen` + `SetWaitPort` inside the container. The *host* mapping follows automatically when the opt-in Docker-socket mode is on (mount `/var/run/docker.sock` + `ALLOW_CONTAINER_RESTART=1`: the bridge recreates its own container with the new mapping, then the clients reconnect); otherwise run `LISTEN_PORT=NEW docker compose up -d` to match. UPnP inside bridge-network sees the container IP — prefer manual port-forward or host mode for UPnP.
@@ -64,7 +104,7 @@ docker pull ghcr.io/mlnl221/nicotinehub-bridge:0.2.0
 
 > First publish requires making each GHCR package **Public** (GitHub → Packages → Settings → Change visibility) so `docker pull` works without `docker login ghcr.io`.
 
-All env vars for deployment are in `docs/architecture.md#env-full`: `BRIDGE_TOKEN` (`?token`/`Bearer`/`Sec-WebSocket-Protocol` → 401 on `/ws` `/files/:token` `/logs` `/diagnostics` `/plugins`), `DATA_DIR`, `SHARED_DIRS`, `UPLOAD_LIMIT`/`DOWNLOAD_LIMIT`, `ALLOWED_ORIGINS`, `NEXT_PUBLIC_BRIDGE_URL` (build-time) vs `localStorage.nicotineHub.bridgeUrl` (runtime).
+All env vars for deployment are in `docs/architecture.md#env-full`: `BRIDGE_TOKEN` (`?token`/`Bearer`/`Sec-WebSocket-Protocol` → 401 on `/ws` `/files/:token` `/logs` `/diagnostics` `/plugins`), `DATA_DIR`, `ALLOWED_ROOTS`, `SHARED_DIRS`, `UPLOAD_LIMIT`/`DOWNLOAD_LIMIT`, `ALLOWED_ORIGINS`, `NEXT_PUBLIC_BRIDGE_URL` (build-time) vs `localStorage.nicotineHub.bridgeUrl` (runtime).
 
 ## Branching & promotion
 

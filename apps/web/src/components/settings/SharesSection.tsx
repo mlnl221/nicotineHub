@@ -7,6 +7,7 @@ import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
 import type { SharedFolder } from "@/lib/config/defaults";
 import { SectionCard, SectionSaveButton, ToggleControl, SelectControl, TextFieldControl } from "@/components/settings/controls";
+import { InfoTooltip } from "@/components/ui/InfoTooltip";
 import { useSession } from "@/lib/session";
 
 const FileExplorer = dynamic(() => import("@/components/files/FileExplorer").then((m) => m.FileExplorer), {
@@ -125,10 +126,9 @@ export function SharesSection() {
   const [browseOpen, setBrowseOpen] = useState(false);
 
   function dataPathFromExplorer(p: string): string {
-    const n = normalizeFolderPath(p) || "/";
-    if (n === "/") return "/data";
-    if (n === "/data" || n.startsWith("/data/")) return n;
-    return "/data" + (n.startsWith("/") ? n : `/${n}`);
+    // FileExplorer already returns absolute container paths (e.g. /media/500SSD/Orpheus)
+    // — store verbatim. Must existsSync on the bridge FS.
+    return normalizeFolderPath(p) || "/";
   }
   function basenameOfExplorerPath(p: string): string {
     if (!p || p === "/") return "Shared";
@@ -276,6 +276,7 @@ export function SharesSection() {
     const newPathRaw = dialogPath.trim();
     if (!newVirtualRaw) { setDialogError("Virtual name is required."); return; }
     if (!newPathRaw) { setDialogError("Folder path is required."); return; }
+    if (normalizeFolderPath(newPathRaw) === "/") { setDialogError("Cannot share the filesystem root — pick a subdirectory."); return; }
     // Mirrors preferences.py:957-984 on_edit_shared_folder_response: remove old, add new with validate_path=False
     // Remove old entry first
     const oldNorm = normalizeFolderPath(editTarget.folderPath).toLowerCase();
@@ -336,6 +337,7 @@ export function SharesSection() {
     const v = dialogVirtual.trim() || getBasename(dialogPath);
     const p = dialogPath.trim();
     if (!p) { setDialogError("Folder path is required."); return; }
+    if (normalizeFolderPath(p) === "/") { setDialogError("Cannot share the filesystem root — pick a subdirectory."); return; }
     const added = addShareInternal(p, dialogPerm, v);
     if (!added) { setDialogError("Could not add folder."); return; }
     setAddOpen(false);
@@ -347,23 +349,43 @@ export function SharesSection() {
     <div className="flex flex-col gap-6">
       <SectionCard
         title="Shared folders"
-        description="Folders you share on the Soulseek network. WSL (bun): use absolute WSL paths like /home/user/Music or /mnt/c/Users/you/Music. Docker: browse container /data to add any nested folder. Browser pickers are a fallback."
+        description="Folders you share on the Soulseek network. WSL (bun): use absolute WSL paths like /home/user/Music or /mnt/c/Users/you/Music. Docker: browse the container filesystem to add any mounted folder. Browser pickers are a fallback."
         actions={<SectionSaveButton section="transfers" />}
       >
-        <div className="py-4 space-y-3">
-          <div className="rounded-xl bg-amber-50 px-4 py-3 font-body text-xs leading-relaxed text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-            <span className="font-semibold">Docker:</span> use <span className="font-mono">Browse /data</span> below to see the container&apos;s <span className="font-mono">/data</span> volume (or bind mount like <span className="font-mono">/home/user/Music:/data/Music:ro</span> then share <span className="font-mono">/data/Music</span>) and add any subdirectory as a share. This is the browser equivalent of <span className="font-mono">explorer /data</span> (container has no display server). For local device folders, use <span className="font-mono">Add folder</span> (File System Access API where available).
-          </div>
-          <div className="rounded-xl bg-surface-container-low px-3 py-2 dark:bg-surface-variant/20">
-            <div className="font-body text-[11px] leading-relaxed text-on-surface-variant dark:text-outline">
-              <span className="font-semibold">WSL (bun):</span> <span className="font-mono">/data</span> on WSL bun falls back to <span className="font-mono">./data</span> or <span className="font-mono">/tmp/nicotine-hub</span> if <span className="font-mono">/data</span> not writable. Add shares with absolute WSL paths (<span className="font-mono">/home/magnus/Music</span>, <span className="font-mono">/mnt/c/Users/you/Music</span>) that <span className="font-mono">existsSync</span> on the bridge — <span className="font-mono">/data/Music</span> only works inside Docker when mounted. Rescan shows <span className="font-mono">unavailable: [v→p]</span> if the path is not found (you saw <span className="font-mono">1 dirs · 0 files</span>).
-            </div>
-          </div>
-          <div className="rounded-xl bg-surface-container-high px-3 py-2 dark:bg-surface-variant/30">
-            <div className="font-body text-[11px] leading-relaxed text-on-surface-variant dark:text-outline">
-              <span className="font-semibold">Security:</span> <span className="font-mono">/data</span> browsing is sandboxed to <span className="font-mono">DATA_DIR</span> (traversal & symlink-escapes blocked). If <span className="font-mono">BRIDGE_TOKEN</span> is set, <span className="font-mono">/api/files</span> requires <span className="font-mono">?token</span> or <span className="font-mono">Authorization: Bearer</span> — same gate as <span className="font-mono">/ws</span>/<span className="font-mono">/logs</span>. More secure than open CORS.
-            </div>
-          </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 py-3">
+          <span className="flex items-center gap-1 font-body text-xs text-on-surface-variant dark:text-outline">
+            <span className="font-semibold">Docker</span>
+            <InfoTooltip
+              testId="shares-docker"
+              content={
+                <>
+                  Use <span className="font-mono">Browse container</span> below to see the container filesystem (e.g. <span className="font-mono">/data</span>, <span className="font-mono">/media/…</span> — every host folder must be mounted into the container) and add any subdirectory as a share — the path is stored verbatim. This is the browser equivalent of <span className="font-mono">explorer /</span> (container has no display server). Playback/metadata in <span className="font-mono">/files</span> only works for paths under <span className="font-mono">ALLOWED_ROOTS</span> (default <span className="font-mono">/data</span>; add <span className="font-mono">/media</span> to allow it). For local device folders, use <span className="font-mono">Add folder</span> (File System Access API where available).
+                </>
+              }
+            />
+          </span>
+          <span className="flex items-center gap-1 font-body text-xs text-on-surface-variant dark:text-outline">
+            <span className="font-semibold">WSL</span>
+            <InfoTooltip
+              testId="shares-wsl"
+              content={
+                <>
+                  <span className="font-mono">/data</span> on WSL bun falls back to <span className="font-mono">./data</span> or <span className="font-mono">/tmp/nicotine-hub</span> if <span className="font-mono">/data</span> not writable. Add shares with absolute WSL paths (<span className="font-mono">/home/magnus/Music</span>, <span className="font-mono">/mnt/c/Users/you/Music</span>) that <span className="font-mono">existsSync</span> on the bridge — <span className="font-mono">/data/Music</span> only works inside Docker when mounted. Rescan shows <span className="font-mono">unavailable: [v→p]</span> if the path is not found (you saw <span className="font-mono">1 dirs · 0 files</span>).
+                </>
+              }
+            />
+          </span>
+          <span className="flex items-center gap-1 font-body text-xs text-on-surface-variant dark:text-outline">
+            <span className="font-semibold">Security</span>
+            <InfoTooltip
+              testId="shares-security"
+              content={
+                <>
+                  Browsing is sandboxed to the browse root (traversal &amp; symlink-escapes blocked). If <span className="font-mono">BRIDGE_TOKEN</span> is set, <span className="font-mono">/api/files</span> requires <span className="font-mono">?token</span> or <span className="font-mono">Authorization: Bearer</span> — same gate as <span className="font-mono">/ws</span>/<span className="font-mono">/logs</span>. More secure than open CORS.
+                </>
+              }
+            />
+          </span>
         </div>
 
         {/* Plus button header — nicotine-plus parity: FolderChooser Add + Docker Browse */}
@@ -377,12 +399,12 @@ export function SharesSection() {
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
-              aria-label="Browse container /data"
+              aria-label="Browse container filesystem"
               onClick={() => setBrowseOpen(true)}
               className="inline-flex h-11 min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-primary px-4 font-label text-xs font-semibold uppercase tracking-widest text-on-primary shadow-sm transition-colors hover:bg-primary/90 active:scale-95"
             >
               <span className="material-symbols-outlined text-[18px]">folder_open</span>
-              <span className="hidden sm:inline">Browse /data</span>
+              <span className="hidden sm:inline">Browse container</span>
               <span className="sm:hidden">Browse</span>
             </button>
             <button
@@ -407,15 +429,15 @@ export function SharesSection() {
                 showFiles
                 selectable="directories"
                 confirmLabel="Add this folder"
-                title="Browse container /data"
+                title="Browse container filesystem"
                 onSelect={(relativePath) => {
                   const abs = dataPathFromExplorer(relativePath);
                   const base = basenameOfExplorerPath(relativePath);
                   setBrowseOpen(false);
-                  setDialogVirtual(base);
+                  setDialogVirtual(abs === "/" ? "" : base);
                   setDialogPath(abs);
                   setDialogPerm("public");
-                  setDialogError(null);
+                  setDialogError(abs === "/" ? "Cannot share the filesystem root — pick a subdirectory." : null);
                   setAddOpen(true);
                 }}
                 onClose={() => setBrowseOpen(false)}
@@ -701,7 +723,7 @@ export function SharesSection() {
                 <option value="buddy">Buddies</option>
                 <option value="trusted">Trusted buddies</option>
               </select>
-              <span className="mt-1 block font-body text-[11px] text-on-surface-variant dark:text-outline">Mirrors nicotine-plus PermissionLevel.PUBLIC/BUDDY/TRUSTED (shares.py:77).</span>
+              <span className="mt-1 block font-body text-[11px] text-on-surface-variant dark:text-outline">Public / Buddies / Trusted-buddies visibility levels.</span>
             </label>
             {dialogError && <div className="mb-3 rounded-xl bg-error-container px-3 py-2 font-body text-xs text-on-error-container">{dialogError}</div>}
             <div className="flex justify-end gap-2">
@@ -749,7 +771,16 @@ export function SharesSection() {
                 <li key={p} className="font-mono break-all">{p}</li>
               ))}
             </ul>
-            <div className="mt-2">Add patterns above like <span className="font-mono">.env</span>, <span className="font-mono">*.key</span>, <span className="font-mono">wallet*</span>, <span className="font-mono">.git\</span> then Preview/Rescan. Default <span className="font-mono">.*</span> already hides dotfiles.</div>
+            <div className="mt-2 flex items-center gap-1">Add patterns above, then Preview/Rescan.
+              <InfoTooltip
+                testId="shares-secrets-help"
+                content={
+                  <>
+                    Add patterns above like <span className="font-mono">.env</span>, <span className="font-mono">*.key</span>, <span className="font-mono">wallet*</span>, <span className="font-mono">.git\</span> then Preview/Rescan. Default <span className="font-mono">.*</span> already hides dotfiles.
+                  </>
+                }
+              />
+            </div>
           </div>
         )}
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -818,7 +849,16 @@ export function SharesSection() {
                   <li key={`${v}:${p}`} className="font-mono break-all">{v} → {p}</li>
                 ))}
               </ul>
-              <div className="mt-2">WSL (bun): use absolute WSL path like <span className="font-mono">/home/magnus/Music</span> or <span className="font-mono">/mnt/c/Users/you/Music</span>. Docker: mount host folder into container (e.g. <span className="font-mono">-v /home/you/Music:/data/Music:ro</span>) then share <span className="font-mono">/data/Music</span>. Check bridge <span className="font-mono">/health?json</span> <span className="font-mono">dataDir</span> + <span className="font-mono">/api/files?path=/</span>.</div>
+              <div className="mt-2 flex items-center gap-1">Fix the path or mount, then rescan.
+                <InfoTooltip
+                  testId="shares-unavailable-help"
+                  content={
+                    <>
+                      WSL (bun): use absolute WSL path like <span className="font-mono">/home/magnus/Music</span> or <span className="font-mono">/mnt/c/Users/you/Music</span>. Docker: mount host folder into container (e.g. <span className="font-mono">-v /home/you/Music:/data/Music:ro</span>) then share <span className="font-mono">/data/Music</span>. Check bridge <span className="font-mono">/health?json</span> <span className="font-mono">dataDir</span> + <span className="font-mono">/api/files?path=/</span>.
+                    </>
+                  }
+                />
+              </div>
             </div>
           )}
           {secretHits && secretHits.length > 0 && (
@@ -829,7 +869,16 @@ export function SharesSection() {
                   <li key={p} className="font-mono break-all">{p}</li>
                 ))}
               </ul>
-              <div className="mt-2">Add to Excluded paths above like <span className="font-mono">.env</span>, <span className="font-mono">*.key</span>, <span className="font-mono">wallet*</span>, <span className="font-mono">.git\</span> then Preview/Rescan.</div>
+              <div className="mt-2 flex items-center gap-1">Exclude them above, then Preview/Rescan.
+                <InfoTooltip
+                  testId="shares-secrets-help-2"
+                  content={
+                    <>
+                      Add to Excluded paths above like <span className="font-mono">.env</span>, <span className="font-mono">*.key</span>, <span className="font-mono">wallet*</span>, <span className="font-mono">.git\</span> then Preview/Rescan.
+                    </>
+                  }
+                />
+              </div>
             </div>
           )}
           {state.status !== "connected" && (
@@ -856,7 +905,7 @@ export function SharesSection() {
         />
         <SelectControl
           label="Buddy share visibility"
-          description="Who can see buddy/trusted shares without being a buddy. 'On request' entries show an indicator and require a message (pynicotine/shares visibility)."
+          description="Who can see buddy/trusted shares without being a buddy. 'On request' entries show an indicator and require a message."
           value={visibilityValue(t.reveal_buddy_shares, t.reveal_trusted_shares)}
           onChange={(v) => {
             if (v === "none") {

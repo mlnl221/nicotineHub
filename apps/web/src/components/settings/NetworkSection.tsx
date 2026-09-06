@@ -6,6 +6,7 @@ import { defaults, DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, DEFAULT_LISTEN_PORT
 import { SectionCard, SectionSaveButton, TextFieldControl, ToggleControl, NumberControl, SelectControl } from "@/components/settings/controls";
 import { useSaveSection } from "@/lib/config/save";
 import { useSession } from "@/lib/session";
+import { InfoTooltip } from "@/components/ui/InfoTooltip";
 import { bridgeFetchUrl } from "@/lib/bridgeHttp";
 
 type UpnpStatus = { enabled: boolean; active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; hasPort: boolean } | null;
@@ -250,7 +251,7 @@ export function NetworkSection() {
               ? `Inbound peer port. Bridge is currently on ${bridgePort ?? "—"} — click Save (top right) to hot-swap Bun.listen + reconnect Soulseek (WS stays up). Will re-advertise via SetWaitPort ${pendingPort}.`
               : bridgePort && bridgePort !== listenPort
                 ? `Inbound peer port. Bridge is currently on ${bridgePort} — pending save for ${listenPort}.`
-                : `Inbound peer port for direct searches & transfers. Requires port-forward of TCP+UDP ${pendingPort} on your VPN/router. Save triggers fresh connect (like nicotine-plus). Default ${DEFAULT_LISTEN_PORT} for VPN forward.`
+                : `Inbound peer port for direct searches & transfers. Requires port-forward of TCP+UDP ${pendingPort} on your VPN/router. Save triggers fresh connect. Default ${DEFAULT_LISTEN_PORT} for VPN forward.`
           }
           value={pendingPort}
           min={1024}
@@ -289,13 +290,23 @@ export function NetworkSection() {
         </div>
         {bridgePort ? (
           <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs text-on-surface-variant dark:bg-surface-container-highest/40">
-            Bridge reports <span className="font-mono font-medium text-on-surface">{bridgePort}</span> via <span className="font-mono">/health?json</span> + WS. Click Save to hot-swap <span className="font-mono">Bun.listen</span> and fresh Soulseek connect – re-advertises via <span className="font-mono">SetWaitPort {pendingPort}</span>. With the Docker socket mounted + <span className="font-mono">ALLOW_CONTAINER_RESTART=1</span> the bridge recreates its container so the host mapping follows automatically (status: <span className="font-mono">GET /api/bridge/container</span>); otherwise Docker host mapping needs <span className="font-mono">LISTEN_PORT={pendingPort} docker compose up -d</span>. For VPN on Linux use <span className="font-mono">network_mode: host</span> (see compose.override.example.yaml, ignored on Docker Desktop) – then no Docker recreate needed.
+            <span className="flex items-center gap-1.5">
+              Bridge reports <span className="font-mono font-medium text-on-surface">{bridgePort}</span> via <span className="font-mono">/health?json</span> + WS.
+              <InfoTooltip
+                testId="network-port-apply"
+                content={
+                  <>
+                    Click Save to hot-swap <span className="font-mono">Bun.listen</span> and fresh Soulseek connect – re-advertises via <span className="font-mono">SetWaitPort {pendingPort}</span>. With the Docker socket mounted + <span className="font-mono">ALLOW_CONTAINER_RESTART=1</span> the bridge recreates its container so the host mapping follows automatically (status: <span className="font-mono">GET /api/bridge/container</span>); otherwise Docker host mapping needs <span className="font-mono">LISTEN_PORT={pendingPort} docker compose up -d</span>. For VPN on Linux use <span className="font-mono">network_mode: host</span> (see compose.override.example.yaml, ignored on Docker Desktop) – then no Docker recreate needed.
+                  </>
+                }
+              />
+            </span>
             {!isConnected ? <span className="block pt-1 text-amber-700 dark:text-amber-300">Not connected — Save will apply on next login.</span> : null}
           </div>
         ) : null}
         <ToggleControl
           label="UPnP port mapping"
-          description="Automatically forward the listening port via UPnP/NAT-PMP (like nicotine-plus). Falls back from NAT-PMP to UPnP; renews every 2 h. Disable if your router doesn't support it or you forward manually."
+          description="Automatically forward the listening port via UPnP/NAT-PMP. Falls back from NAT-PMP to UPnP; renews every 2 h. Disable if your router doesn't support it or you forward manually."
           checked={server.upnp ?? true}
           onChange={(v) => setOption("server", "upnp", v)}
         />
@@ -376,11 +387,20 @@ export function NetworkSection() {
               </div>
               {bridgePort ? (
                 <div className="rounded-xl bg-surface-container-low px-4 py-3 font-body text-xs text-on-surface-variant dark:bg-surface-container-high/40">
-                  Current bind: <span className="font-mono font-medium text-on-surface">{currentIface || "0.0.0.0 (all)"}</span>
-                  {currentIface && byName.get(currentIface) ? (
-                    <span> → <span className="font-mono">{byName.get(currentIface)!.address}</span></span>
-                  ) : null}
-                  . Peer listener <span className="font-mono">{bridgePort}</span> will bind to this IP (or <span className="font-mono">0.0.0.0</span> if empty). VPN example: <span className="font-mono">tun0 10.8.0.6</span>.
+                  <span className="flex items-center gap-1.5">
+                    Current bind: <span className="font-mono font-medium text-on-surface">{currentIface || "0.0.0.0 (all)"}</span>
+                    {currentIface && byName.get(currentIface) ? (
+                      <span> → <span className="font-mono">{byName.get(currentIface)!.address}</span></span>
+                    ) : null}
+                    <InfoTooltip
+                      testId="network-bind"
+                      content={
+                        <>
+                          Peer listener <span className="font-mono">{bridgePort}</span> will bind to this IP (or <span className="font-mono">0.0.0.0</span> if empty). VPN example: <span className="font-mono">tun0 10.8.0.6</span>.
+                        </>
+                      }
+                    />
+                  </span>
                 </div>
               ) : null}
             </>
@@ -400,20 +420,20 @@ export function NetworkSection() {
 
       <SectionCard
         title="Auto-join & watched users"
-        description="Rooms to auto-join after login and users to watch (like nicotine-plus server.autojoin / server.userlist). One per line."
+        description="Rooms to auto-join after login and users to watch. One per line."
         actions={<SectionSaveButton section="server" dirty={portDirty || serverDirty} onSave={handleSaveAll} />}
       >
         <TextFieldControl
           label="Auto-join rooms (autojoin)"
-          description="Rooms to join automatically after login (nicotine-plus autojoin)."
+          description="Rooms to join automatically after login."
           value={(server.autojoin ?? []).join("\n")}
           multiline
-          placeholder="e.g. nicotine&#10;music"
+          placeholder="e.g. lobby&#10;music"
           onChange={(v) => setOption("server", "autojoin", v.split("\n").map((s) => s.trim()).filter(Boolean))}
         />
         <TextFieldControl
           label="Watched users (userlist)"
-          description="Users to watch/status-poll after login (nicotine-plus userlist / buddies precursor)."
+          description="Users to watch/status-poll after login."
           value={(server.userlist ?? []).join("\n")}
           multiline
           placeholder="e.g. alice&#10;bob"
@@ -421,7 +441,7 @@ export function NetworkSection() {
         />
         <TextFieldControl
           label="Auto-search (autosearch)"
-          description="Searches to run automatically after login (nicotine-plus autosearch)."
+          description="Searches to run automatically after login."
           value={(server.autosearch ?? []).join("\n")}
           multiline
           placeholder="e.g. pink floyd flac&#10;jazz 192"
@@ -431,7 +451,7 @@ export function NetworkSection() {
 
       <SectionCard
         title="Auto-reply"
-        description="Away reply sent when you are marked away (nicotine-plus server.autoreply + autoaway → SetStatus 28). Leave empty to disable."
+        description="Away reply sent when you are marked away. Leave empty to disable."
         actions={<SectionSaveButton section="server" dirty={portDirty || serverDirty} onSave={handleSaveAll} />}
       >
         <TextFieldControl

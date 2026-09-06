@@ -194,7 +194,7 @@ export function SearchScreen() {
                 <>
                   Soulseek returns results peer-to-peer to your listening port (currently <code className="rounded bg-surface-container-high px-1 py-0.5 font-mono text-[11px]">{settings.server.portrange[0] ?? 60754}</code>). If this port isn&apos;t forwarded through your VPN/router and into WSL, searches will time out with 0 results.
                   <br />
-                  Check <a href="/settings?tab=network#network" className="text-primary underline">Settings → Network</a> and your ProtonVPN/Windows portproxy.
+                  Check <a href="/settings?tab=network#network" className="text-primary underline">Settings → Network</a> and your VPN port-forward / OS port-proxy settings.
                 </>
               ) : activeTab.total === 0 ? (
                 "Try a different query or widen your filters. Results are live — some queries return nothing if peers are offline."

@@ -82,7 +82,7 @@ function InterestsInner() {
                 <h3 className="font-headline text-xl font-bold tracking-tight text-on-surface">Your Interests</h3>
               </div>
               <p className="max-w-2xl font-body text-sm leading-relaxed text-on-surface-variant">
-                Add things you like and dislike. Your likes and dislikes affect the recommendations you receive and help you find similar users — just like in Nicotine+.
+                Add things you like and dislike. Your likes and dislikes affect the recommendations you receive and help you find similar users.
               </p>
             </div>
 

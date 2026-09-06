@@ -14,6 +14,10 @@ services:
       LISTEN_PORT: "${LISTEN_PORT:-40598}"
       CONFIG_DIR: "/config"
       DATA_DIR: "/data"
+      # Local preview roots for /api/files/raw (bridge) and tag/analyze/mediainfo/audio (worker).
+      # Shares may live anywhere mounted (e.g. /media/500SSD:/media/500SSD → share /media/500SSD/Orpheus),
+      # but playback/metadata only serve paths under these roots. Default is /data only.
+      ALLOWED_ROOTS: "${ALLOWED_ROOTS:-/data}"
       BRIDGE_TOKEN: "${BRIDGE_TOKEN:-}"
       # Shares: Settings → Shares sends virtualName|hostPath pairs to the bridge via WS config:update.
       # Host paths must be mounted into the container to be scannable (e.g. /home/user/Music:/data/Music:ro).
@@ -46,7 +50,17 @@ services:
       # only enable on trusted LAN hosts (see SECURITY.md). Not needed with
       # network_mode: host or when you run `LISTEN_PORT=NEW docker compose up -d` manually.
       # - /var/run/docker.sock:/var/run/docker.sock
-      # Example host mounts for real file sharing (uncomment and adjust):
+      # Example host mounts for real file sharing (uncomment and adjust).
+      # Pattern 1 — everything under /data (no ALLOWED_ROOTS change needed;
+      # playback/metadata in /files work out of the box):
+      # - /home/user/Downloads/NicotineHub:/data/NicotineHub
+      # - /media/500SSD:/data/mediaLibrary:ro
+      # → then share /data/NicotineHub and /data/mediaLibrary/Orpheus verbatim
+      # in Settings → Shares (Browse container stores the path as-is).
+      # Pattern 2 — separate root outside /data (e.g. keep the host path):
+      # - /media/500SSD:/media/500SSD:ro
+      # → set ALLOWED_ROOTS=/data,/media (bridge AND worker, same value) or
+      # /files playback + worker tag/analyze stay 404 outside /data.
       # - /home/user/Music:/data/Music:ro
       # - /home/user/Downloads:/data/downloads:ro
     healthcheck:
@@ -63,6 +77,8 @@ services:
     environment:
       CONFIG_DIR: "/config"
       DATA_DIR: "/data"
+      # Must match bridge ALLOWED_ROOTS so /files playback + worker tag/analyze agree.
+      ALLOWED_ROOTS: "${ALLOWED_ROOTS:-/data}"
       SPECTRUM_DIR: "/tmp/spectrals"
       WORKER_TOKEN: "${WORKER_TOKEN:-}"
       # Optional per-service scraper tokens (env first; see apps/worker for names)
