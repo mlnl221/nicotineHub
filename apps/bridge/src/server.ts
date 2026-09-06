@@ -36,7 +36,7 @@ import {
   envListenPort,
   getSelfContainerId,
 } from "./docker.ts";
-import { logPrivateMessage, logRoomMessage, logRoomSystem } from "./chatLogger.ts";
+import { logPrivateMessage, logRoomMessage, logRoomSystem, readChatLogTail } from "./chatLogger.ts";
 import { clearVault, loadVault, resolveLoginIntent, saveVault, type StoredCreds } from "./shared-session.ts";
 
 /* Schemas */
@@ -168,6 +168,12 @@ const ChatPrivateSchema = z.object({
   username: z.string().min(1).max(64),
   message: z.string().max(5000).optional(),
   msgId: z.number().int().optional(),
+});
+const ChatLogsSchema = z.object({
+  type: z.literal("chat:logs"),
+  scope: z.enum(["rooms", "private"]),
+  key: z.string().min(1).max(64),
+  lines: z.number().int().min(1).max(10000),
 });
 const BrowseSchema = z.object({
   type: z.literal("browse"),
@@ -1514,6 +1520,22 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             logPrivateMessage(result.data.username, session.username, txt, { isAction });
           } catch {}
         }
+        return;
+      }
+      if (data.type === "chat:logs") {
+        const result = ChatLogsSchema.safeParse(parsed);
+        if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid chat:logs message.")); return; }
+        const session = requireLogin(); if (!session) return;
+        const rows = readChatLogTail(result.data.scope, result.data.key, result.data.lines);
+        const self = session.username.toLowerCase();
+        try {
+          ws.send(JSON.stringify({
+            type: "chat:logs",
+            scope: result.data.scope,
+            key: result.data.key,
+            rows: rows.map((r) => ({ ...r, isSelf: r.username.toLowerCase() === self })),
+          }));
+        } catch {}
         return;
       }
       if (data.type === "chat:global") {

@@ -42,6 +42,8 @@ function PrivateChatInner() {
 
   const activeMessages = activeUser ? conversations.get(activeUser) || [] : [];
   const filteredUsers = filter ? users.filter((u) => u.toLowerCase().includes(filter.toLowerCase())) : users;
+  // divider between disk-log backfill and live messages
+  const firstLiveIdx = activeMessages.some((m) => m.backfilled) ? activeMessages.findIndex((m) => !m.backfilled) : -1;
 
   const handleSend = () => {
     if (!activeUser || !input.trim()) return;
@@ -244,10 +246,18 @@ function PrivateChatInner() {
                       </span>
                     </div>
                   ) : (
-                    activeMessages.map((m) => {
+                    activeMessages.map((m, idx) => {
                       const isIgnored = !m.isSelf && (settings.server.ignorelist.includes(m.username) || !!settings.server.ipignorelist[m.username]);
                       return (
-                      <div key={m.id} className={`flex gap-3 max-w-[78%] min-w-0 ${m.isSelf ? "self-end flex-row-reverse" : ""} ${isIgnored ? "opacity-40" : ""}`}>
+                      <div key={m.id}>
+                      {idx === firstLiveIdx ? (
+                        <div className="flex items-center gap-2 py-1" aria-hidden="true">
+                          <span className="h-px flex-1 bg-outline-variant/40" />
+                          <span className="font-label text-[10px] uppercase tracking-widest text-outline">Old messages above</span>
+                          <span className="h-px flex-1 bg-outline-variant/40" />
+                        </div>
+                      ) : null}
+                      <div className={`flex gap-3 max-w-[78%] min-w-0 ${m.isSelf ? "self-end flex-row-reverse" : ""} ${isIgnored ? "opacity-40" : ""}`}>
                         <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-surface-container-high text-xs font-bold">
                           {m.isSelf ? "You" : m.username.slice(0, 2).toUpperCase()}
                         </div>
@@ -266,6 +276,7 @@ function PrivateChatInner() {
                             {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </p>
                         </div>
+                      </div>
                       </div>
                       );
                     })

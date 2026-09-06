@@ -45,6 +45,8 @@ function ChatRoomsInner() {
   const activeMessages = activeRoom ? messages.get(activeRoom) || [] : [];
   const systemMessages = activeMessages.filter((m) => m.username === "system");
   const userMessages = activeMessages.filter((m) => m.username !== "system");
+  // divider between disk-log backfill and live messages (nicotine-plus "old messages above")
+  const firstLiveIdx = userMessages.some((m) => m.backfilled) ? userMessages.findIndex((m) => !m.backfilled) : -1;
   const sysLogRef = useRef<HTMLDivElement>(null);
   const joinedArray = Array.from(joinedRooms.values());
   const sortedRooms = (() => {
@@ -391,12 +393,21 @@ function ChatRoomsInner() {
                           <p className="font-body text-sm text-outline">No messages yet. Start the conversation.</p>
                         </div>
                       ) : (
-                        userMessages.map((m) => {
+                        userMessages.map((m, idx) => {
                           const isSelf = state.user !== undefined && state.user !== null && m.username === (state as unknown as { user?: string }).user;
+                          const divider = idx === firstLiveIdx ? (
+                            <div key={`old-above-${m.id}`} className="flex items-center gap-2 px-4 md:px-6 py-1" aria-hidden="true">
+                              <span className="h-px flex-1 bg-outline-variant/40" />
+                              <span className="font-label text-[10px] uppercase tracking-widest text-outline">Old messages above</span>
+                              <span className="h-px flex-1 bg-outline-variant/40" />
+                            </div>
+                          ) : null;
                           const isIgnored = settings.server.ignorelist.includes(m.username) || !!settings.server.ipignorelist[m.username];
                           if (isSelf) {
                             return (
-                              <div key={m.id} className={`group flex justify-end gap-3 px-4 md:px-6 py-1.5 max-w-full overflow-hidden ${isIgnored ? "opacity-40" : ""}`}>
+                              <div key={m.id}>
+                              {divider}
+                              <div className={`group flex justify-end gap-3 px-4 md:px-6 py-1.5 max-w-full overflow-hidden ${isIgnored ? "opacity-40" : ""}`}>
                                 <div className="flex max-w-[80%] flex-col items-end">
                                   <p className="font-body text-xs leading-relaxed text-right">
                                     <span className={usernameHotspotClass(settings.ui.usernamehotspots, settings.ui.usernamestyle)}>
@@ -416,10 +427,13 @@ function ChatRoomsInner() {
                                   </div>
                                 </div>
                               </div>
+                              </div>
                             );
                           }
                           return (
-                          <div key={m.id} className={`group flex gap-3 hover:bg-surface-container-low/40 -mx-4 md:-mx-6 px-4 md:px-6 py-1.5 max-w-full overflow-hidden ${isIgnored ? "opacity-40" : ""}`}>
+                          <div key={m.id}>
+                          {divider}
+                          <div className={`group flex gap-3 hover:bg-surface-container-low/40 -mx-4 md:-mx-6 px-4 md:px-6 py-1.5 max-w-full overflow-hidden ${isIgnored ? "opacity-40" : ""}`}>
                             <span
                               className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-xs font-bold bg-primary-container text-on-primary-container"
                             >
@@ -445,6 +459,7 @@ function ChatRoomsInner() {
                                 })()}
                               </p>
                             </div>
+                          </div>
                           </div>
                           );
                         })

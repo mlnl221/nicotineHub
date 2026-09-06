@@ -12,7 +12,7 @@
  *    per user request (unlimited, only actively joined rooms)
  */
 
-import { mkdirSync, appendFileSync, chmodSync, existsSync } from "node:fs";
+import { mkdirSync, appendFileSync, chmodSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 function getConfigDir(): string {
@@ -101,4 +101,62 @@ export function logRoomSystem(room: string, text: string) {
   const line = `${ts} ${text}`;
   const filePath = dailyPath(roomFolder, room);
   appendLogFile(filePath, line);
+}
+
+export interface ChatLogRow {
+  username: string;
+  message: string;
+  timestamp: number;
+  isAction: boolean;
+}
+
+const LOG_LINE_RE = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) (.*)$/;
+
+/** Parse one log line written by logRoomMessage/logPrivateMessage (null = system/noise line). */
+export function parseChatLogLine(line: string, globalPrefix?: string): ChatLogRow | null {
+  const m = LOG_LINE_RE.exec(line);
+  if (!m) return null;
+  const timestamp = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+  if (!Number.isFinite(timestamp)) return null;
+  let body = m[7];
+  // strip global-feed prefix ("room | [user] msg") written with isGlobal
+  if (globalPrefix && body.startsWith(`${globalPrefix} | `)) body = body.slice(globalPrefix.length + 3);
+  let bm = /^\[(.*?)\] ([\s\S]*)$/.exec(body);
+  if (bm) return { username: bm[1], message: bm[2], timestamp, isAction: false };
+  bm = /^\* (\S+) ([\s\S]*)$/.exec(body);
+  if (bm) return { username: bm[1], message: `* ${bm[2]}`, timestamp, isAction: true };
+  return null;
+}
+
+/**
+ * Read the last `lines` chat messages for a room or private peer (newest last).
+ * Reads daily files newest-first so only what is needed is parsed. The key is
+ * sanitized exactly like writes; resolved paths are contained under the log dir.
+ */
+export function readChatLogTail(scope: "rooms" | "private", key: string, lines: number): ChatLogRow[] {
+  const want = Math.max(0, Math.min(Math.floor(lines) || 0, 10000));
+  if (want <= 0) return [];
+  const configDir = getConfigDir();
+  const base = resolve(join(configDir, "logs", scope));
+  const dir = resolve(join(base, sanitizeBasename(key)));
+  if (dir !== base && !dir.startsWith(base + "/")) return [];
+  let files: string[] = [];
+  try {
+    files = readdirSync(dir).filter((f) => /^\d{4}-\d{2}-\d{2}\.log$/.test(f)).sort().reverse();
+  } catch { return []; }
+  const globalPrefix = scope === "rooms" ? key : undefined;
+  const collected: ChatLogRow[] = [];
+  for (const f of files) {
+    if (collected.length >= want) break;
+    let text: string;
+    try { text = readFileSync(join(dir, f), "utf8"); } catch { continue; }
+    const rows: ChatLogRow[] = [];
+    for (const line of text.split("\n")) {
+      if (!line) continue;
+      const row = parseChatLogLine(line, globalPrefix);
+      if (row) rows.push(row);
+    }
+    collected.unshift(...rows);
+  }
+  return collected.slice(-want);
 }
