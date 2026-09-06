@@ -16,11 +16,36 @@
 #   # BRIDGE_TOKEN set. Linux + Docker Desktop/WSL both work; `network_mode: host`
 #   # is Linux-only and ignores ports, so don't combine the two.)
 #
-# For extra media mounts outside /data (playback + metadata need ALLOWED_ROOTS):
-#   # Then in compose.override.yaml set for bridge AND worker:
-#   #   volumes: ["/media/500SSD:/media/500SSD:ro"]
-#   #   environment: { ALLOWED_ROOTS: "/data,/media" }
-#   # Then share /media/500SSD/Orpheus verbatim in Settings → Shares.
+# For extra media mounts, paste ONE of these blocks into compose.override.yaml
+# (after `cp compose.override.example.yaml compose.override.yaml`):
+#
+# Pattern 1 — mount host folders into the /data tree (simplest, no env change).
+# Share /data/NicotineHub and /data/mediaLibrary/Orpheus verbatim in Settings → Shares:
+# services:
+#   bridge:
+#     volumes:
+#       - /home/magnus/Downloads/NicotineHub:/data/NicotineHub
+#       - /media/500SSD:/data/mediaLibrary:ro
+#   worker:
+#     volumes:
+#       - /home/magnus/Downloads/NicotineHub:/data/NicotineHub
+#       - /media/500SSD:/data/mediaLibrary:ro
+#
+# Pattern 2 — keep the host path as its own root (needs ALLOWED_ROOTS on BOTH services).
+# Share /media/500SSD/Orpheus verbatim in Settings → Shares:
+# services:
+#   bridge:
+#     volumes:
+#       - /media/500SSD:/media/500SSD:ro
+#     environment:
+#       ALLOWED_ROOTS: "/data,/media"
+#   worker:
+#     volumes:
+#       - /media/500SSD:/media/500SSD:ro
+#     environment:
+#       ALLOWED_ROOTS: "/data,/media"
+# Verify: /health?json shows allowedRoots, and
+# /api/files/raw?path=/media/500SSD/<file>.flac returns 206 audio/flac (not 403).
 #
 # For VPN with custom routing, add your own override file.
 # Host network example (UPnP works, no port remap):
