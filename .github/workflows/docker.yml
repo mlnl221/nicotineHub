@@ -246,7 +246,10 @@ jobs:
         working-directory: /tmp/digests
         run: |
           targs=""
-          for t in ${{ steps.meta.outputs.tags }}; do targs="$targs -t $t"; done
+          tags="${{ steps.meta.outputs.tags }}"
+          # unquoted $tags: word-splits the multi-line metadata output into one tag per word
+          # shellcheck disable=SC2086
+          for t in $tags; do targs="$targs -t $t"; done
           # shellcheck disable=SC2086
           docker buildx imagetools create $targs \
             $(printf 'ghcr.io/mlnl221/${{ matrix.package }}@sha256:%s ' *)
