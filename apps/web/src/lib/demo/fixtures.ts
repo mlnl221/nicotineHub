@@ -86,6 +86,8 @@ export function mockSearchRows(query: string, _mode?: string): import("@/lib/pro
     const bitrate = ext === "flac" || ext === "wav" ? 0 : [128, 192, 256, 320][Math.floor(rnd() * 4)];
     const length = Math.floor(90 + rnd() * 400);
     const isLossless = ext === "flac" || ext === "wav";
+    // ponytail: ~1 in 4 demo rows locked/private so the Hide-private toggle visibly filters (seeded, stable per query)
+    const isPrivate = rnd() < 0.28;
     rows.push({
       user,
       folder,
@@ -98,7 +100,7 @@ export function mockSearchRows(query: string, _mode?: string): import("@/lib/pro
       inQueue: Math.floor(rnd() * 20),
       quality: bitrate,
       length,
-      private: false,
+      private: isPrivate,
       attributes: {
         bitrate: bitrate || undefined,
         length,
