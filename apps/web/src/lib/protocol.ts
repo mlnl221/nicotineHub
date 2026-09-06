@@ -411,6 +411,28 @@ export interface ChatGlobalRequest {
   action: "join" | "leave";
 }
 
+export interface ChatLogsRequest {
+  type: "chat:logs";
+  scope: "rooms" | "private";
+  key: string;
+  lines: number;
+}
+
+export interface ChatLogRow {
+  username: string;
+  message: string;
+  timestamp: number;
+  isAction?: boolean;
+  isSelf?: boolean;
+}
+
+export interface ChatLogsMessage {
+  type: "chat:logs";
+  scope: "rooms" | "private";
+  key: string;
+  rows: ChatLogRow[];
+}
+
 /* ------------------------------------------------------------------ *
  * Browse shares
  * ------------------------------------------------------------------ */
@@ -834,6 +856,7 @@ export type BridgeOutboundMessage =
   | UserInfoFailedOutbound
   | ChatEventMessage
   | RoomEventMessage
+  | ChatLogsMessage
   | BrowseSharesMessage
   | BrowseFolderMessage
   | ServerReconnectMessage
@@ -884,6 +907,7 @@ export type BridgeInboundMessage =
   | ChatRoomRequest
   | ChatPrivateRequest
   | ChatGlobalRequest
+  | ChatLogsRequest
   | BrowseSharesRequest
   | BrowseFolderRequest
   | BrowsePageRequest

@@ -50,6 +50,12 @@ export function handleDemoSend(
     // do nothing — search.tsx already marks ended
     return true;
   }
+  if ((msg as { type: string }).type === "chat:logs") {
+    // demo has no disk logs — seeded fixtures already provide history
+    const { scope, key } = msg as unknown as { scope: "rooms" | "private"; key: string };
+    setTimeout(() => emit(listeners, { type: "chat:logs", scope, key, rows: [] }), 60);
+    return true;
+  }
 
   if (msg.type === "browse") {
     const username = (msg as { username: string }).username;

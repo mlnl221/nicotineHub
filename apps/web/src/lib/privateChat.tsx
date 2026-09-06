@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSession } from "@/lib/session";
 import { useConfig } from "@/lib/config/provider";
-import type { ChatEvent } from "@/lib/protocol";
+import type { ChatEvent, ChatLogRow } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
 import { mockPrivateConversations } from "@/lib/demo/fixtures";
 import { censorText, replaceText, truncateMessages } from "@/lib/chatFormat";
@@ -15,6 +15,8 @@ export interface PrivateMessage {
   timestamp: number;
   isSelf: boolean;
   isNew?: boolean;
+  /** True for rows restored from disk logs (rendered above the live divider). */
+  backfilled?: boolean;
 }
 
 interface PrivateChatApi {
@@ -81,6 +83,8 @@ export function PrivateChatProvider({ children }: { children: ReactNode }) {
   activeUserRef.current = activeUser;
   const conversationsRef = useRef(conversations);
   conversationsRef.current = conversations;
+  // peers already backfilled from disk logs this session (lowercased)
+  const backfilledRef = useRef<Set<string>>(new Set());
 
   const setActiveUser = useCallback((u: string | null) => {
     setActiveUserState(u);
@@ -104,6 +108,7 @@ export function PrivateChatProvider({ children }: { children: ReactNode }) {
     if (!hasConnectedRef.current) return;
     setConversations(new Map());
     setActiveUserState(null);
+    backfilledRef.current.clear();
     try { localStorage.removeItem(ACTIVE_KEY); } catch {}
     if (isDemo) try { localStorage.removeItem(PRIVATECHATS_KEY); } catch {}
   }, [state.status]);
@@ -132,6 +137,39 @@ export function PrivateChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (state.status !== "connected") return;
     const unsub = subscribe((msg) => {
+      if (msg.type === "chat:logs") {
+        const { scope, key, rows } = msg as unknown as { scope?: string; key?: string; rows?: ChatLogRow[] };
+        if (scope !== "private" || !key || !Array.isArray(rows) || rows.length === 0) return;
+        const cap = settings.logging.readprivatelines || 200;
+        const censor = settings.words.censorwords;
+        setConversations((prev) => {
+          const arr = prev.get(key) || [];
+          const seen = new Set(arr.map((m) => `${m.isSelf ? 1 : 0}|${m.message}|${Math.floor(m.timestamp / 1000)}`));
+          const seeded: PrivateMessage[] = [];
+          rows.forEach((r, i) => {
+            if (!r || typeof r.message !== "string") return;
+            const ts = Number(r.timestamp) || Date.now();
+            const self = !!r.isSelf;
+            const k = `${self ? 1 : 0}|${r.message}|${Math.floor(ts / 1000)}`;
+            if (seen.has(k)) return;
+            seen.add(k);
+            seeded.push({
+              id: `log-${ts}-${i}`,
+              username: key,
+              message: censor ? censorText(r.message, settings.words.censored) : r.message,
+              timestamp: ts,
+              isSelf: self,
+              backfilled: true,
+            });
+          });
+          if (seeded.length === 0) return prev;
+          const next = new Map(prev);
+          next.delete(key);
+          next.set(key, truncateMessages([...seeded, ...arr], cap));
+          return next;
+        });
+        return;
+      }
       if (msg.type !== "chat:event") return;
       const ev = (msg as unknown as { event: ChatEvent }).event;
       if (ev.type === "private-message" && ev.username && ev.message) {
@@ -248,8 +286,6 @@ export function PrivateChatProvider({ children }: { children: ReactNode }) {
     [send, settings.words, settings.ctcp.enable, settings.privatechat.store, settings.logging.readprivatelines, state.status],
   );
 
-  const users = Array.from(conversations.keys());
-
   const closeConversation = useCallback((username: string) => {
     const usersList = Array.from(conversationsRef.current.keys());
     const idx = usersList.indexOf(username);
@@ -279,11 +315,13 @@ export function PrivateChatProvider({ children }: { children: ReactNode }) {
       const next = stored.filter((u: string) => u !== username);
       localStorage.setItem("nicotineHub.privatechats", JSON.stringify(next));
     } catch {}
+    backfilledRef.current.delete(username.toLowerCase());
   }, [setActiveUser]);
 
   const closeAll = useCallback(() => {
     setConversations(new Map());
     setActiveUser(null);
+    backfilledRef.current.clear();
     try { localStorage.removeItem(PRIVATECHATS_KEY); localStorage.removeItem(ACTIVE_KEY); } catch {}
   }, [setActiveUser]);
 
@@ -297,6 +335,20 @@ export function PrivateChatProvider({ children }: { children: ReactNode }) {
       }
     } catch {}
   }, [state.status, send]);
+
+  // Backfill conversations from disk logs (persisted peers on connect, plus any
+  // conversation that newly appears — merge dedupes, so requesting is harmless).
+  const users = Array.from(conversations.keys());
+  useEffect(() => {
+    if (isDemo || state.status !== "connected") return;
+    const lines = settings.logging.readprivatelines || 200;
+    for (const u of users) {
+      const lower = u.toLowerCase();
+      if (backfilledRef.current.has(lower)) continue;
+      backfilledRef.current.add(lower);
+      try { send({ type: "chat:logs", scope: "private", key: u, lines }); } catch {}
+    }
+  }, [state.status, users, conversations, send, settings.logging.readprivatelines]);
 
   const isTyping = useCallback((username: string) => {
     const exp = typingUsers.get(username);

@@ -3,8 +3,9 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSession } from "@/lib/session";
 import { useConfig } from "@/lib/config/provider";
-import type { ChatEvent, RoomEvent, UserInfoEvent } from "@/lib/protocol";
+import type { ChatEvent, ChatLogRow, RoomEvent, UserInfoEvent } from "@/lib/protocol";
 import { censorText, replaceText, truncateMessages } from "@/lib/chatFormat";
+import { isDemo } from "@/lib/demo";
 
 export interface RoomMessage {
   id: string;
@@ -12,6 +13,8 @@ export interface RoomMessage {
   username: string;
   message: string;
   timestamp: number;
+  /** True for rows restored from disk logs (rendered above the live divider). */
+  backfilled?: boolean;
 }
 
 export interface JoinedRoom {
@@ -101,6 +104,18 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
   joinedRoomsRef.current = joinedRooms;
   const activeRoomRef = useRef(activeRoom);
   activeRoomRef.current = activeRoom;
+  const linesRef = useRef(settings.logging.readroomlines || 200);
+  linesRef.current = settings.logging.readroomlines || 200;
+  // rooms already backfilled from disk logs this session (lowercased)
+  const backfilledRef = useRef<Set<string>>(new Set());
+
+  const requestRoomBackfill = useCallback((room: string) => {
+    if (isDemo || !room.trim()) return;
+    const lower = room.toLowerCase();
+    if (backfilledRef.current.has(lower)) return;
+    backfilledRef.current.add(lower);
+    try { send({ type: "chat:logs", scope: "rooms", key: room, lines: linesRef.current }); } catch {}
+  }, [send]);
 
   const setActiveRoom = useCallback((r: string | null) => {
     setActiveRoomState(r);
@@ -120,6 +135,7 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
     setJoinedRooms(new Map());
     setMessages(new Map());
     setActiveRoomState(null);
+    backfilledRef.current.clear();
     try { localStorage.removeItem(JOINED_KEY); localStorage.removeItem(ACTIVE_KEY); } catch {}
     try { sessionStorage.removeItem("nicotineHub.activeRoom"); } catch {}
   }, [state.status]);
@@ -136,10 +152,11 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
       const idx = toJoin.indexOf(room);
       setTimeout(() => {
         try { send({ type: "chat:room", action: "join", room }); } catch {}
+        requestRoomBackfill(room);
         setTimeout(() => rejoinRef.current.delete(room.toLowerCase()), 2000);
       }, idx * 250);
     }
-  }, [state.status, send]);
+  }, [state.status, send, requestRoomBackfill]);
 
   useEffect(() => {
     const unsub = subscribe((msg) => {
@@ -369,6 +386,35 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
             return next;
           });
         }
+      } else if (msg.type === "chat:logs") {
+        const { scope, key, rows } = msg as unknown as { scope?: string; key?: string; rows?: ChatLogRow[] };
+        if (scope !== "rooms" || !key || !Array.isArray(rows) || rows.length === 0) return;
+        const cap = settings.logging.readroomlines || 200;
+        const censor = settings.words.censorwords;
+        setMessages((prev) => {
+          const existing = prev.get(key) || [];
+          const seen = new Set(existing.map((m) => `${m.username}|${m.message}|${Math.floor(m.timestamp / 1000)}`));
+          const seeded: RoomMessage[] = [];
+          rows.forEach((r, i) => {
+            if (!r || typeof r.username !== "string" || !r.username || typeof r.message !== "string") return;
+            const ts = Number(r.timestamp) || Date.now();
+            const k = `${r.username}|${r.message}|${Math.floor(ts / 1000)}`;
+            if (seen.has(k)) return;
+            seen.add(k);
+            seeded.push({
+              id: `log-${ts}-${i}`,
+              room: key,
+              username: r.username,
+              message: censor ? censorText(r.message, settings.words.censored) : r.message,
+              timestamp: ts,
+              backfilled: true,
+            });
+          });
+          if (seeded.length === 0) return prev;
+          const next = new Map(prev);
+          next.set(key, truncateMessages([...seeded, ...existing], cap));
+          return next;
+        });
       } else if ((msg as unknown as { type: string }).type === "userinfo:event") {
         const ev = (msg as unknown as { event: UserInfoEvent }).event;
         if (ev.type === "user-stats" && ev.stats && ev.username) {
@@ -410,6 +456,7 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
     (room: string) => {
       send({ type: "chat:room", action: "join", room });
       setActiveRoom(room);
+      requestRoomBackfill(room);
       setJoinedRooms((prev) => {
         if (prev.has(room)) return prev;
         const next = new Map(prev);
@@ -417,12 +464,13 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
         return next;
       });
     },
-    [send, setActiveRoom],
+    [send, setActiveRoom, requestRoomBackfill],
   );
 
   const leaveRoom = useCallback(
     (room: string) => {
       send({ type: "chat:room", action: "leave", room });
+      backfilledRef.current.delete(room.toLowerCase());
       setJoinedRooms((prev) => {
         const next = new Map(prev);
         next.delete(room);
@@ -476,6 +524,7 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
     });
     setJoinedRooms(new Map());
     setMessages(new Map());
+    backfilledRef.current.clear();
     setActiveRoom(null);
   }, [send, setActiveRoom]);
 
