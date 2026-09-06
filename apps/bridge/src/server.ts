@@ -1636,7 +1636,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         try {
           if (section === "transfers") {
             // Real file sharing: web's virtualName|path lists need to become bridge ShareDB folders.
-            // Bridge scans those host paths (must be mounted into DATA_DIR / SHARED_DIRS) and rebuilds the compressed shares.
+            // Bridge scans those host paths (any mounted path — no allowlist) and rebuilds the compressed shares.
             if (["shared", "buddyshared", "trustedshared"].includes(key) && Array.isArray(value)) {
               try {
                 const pairs = value as [string, string][];

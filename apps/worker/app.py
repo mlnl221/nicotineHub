@@ -1316,7 +1316,7 @@ def _transcode_to_opus(src: Path) -> Path | None:
 async def audio(file: str, request: Request):
     """Playable audio for the browser mini-player.
 
-    Query `file`: basename, allowed-roots-relative, or absolute path
+    Query `file`: basename, DATA_DIR-relative, or absolute path (anywhere on disk)
     (same resolution as tag/verify). Native formats stream directly;
     wma/wv/ape/aiff/alac/mp2 transcode to cached opus. Others → 415,
     ffmpeg failure → 422 (web shows a toast; original stays downloadable).
