@@ -125,10 +125,9 @@ export function SharesSection() {
   const [browseOpen, setBrowseOpen] = useState(false);
 
   function dataPathFromExplorer(p: string): string {
-    const n = normalizeFolderPath(p) || "/";
-    if (n === "/") return "/data";
-    if (n === "/data" || n.startsWith("/data/")) return n;
-    return "/data" + (n.startsWith("/") ? n : `/${n}`);
+    // FileExplorer already returns absolute container paths (e.g. /media/500SSD/Orpheus)
+    // — store verbatim. Must existsSync on the bridge FS.
+    return normalizeFolderPath(p) || "/";
   }
   function basenameOfExplorerPath(p: string): string {
     if (!p || p === "/") return "Shared";
@@ -276,6 +275,7 @@ export function SharesSection() {
     const newPathRaw = dialogPath.trim();
     if (!newVirtualRaw) { setDialogError("Virtual name is required."); return; }
     if (!newPathRaw) { setDialogError("Folder path is required."); return; }
+    if (normalizeFolderPath(newPathRaw) === "/") { setDialogError("Cannot share the filesystem root — pick a subdirectory."); return; }
     // Mirrors preferences.py:957-984 on_edit_shared_folder_response: remove old, add new with validate_path=False
     // Remove old entry first
     const oldNorm = normalizeFolderPath(editTarget.folderPath).toLowerCase();
@@ -336,6 +336,7 @@ export function SharesSection() {
     const v = dialogVirtual.trim() || getBasename(dialogPath);
     const p = dialogPath.trim();
     if (!p) { setDialogError("Folder path is required."); return; }
+    if (normalizeFolderPath(p) === "/") { setDialogError("Cannot share the filesystem root — pick a subdirectory."); return; }
     const added = addShareInternal(p, dialogPerm, v);
     if (!added) { setDialogError("Could not add folder."); return; }
     setAddOpen(false);
@@ -347,12 +348,12 @@ export function SharesSection() {
     <div className="flex flex-col gap-6">
       <SectionCard
         title="Shared folders"
-        description="Folders you share on the Soulseek network. WSL (bun): use absolute WSL paths like /home/user/Music or /mnt/c/Users/you/Music. Docker: browse container /data to add any nested folder. Browser pickers are a fallback."
+        description="Folders you share on the Soulseek network. WSL (bun): use absolute WSL paths like /home/user/Music or /mnt/c/Users/you/Music. Docker: browse the container filesystem to add any mounted folder. Browser pickers are a fallback."
         actions={<SectionSaveButton section="transfers" />}
       >
         <div className="py-4 space-y-3">
           <div className="rounded-xl bg-amber-50 px-4 py-3 font-body text-xs leading-relaxed text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-            <span className="font-semibold">Docker:</span> use <span className="font-mono">Browse /data</span> below to see the container&apos;s <span className="font-mono">/data</span> volume (or bind mount like <span className="font-mono">/home/user/Music:/data/Music:ro</span> then share <span className="font-mono">/data/Music</span>) and add any subdirectory as a share. This is the browser equivalent of <span className="font-mono">explorer /data</span> (container has no display server). For local device folders, use <span className="font-mono">Add folder</span> (File System Access API where available).
+            <span className="font-semibold">Docker:</span> use <span className="font-mono">Browse container</span> below to see the container filesystem (e.g. <span className="font-mono">/data</span>, <span className="font-mono">/media/…</span> — every host folder must be mounted into the container) and add any subdirectory as a share — the path is stored verbatim. This is the browser equivalent of <span className="font-mono">explorer /</span> (container has no display server). Playback/metadata in <span className="font-mono">/files</span> only works for paths under <span className="font-mono">ALLOWED_ROOTS</span> (default <span className="font-mono">/data</span>; add <span className="font-mono">/media</span> to allow it). For local device folders, use <span className="font-mono">Add folder</span> (File System Access API where available).
           </div>
           <div className="rounded-xl bg-surface-container-low px-3 py-2 dark:bg-surface-variant/20">
             <div className="font-body text-[11px] leading-relaxed text-on-surface-variant dark:text-outline">
@@ -377,12 +378,12 @@ export function SharesSection() {
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
-              aria-label="Browse container /data"
+              aria-label="Browse container filesystem"
               onClick={() => setBrowseOpen(true)}
               className="inline-flex h-11 min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-primary px-4 font-label text-xs font-semibold uppercase tracking-widest text-on-primary shadow-sm transition-colors hover:bg-primary/90 active:scale-95"
             >
               <span className="material-symbols-outlined text-[18px]">folder_open</span>
-              <span className="hidden sm:inline">Browse /data</span>
+              <span className="hidden sm:inline">Browse container</span>
               <span className="sm:hidden">Browse</span>
             </button>
             <button
@@ -407,15 +408,15 @@ export function SharesSection() {
                 showFiles
                 selectable="directories"
                 confirmLabel="Add this folder"
-                title="Browse container /data"
+                title="Browse container filesystem"
                 onSelect={(relativePath) => {
                   const abs = dataPathFromExplorer(relativePath);
                   const base = basenameOfExplorerPath(relativePath);
                   setBrowseOpen(false);
-                  setDialogVirtual(base);
+                  setDialogVirtual(abs === "/" ? "" : base);
                   setDialogPath(abs);
                   setDialogPerm("public");
-                  setDialogError(null);
+                  setDialogError(abs === "/" ? "Cannot share the filesystem root — pick a subdirectory." : null);
                   setAddOpen(true);
                 }}
                 onClose={() => setBrowseOpen(false)}

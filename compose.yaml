@@ -14,6 +14,10 @@ services:
       LISTEN_PORT: "${LISTEN_PORT:-40598}"
       CONFIG_DIR: "/config"
       DATA_DIR: "/data"
+      # Local preview roots for /api/files/raw (bridge) and tag/analyze/mediainfo/audio (worker).
+      # Shares may live anywhere mounted (e.g. /media/500SSD:/media/500SSD → share /media/500SSD/Orpheus),
+      # but playback/metadata only serve paths under these roots. Default is /data only.
+      ALLOWED_ROOTS: "${ALLOWED_ROOTS:-/data}"
       BRIDGE_TOKEN: "${BRIDGE_TOKEN:-}"
       # Shares: Settings → Shares sends virtualName|hostPath pairs to the bridge via WS config:update.
       # Host paths must be mounted into the container to be scannable (e.g. /home/user/Music:/data/Music:ro).
@@ -63,6 +67,8 @@ services:
     environment:
       CONFIG_DIR: "/config"
       DATA_DIR: "/data"
+      # Must match bridge ALLOWED_ROOTS so /files playback + worker tag/analyze agree.
+      ALLOWED_ROOTS: "${ALLOWED_ROOTS:-/data}"
       SPECTRUM_DIR: "/tmp/spectrals"
       WORKER_TOKEN: "${WORKER_TOKEN:-}"
       # Optional per-service scraper tokens (env first; see apps/worker for names)

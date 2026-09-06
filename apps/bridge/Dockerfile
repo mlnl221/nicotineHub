@@ -45,6 +45,7 @@ LABEL org.opencontainers.image.version="${BUILD_TAG:-$TAG}"
 ENV NODE_ENV=production
 ENV CONFIG_DIR=/config
 ENV DATA_DIR=/data
+ENV ALLOWED_ROOTS=/data
 ENV TAG=${TAG}
 ENV BUILD_TAG=${BUILD_TAG:-$TAG}
 ENV APP_VERSION=${BUILD_TAG:-$TAG}
