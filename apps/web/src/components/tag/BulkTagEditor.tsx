@@ -100,7 +100,7 @@ export function BulkTagEditor({ open, files, onClose, onSaved }: Props) {
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="font-headline text-lg font-bold">Bulk Edit Tags</h2>
-              <p className="font-mono text-xs text-outline">{files.length} files · title+artist per-file, others uniform (smoked-salmon parity)</p>
+              <p className="font-mono text-xs text-outline">{files.length} files · title+artist per-file, others uniform</p>
             </div>
             <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-container-high"><span className="material-symbols-outlined text-[18px]">close</span></button>
           </div>

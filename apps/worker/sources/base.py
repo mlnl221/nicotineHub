@@ -1,7 +1,4 @@
-"""Scraper base — own implementation.
-
-Only the *pattern* (regex + release_format + get_json/fetch_page + IdentData)
-is guided by smoked-salmon's ``sources/base.py``. No code is imported or copied.
+"""Scraper base — regex + release_format + get_json/fetch_page + IdentData.
 """
 
 from __future__ import annotations

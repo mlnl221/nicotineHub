@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Worker service — heavy lifting off the Soulseek event loop.
 
-Own implementation throughout (scraper *pattern* only guided by smoked-salmon).
 Endpoints: GET /health, POST /scrape, POST /spectrum/request,
 GET /spectrum/{stem}/full|zoom, GET /spectrum/{stem},
 POST /tag, POST /tag/write, POST /tag/scrape, POST /tag/bulk,

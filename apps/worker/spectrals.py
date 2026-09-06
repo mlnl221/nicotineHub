@@ -1,8 +1,8 @@
-"""Spectrum generation — own implementation.
+"""Spectrum generation.
 
 Same output semantics as the old ``apps/bridge/src/spectrum.ts``
 (Full 2000x513 + Zoom 500x1025, Kaiser -z 120, sha256(token:mtime:size) etag)
-so cached URLs stay compatible. No smoked-salmon code.
+so cached URLs stay compatible.
 """
 
 from __future__ import annotations
