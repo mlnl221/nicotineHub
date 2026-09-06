@@ -8,7 +8,7 @@ Thanks for your interest in contributing! This project is a mobile-first Soulsee
 
 - **Discuss first.** For anything beyond a trivial bug fix, open an issue before a PR so it can be checked against the project direction. Unannounced large PRs will likely be rejected (same policy as upstream).
 - **One maintainer approves everything.** [@mlnl221](https://github.com/mlnl221) is the sole code owner (`CODEOWNERS`). Expect review latency; rebasing on `stage` speeds things up.
-- **Soulseek rules apply.** By connecting you agree to the [Soulseek rules](https://www.slsknet.org/news/node/681) and [Terms](https://www.slsknet.org/news/node/682). Never commit credentials — the app never stores passwords (Soulseek sends them in plaintext), and neither should you.
+- **Soulseek rules apply.** By connecting you agree to the [Soulseek rules](https://www.slsknet.org/news/node/681) and [Terms](https://www.slsknet.org/news/node/682). Never commit credentials — the bridge holds one shared login encrypted on your own server (Soulseek sends passwords in plaintext), and neither should you.
 
 ## AI-assisted contributions
 
