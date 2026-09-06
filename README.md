@@ -65,7 +65,7 @@ Only `web:3000` (+ Soulseek peer `LISTEN_PORT`) is published — browsers reach 
 
 The browser can't open raw TCP sockets, so the bridge translates JSON over WebSocket to Soulseek binary framing. Heavy work (link scraping, spectrum rendering, tagging) lives in the worker so the SLSK event loop stays clean. See `docs/architecture.md` for protocol and env details.
 
-> **Security:** Soulseek sends passwords in plaintext. The app never stores them — use credentials you trust.
+> **Security:** Soulseek sends passwords in plaintext — use credentials you trust. The bridge keeps one shared login (encrypted in `CONFIG_DIR/session.vault`, `0600`) so every device on your home network attaches without re-entering the password. Sign out clears it.
 
 ---
 
@@ -170,7 +170,7 @@ Then start with:
 docker compose up -d
 ```
 
-Open `http://localhost:3000` → Settings → Network check `LISTEN_PORT`, login with Soulseek creds (never stored). Health: `http://localhost:3000/api/bridge/health` + `http://localhost:3000/api/worker/health` (proxied — bridge/worker publish no ports). See `docs/deployment.md` for `TAG` pinning (`TAG=v0.25.0 docker compose pull && up -d`), `BRIDGE_TOKEN`, and `network_mode: host`.
+Open `http://localhost:3000` → Settings → Network check `LISTEN_PORT`, login with Soulseek creds (stored encrypted on your server only, cleared on sign-out). Health: `http://localhost:3000/api/bridge/health` + `http://localhost:3000/api/worker/health` (proxied — bridge/worker publish no ports). See `docs/deployment.md` for `TAG` pinning (`TAG=v0.25.0 docker compose pull && up -d`), `BRIDGE_TOKEN`, and `network_mode: host`.
 
 ---
 

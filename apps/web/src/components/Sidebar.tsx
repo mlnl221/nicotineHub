@@ -188,7 +188,7 @@ export function Sidebar() {
         ) : null}
         <button
           onClick={() => logout()}
-          title={collapsed ? t("Logoff") : undefined}
+          title={collapsed ? t("Logoff") : "Log off — signs out all devices (shared server login)"}
           className={`flex w-full items-center rounded-xl px-3 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant ${collapsed ? "justify-center" : "space-x-3"}`}
         >
           <span className="material-symbols-outlined">logout</span>
