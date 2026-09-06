@@ -3,12 +3,13 @@
 FROM oven/bun:1.4-alpine AS base
 WORKDIR /app
 
-# ---- deps: workspace-aware install ----
+# ---- deps: bridge-only install (skips web + root e2e tarballs) ----
 FROM base AS deps
 COPY package.json bun.lock ./
 COPY apps/bridge/package.json apps/bridge/package.json
 COPY apps/web/package.json apps/web/package.json
-RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile && rm -rf node_modules/@playwright node_modules/playwright* node_modules/.bun/@playwright* node_modules/.bun/playwright* 2>/dev/null || true
+# If `bun run build` ever needs a dropped dep, revert to plain --frozen-lockfile.
+RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile --filter './apps/bridge'
 
 # ---- builder ----
 FROM base AS builder
@@ -18,7 +19,6 @@ COPY apps/web/package.json apps/web/package.json
 COPY apps/bridge apps/bridge
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/bridge/node_modules ./apps/bridge/node_modules
-COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 WORKDIR /app/apps/bridge
 ARG TAG
 ARG BUILD_TAG

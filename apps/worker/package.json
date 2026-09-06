@@ -2,5 +2,5 @@
   "name": "@nicotine/worker",
   "version": "0.25.0",
   "private": true,
-  "description": "Python FastAPI worker (scrape/spectrum/tag) — no bun scripts; see requirements.txt"
+  "description": "Python FastAPI worker (scrape/spectrum/tag) — no bun scripts; see pyproject.toml + uv.lock"
 }

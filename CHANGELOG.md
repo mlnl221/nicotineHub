@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.30.0](https://github.com/mlnl221/nicotineHub/compare/v0.29.0...v0.30.0) (2026-09-06)
+
+
+### Features
+
+* **files:** remove ALLOWED_ROOTS gate, serve any mounted path ([56319ec](https://github.com/mlnl221/nicotineHub/commit/56319ec49c2a17a40f0d2803860123525397118d))
+* **files:** remove ALLOWED_ROOTS gate, serve any mounted path ([6605c29](https://github.com/mlnl221/nicotineHub/commit/6605c293f0c38e7d81e933d89ec8f96f987373ab))
+* **profile:** My profile button, description empty-state, avatar hover preview + lightbox ([10f6954](https://github.com/mlnl221/nicotineHub/commit/10f69546d6fe3b1895d138eedf0d610379eaf684))
+* **profile:** My profile button, description empty-state, avatar hover preview + lightbox ([468bb90](https://github.com/mlnl221/nicotineHub/commit/468bb90a9928a9203996fa348e67a9d62b185dea))
+
+
+### Bug Fixes
+
+* **uploads:** resolve share virtual2real in startUploadStream for any mounted path ([91c4d2e](https://github.com/mlnl221/nicotineHub/commit/91c4d2e7e7ce53eb15b1a334dacda0fec3a1eeda))
+
 ## [0.29.0](https://github.com/mlnl221/nicotineHub/compare/v0.28.2...v0.29.0) (2026-09-06)
 
 
