@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.30.1](https://github.com/mlnl221/nicotineHub/compare/v0.30.0...v0.30.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* **docker:** handle multi-line tags in merge imagetools step ([d35dc1d](https://github.com/mlnl221/nicotineHub/commit/d35dc1d1d81dc1a6ba39488b201ad3c3e156d326))
+* **docker:** handle multi-line tags in merge imagetools step ([944ed9a](https://github.com/mlnl221/nicotineHub/commit/944ed9aac840bd6dd48d5e7d693fc524daa1f68b))
+
 ## [0.30.0](https://github.com/mlnl221/nicotineHub/compare/v0.29.0...v0.30.0) (2026-09-06)
 
 
