@@ -5,7 +5,6 @@ COPY --from=ghcr.io/astral-sh/uv:0.6 /uv /uvx /bin/
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DATA_DIR=/data \
-    ALLOWED_ROOTS=/data \
     SPECTRUM_DIR=/tmp/spectrals \
     UV_LINK_MODE=copy \
     PATH="/app/.venv/bin:$PATH"
