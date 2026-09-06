@@ -474,7 +474,7 @@ function DiagnosticsInner() {
               ))}
             </div>
             <p className="mt-2 font-body text-[11px] text-on-surface-variant dark:text-outline">
-              Persistent ring: last 500 shown (2000 stored) in <code className="rounded bg-surface-container-high px-1 dark:bg-surface-variant">DATA_DIR/diagnostics.log</code> · visible to all logged-in users · passwords redacted.
+              Persistent ring: last 500 shown (2000 stored) in <code className="rounded bg-surface-container-high px-1 dark:bg-surface-variant">CONFIG_DIR/diagnostics.log</code> · visible to all logged-in users · passwords redacted.
             </p>
           </section>
         </div>

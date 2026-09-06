@@ -668,7 +668,7 @@ async function restoreSharedSessionFromVault(): Promise<void> {
 
 // Global plugin manager (shared across WS, but per-WS session getter is swapped)
 // Must be after CONFIG_DIR fallback — otherwise WSL uses stale "/config" and EACCES on persist.
-const pluginManager = new PluginManager({ dataDir: CONFIG_DIR });
+const pluginManager = new PluginManager({ configDir: CONFIG_DIR });
 pluginManager.registerBuiltin("core_commands", coreCommandsManifest as unknown as Record<string, unknown>, () => new CoreCommandsPlugin());
 pluginManager.registerBuiltin("spamfilter", spamManifest as unknown as Record<string, unknown>, () => new SpamfilterPlugin());
 pluginManager.registerBuiltin("leech_detector", leechManifest as unknown as Record<string, unknown>, () => new LeechDetectorPlugin());

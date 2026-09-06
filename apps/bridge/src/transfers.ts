@@ -214,7 +214,7 @@ export class TransferManager {
     this.configDir = process.env.CONFIG_DIR || opts.dataDir || process.env.DATA_DIR || "/config";
     this.incompleteDir = process.env.INCOMPLETE_DIR || join(this.dataDir, "incomplete");
     this.downloadsDir = process.env.DOWNLOADS_DIR || join(this.dataDir, "downloads");
-    this.statsManager = new StatsManager({ dataDir: this.configDir });
+    this.statsManager = new StatsManager({ configDir: this.configDir });
 
     try {
       for (const p of [this.dataDir, this.incompleteDir, this.downloadsDir, join(this.dataDir, "uploads")]) {

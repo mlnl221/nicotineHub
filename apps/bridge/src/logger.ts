@@ -31,8 +31,8 @@ const LEVEL_ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, erro
 const MAX_MEMORY = 2000;
 const MAX_PERSIST = 2000;
 
-let dataDir = process.env.CONFIG_DIR || "/config";
-let filePath = join(dataDir, "diagnostics.log");
+let configDir = process.env.CONFIG_DIR || "/config";
+let filePath = join(configDir, "diagnostics.log");
 
 const ring: LogEntry[] = [];
 const listeners = new Set<(entry: LogEntry) => void>();
@@ -46,13 +46,13 @@ function isTestEnv(): boolean {
 function ensureLoaded() {
   if (loaded) return;
   loaded = true;
-  dataDir = process.env.CONFIG_DIR || "/config";
-  filePath = join(dataDir, "diagnostics.log");
+  configDir = process.env.CONFIG_DIR || "/config";
+  filePath = join(configDir, "diagnostics.log");
   if (isTestEnv()) {
     // isolated in-memory only for tests; don't read/ pollute /data
     return;
   }
-  try { mkdirSync(dataDir, { recursive: true }); } catch {}
+  try { mkdirSync(configDir, { recursive: true }); } catch {}
   try {
     if (existsSync(filePath)) {
       const raw = readFileSync(filePath, "utf8");
@@ -72,7 +72,7 @@ function ensureLoaded() {
 function persist(entry: LogEntry) {
   if (isTestEnv()) return;
   try {
-    mkdirSync(dataDir, { recursive: true });
+    mkdirSync(configDir, { recursive: true });
     appendFileSync(filePath, JSON.stringify(entry) + "\n", "utf8");
     // trim file if > MAX_PERSIST (rewrite)
     // cheap: check ring length, if exceeds, rewrite file from ring
@@ -153,7 +153,7 @@ export function diagClear() {
 
 export function diagStats() {
   ensureLoaded();
-  return { total: ring.length, file: filePath, dataDir };
+  return { total: ring.length, file: filePath, configDir };
 }
 
 // convenience
