@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useSession } from "@/lib/session";
+import { isDemo } from "@/lib/demo";
+import { InfoTooltip } from "@/components/ui/InfoTooltip";
 
 type HealthJson = {
   listenPort?: number;
@@ -20,6 +22,15 @@ function getBridgeToken(): string | null {
 function getBridgeCandidates(): Array<{ httpBase: string; token: string | null }> {
   const out: Array<{ httpBase: string; token: string | null }> = [];
   const seen = new Set<string>();
+  // Same-origin first: /api/bridge on the web origin is proxied to the
+  // bridge, so no published bridge port is needed. Direct ports below
+  // remain as fallback for remote-bridge setups (Vercel demo, NAS).
+  if (typeof window !== "undefined") {
+    const token = getBridgeToken();
+    const key = `/api/bridge|${token ?? ""}`;
+    seen.add(key);
+    out.push({ httpBase: "/api/bridge", token });
+  }
   const add = (wsUrl: string | null | undefined) => {
     if (!wsUrl) return;
     try {
@@ -109,12 +120,15 @@ export function PortChecker() {
   };
 
   useEffect(() => {
+    // Demo (Vercel): no bridge exists — never poll dead candidates
+    if (isDemo) return;
     fetchHealth();
     const id = setInterval(fetchHealth, 15000);
     return () => clearInterval(id);
   }, []);
 
   const check = async () => {
+    if (isDemo) return;
     setChecking(true);
     setResult(null);
     try {
@@ -189,12 +203,12 @@ export function PortChecker() {
   return (
     <div className="glass-panel rounded-2xl p-4">
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="font-label text-sm font-semibold">Port Checker</h3>
+        <h3 className="flex items-center gap-1.5 font-label text-sm font-semibold">
+          Port Checker
+          <InfoTooltip text={`Search results require a reachable inbound peer listener. Default LISTEN_PORT 60754 (configurable) must be port-forwarded (TCP) — edit in Settings → Network. With the Docker socket mounted + ALLOW_CONTAINER_RESTART=1 the bridge recreates itself so the host mapping follows, otherwise follow with LISTEN_PORT=<port> docker compose up -d. UPnP/NAT-PMP auto-forwards when enabled (toggle in Network, renews every 2 h). Currently ${health?.listenPort ?? 60754}.`} />
+        </h3>
         <span className={`h-2 w-2 rounded-full ${state.status === "connected" ? "bg-green-500" : "bg-outline"}`} title={state.status} />
       </div>
-      <p className="mb-3 text-xs text-on-surface-variant">
-        Search results require a reachable inbound peer listener. Default <code>LISTEN_PORT 60754</code> (configurable) must be port-forwarded (TCP, see README) — edit in Settings → Network. UPnP/NAT-PMP auto-forwards when enabled (toggle in Network, renews every 2 h). Currently <code>{health?.listenPort ?? 60754}</code>.
-      </p>
       {health && (
         <div className="mb-3 rounded-xl bg-surface-container-high px-3 py-2 text-xs dark:bg-surface-container-highest/40">
           <div className="flex flex-wrap gap-x-3 gap-y-1">
@@ -211,13 +225,19 @@ export function PortChecker() {
           </div>
         </div>
       )}
-      <button
-        onClick={check}
-        disabled={checking}
-        className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary disabled:opacity-50"
-      >
-        {checking ? "Checking…" : "Check bridge & port"}
-      </button>
+      {isDemo ? (
+        <p className="rounded-xl bg-surface-container-high px-3 py-2 text-xs text-on-surface-variant dark:bg-surface-container-highest/40">
+          Bridge check unavailable in demo (offline — no bridge).
+        </p>
+      ) : (
+        <button
+          onClick={check}
+          disabled={checking}
+          className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary disabled:opacity-50"
+        >
+          {checking ? "Checking…" : "Check bridge & port"}
+        </button>
+      )}
       {result && (
         <div className={`mt-3 rounded-xl px-3 py-2 text-xs ${result.ok ? "bg-green-500/10 text-green-700 dark:text-green-300" : "bg-error-container text-on-error-container"}`}>
           {result.msg}

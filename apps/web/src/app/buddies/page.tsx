@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useSession } from "@/lib/session";
+import { RequireAuth } from "@/components/RequireAuth";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
@@ -13,19 +13,19 @@ import { ContextMenu } from "@/components/ui/ContextMenu";
 import { buddyMenu } from "@/lib/context-menu/menus";
 
 export default function BuddiesPage() {
-  const { state } = useSession();
+  return (
+    <RequireAuth>
+      <BuddiesInner />
+    </RequireAuth>
+  );
+}
+
+function BuddiesInner() {
   const router = useRouter();
   const { buddies, filter, setFilter, addBuddy, removeBuddy, setTrusted, setNotify, setNote } = useBuddies();
   const [addInput, setAddInput] = useState("");
   const [noteEdit, setNoteEdit] = useState<string | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; username: string } | null>(null);
-
-  useEffect(() => {
-    if (state.status === "failed") router.replace("/");
-  }, [state.status, router]);
-
-  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
-  if (state.status !== "connected") return null;
 
   const handleAdd = () => {
     if (addInput.trim()) {

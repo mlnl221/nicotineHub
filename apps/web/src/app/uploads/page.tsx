@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "@/lib/session";
+import { RequireAuth } from "@/components/RequireAuth";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
@@ -177,7 +177,7 @@ function UploadsInner() {
                   <span className="material-symbols-outlined text-tertiary text-xl">info</span>
                   <div>
                     <p className="font-label text-xs font-semibold text-on-tertiary-container dark:text-tertiary-fixed">No shared folders configured</p>
-                    <p className="font-label text-xs text-on-surface-variant mt-1">Uploads are queued but cannot start until you configure Shares (Settings → Shares). Queue remains inspectable — matching nicotine+.</p>
+                    <p className="font-label text-xs text-on-surface-variant mt-1">Uploads are queued but cannot start until you configure Shares (Settings → Shares). The queue stays visible in the meantime.</p>
                   </div>
                 </div>
                 <Link href="/downloads" className="mt-6 inline-flex font-label text-sm font-semibold text-primary hover:underline">View Downloads</Link>
@@ -265,12 +265,9 @@ function UploadsInner() {
 }
 
 export default function UploadsPage() {
-  const { state } = useSession();
-  const router = useRouter();
-  useEffect(() => {
-    if (state.status === "failed") router.replace("/");
-  }, [state.status, router]);
-  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
-  if (state.status !== "connected") return null;
-  return <UploadsInner />;
+  return (
+    <RequireAuth>
+      <UploadsInner />
+    </RequireAuth>
+  );
 }

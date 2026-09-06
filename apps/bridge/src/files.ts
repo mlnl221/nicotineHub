@@ -29,6 +29,38 @@ function getDataDir(): string {
 }
 
 /**
+ * Readable/playable roots for local preview (shares may live anywhere mounted,
+ * e.g. /media/500SSD — but /api/files/raw only serves these roots).
+ * ALLOWED_ROOTS="/data,/media" (comma/colon separated); default is DATA_DIR only.
+ */
+export function getAllowedRoots(): string[] {
+  const raw = process.env.ALLOWED_ROOTS || "";
+  const parts = raw.split(/[:,]/).map((s) => s.trim()).filter(Boolean);
+  const roots = parts.length ? parts : [process.env.DATA_DIR || "/data"];
+  const out: string[] = [];
+  for (const r of roots) {
+    try {
+      const resolved = resolve(r);
+      if (!out.includes(resolved)) out.push(resolved);
+    } catch {}
+  }
+  return out.length ? out : [getDataDir()];
+}
+
+/** True when an absolute (or real) path sits inside any allowed root. */
+export function isPathAllowed(absPath: string, realPath?: string): boolean {
+  const roots = getAllowedRoots();
+  const check = (p: string) => {
+    let rp = p;
+    try { rp = resolve(p); } catch {}
+    return roots.some((r) => rp === r || rp.startsWith(r + sep));
+  };
+  if (!check(absPath)) return false;
+  if (realPath !== undefined && realPath !== absPath && !check(realPath)) return false;
+  return true;
+}
+
+/**
  * Normalize user-supplied path to a safe relative path.
  * Accepts "", "/", "subdir", "/subdir", "a/b/c", with or without trailing slash.
  * Rejects null bytes, control chars, empty segments with ".." traversal intent is sanitized via resolve check.

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
-export function InfoTooltip({ text, testId }: { text: string; testId?: string }) {
+export function InfoTooltip({ text, content, testId }: { text?: string; content?: ReactNode; testId?: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -43,7 +43,7 @@ export function InfoTooltip({ text, testId }: { text: string; testId?: string })
           className="absolute left-1/2 top-full z-[70] mt-2 w-[280px] max-w-[320px] -translate-x-1/2 rounded-xl bg-surface-container-highest p-3 shadow-lg ghost-border dark:bg-surface-variant text-left"
         >
           <div className="font-body text-xs leading-relaxed text-on-surface-variant dark:text-outline">
-            {text}
+            {content ?? text}
           </div>
         </div>
       )}

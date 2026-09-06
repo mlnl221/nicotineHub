@@ -103,3 +103,11 @@ is the honest thing to do, and lets others judge the code on its merits.
 
 If the tooling, workflow or declared levels change, this file and its version
 are updated to match.
+
+### 2026-09-05 — port internalization (PR #102)
+
+Earlier sections describe direct browser-to-service ports (`ws://host:8787/ws`,
+worker `:8789`); that was accurate when written. The stack has since moved to a
+single web entrypoint (`web:3000`, same-origin `/ws` + `/api/*` proxy;
+`:8787`/`:8789` internal-only), documented in `README.md`, `AGENTS.md` and
+`docs/architecture.md`. Original wording above is preserved as history.

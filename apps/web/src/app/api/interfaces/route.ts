@@ -21,6 +21,9 @@ function listLocal(): Array<{ name: string; address: string; netmask: string; fa
 }
 
 export async function GET() {
+  // Demo (Vercel): no bridge exists, and the web host's NICs belong to the
+  // serverless host — never leak them into the demo UI. Return empty.
+  if (process.env.NEXT_PUBLIC_DEMO === "true") return NextResponse.json([]);
   // Try bridge first (canonical – bridge's interfaces are what Soulseek binds to, especially with host network + VPN tun0)
   const candidates: string[] = [];
   // In Docker, web can reach bridge via http://bridge:8787; in dev via localhost:8787

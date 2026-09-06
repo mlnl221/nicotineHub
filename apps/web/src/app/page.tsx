@@ -6,12 +6,29 @@ import { useSession } from "@/lib/session";
 import { LoginForm } from "@/components/LoginForm";
 import { isDemo } from "@/lib/demo";
 
+/** Internal destinations only — blocks open redirects via crafted ?next=. */
+function safeNext(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const decoded = decodeURIComponent(raw);
+    if (decoded.startsWith("/") && !decoded.startsWith("//")) return decoded;
+  } catch {}
+  return null;
+}
+
 export default function Home() {
   const { state } = useSession();
   const router = useRouter();
 
   useEffect(() => {
-    if (state.status === "connected") router.replace("/search");
+    if (state.status !== "connected") return;
+    // Read from window.location (not useSearchParams) so this statically
+    // prerendered page needs no Suspense boundary.
+    let next: string | null = null;
+    try {
+      next = safeNext(new URLSearchParams(window.location.search).get("next"));
+    } catch {}
+    router.replace(next ?? "/search");
   }, [state.status, router]);
 
   if (state.status === "connected") return null;

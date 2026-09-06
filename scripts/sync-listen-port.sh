@@ -2,6 +2,8 @@
 # Watches CONFIG_DIR/listen_port (or config volume) and syncs host .env + recreates bridge
 # For users who keep bridge network (ports mapping) instead of network_mode: host.
 # With host mode (compose.override.example.yaml) this script is NOT needed – Save hot-swaps.
+# Alternative: mount /var/run/docker.sock + ALLOW_CONTAINER_RESTART=1 and the bridge
+# recreates itself on Save (see compose.yaml) – then this watcher is NOT needed either.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG_DIR="${CONFIG_DIR:-${DATA_DIR:-}}"

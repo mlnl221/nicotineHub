@@ -46,7 +46,7 @@ export function NowPlayingSection() {
   return (
     <SectionCard
       title="Now Playing"
-      description="Format for /np. Desktop backends (MPRIS/other) are browser-inapplicable — stored locally and usable with navigator.mediaSession later (preferences.py:3206, settings-mapping.md:244). Last.fm/Libre.fm/ListenBrainz scrobblers intentionally omitted — no browser API."
+      description="Format for /np. Desktop backends (MPRIS/other) are browser-inapplicable — stored locally and usable with navigator.mediaSession later (preferences.py:3206, settings-mapping.md:244). Scrobbling services intentionally omitted — no browser API."
       actions={<SectionSaveButton section="players" />}
     >
       <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs leading-relaxed text-on-surface-variant dark:bg-surface-container-highest/40">
@@ -59,7 +59,7 @@ export function NowPlayingSection() {
       ) : null}
       <RadioGroupControl
         label="Player backend"
-        description="MPRIS and Other are desktop-only (stored-only, not executed). Browser uses mediaSession. Last.fm/Libre.fm/ListenBrainz omitted per settings-mapping.md."
+        description="MPRIS and Other are desktop-only (stored-only, not executed). Browser uses mediaSession. Scrobbling services omitted."
         value={effectivePlayer}
         onChange={(v) => setOption("players", "npplayer", v)}
         options={PLAYER_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}

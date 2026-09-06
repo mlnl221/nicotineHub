@@ -10,11 +10,32 @@ export interface StatsData {
   started_uploads: number;
   completed_uploads: number;
   uploaded_size: number;
+  failed_downloads?: number;
+  cancelled_downloads?: number;
+  failed_uploads?: number;
+  cancelled_uploads?: number;
+}
+
+export interface LiveStats {
+  downloadSpeed: number;
+  uploadSpeed: number;
+  activeDownloads: number;
+  activeUploads: number;
+  queuedDownloads: number;
+  queuedUploads: number;
+}
+
+export interface SharesSummary {
+  dirs: number;
+  files: number;
+  unavailable: number;
 }
 
 interface StatsApi {
   total: StatsData | null;
   session: StatsData | null;
+  live: LiveStats | null;
+  shares: SharesSummary | null;
   refresh: () => void;
   loading: boolean;
 }
@@ -25,6 +46,8 @@ export function StatisticsProvider({ children }: { children: React.ReactNode }) 
   const { send, subscribe, state } = useSession();
   const [total, setTotal] = useState<StatsData | null>(null);
   const [sessionStat, setSessionStat] = useState<StatsData | null>(null);
+  const [live, setLive] = useState<LiveStats | null>(null);
+  const [shares, setShares] = useState<SharesSummary | null>(null);
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(() => {
@@ -43,11 +66,18 @@ export function StatisticsProvider({ children }: { children: React.ReactNode }) 
 
   useEffect(() => {
     const unsub = subscribe((msg) => {
-      const m = msg as unknown as { type: string; total?: StatsData; session?: StatsData };
+      const m = msg as unknown as { type: string; total?: StatsData; session?: StatsData; live?: LiveStats; shares?: SharesSummary };
       if (m.type === "statistics:response") {
         if (m.total) setTotal(m.total);
         if (m.session) setSessionStat(m.session);
+        if (m.live) setLive(m.live);
+        if (m.shares) setShares(m.shares);
         setLoading(false);
+      }
+      // Live queue/speed snapshot also arrives every 2s as transfer:stats — reuse it.
+      if (m.type === "transfer:stats") {
+        const s = m as unknown as LiveStats;
+        if (typeof s.downloadSpeed === "number") setLive({ downloadSpeed: s.downloadSpeed, uploadSpeed: s.uploadSpeed, activeDownloads: s.activeDownloads, activeUploads: s.activeUploads, queuedDownloads: s.queuedDownloads, queuedUploads: s.queuedUploads });
       }
       if ((m as unknown as { type: string }).type === "statistics:reset:ok") {
         // avoid calling refresh() which would capture stale closure — re-request directly
@@ -64,7 +94,7 @@ export function StatisticsProvider({ children }: { children: React.ReactNode }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.status]);
 
-  return <StatsContext.Provider value={{ total, session: sessionStat, refresh, reset, loading } as StatsApi & { reset: () => void }}>{children}</StatsContext.Provider>;
+  return <StatsContext.Provider value={{ total, session: sessionStat, live, shares, refresh, reset, loading } as StatsApi & { reset: () => void }}>{children}</StatsContext.Provider>;
 }
 
 export function useStatistics() {

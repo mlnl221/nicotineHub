@@ -53,7 +53,7 @@ export function UserProfileSection() {
     >
       <TextFieldControl
         label="Description"
-        description="Shown on your profile. Stored as repr() like Nicotine+ (pynicotine/config.py:244). Supports plain text and URLs."
+        description="Shown on your profile. Supports plain text and URLs."
         value={u.descr === "''" ? "" : u.descr.replace(/^'|'$/g, "").replace(/^"|"$/g, "")}
         multiline
         placeholder="Tell others about your music..."

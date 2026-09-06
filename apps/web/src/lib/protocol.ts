@@ -587,6 +587,11 @@ export interface ServerReconnectedAltMessage {
   ok?: true;
   listenPort?: number;
 }
+export interface ServerRestartingMessage {
+  /** Bridge is recreating its container so the Docker host mapping follows a port change — WS drops mid-swap, client reconnects */
+  type: "server:restarting";
+  listenPort: number;
+}
 
 /* ------------------------------------------------------------------ *
  * Shares rescan
@@ -802,6 +807,7 @@ export type BridgeOutboundMessage =
   | ServerReconnectFailedMessage
   | ServerReconnectedMessage
   | ServerReconnectedAltMessage
+  | ServerRestartingMessage
   | DiagnosticsInitMessage
   | DiagnosticsLogMessage
   | DiagnosticsHealthMessage

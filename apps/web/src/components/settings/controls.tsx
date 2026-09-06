@@ -313,6 +313,8 @@ export function SectionCard({
   actions?: ReactNode;
   children: ReactNode;
 }) {
+  const { isLong, first, full } = useInfoSplit(description);
+  const testId = `section-info-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <section className="overflow-hidden rounded-2xl bg-surface-container-low shadow-sm dark:bg-surface-container-high">
       <header className="border-b border-surface-container-high px-5 py-4 dark:border-surface-container-highest/40">
@@ -323,9 +325,10 @@ export function SectionCard({
           {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
         </div>
         {description ? (
-          <p className="mt-1 font-body text-xs text-on-surface-variant dark:text-outline">
-            {description}
-          </p>
+          <div className="mt-1 flex items-start gap-1.5 font-body text-xs text-on-surface-variant dark:text-outline">
+            <p className="min-w-0">{isLong ? first : description}</p>
+            {isLong ? <InfoTooltip text={full} testId={testId} /> : null}
+          </div>
         ) : null}
       </header>
       <div className="divide-y divide-surface-container-high px-5 dark:divide-surface-container-highest/40">

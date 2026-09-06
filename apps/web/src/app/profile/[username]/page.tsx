@@ -3,15 +3,23 @@
 import { useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
+import { RequireAuth } from "@/components/RequireAuth";
 
 export default function ProfileRedirect() {
+  return (
+    <RequireAuth>
+      <ProfileRedirectInner />
+    </RequireAuth>
+  );
+}
+
+function ProfileRedirectInner() {
   const params = useParams<{ username: string }>();
   const username = decodeURIComponent(params.username ?? "");
   const { state } = useSession();
   const router = useRouter();
   useEffect(() => {
-    if (state.status === "idle" || state.status === "connecting") return;
-    if (state.status !== "connected") { router.replace("/"); return; }
+    if (state.status !== "connected") return;
     if (username) {
       try {
         const key = "nicotineHub.recentProfiles";
@@ -25,6 +33,5 @@ export default function ProfileRedirect() {
       router.replace("/profile");
     }
   }, [username, state.status, router]);
-  if (state.status === "idle" || state.status === "connecting") return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>;
   return null;
 }

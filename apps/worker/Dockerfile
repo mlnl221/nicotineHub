@@ -4,6 +4,7 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DATA_DIR=/data \
+    ALLOWED_ROOTS=/data \
     SPECTRUM_DIR=/tmp/spectrals
 WORKDIR /app
 COPY apps/worker/requirements.txt ./

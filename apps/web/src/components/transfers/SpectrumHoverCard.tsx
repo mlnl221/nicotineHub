@@ -135,7 +135,7 @@ export function SpectrumHoverCard({ transferId, fileName, children }: Props) {
                     <h3 className="font-headline text-sm font-semibold truncate" title={fileName}>
                       Spectrum — {fileName}
                     </h3>
-                    <p className="font-label text-[11px] text-outline">sox Kaiser • -z 120 • cached in /tmp (wiped on reboot)</p>
+                    <p className="font-label text-[11px] text-outline">cached in /tmp (wiped on reboot)</p>
                   </div>
                   <button
                     aria-label="Close"

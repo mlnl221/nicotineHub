@@ -69,7 +69,7 @@ export function LoggingSection() {
       <SectionCard title="Debug & display" actions={<SectionSaveButton section="logging" />}>
         <ToggleControl
           label="Debug mode"
-          description="Verbose logging (pynicotine logfacility debug)."
+          description="Verbose debug logging."
           checked={l.debug}
           onChange={(v) => setOption("logging", "debug", v)}
         />

@@ -7,9 +7,18 @@ import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { FileExplorer } from "@/components/files/FileExplorer";
 import { PageHeader } from "@/components/PageHeader";
+import { RequireAuth } from "@/components/RequireAuth";
 import { isDemo } from "@/lib/demo";
 
 export default function FilesPage() {
+  return (
+    <RequireAuth>
+      <FilesInner />
+    </RequireAuth>
+  );
+}
+
+function FilesInner() {
   const router = useRouter();
   const [lastSelected, setLastSelected] = useState<string | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -102,7 +111,7 @@ export default function FilesPage() {
                   className="absolute bottom-full left-0 z-[70] mb-2 max-w-sm rounded-xl bg-surface-container-highest p-3 shadow-lg ghost-border dark:bg-surface-variant"
                 >
                   <div className="font-body text-xs leading-relaxed text-on-surface-variant dark:text-outline">
-                    This is the browser replacement for <span className="font-mono">nautilus /data</span> / <span className="font-mono">explorer /data</span> / <span className="font-mono">xdg-open /data</span>. The container has no display server; this web UI is the Explorer. You start at <span className="font-mono">/data</span> but can navigate up to <span className="font-mono">/</span> (host root) — traversal outside <span className="font-mono">/</span> is blocked and symlink escapes are rejected. If <span className="font-mono">BRIDGE_TOKEN</span> is set, the bridge requires it for <span className="font-mono">/api/files</span> (same gate as <span className="font-mono">/ws</span>, <span className="font-mono">/logs</span>, <span className="font-mono">/diagnostics</span>, <span className="font-mono">/plugins</span>).
+                    This is the browser replacement for opening <span className="font-mono">/data</span> in your system file manager. The container has no display server; this web UI is the Explorer. You start at <span className="font-mono">/data</span> but can navigate up to <span className="font-mono">/</span> (host root) — traversal outside <span className="font-mono">/</span> is blocked and symlink escapes are rejected. If <span className="font-mono">BRIDGE_TOKEN</span> is set, the bridge requires it for <span className="font-mono">/api/files</span> (same gate as <span className="font-mono">/ws</span>, <span className="font-mono">/logs</span>, <span className="font-mono">/diagnostics</span>, <span className="font-mono">/plugins</span>).
                   </div>
                 </div>
               )}

@@ -39,13 +39,13 @@ gh pr create --base stage --title "feat: ..."
 
 ```bash
 bun install
-bun run dev              # bridge ws://localhost:8787/ws + web http://localhost:3000
+bun run dev              # web http://localhost:3000 (same-origin /ws proxied to bridge :8787)
 bun test                 # bridge unit tests
 bun run build            # typecheck + prod builds (both apps)
 docker compose up --build
 ```
 
-Conventions: **Bun only** (no npm/yarn/npx), mobile-first UI with safe-area insets, experimental Soulseek client version `177/1` (do not change). Full details in [`AGENTS.md`](./AGENTS.md) and [`docs/architecture.md`](./docs/architecture.md).
+Conventions: **Bun only** (no npm/yarn/npx), mobile-first UI with safe-area insets, Soulseek client version `160/3` (nicotine-plus current; do not change). Full details in [`AGENTS.md`](./AGENTS.md) and [`docs/architecture.md`](./docs/architecture.md).
 
 ## Reporting bugs / suggesting features
 

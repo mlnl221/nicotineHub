@@ -8,9 +8,9 @@ This file is for AI coding agents working in this repo. See https://agents.md fo
 
 Mobile-first / browser-first Soulseek web client (beyond MVP — full 1:1 bridge). Monorepo with Bun workspaces.
 
-- `apps/bridge` — Bun: Soulseek 1:1 bridge over raw TCP (`server.slsknet.org:2242`, P/F/D leaf) + WebSocket at `ws://host:8787/ws` + `/health` + `/files/:token` + volumes `CONFIG_DIR` (`/config`, autobrr parity) + `DATA_DIR` (`/data`)
+- `apps/bridge` — Bun: Soulseek 1:1 bridge over raw TCP (`server.slsknet.org:2242`, P/F/D leaf) + WebSocket via web same-origin `/ws` (piped to internal `bridge:8787`; direct `ws://host:8787/ws` only in bare dev / direct mode) + `/health` + `/files/:token` + volumes `CONFIG_DIR` (`/config`, autobrr parity) + `DATA_DIR` (`/data`)
 - `apps/web` — Next.js 15 (App Router) + Tailwind v4 PWA, mobile shell `TopBar`/`BottomNav`, pages for search (multi-mode), downloads/uploads (F streaming), browse, chat, buddies, interests, profiles
-- `compose.yaml` — `web:3000` + `bridge:8787/60754` + `worker:8789` (no reverse proxy; `LISTEN_PORT` default 60754, editable in Settings → Network)
+- `compose.yaml` — `web:3000` is the sole browser entrypoint (same-origin `/ws` + `/api/bridge/*` + `/api/worker/*` proxied to internal `bridge:8787`/`worker:8789`, neither published) + peer `LISTEN_PORT` (default 60754, editable in Settings → Network)
 
 Reference protocol: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plus/nicotine-plus) and `apps/bridge/src/soulseek.ts` (framing: `[uint32 len][uint32 code][payload]`).
 
@@ -31,7 +31,7 @@ Bridge URL override: `NEXT_PUBLIC_BRIDGE_URL` (build-time) or `localStorage.nico
 ## Conventions
 
 - **Bun only** — use `bun`, not `npm`/`yarn`/`npx`. `bun.lock` is committed.
-- No password persistence (`README` security note). Search results require a reachable inbound peer listener; `LISTEN_PORT` (default 60754, `server.portrange`) must be port-forwarded TCP+UDP on the homelab. Changing via Settings → Network triggers bridge reconnect and writes `CONFIG_DIR/listen_port` (`CONFIG_DIR` autobrr-style, default `/config`); Docker host mapping uses `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` so also `LISTEN_PORT=... docker compose up -d`.
+- No password persistence (`README` security note). Search results require a reachable inbound peer listener; `LISTEN_PORT` (default 60754, `server.portrange`) must be port-forwarded TCP+UDP on the homelab. Changing via Settings → Network triggers bridge reconnect and writes `CONFIG_DIR/listen_port` (`CONFIG_DIR` autobrr-style, default `/config`); Docker host mapping uses `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` for both env and ports (interpolated — never hardcode env, it would discard the UI port on recreate). With the opt-in socket (`/var/run/docker.sock` + `ALLOW_CONTAINER_RESTART=1`, see `compose.yaml`) the bridge self-recreates with the new mapping; otherwise also `LISTEN_PORT=... docker compose up -d`.
 - Client version is `160/3` (nicotine-plus current; `177/1` is the experimental pool — do not reuse reserved majors).
 - Shares on WSL `bun` dev vs Docker: `CONFIG_DIR` defaults to `/config` and `DATA_DIR` to `/data` but on WSL fall back to `./config`/`./data` or `/tmp/nicotine-hub-*` if not writable (see `apps/bridge/src/server.ts:205`). **WSL `bun`**: add shares with absolute WSL paths like `/home/magnus/Music` or `/mnt/c/Users/you/Music` (must `existsSync` on bridge FS) — Docker `Browse /data` (`/data/Music`) only works when host path is mounted (`-v /home/you/Music:/data/Music:ro` then share `/data/Music`). Rescan warns `unavailable: [v→p]` when path not found (1 dirs 0 files). `CONFIG_DIR` holds `worker.json` 0600, `shares.json`, `downloads.json`, `plugins.json` etc.; `DATA_DIR` holds `downloads/`, `incomplete/`, `uploads/`.
 - Mobile-first UI: touch targets, safe-area insets, PWA `manifest.webmanifest`.
@@ -50,7 +50,9 @@ Every `git worktree` must run on its own ports so it never collides with `main` 
   PORT=8788 LISTEN_PORT=60755 bun run --cwd apps/bridge dev   # -> ws://localhost:8788/ws
 
   # web (Next.js) — PORT env overrides the -p 3000 in apps/web/package.json:6
-  PORT=3001 NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws NEXT_PUBLIC_WORKER_URL=http://localhost:8789 bun run --cwd apps/web dev  # -> http://localhost:3001
+  # NOTE: web dev runs behind proxy-server.js (same-origin /ws + /api/* proxy).
+  # INNER_PORT (outer PORT+1) must also be free — set it explicitly per worktree.
+  PORT=3001 INNER_PORT=3101 NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws NEXT_PUBLIC_WORKER_URL=http://localhost:8789 BRIDGE_INTERNAL_URL=http://localhost:8788 WORKER_INTERNAL_URL=http://localhost:8789 bun run --cwd apps/web dev  # -> http://localhost:3001
   # or: echo "NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws" > apps/web/.env  (.env is gitignored)
 
   # worker (Python) — run from apps/worker with system python + PYTHONPATH, or docker

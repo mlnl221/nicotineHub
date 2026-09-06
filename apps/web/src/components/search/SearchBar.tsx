@@ -42,7 +42,7 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
       const joined = Array.from(joinedRooms.values()).some(r => r.name.toLowerCase() === t.toLowerCase());
       const exists = roomList.some(r => r.name.toLowerCase() === t.toLowerCase());
       if (!joined && !exists) {
-        setRoomError("Room not joined — join the room first or pick a public/joined room (nicotine parity).");
+        setRoomError("Room not joined — join the room first or pick a public/joined room.");
         return;
       }
       setRoomError("");
@@ -223,7 +223,7 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
         ) : null}
         {showHelp ? (
           <div className="rounded-xl bg-surface-container-high p-3 ghost-border">
-            <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface">Filter syntax (nicotine `preferences.py:2903` parity)</h4>
+            <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface">Filter syntax</h4>
             <ul className="mt-2 space-y-1 font-mono text-[11px] leading-relaxed text-on-surface-variant">
               <li><span className="font-bold">Include:</span> <span className="bg-surface-container-lowest px-1 rounded">pink floyd</span> regex on path+username</li>
               <li><span className="font-bold">Exclude:</span> <span className="bg-surface-container-lowest px-1 rounded">remix</span> — hide matches</li>

@@ -18,6 +18,10 @@ export interface Statistics {
   started_uploads: number;
   completed_uploads: number;
   uploaded_size: number;
+  failed_downloads: number;
+  cancelled_downloads: number;
+  failed_uploads: number;
+  cancelled_uploads: number;
 }
 
 function defaultDataDir(): string {
@@ -37,7 +41,7 @@ export class StatsManager {
     this.dataDir = opts?.dataDir || defaultDataDir();
     const loaded = this.load();
     if (loaded) {
-      this.stats = loaded;
+      this.stats = normalize(loaded);
       this.sessionStats = {
         since_timestamp: Math.floor(Date.now() / 1000),
         started_downloads: 0,
@@ -46,6 +50,10 @@ export class StatsManager {
         started_uploads: 0,
         completed_uploads: 0,
         uploaded_size: 0,
+        failed_downloads: 0,
+        cancelled_downloads: 0,
+        failed_uploads: 0,
+        cancelled_uploads: 0,
       };
     } else {
       const now = Math.floor(Date.now() / 1000);
@@ -57,6 +65,10 @@ export class StatsManager {
         started_uploads: 0,
         completed_uploads: 0,
         uploaded_size: 0,
+        failed_downloads: 0,
+        cancelled_downloads: 0,
+        failed_uploads: 0,
+        cancelled_uploads: 0,
       };
       this.sessionStats = { ...this.stats, since_timestamp: now };
       this.persist();
@@ -94,13 +106,17 @@ export class StatsManager {
       started_uploads: 0,
       completed_uploads: 0,
       uploaded_size: 0,
+      failed_downloads: 0,
+      cancelled_downloads: 0,
+      failed_uploads: 0,
+      cancelled_uploads: 0,
     };
     this.sessionStats = { ...this.stats };
     this.persist();
   }
 
   append(
-    type: "started_downloads" | "completed_downloads" | "downloaded_size" | "started_uploads" | "completed_uploads" | "uploaded_size",
+    type: "started_downloads" | "completed_downloads" | "downloaded_size" | "started_uploads" | "completed_uploads" | "uploaded_size" | "failed_downloads" | "cancelled_downloads" | "failed_uploads" | "cancelled_uploads",
     value: number = 1,
   ) {
     if (type === "downloaded_size" || type === "uploaded_size") {
@@ -126,4 +142,25 @@ export class StatsManager {
     this.append("completed_uploads", 1);
     this.append("uploaded_size", size);
   }
+  recordDownloadFailed() { this.append("failed_downloads", 1); }
+  recordDownloadCancelled() { this.append("cancelled_downloads", 1); }
+  recordUploadFailed() { this.append("failed_uploads", 1); }
+  recordUploadCancelled() { this.append("cancelled_uploads", 1); }
+}
+
+// Older statistics.json files predate the failed/cancelled counters.
+function normalize(raw: Statistics): Statistics {
+  return {
+    since_timestamp: raw.since_timestamp,
+    started_downloads: raw.started_downloads ?? 0,
+    completed_downloads: raw.completed_downloads ?? 0,
+    downloaded_size: raw.downloaded_size ?? 0,
+    started_uploads: raw.started_uploads ?? 0,
+    completed_uploads: raw.completed_uploads ?? 0,
+    uploaded_size: raw.uploaded_size ?? 0,
+    failed_downloads: (raw as Partial<Statistics>).failed_downloads ?? 0,
+    cancelled_downloads: (raw as Partial<Statistics>).cancelled_downloads ?? 0,
+    failed_uploads: (raw as Partial<Statistics>).failed_uploads ?? 0,
+    cancelled_uploads: (raw as Partial<Statistics>).cancelled_uploads ?? 0,
+  };
 }

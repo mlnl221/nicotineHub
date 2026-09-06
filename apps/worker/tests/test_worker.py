@@ -186,6 +186,33 @@ def test_mediainfo_traversal_blocked(client):
         assert r.status_code == 404, bad
 
 
+def test_allowed_roots_second_mount(monkeypatch, tmp_path):
+    data = tmp_path / "data"
+    media = tmp_path / "media"
+    (data / "downloads").mkdir(parents=True)
+    (media / "Orpheus").mkdir(parents=True)
+    track = media / "Orpheus" / "song.flac"
+    track.write_bytes(b"fake-flac")
+    monkeypatch.setenv("DATA_DIR", str(data))
+    monkeypatch.setenv("SPECTRUM_DIR", str(tmp_path / "spectra"))
+    monkeypatch.setenv("ALLOWED_ROOTS", f"{data},{media}")
+    monkeypatch.setattr(worker_app, "worker_token", lambda: "")
+    assert spectrals.is_allowed(track) is True
+    assert worker_app._resolve_any(str(track)) == track.resolve()
+    # outside both roots still blocked
+    outside = tmp_path / "other" / "evil.flac"
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(b"x")
+    assert spectrals.is_allowed(outside) is False
+    assert worker_app._resolve_any(str(outside)) is None
+    with TestClient(worker_app.app) as c:
+        r = c.post("/mediainfo", json={"fileName": str(track)})
+        # file exists but is not valid audio — either 422 (parsed, unrecognized) or 500/200
+        # depending on mediainfo presence; key assertion is NOT 404
+        assert r.status_code != 404, r.text
+    monkeypatch.delenv("ALLOWED_ROOTS", raising=False)
+
+
 def test_mediainfo_rejects_empty(client):
     r = client.post("/mediainfo", json={"fileName": ""})
     assert r.status_code in (400, 422)
