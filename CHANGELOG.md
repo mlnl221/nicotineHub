@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/mlnl221/nicotineHub/compare/v0.30.1...v0.31.0) (2026-09-06)
+
+
+### Features
+
+* **chat:** backfill room + private history from disk logs on join ([e0b1b3c](https://github.com/mlnl221/nicotineHub/commit/e0b1b3cf07aced8e5c275b60268b6a02988121b9))
+
 ## [0.30.1](https://github.com/mlnl221/nicotineHub/compare/v0.30.0...v0.30.1) (2026-09-06)
 
 
