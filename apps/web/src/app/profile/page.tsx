@@ -92,6 +92,16 @@ function TabbedProfileInner() {
               >
                 View
               </button>
+              <button
+                onClick={() => state.user && tabs.length < 10 && openProfile(state.user)}
+                disabled={!state.user || tabs.length >= 10}
+                aria-label="View my public profile"
+                title={state.user ? `View ${state.user}'s public profile` : "Sign in to view your profile"}
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-surface-container-high px-5 py-3 min-h-11 font-label text-xs font-semibold uppercase tracking-widest text-primary hover:bg-surface-container disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-[16px]" aria-hidden>account_circle</span>
+                My profile
+              </button>
             </div>
             <ProfileTabs />
             <p className="font-label text-xs text-outline">Tabs load in background and persist. {tabs.length}/10.</p>
