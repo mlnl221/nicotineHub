@@ -1337,12 +1337,34 @@ export class TransferManager {
   private startUploadStream(t: BridgeTransfer, offset: number, _initialTail?: Buffer) {
     const socket = (t as unknown as { _uploadSocket?: Socket })._uploadSocket as Socket | undefined;
     if (!socket) return;
-    // Resolve real file path: try Shared dirs -> DATA_DIR/shared -> uploads
+    // Resolve real file path: ShareDB virtual2real first (any mounted path),
+    // then Shared dirs -> DATA_DIR/shared -> uploads basename fallback.
     let realPath: string | null = null;
     let fileSize = t.size || 0;
     try {
       const { existsSync: es, statSync: ss } = require("node:fs") as typeof import("node:fs");
       const { join: jp } = require("node:path") as typeof import("node:path");
+      const use = (p: string): boolean => {
+        try { if (es(p) && ss(p).isFile()) { realPath = p; try { fileSize = ss(p).size; } catch {} return true; } } catch {}
+        return false;
+      };
+      // 0. ShareDB virtual→real (covers /media and any mounted share)
+      try {
+        const sess: any = this.session;
+        const sdb = sess?.shareDBInstance ?? (this.sessionGetter?.() as any)?.shareDBInstance ?? (sess as any)?.shareDB ?? null;
+        if (sdb && typeof sdb.getVirtual2Real === "function") {
+          const exact = sdb.getVirtual2Real(t.virtualPath) as string | undefined;
+          if (!exact || !use(exact)) {
+            // longest mapped folder prefix + remainder (e.g. "M\Orpheus" + "song.flac")
+            const parts = t.virtualPath.split("\\");
+            for (let i = parts.length - 1; i > 0 && !realPath; i--) {
+              const folderReal = sdb.getVirtual2Real(parts.slice(0, i).join("\\")) as string | undefined;
+              if (folderReal) use(jp(folderReal, ...parts.slice(i)));
+            }
+          }
+        }
+      } catch {}
+      if (!realPath) {
       const candidates: string[] = [];
       const sharedEnv = process.env.SHARED_DIRS || process.env.SHARES_DIR || "";
       if (sharedEnv) candidates.push(...sharedEnv.split(":").map((s) => s.trim()).filter(Boolean));
@@ -1363,6 +1385,7 @@ export class TransferManager {
             if (realPath) break;
           }
         } catch {}
+      }
       }
     } catch {}
     if (!realPath) {

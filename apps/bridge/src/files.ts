@@ -4,10 +4,12 @@
  * Secure filesystem browsing for host root (starts at /data but can navigate up to /).
  * All paths are contained within the browse root ("/" for the API); host root browsing is gated by BRIDGE_TOKEN like /ws.
  * Legacy DATA_DIR containment is kept when caller passes DATA_DIR, but /api/files now uses "/".
+ * Homelab: any mounted path is browsable AND servable — no allowlist. Traversal and
+ * symlink escapes are still blocked by resolveSafePath containment + realpath checks.
  */
 import { readdir, stat, lstat, realpath } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, resolve, relative, basename, sep } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 export interface FileEntry {
   name: string;
@@ -26,38 +28,6 @@ export interface BrowseResult {
 
 function getDataDir(): string {
   return resolve(process.env.DATA_DIR || "/data");
-}
-
-/**
- * Readable/playable roots for local preview (shares may live anywhere mounted,
- * e.g. /media/500SSD — but /api/files/raw only serves these roots).
- * ALLOWED_ROOTS="/data,/media" (comma/colon separated); default is DATA_DIR only.
- */
-export function getAllowedRoots(): string[] {
-  const raw = process.env.ALLOWED_ROOTS || "";
-  const parts = raw.split(/[:,]/).map((s) => s.trim()).filter(Boolean);
-  const roots = parts.length ? parts : [process.env.DATA_DIR || "/data"];
-  const out: string[] = [];
-  for (const r of roots) {
-    try {
-      const resolved = resolve(r);
-      if (!out.includes(resolved)) out.push(resolved);
-    } catch {}
-  }
-  return out.length ? out : [getDataDir()];
-}
-
-/** True when an absolute (or real) path sits inside any allowed root. */
-export function isPathAllowed(absPath: string, realPath?: string): boolean {
-  const roots = getAllowedRoots();
-  const check = (p: string) => {
-    let rp = p;
-    try { rp = resolve(p); } catch {}
-    return roots.some((r) => rp === r || rp.startsWith(r + sep));
-  };
-  if (!check(absPath)) return false;
-  if (realPath !== undefined && realPath !== absPath && !check(realPath)) return false;
-  return true;
 }
 
 /**

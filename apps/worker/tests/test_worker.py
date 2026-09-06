@@ -180,13 +180,20 @@ def test_mediainfo_missing_file(client):
     assert r.status_code == 404
 
 
-def test_mediainfo_traversal_blocked(client):
-    for bad in ("/etc/passwd", "../../etc/passwd", "/data/../etc/passwd"):
+def test_mediainfo_no_allowlist(client, tmp_path):
+    # absolute path anywhere on disk resolves (no roots gate)
+    outside = tmp_path / "elsewhere" / "note.flac"
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(b"fake-flac")
+    r = client.post("/mediainfo", json={"fileName": str(outside)})
+    assert r.status_code != 404, r.text
+    # nonexistent paths still 404 (relative escape + absolute miss)
+    for bad in ("../../etc/passwd", "/definitely/not/here.flac"):
         r = client.post("/mediainfo", json={"fileName": bad})
         assert r.status_code == 404, bad
 
 
-def test_allowed_roots_second_mount(monkeypatch, tmp_path):
+def test_any_mount_resolves_without_gate(monkeypatch, tmp_path):
     data = tmp_path / "data"
     media = tmp_path / "media"
     (data / "downloads").mkdir(parents=True)
@@ -195,22 +202,14 @@ def test_allowed_roots_second_mount(monkeypatch, tmp_path):
     track.write_bytes(b"fake-flac")
     monkeypatch.setenv("DATA_DIR", str(data))
     monkeypatch.setenv("SPECTRUM_DIR", str(tmp_path / "spectra"))
-    monkeypatch.setenv("ALLOWED_ROOTS", f"{data},{media}")
     monkeypatch.setattr(worker_app, "worker_token", lambda: "")
-    assert spectrals.is_allowed(track) is True
+    # absolute path outside DATA_DIR resolves — no allowlist
     assert worker_app._resolve_any(str(track)) == track.resolve()
-    # outside both roots still blocked
-    outside = tmp_path / "other" / "evil.flac"
-    outside.parent.mkdir(parents=True)
-    outside.write_bytes(b"x")
-    assert spectrals.is_allowed(outside) is False
-    assert worker_app._resolve_any(str(outside)) is None
     with TestClient(worker_app.app) as c:
         r = c.post("/mediainfo", json={"fileName": str(track)})
         # file exists but is not valid audio — either 422 (parsed, unrecognized) or 500/200
         # depending on mediainfo presence; key assertion is NOT 404
         assert r.status_code != 404, r.text
-    monkeypatch.delenv("ALLOWED_ROOTS", raising=False)
 
 
 def test_mediainfo_rejects_empty(client):
@@ -271,8 +270,8 @@ def test_rename_invalid(client, tmp_path):
         assert r.status_code in (400, 422), bad
 
 
-def test_rename_traversal_blocked(client):
-    for bad in ("/etc/passwd", "../../etc/passwd"):
+def test_rename_missing_file_404(client):
+    for bad in ("/definitely/not/here.flac", "../../etc/passwd"):
         r = client.post("/rename", json={"fileName": bad, "newName": "ok.txt"})
         assert r.status_code == 404, bad
 
