@@ -408,7 +408,7 @@ export function NetworkSection() {
           description="Rooms to join automatically after login."
           value={(server.autojoin ?? []).join("\n")}
           multiline
-          placeholder="e.g. nicotine&#10;music"
+          placeholder="e.g. lobby&#10;music"
           onChange={(v) => setOption("server", "autojoin", v.split("\n").map((s) => s.trim()).filter(Boolean))}
         />
         <TextFieldControl

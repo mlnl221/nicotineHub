@@ -83,7 +83,7 @@ export function SearchesSection() {
           onChange={(v) => setOption("searches", "expand_results", v)}
           options={[
             { value: "all", label: "Expand all" },
-            { value: "partial", label: "Partial (nicotine parity)" },
+            { value: "partial", label: "Partial" },
             { value: "none", label: "Collapse all" },
           ]}
         />

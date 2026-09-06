@@ -281,7 +281,7 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
                     <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Analyze (transcode)</h4>
                     <button disabled={analyzing} onClick={handleAnalyze} className="rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs disabled:opacity-40">{analyzing ? "Analyzing…" : "Run Analyze"}</button>
                   </div>
-                  <p className="font-body text-xs text-outline">Worker <span className="font-mono">POST /analyze</span> <span className="font-mono">mutagen</span> + <span className="font-mono">ffmpeg</span> spectral knee <span className="font-mono">-40dB</span> → <span className="font-mono">cutoffHz</span>.</p>
+                  <p className="font-body text-xs text-outline">Worker <span className="font-mono">POST /analyze</span> — spectral knee <span className="font-mono">-40dB</span> → <span className="font-mono">cutoffHz</span>.</p>
                   {analyzeRes ? (
                     <div className="flex flex-wrap gap-1.5">
                       {analyzeRes.bitrate ? <span className="rounded-full bg-surface-container-high px-2 py-1 font-mono text-[10px]">{String(analyzeRes.bitrate)} kbps {analyzeRes.vbr ? `· ${String(analyzeRes.vbr)}` : ""}</span> : null}
@@ -295,7 +295,7 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
                     <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Spectrum</h4>
                     <button disabled={!!spectrum?.loading} onClick={handleSpectrum} className="rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs disabled:opacity-40">{spectrum?.loading ? "Generating…" : "Generate Spectrum"}</button>
                   </div>
-                  <p className="font-body text-xs text-outline"><span className="font-mono">sox</span> Full <span className="font-mono">2000×513</span> + Zoom <span className="font-mono">500×1025</span> Kaiser <span className="font-mono">-z 120</span> via worker <span className="font-mono">POST /spectrum/request</span>.</p>
+                  <p className="font-body text-xs text-outline">Full <span className="font-mono">2000×513</span> + Zoom <span className="font-mono">500×1025</span> Kaiser <span className="font-mono">-z 120</span> via worker <span className="font-mono">POST /spectrum/request</span>.</p>
                   {spectrum?.error ? <p className="font-body text-xs text-error">{spectrum.error}</p> : null}
                   {spectrum?.fullBlobUrl ? (
                     <div className="space-y-2">
@@ -307,7 +307,7 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
                 </div>
               </div>
 
-              <p className="font-body text-[11px] leading-relaxed text-outline">Nicotin-plus parity: TinyTag fields (artist, album, title, track, genre, year, composer, albumartist). Worker edits via <span className="font-mono">mutagen</span> with <span className="font-mono">DATA_DIR</span> containment.</p>
+              <p className="font-body text-[11px] leading-relaxed text-outline">Standard tag fields (artist, album, title, track, genre, year, composer, albumartist). Worker edits with <span className="font-mono">DATA_DIR</span> containment.</p>
             </>
           )}
         </div>

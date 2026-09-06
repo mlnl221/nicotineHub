@@ -16,7 +16,7 @@ export function UrlHandlersSection() {
         <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs leading-relaxed text-on-surface-variant dark:bg-surface-container-highest/40">
           No configuration needed in the browser. Your system/browser opens <span className="font-mono">http://, https://</span> and file links. Desktop default protocols include{" "}
           <span className="font-mono">http://, https://, audio, image, video, document, text, archive, .mp3, .jpg, .pdf</span> with commands like{" "}
-          <span className="font-mono">xdg-open $, firefox $</span> (preferences.py:3039). This tab is kept for parity and hidden when{" "}
+          <span className="font-mono">file-manager $, browser $</span>. This tab is kept for parity and hidden when{" "}
           <span className="font-mono">NEXT_PUBLIC_BRIDGE_URL</span> is isolated-like in future.
         </div>
         <TextFieldControl
@@ -26,7 +26,7 @@ export function UrlHandlersSection() {
             .map(([k, v]) => `${k}=${v}`)
             .join("\n")}
           multiline
-          placeholder="http://=xdg-open $&#10;audio=firefox $&#10;.mp3=xdg-open $"
+          placeholder="http://=browser $&#10;audio=browser $&#10;.mp3=file-manager $"
           onChange={(v) => {
             const obj: Record<string, string> = {};
             for (const line of v.split("\n")) {
@@ -44,7 +44,7 @@ export function UrlHandlersSection() {
 
       <SectionCard title="File manager" description="Desktop ui.filemanager — omitted in browser.">
         <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs leading-relaxed text-on-surface-variant dark:bg-surface-container-highest/40">
-          Desktop file manager command (e.g. <span className="font-mono">xdg-open $, nautilus $, explorer $</span>) has no browser equivalent — files open via the browser download handling.
+          Desktop file manager command (e.g. your system file manager) has no browser equivalent — files open via the browser download handling.
         </div>
       </SectionCard>
     </div>
