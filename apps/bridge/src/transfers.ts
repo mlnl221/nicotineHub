@@ -280,7 +280,20 @@ export class TransferManager {
     return {
       total: this.statsManager.getTotal(),
       session: this.statsManager.getSession(),
+      live: this.getLiveStats(),
     };
+  }
+
+  getLiveStats() {
+    const vals = [...this.transfers.values()];
+    const isActive = (t: (typeof vals)[number]) => t.status === "Transferring";
+    const activeDownloads = vals.filter((t) => !t.isUpload && isActive(t)).length;
+    const activeUploads = vals.filter((t) => t.isUpload && isActive(t)).length;
+    const queuedDownloads = vals.filter((t) => !t.isUpload && t.status === "Queued").length;
+    const queuedUploads = vals.filter((t) => t.isUpload && t.status === "Queued").length;
+    const downloadSpeed = vals.filter((t) => !t.isUpload && isActive(t)).reduce((s, t) => s + t.speed, 0);
+    const uploadSpeed = vals.filter((t) => t.isUpload && isActive(t)).reduce((s, t) => s + t.speed, 0);
+    return { downloadSpeed, uploadSpeed, activeDownloads, activeUploads, queuedDownloads, queuedUploads };
   }
 
   resetStats() {
@@ -425,14 +438,7 @@ export class TransferManager {
   }
 
   private emitStats() {
-    const vals = [...this.transfers.values()];
-    const activeDownloads = vals.filter((t) => !t.isUpload && t.status === "Transferring").length;
-    const activeUploads = vals.filter((t) => t.isUpload && t.status === "Transferring").length;
-    const queuedDownloads = vals.filter((t) => !t.isUpload && t.status === "Queued").length;
-    const queuedUploads = vals.filter((t) => t.isUpload && t.status === "Queued").length;
-    const downloadSpeed = vals.filter((t) => !t.isUpload && t.status === "Transferring").reduce((s, t) => s + t.speed, 0);
-    const uploadSpeed = vals.filter((t) => t.isUpload && t.status === "Transferring").reduce((s, t) => s + t.speed, 0);
-    this.onStats({ downloadSpeed, uploadSpeed, activeDownloads, activeUploads, queuedDownloads, queuedUploads });
+    this.onStats(this.getLiveStats());
   }
 
   private emitQueue(id: string, place: number) {
@@ -718,6 +724,7 @@ export class TransferManager {
         try { this.onBanlistUpdated?.(this.config.banlist, username); } catch {}
         const t: BridgeTransfer = { id, username, virtualPath, fileName: baseName, size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Banned", queuePosition: null, isUpload: true };
         this.transfers.set(id, t);
+        this.statsManager.recordUploadFailed();
         this.emit(t);
         this.emitStats();
         this.persist();
@@ -748,6 +755,7 @@ export class TransferManager {
           id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Banned", queuePosition: null, isUpload: true,
         };
         this.transfers.set(id, t);
+        this.statsManager.recordUploadFailed();
         this.emit(t);
         logger.info("transfer", isGeo ? "upload denied geoblocked" : "upload denied banned", { username, banMsg, ip, country });
         return t;
@@ -773,6 +781,7 @@ export class TransferManager {
         id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Too many files", queuePosition: null, isUpload: true,
       };
       this.transfers.set(id, t);
+      this.statsManager.recordUploadFailed();
       this.emit(t);
       return t;
     }
@@ -781,6 +790,7 @@ export class TransferManager {
         id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Too many megabytes", queuePosition: null, isUpload: true,
       };
       this.transfers.set(id, t);
+      this.statsManager.recordUploadFailed();
       this.emit(t);
       return t;
     }
@@ -863,6 +873,7 @@ export class TransferManager {
         id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "File not shared.", queuePosition: null, isUpload: true,
       };
       this.transfers.set(id, t);
+      this.statsManager.recordUploadFailed();
       this.emit(t);
       return t;
     }
@@ -894,6 +905,7 @@ export class TransferManager {
       if (block.blocked) {
         t.status = "Banned";
         t.queuePosition = null;
+        this.statsManager.recordUploadFailed();
         this.emit(t);
         this.emitStats();
         this.persist();
@@ -1042,6 +1054,7 @@ export class TransferManager {
   handleUploadFailed(file: string) {
     for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) {
       t.status = "Connection closed";
+      this.statsManager.recordDownloadFailed();
       this.emit(t);
       this.scheduleRetry(t.id, 180_000);
       break;
@@ -1568,6 +1581,7 @@ export class TransferManager {
     if (t.isUpload) return;
     switch (action) {
       case "cancel":
+        if (t.status !== "Finished" && t.status !== "Cancelled") this.statsManager.recordDownloadCancelled();
         t.status = "Cancelled";
         if (t._timer) clearInterval(t._timer);
         if (t._statusTimer) clearTimeout(t._statusTimer);
@@ -1623,6 +1637,7 @@ export class TransferManager {
     const t = this.transfers.get(id);
     if (!t || !t.isUpload) return;
     if (action === "cancel") {
+      if (t.status !== "Finished" && t.status !== "Cancelled") this.statsManager.recordUploadCancelled();
       t.status = "Cancelled";
       this.emit(t);
       this.emitStats();

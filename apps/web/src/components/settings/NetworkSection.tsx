@@ -6,6 +6,7 @@ import { defaults, DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, DEFAULT_LISTEN_PORT
 import { SectionCard, SectionSaveButton, TextFieldControl, ToggleControl, NumberControl, SelectControl } from "@/components/settings/controls";
 import { useSaveSection } from "@/lib/config/save";
 import { useSession } from "@/lib/session";
+import { InfoTooltip } from "@/components/ui/InfoTooltip";
 import { bridgeFetchUrl } from "@/lib/bridgeHttp";
 
 type UpnpStatus = { enabled: boolean; active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; hasPort: boolean } | null;
@@ -289,7 +290,17 @@ export function NetworkSection() {
         </div>
         {bridgePort ? (
           <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs text-on-surface-variant dark:bg-surface-container-highest/40">
-            Bridge reports <span className="font-mono font-medium text-on-surface">{bridgePort}</span> via <span className="font-mono">/health?json</span> + WS. Click Save to hot-swap <span className="font-mono">Bun.listen</span> and fresh Soulseek connect – re-advertises via <span className="font-mono">SetWaitPort {pendingPort}</span>. With the Docker socket mounted + <span className="font-mono">ALLOW_CONTAINER_RESTART=1</span> the bridge recreates its container so the host mapping follows automatically (status: <span className="font-mono">GET /api/bridge/container</span>); otherwise Docker host mapping needs <span className="font-mono">LISTEN_PORT={pendingPort} docker compose up -d</span>. For VPN on Linux use <span className="font-mono">network_mode: host</span> (see compose.override.example.yaml, ignored on Docker Desktop) – then no Docker recreate needed.
+            <span className="flex items-center gap-1.5">
+              Bridge reports <span className="font-mono font-medium text-on-surface">{bridgePort}</span> via <span className="font-mono">/health?json</span> + WS.
+              <InfoTooltip
+                testId="network-port-apply"
+                content={
+                  <>
+                    Click Save to hot-swap <span className="font-mono">Bun.listen</span> and fresh Soulseek connect – re-advertises via <span className="font-mono">SetWaitPort {pendingPort}</span>. With the Docker socket mounted + <span className="font-mono">ALLOW_CONTAINER_RESTART=1</span> the bridge recreates its container so the host mapping follows automatically (status: <span className="font-mono">GET /api/bridge/container</span>); otherwise Docker host mapping needs <span className="font-mono">LISTEN_PORT={pendingPort} docker compose up -d</span>. For VPN on Linux use <span className="font-mono">network_mode: host</span> (see compose.override.example.yaml, ignored on Docker Desktop) – then no Docker recreate needed.
+                  </>
+                }
+              />
+            </span>
             {!isConnected ? <span className="block pt-1 text-amber-700 dark:text-amber-300">Not connected — Save will apply on next login.</span> : null}
           </div>
         ) : null}
@@ -376,11 +387,20 @@ export function NetworkSection() {
               </div>
               {bridgePort ? (
                 <div className="rounded-xl bg-surface-container-low px-4 py-3 font-body text-xs text-on-surface-variant dark:bg-surface-container-high/40">
-                  Current bind: <span className="font-mono font-medium text-on-surface">{currentIface || "0.0.0.0 (all)"}</span>
-                  {currentIface && byName.get(currentIface) ? (
-                    <span> → <span className="font-mono">{byName.get(currentIface)!.address}</span></span>
-                  ) : null}
-                  . Peer listener <span className="font-mono">{bridgePort}</span> will bind to this IP (or <span className="font-mono">0.0.0.0</span> if empty). VPN example: <span className="font-mono">tun0 10.8.0.6</span>.
+                  <span className="flex items-center gap-1.5">
+                    Current bind: <span className="font-mono font-medium text-on-surface">{currentIface || "0.0.0.0 (all)"}</span>
+                    {currentIface && byName.get(currentIface) ? (
+                      <span> → <span className="font-mono">{byName.get(currentIface)!.address}</span></span>
+                    ) : null}
+                    <InfoTooltip
+                      testId="network-bind"
+                      content={
+                        <>
+                          Peer listener <span className="font-mono">{bridgePort}</span> will bind to this IP (or <span className="font-mono">0.0.0.0</span> if empty). VPN example: <span className="font-mono">tun0 10.8.0.6</span>.
+                        </>
+                      }
+                    />
+                  </span>
                 </div>
               ) : null}
             </>

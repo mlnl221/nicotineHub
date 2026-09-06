@@ -1733,6 +1733,17 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (data.type === "statistics:request") {
         const tm = ws.data.transfers as unknown as { getStatsSummary?: () => unknown } | undefined;
         const summary = tm?.getStatsSummary?.() ?? { total: null, session: null };
+        // Library size comes from the login session's ShareDB (best-effort — absent pre-login).
+        try {
+          const session = ws.data.session as unknown as { shareDBInstance?: { getSharedCounts?: () => { dirs: number; files: number }; getUnavailableShares?: () => unknown[] } } | undefined;
+          const sdb = session?.shareDBInstance;
+          if (sdb?.getSharedCounts) {
+            (summary as Record<string, unknown>).shares = {
+              ...sdb.getSharedCounts(),
+              unavailable: sdb.getUnavailableShares?.()?.length ?? 0,
+            };
+          }
+        } catch {}
         ws.send(JSON.stringify({ type: "statistics:response", ...summary as Record<string, unknown> }));
         return;
       }
