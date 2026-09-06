@@ -15,20 +15,20 @@ function tmpDataDir(): string {
 }
 
 describe("PluginManager", () => {
-  let dataDir: string;
+  let configDir: string;
   let pm: PluginManager;
 
   beforeEach(() => {
-    dataDir = tmpDataDir();
-    process.env.CONFIG_DIR = dataDir;
-    process.env.DATA_DIR = dataDir;
-    pm = new PluginManager({ dataDir });
+    configDir = tmpDataDir();
+    process.env.CONFIG_DIR = configDir;
+    process.env.DATA_DIR = configDir;
+    pm = new PluginManager({ configDir });
     pm.registerBuiltin("core_commands", coreManifest as unknown as Record<string, unknown>, () => new CorePlugin());
     pm.registerBuiltin("spamfilter", spamManifest as unknown as Record<string, unknown>, () => new SpamPlugin());
   });
   afterEach(() => {
     try { delete process.env.CONFIG_DIR; } catch {}
-    try { rmSync(dataDir, { recursive: true, force: true }); } catch {}
+    try { rmSync(configDir, { recursive: true, force: true }); } catch {}
   });
 
   test("enable core_commands registers help", async () => {
@@ -127,7 +127,7 @@ describe("PluginManager", () => {
     expect(got.minlength).toBe(123);
     expect(got.badprivatephrases).toEqual(["foo"]);
     // check file
-    const raw = JSON.parse(readFileSync(join(dataDir, "plugins.json"), "utf8"));
+    const raw = JSON.parse(readFileSync(join(configDir, "plugins.json"), "utf8"));
     expect(raw.plugins["spamfilter"].minlength).toBe(123);
     // reload preserves
     await pm.reloadPlugin("spamfilter");
@@ -152,7 +152,7 @@ describe("PluginManager", () => {
 
   test("list installed plugins includes builtin and user", async () => {
     // create a fake user plugin folder
-    const userDir = join(dataDir, "plugins", "myuserplugin");
+    const userDir = join(configDir, "plugins", "myuserplugin");
     mkdirSync(userDir, { recursive: true });
     writeFileSync(join(userDir, "plugin.json"), JSON.stringify({ Name: "My User Plugin", Version: "0.1" }));
     writeFileSync(join(userDir, "index.js"), `export class Plugin { }`);

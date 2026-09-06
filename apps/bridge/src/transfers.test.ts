@@ -311,6 +311,52 @@ describe("transfers — file streaming (Phase 4 - download & upload)", () => {
     mgr.close();
   });
 
+  test("upload serving resolves /media file via ShareDB virtual2real", async () => {
+    // file lives OUTSIDE dataDir (simulates a /media mount) — reachable only via ShareDB mapping
+    const mediaDir = mkdtempSync(join(tmpdir(), "nicotine-media-test-"));
+    try {
+      const realFile = join(mediaDir, "outside.mp3");
+      writeFileSync(realFile, Buffer.alloc(3000, 0x45));
+      const virtual = "M\\Orpheus\\outside.mp3";
+      const mockSession: any = {
+        registerFileToken: () => {},
+        unregisterFileToken: () => {},
+        queueUpload: () => {},
+        placeInQueueRequest: () => {},
+        sendUploadSpeed: () => {},
+        transferRequest: () => {},
+        shareDBInstance: {
+          hasVirtualPath: (p: string) => p === virtual,
+          getVirtual2Real: (p: string) => (p === virtual ? realFile : undefined),
+        },
+      };
+      const { mgr } = makeManager(tmp, mockSession);
+      (mgr as any).transfers.clear();
+      const q = mgr.handleQueueUpload("peerB", virtual);
+      expect(q.status).toBe("Queued");
+      await new Promise((r) => setTimeout(r, 200));
+      const up = mgr.get(q.id);
+      const token = up?.token;
+      expect(token).toBeDefined();
+      const writes: Buffer[] = [];
+      const mockSocket: any = {
+        write: (b: Buffer) => writes.push(Buffer.from(b)),
+        end: () => {},
+      };
+      await (mgr as any).handleFileConnection(token!, mockSocket);
+      const off = Buffer.alloc(8);
+      off.writeBigUInt64LE(BigInt(0), 0);
+      (mgr as any).handleFileChunk(token!, off);
+      await new Promise((r) => setTimeout(r, 500));
+      const totalSent = writes.reduce((s, b) => s + b.length, 0);
+      expect(totalSent).toBe(3000);
+      expect(mgr.get(q.id)?.status).toBe("Finished");
+      mgr.close();
+    } finally {
+      rmSync(mediaDir, { recursive: true, force: true });
+    }
+  });
+
   test("upload serving streams file after offset (shared file)", async () => {
     const sharedDir = join(tmp, "shared");
     const { mkdirSync: mks, writeFileSync: wfs } = await import("node:fs");
@@ -395,7 +441,7 @@ describe("transfers — statistics breakdown (failed/cancelled + live)", () => {
       since_timestamp: 1, started_downloads: 5, completed_downloads: 4, downloaded_size: 100,
       started_uploads: 2, completed_uploads: 2, uploaded_size: 50,
     }));
-    const sm = new StatsManager({ dataDir: tmp });
+    const sm = new StatsManager({ configDir: tmp });
     expect(sm.getTotal().failed_downloads).toBe(0);
     expect(sm.getTotal().cancelled_uploads).toBe(0);
     expect(sm.getTotal().started_downloads).toBe(5);

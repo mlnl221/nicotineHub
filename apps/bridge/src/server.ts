@@ -25,7 +25,7 @@ import { PluginManager } from "./plugins/manager.ts";
 import { Plugin as CoreCommandsPlugin, manifest as coreCommandsManifest } from "./plugins/builtin/core_commands.ts";
 import { Plugin as SpamfilterPlugin, manifest as spamManifest } from "./plugins/builtin/spamfilter.ts";
 import { Plugin as LeechDetectorPlugin, manifest as leechManifest } from "./plugins/builtin/leech_detector.ts";
-import { listDirectory, resolveSafePath, sanitizeFileNameForHeader, serveFileWithRanges, getAllowedRoots, isPathAllowed } from "./files.ts";
+import { listDirectory, resolveSafePath, sanitizeFileNameForHeader, serveFileWithRanges } from "./files.ts";
 import { portChecker } from "./portchecker.ts";
 import {
   maybeRecreateContainerForPort,
@@ -668,7 +668,7 @@ async function restoreSharedSessionFromVault(): Promise<void> {
 
 // Global plugin manager (shared across WS, but per-WS session getter is swapped)
 // Must be after CONFIG_DIR fallback — otherwise WSL uses stale "/config" and EACCES on persist.
-const pluginManager = new PluginManager({ dataDir: CONFIG_DIR });
+const pluginManager = new PluginManager({ configDir: CONFIG_DIR });
 pluginManager.registerBuiltin("core_commands", coreCommandsManifest as unknown as Record<string, unknown>, () => new CoreCommandsPlugin());
 pluginManager.registerBuiltin("spamfilter", spamManifest as unknown as Record<string, unknown>, () => new SpamfilterPlugin());
 pluginManager.registerBuiltin("leech_detector", leechManifest as unknown as Record<string, unknown>, () => new LeechDetectorPlugin());
@@ -803,7 +803,6 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           listenPort: LISTEN_PORT,
           configDir: CONFIG_DIR,
           dataDir: DATA_DIR,
-          allowedRoots: getAllowedRoots(),
           tokenAuth: !!BRIDGE_TOKEN,
           version: APP_VERSION,
           commitSha: COMMIT_SHA,
@@ -880,7 +879,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       entries = entries.slice(-tail);
       const _upnpDiag = getGlobalPortMapperStatus();
       return new Response(JSON.stringify({
-        health: { ok: true, ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, configDir: CONFIG_DIR, dataDir: DATA_DIR, allowedRoots: getAllowedRoots(), tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: _upnpDiag },
+        health: { ok: true, ts: new Date().toISOString(), uptime: process.uptime(), port: PORT, listenPort: LISTEN_PORT, configDir: CONFIG_DIR, dataDir: DATA_DIR, tokenAuth: !!BRIDGE_TOKEN, version: APP_VERSION, commitSha: COMMIT_SHA, buildDate: BUILD_DATE, upnp: _upnpDiag },
         logs: entries,
       }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
     }
@@ -979,7 +978,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     }
 
     // GET /api/files/raw?path=/data/Music/song.flac — raw bytes for in-browser audio/image preview.
-    // Restricted to ALLOWED_ROOTS (default DATA_DIR) — unlike listing, which may browse host root.
+    // Homelab: any mounted path is servable (no allowlist). Traversal is blocked
+    // by resolveSafePath; symlinks are resolved to real and served as real.
     if (url.pathname === "/api/files/raw" && req.method === "GET") {
       { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const rawPath = url.searchParams.get("path") ?? "";
@@ -989,8 +989,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       try {
         const { statSync, realpathSync } = require("node:fs") as typeof import("node:fs");
         const { basename } = require("node:path") as typeof import("node:path");
-        // FileExplorer paths are host-root-absolute ("/data/...", "/media/...") — resolve like
-        // the listing endpoint, then restrict to ALLOWED_ROOTS (realpath: no symlink escape).
+        // FileExplorer paths are host-root-absolute ("/data/...", "/media/...") —
+        // resolve like the listing endpoint, then serve the realpath target.
         const abs = await resolveSafePath(rawPath, "/");
         let st;
         try {
@@ -1003,9 +1003,6 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         try {
           real = realpathSync(abs);
         } catch {}
-        if (!isPathAllowed(abs, real)) {
-          return new Response(JSON.stringify({ error: "file outside allowed roots", allowedRoots: getAllowedRoots() }), { status: 403, headers: { "content-type": "application/json", ...cors } });
-        }
         if (st.size > 500 * 1024 * 1024) {
           return new Response(JSON.stringify({ error: "file too large to stream" }), { status: 413, headers: { "content-type": "application/json", ...cors } });
         }
@@ -1639,7 +1636,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         try {
           if (section === "transfers") {
             // Real file sharing: web's virtualName|path lists need to become bridge ShareDB folders.
-            // Bridge scans those host paths (must be mounted into DATA_DIR / SHARED_DIRS) and rebuilds the compressed shares.
+            // Bridge scans those host paths (any mounted path — no allowlist) and rebuilds the compressed shares.
             if (["shared", "buddyshared", "trustedshared"].includes(key) && Array.isArray(value)) {
               try {
                 const pairs = value as [string, string][];
