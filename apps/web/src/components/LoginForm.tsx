@@ -229,25 +229,6 @@ export function LoginForm() {
   );
 }
 
-function Field({
-  label,
-  id,
-  children,
-}: {
-  label: string;
-  id: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <label className="font-label text-xs tracking-wide text-on-surface-variant" htmlFor={id}>
-        {label}
-      </label>
-      {children}
-    </div>
-  );
-}
-
 function Spinner() {
   return (
     <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-on-primary/30 border-t-on-primary" />

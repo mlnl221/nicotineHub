@@ -228,6 +228,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     socketRef.current = null;
     // Detach only — closing a tab must NOT log out the shared server session.
     // Global logoff is an explicit logout() (server broadcasts session:ended).
+    // Drop any pending seed so a later reconnect can't inherit a stale
+    // explicit flag and auto-challenge a foreign session.
+    seedRef.current = null;
+    seedExplicitRef.current = false;
     try { ws?.close(); } catch {}
   }, [clearHeartbeat, clearReconnect]);
 
@@ -351,6 +355,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           } else if (seedRef.current?.username && seedRef.current?.password) {
             const seed = seedRef.current;
             seedRef.current = null;
+            seedExplicitRef.current = false;
             sendLogin(ws, seed);
           } else {
             const creds = loadCreds();
@@ -396,6 +401,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           if (data.ok) {
             const user = loginReq?.username ?? seedRef.current?.username ?? lastLogin.current?.username ?? stateRef.current.user;
             seedRef.current = null;
+            seedExplicitRef.current = false;
             setConflict(null);
             setState((s) => ({ ...s, status: "connected", user: user ?? s.user, error: undefined, reconnecting: false }));
             clearReconnect();
@@ -488,6 +494,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "error":
+          // Old-bridge compat: pre-singleton bridges reject session:status
+          // with "Unknown message type." — fall back to a direct login seed
+          // instead of stranding the client in failed.
+          if (/Unknown message type/i.test(data.error || "") && seedRef.current?.username && seedRef.current?.password) {
+            const seed = seedRef.current;
+            seedRef.current = null;
+            seedExplicitRef.current = false;
+            sendLogin(ws, seed);
+            break;
+          }
           if (stateRef.current.status !== "connected" && !stateRef.current.reconnecting) {
             setState((s) => ({ ...s, status: "failed", error: data.error, reconnecting: false }));
           }
@@ -550,6 +566,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // Reconnect even without local creds: the server singleton may still be
     // logged in, and status-first attach needs no password.
     if (!shouldReconnect.current) return;
+    // Background reconnects are never explicit: drop any stale explicit flag
+    // (e.g. in-flight form submit interrupted by a socket drop) so a retry
+    // can never auto-challenge a foreign session — it attaches or seeds quiet.
+    seedExplicitRef.current = false;
     const attempt = reconnectAttempts.current++;
     const base = Math.min(RECONNECT_MAX_MS, RECONNECT_MIN_MS * Math.pow(2, attempt));
     const jitter = base * 0.2 * (Math.random() * 2 - 1);
@@ -736,7 +756,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
     const onOnline = () => {
       ensureCreds();
-      if (shouldReconnect.current && lastLogin.current && (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN)) {
+      // No lastLogin guard (matches onclose): a cred-less attached client
+      // re-attaches via status-first connectSocket(null). Never explicit.
+      seedExplicitRef.current = false;
+      if (shouldReconnect.current && (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN)) {
         clearReconnect();
         reconnectAttempts.current = 0;
         connectSocket(lastLogin.current);
@@ -744,7 +767,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
     const onVis = () => {
       ensureCreds();
-      if (document.visibilityState === "visible" && shouldReconnect.current && lastLogin.current) {
+      // Background path — never explicit (see scheduleReconnect).
+      seedExplicitRef.current = false;
+      if (document.visibilityState === "visible" && shouldReconnect.current) {
         const ws = socketRef.current;
         if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
           clearReconnect();

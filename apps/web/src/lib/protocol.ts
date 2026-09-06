@@ -21,10 +21,6 @@ export interface SessionStatusRequest {
   type: "session:status";
 }
 
-export interface AttachRequest {
-  type: "attach";
-}
-
 export interface SessionStatusMessage {
   type: "session:status";
   loggedIn: boolean;
@@ -876,7 +872,6 @@ export type BridgeInboundMessage =
   | LoginRequest
   | LogoutRequest
   | SessionStatusRequest
-  | AttachRequest
   | SearchRequest
   | SearchUserRequest
   | SearchRoomRequest

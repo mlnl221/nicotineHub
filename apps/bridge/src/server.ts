@@ -55,10 +55,6 @@ const SessionStatusSchema = z.object({
   type: z.literal("session:status"),
 });
 
-const AttachSchema = z.object({
-  type: z.literal("attach"),
-});
-
 const SearchMessageSchema = z.object({
   type: z.literal("search"),
   searchId: z.string().min(1).max(64),
@@ -1235,19 +1231,22 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           return;
         }
         // "fresh" or user-confirmed "replace": (re)establish the singleton.
-        // Success fans out via broadcast; request-scoped failures reply here.
-        establishSharedSession({ username, password, host, port }).then((res) => {
-          if (!res.ok) {
-            try { ws.send(JSON.stringify({ type: "login:result", ok: false, error: res.error ?? "Login failed." })); } catch {}
-          }
-        }).catch((e: Error) => {
+        // Outcomes fan out via broadcast (establishSharedSession covers the
+        // attached requester too); the catch is only a safety net for throws
+        // outside the managed flow. The establishing guard below is the one
+        // path that never broadcasts, so it replies per-WS (no hung requester).
+        if (establishing) {
+          ws.send(JSON.stringify({ type: "login:result", ok: false, error: "Login already in progress." }));
+          return;
+        }
+        establishSharedSession({ username, password, host, port }).catch((e: Error) => {
           try { ws.send(JSON.stringify({ type: "login:result", ok: false, error: e.message })); } catch {}
         });
         return;
       }
 
-      if (data.type === "session:status" || data.type === "attach") {
-        const statusParsed = data.type === "session:status" ? SessionStatusSchema.safeParse(parsed) : AttachSchema.safeParse(parsed);
+      if (data.type === "session:status") {
+        const statusParsed = SessionStatusSchema.safeParse(parsed);
         if (!statusParsed.success) { ws.send(errorMessage("Invalid session message.")); return; }
         ws.send(JSON.stringify(sessionStatusPayload()));
         return;
