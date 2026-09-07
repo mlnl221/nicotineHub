@@ -453,7 +453,7 @@ export function LeechersStep({ onNext, onBack, isFirst }: StepNav) {
         body="Some users download everything and share nothing. Flag accounts sharing too little so your uploads go to real sharers."
       />
       <InfoTip>
-        A leecher shares fewer files or folders than your minimum (defaults 1010 files / 51 folders, tunable in Settings →
+        A leecher shares fewer files or folders than your minimum (defaults 10 files / 1 folder, tunable in Settings →
         Leecher). <span className="font-semibold">Ban</span> blocks their uploads; <span className="font-semibold">Ignore</span> hides
         their messages. Buddies are always exempt — never flagged, banned, or challenged.
       </InfoTip>

@@ -30,9 +30,10 @@ export default function Home() {
       next = safeNext(new URLSearchParams(window.location.search).get("next"));
     } catch {}
     const dest = next ?? "/search";
-    // First run (non-demo): route through the setup guide once — it honors
+    // First run: route through the setup guide once — it honors
     // ?next= at finish/skip so deep links survive onboarding.
-    if (!isDemo && !isOnboardingDone()) {
+    // Demo included: demo login connects (mocked), steps degrade gracefully.
+    if (!isOnboardingDone()) {
       router.replace(`/onboarding?next=${encodeURIComponent(dest)}`);
       return;
     }
