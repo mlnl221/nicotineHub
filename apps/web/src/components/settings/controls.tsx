@@ -149,6 +149,7 @@ export function NumberControl({
   description,
   min,
   max,
+  sliderMax,
   step,
   onReset,
   hideSlider,
@@ -159,11 +160,15 @@ export function NumberControl({
   description?: string;
   min?: number;
   max?: number;
+  sliderMax?: number;
   step?: number;
   onReset?: () => void;
   hideSlider?: boolean;
 }) {
   const clamp = (v: number) => Math.min(max ?? v, Math.max(min ?? v, v));
+  const sliderMaxResolved = sliderMax ?? max;
+  const clampSlider = (v: number) =>
+    Math.min(sliderMaxResolved ?? v, Math.max(min ?? v, v));
   const { isLong: isLongNum, first: firstNum, full: fullNum } = useInfoSplit(description);
   const testIdNum = `setting-info-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
@@ -202,14 +207,14 @@ export function NumberControl({
           }}
           className="w-28 rounded-xl bg-surface-container-lowest px-4 py-3 font-body text-sm text-on-surface ghost-border transition-all focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
         />
-        {typeof min === "number" && typeof max === "number" && !hideSlider ? (
+        {typeof min === "number" && typeof sliderMaxResolved === "number" && !hideSlider ? (
           <input
             type="range"
             min={min}
-            max={max}
+            max={sliderMaxResolved}
             step={step ?? 1}
-            value={value}
-            onChange={(e) => onChange(clamp(Number(e.target.value)))}
+            value={clampSlider(value)}
+            onChange={(e) => onChange(clampSlider(Number(e.target.value)))}
             className="flex-1 accent-primary"
           />
         ) : null}

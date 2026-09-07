@@ -76,6 +76,15 @@ export interface PluginCoreShim {
   requestUserStats?(user: string): void;
   requestUserShares?(user: string): void;
   isBuddy?(user: string): boolean;
+  denyUpload?(user: string, file: string, reason?: string): boolean | void;
+  retryUploads?(user?: string, file?: string): void;
+  blockIp?(user: string): boolean;
+  banUser?(user: string): void;
+  unbanUser?(user: string): void;
+  ignoreUser?(user: string): void;
+  unignoreUser?(user: string): void;
+  isUserBanned?(user: string): boolean;
+  isUserIgnored?(user: string): boolean;
 }
 
 export abstract class BasePlugin {

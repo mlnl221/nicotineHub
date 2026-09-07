@@ -5,6 +5,12 @@ import { DEMO_ROOMS, mockBrowseFolders, mockDiagnosticsEntries, mockDiagnosticsH
 
 export type DemoListener = (msg: BridgeOutboundMessage) => void;
 
+// Demo leech_detector plugin — session-only state so Settings → Leecher
+// (and the wizard) render real controls. Settings stay partial: the UI
+// merges over its own DEFAULTS (mirror of bridge leech_detector.ts).
+let demoLeechEnabled = true;
+let demoLeechSettings: Record<string, unknown> = {};
+
 function emit(listeners: Set<DemoListener>, msg: BridgeOutboundMessage) {
   listeners.forEach((cb) => {
     try {
@@ -265,6 +271,36 @@ export function handleDemoSend(
       meta: (anyMsg.meta as Record<string, unknown>) || undefined,
     };
     setTimeout(() => emit(listeners, { type: "diagnostics:log", entry } as unknown as BridgeOutboundMessage), 60);
+    return true;
+  }
+
+  if (msg.type === "plugin:list") {
+    setTimeout(() => {
+      emit(listeners, {
+        type: "plugin:list",
+        plugins: [{
+          name: "leech_detector",
+          humanName: "Leech Detector",
+          enabled: demoLeechEnabled,
+          isInternal: true,
+          info: {},
+          settings: demoLeechSettings,
+          metasettings: null,
+        }],
+      } as unknown as BridgeOutboundMessage);
+    }, 150);
+    return true;
+  }
+  if (msg.type === "plugin:toggle") {
+    demoLeechEnabled = !demoLeechEnabled;
+    const name = (msg as { name: string }).name;
+    setTimeout(() => {
+      emit(listeners, { type: "plugin:toggled", name, enabled: demoLeechEnabled } as unknown as BridgeOutboundMessage);
+    }, 150);
+    return true;
+  }
+  if (msg.type === "plugin:settings") {
+    demoLeechSettings = { ...demoLeechSettings, ...((msg as { settings: Record<string, unknown> }).settings ?? {}) };
     return true;
   }
 

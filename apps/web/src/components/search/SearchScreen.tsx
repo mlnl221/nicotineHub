@@ -1,12 +1,12 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
-import { useSearches } from "@/lib/search";
+import { buildInitialFilters, useSearches, type SearchMode } from "@/lib/search";
 import { applyFilters } from "@/lib/filter";
 import { useTransfers } from "@/lib/transfers";
-import type { SearchRow } from "@/lib/protocol";
+import { type FilterState, type SearchRow } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
 import { useConfig } from "@/lib/config/provider";
 import { WishlistManager } from "@/components/WishlistManager";
@@ -28,6 +28,37 @@ export function SearchScreen() {
   const router = useRouter();
   const [showFilters, setShowFilters] = useState(() => settings.searches.filters_visible ?? false);
   useEffect(() => { setShowFilters(settings.searches.filters_visible ?? false); }, [settings.searches.filters_visible]);
+  // Sticky zero-tab draft: FilterBar stays usable with no tabs, and the next
+  // user-initiated search (from empty state) seeds from it. Seeded from the
+  // same defaults as new tabs so the panel shows what the search will use.
+  // Per-tab filters take over once a tab exists.
+  const [draft, setDraft] = useState<FilterState>(() => buildInitialFilters(settings.searches.defilter, settings.searches.enablefilters));
+  // Keep draft publicOnly in line with the persisted default (e.g. header
+  // toggle on a tab); no-op when already equal so typing never re-renders.
+  useEffect(() => {
+    const next = settings.searches.defilter.publicFiles ?? false;
+    setDraft((d) => (d.publicOnly === next ? d : { ...d, publicOnly: next }));
+  }, [settings.searches.defilter.publicFiles]);
+  // Refs keep the async SearchBar scrape path (resolves after render) on the
+  // latest branch/seed instead of a stale closure.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const noTabsRef = useRef(!activeTab);
+  noTabsRef.current = !activeTab;
+  // New searches from empty state carry the visible draft; with tabs open the
+  // panel shows the active tab instead, so leave seeding at defaults there.
+  const startWithDraft = (query: string, opts?: { mode?: SearchMode; target?: string }) =>
+    startSearch(query, noTabsRef.current ? { ...opts, filters: draftRef.current } : opts);
+  // Stable identities: FilterBar debounces 150ms on [local, filters, onChange],
+  // so a fresh arrow each render would starve commits while results stream.
+  const handleFilterChange = useCallback(
+    (partial: Partial<FilterState>) => (activeId ? setFilters(activeId, partial) : setDraft((d) => ({ ...d, ...partial }))),
+    [activeId, setFilters],
+  );
+  const handleFilterClear = useCallback(
+    () => (activeId ? clearFilters(activeId) : setDraft(buildInitialFilters(settings.searches.defilter, settings.searches.enablefilters))),
+    [activeId, clearFilters, settings.searches.defilter, settings.searches.enablefilters],
+  );
   const [sheetRow, setSheetRow] = useState<SearchRow | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const ctxMenu = useContextMenu();
@@ -67,8 +98,7 @@ export function SearchScreen() {
   }, [activeTab?.id, visibleRows, markSeen]);
 
   const activeFilterCount = useMemo(() => {
-    if (!activeTab) return 0;
-    const f = activeTab.filters;
+    const f = activeTab?.filters ?? draft;
     let n = 0;
     if (f.include.trim()) n++;
     if (f.exclude.trim()) n++;
@@ -81,7 +111,7 @@ export function SearchScreen() {
     if (f.freeSlot) n++;
     if (f.publicOnly) n++;
     return n;
-  }, [activeTab]);
+  }, [activeTab, draft]);
 
   const flash = (msg: string) => {
     setToast(msg);
@@ -108,7 +138,7 @@ export function SearchScreen() {
       <PageHeader title="Search" subtitle={searchSubtitle} settingsHref="/settings?tab=searches#searches" />
       <div className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-low/95 backdrop-blur dark:bg-inverse-surface/95 border-b border-outline-variant/10">
         <SearchBar
-          onSearch={startSearch}
+          onSearch={startWithDraft}
           onToggleFilters={() => {
             const next = !showFilters;
             setShowFilters(next);
@@ -131,11 +161,12 @@ export function SearchScreen() {
         >
           <SearchTabs />
         </div>
-        {showFilters && activeTab ? (
+        {showFilters ? (
           <FilterBar
-            filters={activeTab.filters}
-            onChange={(partial) => activeId && setFilters(activeId, partial)}
-            onClear={() => activeId && clearFilters(activeId)}
+            key={activeId ?? "draft"}
+            filters={activeTab?.filters ?? draft}
+            onChange={handleFilterChange}
+            onClear={handleFilterClear}
           />
         ) : null}
       </div>
@@ -151,6 +182,24 @@ export function SearchScreen() {
             {visibleRows.length !== activeTab.total ? ` • showing ${visibleRows.length}` : ""}
           </span>
           <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              aria-pressed={activeTab.filters.publicOnly}
+              title={activeTab.filters.publicOnly ? "Showing public files only — tap to show private results" : "Private results visible — tap to hide private shares"}
+              onClick={() => {
+                if (!activeId) return;
+                const next = !activeTab.filters.publicOnly;
+                setFilters(activeId, { publicOnly: next });
+                setOption("searches", "defilter", { ...settings.searches.defilter, publicFiles: next });
+              }}
+              className={`rounded-full px-2 py-1 text-[10px] font-semibold outline-none ${
+                activeTab.filters.publicOnly
+                  ? "bg-primary text-on-primary"
+                  : "bg-surface-container-high text-on-surface-variant"
+              }`}
+            >
+              {activeTab.filters.publicOnly ? "Public only" : "Hide private"}
+            </button>
             <select
               value={settings.searches.group_searches}
               onChange={(e) => setOption("searches", "group_searches", e.target.value)}
@@ -250,7 +299,7 @@ export function SearchScreen() {
                 {settings.searches.history.slice(0, 8).map((h) => (
                   <button
                     key={h}
-                    onClick={() => startSearch(h)}
+                    onClick={() => startWithDraft(h)}
                     className="rounded-full bg-surface-container-high px-3 py-1 text-xs text-on-surface-variant hover:text-primary"
                   >
                     {h}

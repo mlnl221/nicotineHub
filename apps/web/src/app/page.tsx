@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { LoginForm } from "@/components/LoginForm";
 import { isDemo } from "@/lib/demo";
+import { isOnboardingDone } from "@/lib/onboarding";
 
 /** Internal destinations only — blocks open redirects via crafted ?next=. */
 function safeNext(raw: string | null): string | null {
@@ -28,7 +29,15 @@ export default function Home() {
     try {
       next = safeNext(new URLSearchParams(window.location.search).get("next"));
     } catch {}
-    router.replace(next ?? "/search");
+    const dest = next ?? "/search";
+    // First run: route through the setup guide once — it honors
+    // ?next= at finish/skip so deep links survive onboarding.
+    // Demo included: demo login connects (mocked), steps degrade gracefully.
+    if (!isOnboardingDone()) {
+      router.replace(`/onboarding?next=${encodeURIComponent(dest)}`);
+      return;
+    }
+    router.replace(dest);
   }, [state.status, router]);
 
   if (state.status === "connected") return null;

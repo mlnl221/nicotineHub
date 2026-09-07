@@ -23,6 +23,7 @@ const NowPlayingSection = dynamic(() => import("@/components/settings/NowPlaying
 const LoggingSection = dynamic(() => import("@/components/settings/LoggingSection").then((m) => m.LoggingSection), { loading: () => <SectionLoader /> });
 const BannedUsersSection = dynamic(() => import("@/components/settings/BannedUsersSection").then((m) => m.BannedUsersSection), { loading: () => <SectionLoader /> });
 const IgnoredUsersSection = dynamic(() => import("@/components/settings/IgnoredUsersSection").then((m) => m.IgnoredUsersSection), { loading: () => <SectionLoader /> });
+const LeecherSection = dynamic(() => import("@/components/settings/LeecherSection").then((m) => m.LeecherSection), { loading: () => <SectionLoader /> });
 const UrlHandlersSection = dynamic(() => import("@/components/settings/UrlHandlersSection").then((m) => m.UrlHandlersSection), { loading: () => <SectionLoader /> });
 const PluginsSection = dynamic(() => import("@/components/settings/PluginsSection").then((m) => m.PluginsSection), { loading: () => <SectionLoader /> });
 const WorkerSection = dynamic(() => import("@/components/settings/WorkerSection").then((m) => m.WorkerSection), { loading: () => <SectionLoader /> });
@@ -41,6 +42,7 @@ type TabId =
   | "logging"
   | "banned-users"
   | "ignored-users"
+  | "leecher"
   | "url-handlers"
   | "plugins"
   | "worker"
@@ -61,6 +63,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "banned-users", label: "Banned Users", icon: "block" },
   { id: "about", label: "About", icon: "info" },
   { id: "ignored-users", label: "Ignored Users", icon: "person_off" },
+  { id: "leecher", label: "Leecher", icon: "shield" },
   { id: "url-handlers", label: "URL Handlers", icon: "link" },
   { id: "plugins", label: "Plugins", icon: "extension" },
   { id: "worker", label: "Worker", icon: "memory" },
@@ -73,7 +76,7 @@ const TAB_GROUPS: TabGroup[] = [
   { label: "Connection", tabs: ["network"] },
   { label: "Interface", tabs: ["appearance", "notifications"] },
   { label: "Transfers", tabs: ["shares", "downloads", "uploads"] },
-  { label: "Search & Users", tabs: ["searches", "user-profile", "banned-users", "ignored-users"] },
+  { label: "Search & Users", tabs: ["searches", "user-profile", "banned-users", "ignored-users", "leecher"] },
   { label: "Chat & Playback", tabs: ["chats", "now-playing"] },
   { label: "System", tabs: ["logging", "url-handlers", "plugins", "worker", "about"] },
 ];
@@ -272,6 +275,8 @@ export default function SettingsPage() {
                   <BannedUsersSection />
                 ) : tab === "ignored-users" ? (
                   <IgnoredUsersSection />
+                ) : tab === "leecher" ? (
+                  <LeecherSection />
                 ) : tab === "url-handlers" ? (
                   <UrlHandlersSection />
                 ) : tab === "plugins" ? (
