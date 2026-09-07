@@ -12,6 +12,7 @@ import {
 } from "react";
 import { useSession } from "@/lib/session";
 import { useConfig } from "@/lib/config/provider";
+import type { Filters } from "@/lib/config/defaults";
 import {
   emptyFilters,
   type FilterState,
@@ -38,7 +39,7 @@ interface SearchApi {
   tabs: SearchTab[];
   activeId: string | null;
   activeTab: SearchTab | null;
-  startSearch: (query: string, opts?: { mode?: SearchMode; target?: string }) => void;
+  startSearch: (query: string, opts?: { mode?: SearchMode; target?: string; filters?: FilterState }) => void;
   stopSearch: (id: string) => void;
   closeTab: (id: string) => void;
   retrySearch: (id: string) => void;
@@ -50,6 +51,18 @@ interface SearchApi {
 const SearchContext = createContext<SearchApi | null>(null);
 
 const SEARCH_STORAGE_KEY = "nicotineHub.searchTabs";
+
+// New-tab filter seed, shared by startSearch and the SearchScreen zero-tab
+// draft so the panel shows exactly what the next search will use: persisted
+// defilter defaults when enabled, otherwise empty. publicOnly always follows
+// the persisted default so the /search header toggle sticks for future tabs
+// even when default filters are off.
+export function buildInitialFilters(defilter: Filters, enableFilters: boolean): FilterState {
+  const base: FilterState = enableFilters
+    ? { include: defilter.include, exclude: defilter.exclude, size: defilter.fileSize, bitrate: defilter.bitrate, freeSlot: defilter.freeSlots, country: defilter.country, fileType: defilter.fileType, length: defilter.length, publicOnly: defilter.publicFiles, quality: (defilter as unknown as { quality?: string }).quality ?? "" }
+    : emptyFilters();
+  return { ...base, publicOnly: defilter.publicFiles ?? base.publicOnly };
+}
 
 function loadSearchPersisted(): { tabs: SearchTab[]; activeId: string | null; maxId: number } | null {
   if (typeof window === "undefined") return null;
@@ -198,7 +211,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   }, [subscribe, send, settings.searches.max_displayed_results, settings.searches.defilter.publicFiles]);
 
   const startSearch = useCallback(
-    (query: string, opts?: { mode?: SearchMode; target?: string }) => {
+    (query: string, opts?: { mode?: SearchMode; target?: string; filters?: FilterState }) => {
       const trimmed = query.trim();
       if (trimmed.length < (settings.searches.min_search_chars ?? 3)) return;
       // History handling (nicotine searches.history 200)
@@ -221,12 +234,9 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       }
       const id = `s${++counter.current}`;
       const defilter = settings.searches.defilter;
-      const baseFilters: FilterState = settings.searches.enablefilters
-        ? { include: defilter.include, exclude: defilter.exclude, size: defilter.fileSize, bitrate: defilter.bitrate, freeSlot: defilter.freeSlots, country: defilter.country, fileType: defilter.fileType, length: defilter.length, publicOnly: defilter.publicFiles, quality: (defilter as unknown as { quality?: string }).quality ?? "" }
-        : emptyFilters();
-      // publicOnly always follows the persisted default so the /search header
-      // toggle sticks for future tabs even when default filters are off
-      const initialFilters: FilterState = { ...baseFilters, publicOnly: defilter.publicFiles ?? baseFilters.publicOnly };
+      // Sticky zero-tab draft (SearchScreen) wins when provided; otherwise fall
+      // back to the persisted defilter defaults.
+      const initialFilters: FilterState = opts?.filters ?? buildInitialFilters(defilter, settings.searches.enablefilters);
       setTabs((prev) => [
         ...prev,
         { id, query: trimmed, mode, target, status: "searching", rows: [], total: 0, filters: initialFilters },

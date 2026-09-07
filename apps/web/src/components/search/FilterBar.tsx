@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FilterState } from "@/lib/protocol";
 
 interface FilterBarProps {
@@ -24,18 +24,32 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
   // local debounced text state 150ms — checkboxes bypass debounce
   const [local, setLocal] = useState<FilterState>(filters);
   useEffect(() => setLocal(filters), [filters]);
+  const diffText = (from: FilterState, to: FilterState): Partial<FilterState> | null => {
+    const diff: Partial<FilterState> = {};
+    let changed = false;
+    for (const k of Object.keys(to) as Array<keyof FilterState>) {
+      if (k === "freeSlot" || k === "publicOnly") continue;
+      if (to[k] !== from[k]) { (diff as Record<string, unknown>)[k] = to[k]; changed = true; }
+    }
+    return changed ? diff : null;
+  };
   useEffect(() => {
     const t = setTimeout(() => {
-      const diff: Partial<FilterState> = {};
-      let changed = false;
-      for (const k of Object.keys(local) as Array<keyof FilterState>) {
-        if (k === "freeSlot" || k === "publicOnly") continue;
-        if (local[k] !== filters[k]) { (diff as Record<string, unknown>)[k] = local[k]; changed = true; }
-      }
-      if (changed) onChange(diff);
+      const diff = diffText(filters, local);
+      if (diff) onChange(diff);
     }, 150);
     return () => clearTimeout(t);
   }, [local, filters, onChange]);
+  // Flush pending keystrokes on unmount: typing then hitting Search (or
+  // switching tabs) inside the debounce window remounts the bar via key and
+  // would otherwise drop the text. No-op when nothing is pending.
+  const latest = useRef({ local, filters, onChange });
+  latest.current = { local, filters, onChange };
+  useEffect(() => () => {
+    const s = latest.current;
+    const diff = diffText(s.filters, s.local);
+    if (diff) s.onChange(diff);
+  }, []);
 
   return (
     <div className="border-b border-outline-variant/30 bg-surface-container px-4 py-4">
