@@ -178,15 +178,10 @@ export function LeecherSection() {
   }, []);
 
   const refresh = useCallback(() => {
-    if (isDemo) return;
     send({ type: "plugin:list" });
   }, [send]);
 
   useEffect(() => {
-    if (isDemo) {
-      setLoading(false);
-      return;
-    }
     const unsub = subscribe((msg) => {
       if (msg.type === "plugin:list") applyList(msg.plugins);
       else if (msg.type === "plugin:toggled" && (msg.name === PRIMARY || msg.name === FALLBACK)) {
@@ -210,21 +205,6 @@ export function LeecherSection() {
 
   const saveProps = { dirty, onSave: save };
 
-  if (isDemo) {
-    return (
-      <div className="flex flex-col gap-6">
-        <SectionCard
-          title="Leecher"
-          description="Demo mode — the leech_detector bridge plugin is unavailable without a running bridge."
-        >
-          <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs text-on-surface-variant dark:bg-surface-container-highest/40">
-            Run locally (<span className="font-mono">bun run dev</span>) to configure anti-leech limits and ProveIt challenges.
-          </div>
-        </SectionCard>
-      </div>
-    );
-  }
-
   const leechers = strList(draft.detected_leechers);
   const verified = strList(draft.proveit_verified_users);
 
@@ -235,6 +215,11 @@ export function LeecherSection() {
         description="Flag users sharing too few files/folders and message them after upload. Stored on the bridge via the leech_detector plugin."
         actions={<SectionSaveButton {...saveProps} />}
       >
+        {isDemo ? (
+          <div className="mb-2 rounded-xl bg-tertiary-container/30 px-4 py-3 font-body text-xs text-on-surface-variant dark:text-outline">
+            Demo — explore freely, changes reset on reload. Run locally (<span className="font-mono">bun run dev</span>) for a real bridge.
+          </div>
+        ) : null}
         {loading ? (
           <div className="py-4 text-center font-body text-sm text-on-surface-variant">Loading plugin settings…</div>
         ) : (

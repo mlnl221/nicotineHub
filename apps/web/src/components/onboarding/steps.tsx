@@ -391,10 +391,10 @@ function useLeechDraft() {
   const [pluginName, setPluginName] = useState(PLUGIN_PRIMARY);
   const [enabled, setEnabled] = useState(true);
   const [remote, setRemote] = useState<Record<string, unknown> | null>(null);
-  const [loading, setLoading] = useState(!isDemo);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (isDemo || state.status !== "connected") return;
+    if (state.status !== "connected") return;
     const unsub = subscribe((msg) => {
       if (msg.type === "plugin:list") {
         const list = (msg as unknown as { plugins: { name: string; enabled: boolean; settings: Record<string, unknown> }[] }).plugins;
@@ -441,7 +441,7 @@ export function LeechersStep({ onNext, onBack, isFirst }: StepNav) {
   }, [remote]);
 
   const cont = () => {
-    if (!isDemo) commit({ ban_leechers: ban, ignore_leechers: ignore });
+    commit({ ban_leechers: ban, ignore_leechers: ignore });
     onNext();
   };
 
@@ -462,7 +462,7 @@ export function LeechersStep({ onNext, onBack, isFirst }: StepNav) {
           <div>
             <div className="font-label text-sm font-medium text-on-surface dark:text-inverse-on-surface">Enable leech detector</div>
             <div className="font-body text-xs text-on-surface-variant dark:text-outline">
-              {loading ? "Loading…" : isDemo ? "Demo — unavailable" : "Flips the bridge plugin on/off now."}
+              {loading ? "Loading…" : "Flips the bridge plugin on/off now."}
             </div>
           </div>
           <Toggle checked={enabled} onChange={togglePlugin} label="Enable leech detector" />
@@ -500,7 +500,7 @@ export function CaptchaStep({ onNext, onBack, isFirst }: StepNav) {
   }, [remote]);
 
   const cont = () => {
-    if (!isDemo) commit({ enable_proveit: proveit, proveit_captcha_word: word.trim() || "download" });
+    commit({ enable_proveit: proveit, proveit_captcha_word: word.trim() || "download" });
     onNext();
   };
 
