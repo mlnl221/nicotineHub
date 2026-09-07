@@ -142,7 +142,7 @@ export class TransferManager {
   private configDir: string;
   private incompleteDir: string;
   private downloadsDir: string;
-  private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
+  private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; sendUploadDenied?: (u: string, f: string, reason?: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
   private onBanlistUpdated?: (banlist: string[], byUser: string) => void;
   private tokenCounter = Math.floor(Math.random() * 900000) + 10000;
   private statsManager: StatsManager;
@@ -334,13 +334,20 @@ export class TransferManager {
     return false;
   }
 
-  private isBuddy(username: string): boolean {
-    return this.config.buddies.includes(username);
+  isBuddy(username: string): boolean {
+    const lower = String(username || "").toLowerCase();
+    if (!lower) return false;
+    return this.config.buddies.some((b) => String(b || "").toLowerCase() === lower);
   }
 
-  private isPrivileged(username: string): boolean {
-    return this.config.privilegedUsers.includes(username);
+  isPrivileged(username: string): boolean {
+    const lower = String(username || "").toLowerCase();
+    if (!lower) return false;
+    return this.config.privilegedUsers.some((b) => String(b || "").toLowerCase() === lower);
   }
+
+  getBuddies(): string[] { return [...this.config.buddies]; }
+  getBanlist(): string[] { return [...this.config.banlist]; }
 
   private shouldUseBuddyLimits(username: string): boolean {
     if (!this.config.friendsnolimits) return false;
@@ -712,7 +719,7 @@ export class TransferManager {
     const honeyNames = (this.config.honeypot_names || []).map((s: string) => s.toLowerCase().trim()).filter(Boolean);
     const isHoney = this.config.honeypot_enabled && honeyNames.includes(honeyLower);
     if (isHoney) {
-      const isBuddy = this.config.buddies.includes(username) || this.config.privilegedUsers.includes(username);
+      const isBuddy = this.isBuddy(username) || this.isPrivileged(username);
       if (!isBuddy) {
         if (!this.config.banlist.includes(username)) {
           this.config.banlist = [...this.config.banlist, username];
@@ -1671,6 +1678,39 @@ export class TransferManager {
       this.emitStats();
       this.persist();
     }
+  }
+
+  /** Hard-deny a queued upload: drop entry, notify UI, send UploadDenied(50) to peer. */
+  denyUpload(username: string, virtualPath: string, reason = "Denied"): boolean {
+    const id = `${username}::${virtualPath}`;
+    const t = this.transfers.get(id);
+    if (!t || !t.isUpload || t.status !== "Queued") return false;
+    if (t._timer) clearInterval(t._timer);
+    if (t._statusTimer) clearTimeout(t._statusTimer);
+    if (t._pollTimer) clearInterval(t._pollTimer);
+    if (t._retryTimer) clearTimeout(t._retryTimer);
+    if (t._fileHandle !== undefined) try { const { closeSync } = require("node:fs"); closeSync(t._fileHandle); } catch {}
+    this.transfers.delete(id);
+    this.onRemoved(id);
+    this.emitStats();
+    this.persist();
+    try { this.sessionGetter?.()?.sendUploadDenied?.(username, virtualPath, reason); } catch {}
+    return true;
+  }
+
+  /** Clear upload retry backoff and re-run queue selection (e.g. after undeny). */
+  retryUploads(username?: string, file?: string): void {
+    // ProveIt grant-path: denyUpload deletes the Queued entry, so resurrect it here.
+    if (username && file && !this.transfers.has(`${username}::${file}`)) {
+      try { this.handleQueueUpload(username, file); } catch {}
+    }
+    for (const [id, t] of this.transfers) {
+      if (!t.isUpload) continue;
+      if (username && t.username !== username) continue;
+      if (t._retryTimer) { clearTimeout(t._retryTimer); t._retryTimer = undefined; }
+      this.retryAttempts.delete(id);
+    }
+    this.checkUploadQueue();
   }
 
   close() {

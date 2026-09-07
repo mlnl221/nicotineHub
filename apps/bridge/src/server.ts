@@ -151,7 +151,7 @@ const DownloadControlSchema = z.object({
 const UploadControlSchema = z.object({
   type: z.literal("upload:control"),
   id: z.string().min(1).max(1024),
-  action: z.enum(["cancel", "clear"]),
+  action: z.enum(["cancel", "clear", "deny"]),
 });
 const UserInfoRequestSchema = z.object({ type: z.literal("userinfo") }).and(UserInfoMessageSchema);
 
@@ -198,6 +198,11 @@ const ConfigUpdateSchema = z.object({
   section: z.string().min(1).max(64),
   key: z.string().min(1).max(64),
   value: z.unknown(),
+});
+
+const BanControlSchema = z.object({
+  type: z.enum(["ban:add", "ban:remove", "ignore:add", "ignore:remove"]),
+  username: z.string().min(1).max(64),
 });
 
 const WishlistUpdateSchema = z.object({
@@ -628,6 +633,7 @@ async function establishSharedSession(creds: StoredCreds): Promise<{ ok: boolean
     sharedSessionUser = creds.username;
     try { activeSessions.add(session); } catch {}
     try { pluginManager.setSessionGetter(() => sharedSession as unknown as ReturnType<PluginManager["setSessionGetter"]> extends never ? never : unknown as never); } catch {}
+    try { (pluginManager as unknown as { setTransfersGetter?: (g: () => unknown) => void }).setTransfersGetter?.(() => sharedTransfers as unknown as never); } catch {}
     broadcastJson({ type: "login:start" });
     try {
       const outcome = await session.login() as unknown as { success: true; banner: string; ipAddress: string; checksum: string; isSupporter: boolean };
@@ -1427,7 +1433,13 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const result = UploadControlSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid upload control.")); return; }
         logger.info("transfer", "upload control", { id: result.data.id, action: result.data.action });
-        sharedTransfers?.controlUpload(result.data.id, result.data.action);
+        if (result.data.action === "deny") {
+          const t = sharedTransfers?.get(result.data.id);
+          if (t && t.isUpload) {
+            const ok = sharedTransfers?.denyUpload(t.username, t.virtualPath);
+            if (!ok) ws.send(errorMessage("Upload deny failed: transfer is no longer queued."));
+          }
+        } else sharedTransfers?.controlUpload(result.data.id, result.data.action);
         return;
       }
 
@@ -1810,6 +1822,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             else if (key === "autosearch") (session as unknown as { setAutosearch?: (v:string[])=>void })?.setAutosearch?.(Array.isArray(value) ? value as string[] : []);
             else if (key === "autojoin") (session as unknown as { setAutojoin?: (v:string[])=>void })?.setAutojoin?.(Array.isArray(value) ? value as string[] : []);
             else if (key === "userlist") (session as unknown as { setUserlist?: (v:string[])=>void })?.setUserlist?.(Array.isArray(value) ? value as string[] : []);
+            // Buddy wiring — transfers (honeypot exempt, queue priority) mirrors session userlist.
+            if (key === "userlist" && Array.isArray(value)) tm?.setConfig?.({ buddies: (value as unknown[]).filter((s) => typeof s === "string") as string[] });
             else if (key === "autoaway") (session as unknown as { setAutoaway?: (v:number)=>void })?.setAutoaway?.(Number(value) || 15);
             logger.debug("bridge", "network extra updated", { key, len: Array.isArray(value) ? (value as unknown[]).length : String(value).slice(0,40) });
           } else if (section === "chatrooms" || section === "userbrowse") {
@@ -1874,6 +1888,44 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (data.type === "config:get") {
         // Durable settings snapshot for new browsers / post-restart reconcile (no secrets — worker never persisted here)
         ws.send(JSON.stringify({ type: "config:state", settings: PERSISTED_SETTINGS }));
+        return;
+      }
+
+      if (data.type === "ban:add" || data.type === "ban:remove" || data.type === "ignore:add" || data.type === "ignore:remove") {
+        const result = BanControlSchema.safeParse(parsed);
+        if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid ban/ignore message.")); return; }
+        const session = requireLogin(); if (!session) return;
+        const name = result.data.username.trim();
+        if (!name) { ws.send(errorMessage("Username required.")); return; }
+        const tm = sharedTransfers as unknown as { setConfig?: (c: Record<string, unknown>) => void } | undefined;
+        const sess = session as unknown as {
+          banUser: (u: string) => string[]; unbanUser: (u: string) => string[];
+          ignoreUser: (u: string) => string[]; unignoreUser: (u: string) => string[];
+          getBanlist: () => string[]; getIgnorelist: () => string[];
+        };
+        try {
+          if (result.data.type === "ban:add") {
+            const banlist = sess.banUser(name);
+            tm?.setConfig?.({ banlist });
+            persistSetting("server", "banlist", banlist);
+            broadcastJson({ type: "banlist:updated", banlist, byUser: name, reason: "manual" });
+          } else if (result.data.type === "ban:remove") {
+            const banlist = sess.unbanUser(name);
+            tm?.setConfig?.({ banlist });
+            persistSetting("server", "banlist", banlist);
+            broadcastJson({ type: "banlist:updated", banlist, byUser: name, reason: "manual" });
+          } else if (result.data.type === "ignore:add") {
+            const ignorelist = sess.ignoreUser(name);
+            persistSetting("server", "ignorelist", ignorelist);
+            broadcastJson({ type: "ignorelist:updated", ignorelist, byUser: name, reason: "manual" });
+          } else {
+            const ignorelist = sess.unignoreUser(name);
+            persistSetting("server", "ignorelist", ignorelist);
+            broadcastJson({ type: "ignorelist:updated", ignorelist, byUser: name, reason: "manual" });
+          }
+        } catch (e) {
+          ws.send(errorMessage((e as Error).message));
+        }
         return;
       }
 

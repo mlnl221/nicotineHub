@@ -13,7 +13,7 @@ import type { Socket, TCPSocketListener } from "bun";
 import { deflateSync, inflateSync } from "node:zlib";
 import { ShareDB, PermissionLevel, type ShareFolder } from "./shares.ts";
 import { logger } from "./logger.ts";
-import { shouldBlockUser, shouldIgnoreUser, getCountryCode, setCountryForIp } from "./networkfilter.ts";
+import { isUserBanned, shouldBlockUser, shouldIgnoreUser, getCountryCode, setCountryForIp } from "./networkfilter.ts";
 import { PortMapper } from "./portmapper.ts";
 import {
   buildAcceptChildren,
@@ -61,6 +61,7 @@ import {
   buildSharedFileListRequest,
   buildSharedFoldersFiles,
   buildTransferRequest,
+  buildUploadDenied,
   buildUnwatchUser,
   buildUserInfoRequest,
   buildUserInfoResponse,
@@ -482,6 +483,67 @@ export class SoulseekSession {
     if (opts.customban !== undefined) this.customban = opts.customban;
     if (opts.usecustomgeoblock !== undefined) this.usecustomgeoblock = opts.usecustomgeoblock;
     if (opts.customgeoblock !== undefined) this.customgeoblock = opts.customgeoblock;
+  }
+
+  // Ban/ignore control — WS ban:add/remove + ignore:add/remove + plugin shim.
+  // Buddy matching is case-insensitive (display case varies); ban/ignore lists
+  // stay exact-case like networkfilter.isUserBanned (Soulseek usernames are case-sensitive).
+  getBanlist(): string[] { return [...this.banlist]; }
+  getIgnorelist(): string[] { return [...this.ignorelist]; }
+  getUserlist(): string[] { return [...this._userlist]; }
+  isBuddy(username: string): boolean {
+    const lower = String(username || "").toLowerCase();
+    if (!lower) return false;
+    return this._userlist.some((u) => u.toLowerCase() === lower);
+  }
+  isUserBanned(username: string): boolean {
+    try { return isUserBanned(String(username || ""), this.banlist); } catch { return false; }
+  }
+  isUserIgnored(username: string): boolean {
+    try { return isUserBanned(String(username || ""), this.ignorelist); } catch { return false; }
+  }
+  banUser(username: string): string[] {
+    const name = String(username || "").trim();
+    if (!name) return this.getBanlist();
+    if (!this.banlist.includes(name)) {
+      this.banlist = [...this.banlist, name];
+    }
+    return this.getBanlist();
+  }
+  unbanUser(username: string): string[] {
+    const name = String(username || "").trim();
+    if (!name) return this.getBanlist();
+    this.banlist = this.banlist.filter((b) => b !== name);
+    return this.getBanlist();
+  }
+  ignoreUser(username: string): string[] {
+    const name = String(username || "").trim();
+    if (!name) return this.getIgnorelist();
+    if (!this.ignorelist.includes(name)) {
+      this.ignorelist = [...this.ignorelist, name];
+    }
+    return this.getIgnorelist();
+  }
+  unignoreUser(username: string): string[] {
+    const name = String(username || "").trim();
+    if (!name) return this.getIgnorelist();
+    this.ignorelist = this.ignorelist.filter((b) => b !== name);
+    return this.getIgnorelist();
+  }
+  blockIp(username: string): boolean {
+    const name = String(username || "").trim();
+    if (!name) return false;
+    let ip = this.userAddresses.get(name)?.addr?.ip || "";
+    if (!ip) {
+      const lower = name.toLowerCase();
+      for (const [u, entry] of this.userAddresses) {
+        if (u.toLowerCase() === lower && entry.addr?.ip) { ip = entry.addr.ip; break; }
+      }
+    }
+    if (!ip) return false;
+    if (this.ipblocklist[ip] === name) return true;
+    this.ipblocklist = { ...this.ipblocklist, [ip]: name };
+    return true;
   }
 
   setShareFilters(filters: string[]) {
@@ -2782,6 +2844,7 @@ export class SoulseekSession {
     this.ensurePeerAndSend(username, "P", buildFolderContentsRequest(token, dir));
   }
   queueUpload(username: string, file: string) { this.ensurePeerAndSend(username, "P", buildQueueUpload(file)); }
+  sendUploadDenied(username: string, file: string, reason = "Denied") { this.ensurePeerAndSend(username, "P", buildUploadDenied(file, reason)); }
   placeInQueueRequest(username: string, file: string) { this.ensurePeerAndSend(username, "P", buildPlaceInQueueRequest(file)); }
   transferRequest(username: string, direction: number, token: number, file: string, size?: bigint) {
     this.ensurePeerAndSend(username, "P", buildTransferRequest(direction, token, file, size));
