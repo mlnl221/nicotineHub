@@ -131,6 +131,23 @@ type SessionLike = {
   requestUserShares?: (user: string) => void;
   // we also proxy others as needed
   isBuddy?: (user: string) => boolean;
+  getUserlist?: () => string[];
+  getBanlist?: () => string[];
+  getIgnorelist?: () => string[];
+  banUser?: (user: string) => string[];
+  unbanUser?: (user: string) => string[];
+  ignoreUser?: (user: string) => string[];
+  unignoreUser?: (user: string) => string[];
+  isUserBanned?: (user: string) => boolean;
+  isUserIgnored?: (user: string) => boolean;
+  blockIp?: (user: string) => boolean;
+};
+
+type TransfersLike = {
+  isBuddy?: (user: string) => boolean;
+  getBuddies?: () => string[];
+  denyUpload?: (user: string, file: string, reason?: string) => boolean | void;
+  retryUploads?: (user?: string, file?: string) => void;
 };
 
 export class PluginManager {
@@ -145,6 +162,7 @@ export class PluginManager {
   private configDirStr = configDir();
   // core shim injected per session
   private sessionGetter: (() => SessionLike | null) | null = null;
+  private transfersGetter: (() => TransfersLike | null) | null = null;
   private outputHandler: ((pluginName: string, text: string) => void) | null = null;
 
   constructor(
@@ -159,6 +177,9 @@ export class PluginManager {
 
   setSessionGetter(getter: () => SessionLike | null): void {
     this.sessionGetter = getter;
+  }
+  setTransfersGetter(getter: () => TransfersLike | null): void {
+    this.transfersGetter = getter;
   }
   setOutputHandler(handler: ((pluginName: string, text: string) => void) | null): void {
     this.outputHandler = handler;
@@ -347,17 +368,19 @@ export class PluginManager {
   }
 
   private injectHelpers(plugin: BasePlugin): void {
-    const session = this.sessionGetter?.() ?? null;
     const manager = this;
+    // Resolve session per invocation — the session is null until login, so a
+    // value captured here would stay stale for ban/ignore/stats helpers.
+    const getSession = (): SessionLike | null => manager.sessionGetter?.() ?? null;
     plugin.parent = manager as unknown as BasePlugin["parent"];
     // expose manager as parent for command_source
     (plugin as unknown as { parent: PluginManager }).parent = manager;
     plugin.core = {
       sendPublic: (room: string, text: string) => {
-        try { session?.sayChatroom(room, text); } catch {}
+        try { getSession()?.sayChatroom(room, text); } catch {}
       },
       sendPrivate: (user: string, text: string) => {
-        try { session?.sendPrivateMessage(user, text); } catch {}
+        try { getSession()?.sendPrivateMessage(user, text); } catch {}
       },
       echoPublic: (_room: string, _text: string) => {
         // echo is UI-only; bridge logs it for diagnostics
@@ -369,22 +392,77 @@ export class PluginManager {
       // leech_detector helpers — delegate to session if available
       requestUserStats: (user: string) => {
         try {
-          const s = session as unknown as { watchUser?: (u: string) => void; getUserStats?: (u: string) => void };
+          const s = getSession() as unknown as { watchUser?: (u: string) => void; getUserStats?: (u: string) => void };
           if (s?.watchUser) s.watchUser(user);
           else if (s?.getUserStats) s.getUserStats(user);
         } catch {}
       },
       requestUserShares: (user: string) => {
         try {
-          const s = session as unknown as { requestSharedFileList?: (u: string) => void; requestUserShares?: (u: string) => void };
+          const s = getSession() as unknown as { requestSharedFileList?: (u: string) => void; requestUserShares?: (u: string) => void };
           if (s?.requestSharedFileList) s.requestSharedFileList(user);
           else if (s?.requestUserShares) s.requestUserShares(user);
         } catch {}
       },
       isBuddy: (user: string) => {
+        const lower = String(user || "").toLowerCase();
+        if (!lower) return false;
         try {
-          const s = session as unknown as { isBuddy?: (u: string) => boolean };
+          const s = getSession() as unknown as SessionLike | null;
           if (s?.isBuddy) return !!s.isBuddy(user);
+          // fallback: session _userlist / getUserlist (case-insensitive)
+          const list = s?.getUserlist?.() ?? (s as unknown as { _userlist?: string[] })?._userlist;
+          if (Array.isArray(list) && list.some((u) => String(u || "").toLowerCase() === lower)) return true;
+        } catch {}
+        try {
+          const t = manager.transfersGetter?.() ?? null;
+          if (t?.isBuddy) return !!t.isBuddy(user);
+          const buds = t?.getBuddies?.();
+          if (Array.isArray(buds) && buds.some((u) => String(u || "").toLowerCase() === lower)) return true;
+        } catch {}
+        return false;
+      },
+      denyUpload: (user: string, file: string, reason?: string) => {
+        try { return manager.transfersGetter?.()?.denyUpload?.(user, file, reason); } catch { return false; }
+      },
+      retryUploads: (user?: string, file?: string) => {
+        try { manager.transfersGetter?.()?.retryUploads?.(user, file); } catch {}
+      },
+      blockIp: (user: string): boolean => {
+        try {
+          const s = getSession();
+          const fn = s?.blockIp;
+          if (typeof fn === "function") return !!fn.call(s, String(user || "").trim());
+        } catch {}
+        return false;
+      },
+      banUser: (user: string) => {
+        try { getSession()?.banUser?.(String(user || "").trim()); } catch {}
+      },
+      unbanUser: (user: string) => {
+        try { getSession()?.unbanUser?.(String(user || "").trim()); } catch {}
+      },
+      ignoreUser: (user: string) => {
+        try { getSession()?.ignoreUser?.(String(user || "").trim()); } catch {}
+      },
+      unignoreUser: (user: string) => {
+        try { getSession()?.unignoreUser?.(String(user || "").trim()); } catch {}
+      },
+      isUserBanned: (user: string) => {
+        try {
+          const s = getSession() as unknown as SessionLike | null;
+          if (s?.isUserBanned) return !!s.isUserBanned(user);
+          const list = s?.getBanlist?.();
+          if (Array.isArray(list)) return list.includes(String(user || ""));
+        } catch {}
+        return false;
+      },
+      isUserIgnored: (user: string) => {
+        try {
+          const s = getSession() as unknown as SessionLike | null;
+          if (s?.isUserIgnored) return !!s.isUserIgnored(user);
+          const list = s?.getIgnorelist?.();
+          if (Array.isArray(list)) return list.includes(String(user || ""));
         } catch {}
         return false;
       },
@@ -804,6 +882,11 @@ export class PluginManager {
     const p = this.loadedPlugins.get(name);
     if (p) {
       Object.assign(p.settings, settings);
+      // re-run validation so derived state (e.g. sus_patterns) rebuilds
+      try {
+        const r = p.loaded_notification?.();
+        if (r instanceof Promise) r.catch((e) => logger.warn("bridge", `plugin ${name} re-validation failed`, { error: (e as Error).message }));
+      } catch (e) { logger.warn("bridge", `plugin ${name} re-validation failed`, { error: (e as Error).message }); }
       this.persistPluginSettings(p);
       return true;
     }

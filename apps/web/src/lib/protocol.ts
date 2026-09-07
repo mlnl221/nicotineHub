@@ -333,7 +333,7 @@ export interface DownloadControlRequest {
 export interface UploadControlRequest {
   type: "upload:control";
   id: string;
-  action: "cancel" | "clear";
+  action: "cancel" | "clear" | "deny";
 }
 
 /* ------------------------------------------------------------------ *

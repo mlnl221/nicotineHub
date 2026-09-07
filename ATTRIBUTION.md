@@ -101,6 +101,7 @@ ideas/spec, we still credit the source.
 | `apps/bridge/src/plugins/types.ts` | `pynicotine/pluginsystem.py:31` `BasePlugin` / `returncode` | **Full port** |
 | `apps/bridge/src/plugins/manager.ts` | `pynicotine/pluginsystem.py` | **Heavily derived** |
 | `apps/bridge/src/plugins/builtin/spamfilter.ts` | `pynicotine/plugins/spamfilter/__init__.py` | **Full port** |
+| `apps/bridge/src/plugins/builtin/leech_detector.ts` (+ `LeecherSection.tsx`, deny/ban WS) | `CompositeRegister/Anti-Leecher-for-Nicotine-ProveIt` (GPLv3, fork of `Blavkentropy1/Anti-Leecher-for-Nicotine`) | **Derived port** — thresholds, sus patterns, ban/ignore, ProveIt captcha/whitelist/cooldown/auto-retry; native `denyUpload` + `ban:add/remove` WS |
 | `apps/bridge/src/plugins/builtin/core_commands.ts` | `pynicotine/plugins/core_commands/__init__.py` | **Derived** (minimal `/help`+`/plugin`) |
 | `docs/settings-mapping.md` + `apps/web/src/lib/config/defaults.ts` | `pynicotine/config.py:156` defaults, `gtkgui/dialogs/preferences.py:3764`, `ui/settings/*.ui` | **Derived mapping** |
 | `apps/worker/spectrals.py` | `smokin-salmon/smoked-salmon` `src/salmon/uploader/spectrals.py` (Apache-2.0) — sox spectrogram `2000×513` + `500×1025` Kaiser `-z 120` + `oxipng -o 2` | **Port** — sox Full/Zoom + oxipng, `/tmp` ephemeral cache (migrated from `apps/bridge/src/spectrum.ts`, now deleted) |
