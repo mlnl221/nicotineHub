@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { appVersion, buildTag, soulseekClientVersion, shortSha, buildDate, displayVersion } from "@/lib/version";
+import { clearOnboardingDone } from "@/lib/onboarding";
 
 export function AboutSection() {
+  const router = useRouter();
   const [bridgeHealth, setBridgeHealth] = useState<{ version?: string; commitSha?: string; buildDate?: string; } | null>(null);
   useEffect(() => {
     // fetch bridge health for matching version (homelab) — optional, ignore errors (Vercel demo has no bridge)
@@ -144,6 +147,22 @@ export function AboutSection() {
             <p className="font-body text-sm leading-relaxed text-on-surface-variant">
               GPL-3.0-or-later — see <a href="https://github.com/mlnl221/nicotineHub/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">LICENSE</a> and <a href="https://github.com/mlnl221/nicotineHub/blob/main/ATTRIBUTION.md" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">ATTRIBUTION.md</a> for full notices. This project is not affiliated with Soulseek.
             </p>
+          </div>
+          <div className="flex items-center justify-between gap-4 rounded-xl bg-surface-container-lowest dark:bg-surface-container p-4 ghost-border">
+            <div>
+              <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Setup guide</h4>
+              <p className="font-body text-sm text-on-surface-variant">Replay the first-run walkthrough (shares, leechers, captcha, appearance, keys).</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                clearOnboardingDone();
+                router.push("/onboarding");
+              }}
+              className="shrink-0 rounded-xl bg-surface-container-high px-4 py-2.5 font-label text-xs font-bold uppercase tracking-widest text-primary dark:bg-surface-container-highest/60"
+            >
+              Replay
+            </button>
           </div>
         </div>
       </section>

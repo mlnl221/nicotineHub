@@ -241,6 +241,10 @@ async function mockBridge(page, opts: { withTransfers?: boolean } = {}) {
 }
 
 async function login(page) {
+  // Returning user: skip the first-run onboarding wizard.
+  await page.addInitScript(() => {
+    try { localStorage.setItem("nicotineHub.onboardingDone", "1"); } catch {}
+  });
   await page.goto("/");
   await page.getByRole("textbox", { name: "Username" }).fill("tester");
   await page.getByRole("textbox", { name: "Password" }).fill("secret123");
