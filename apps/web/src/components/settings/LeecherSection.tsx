@@ -22,8 +22,8 @@ const DEFAULTS: Draft = {
   message: "Please consider not being a leecher. Thanks",
   hide_plugin_messages: false,
   open_private_chat: true,
-  num_files: 1010,
-  num_folders: 51,
+  num_files: 10,
+  num_folders: 1,
   send_message_to_leechers: false,
   ban_leechers: true,
   ignore_leechers: true,
@@ -321,7 +321,8 @@ export function LeecherSection() {
               description="Users sharing fewer files than this are flagged."
               value={num(draft.num_files, 1)}
               min={0}
-              max={1000000}
+              max={100000}
+              sliderMax={1000}
               onChange={(v) => set("num_files", v)}
               onReset={() => set("num_files", DEFAULTS.num_files)}
             />
@@ -330,7 +331,8 @@ export function LeecherSection() {
               description="Users sharing fewer folders than this are flagged."
               value={num(draft.num_folders, 1)}
               min={1}
-              max={100000}
+              max={10000}
+              sliderMax={1000}
               onChange={(v) => set("num_folders", v)}
               onReset={() => set("num_folders", DEFAULTS.num_folders)}
             />
