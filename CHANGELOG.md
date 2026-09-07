@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.32.0](https://github.com/mlnl221/nicotineHub/compare/v0.31.0...v0.32.0) (2026-09-07)
+
+
+### Features
+
+* **demo:** mock leech_detector plugin so leecher settings render ([0631fa0](https://github.com/mlnl221/nicotineHub/commit/0631fa025493ceff752622cbe397d4bffa23f487))
+* **leecher:** port Anti-Leecher ProveIt + Leecher settings tab ([7820dcf](https://github.com/mlnl221/nicotineHub/commit/7820dcf66d8bff39d3dbd9d7496e9edc5ecf31c5))
+* **leecher:** port Anti-Leecher ProveIt + Leecher settings tab ([4e527dc](https://github.com/mlnl221/nicotineHub/commit/4e527dcd4f1c9ebff126b386ce88e0acfcb1002f))
+* **leecher:** sane defaults 10 files / 1 folder, slider capped at 1000 ([87d668f](https://github.com/mlnl221/nicotineHub/commit/87d668f67afd4cab1a462fda786e444c761f2e8d))
+* **onboarding:** first-run setup wizard ([11125a3](https://github.com/mlnl221/nicotineHub/commit/11125a386fd6391b0c01884e390c133ddabb867e))
+* **onboarding:** first-run setup wizard (shares, leechers, captcha, appearance, keys) ([fd34f24](https://github.com/mlnl221/nicotineHub/commit/fd34f248c2dc047f2adcc80f5eef6813d02483b2))
+* **onboarding:** include demo mode, leecher copy 10/1 ([49e7136](https://github.com/mlnl221/nicotineHub/commit/49e71363ae28887d642f1b2283e99ecb6ba15c40))
+* **search:** add Hide-private toggle to /search header, persist default, mock private rows in demo ([2679256](https://github.com/mlnl221/nicotineHub/commit/2679256ec5c2bc9da606e4dc76e76cc2917b4e79))
+* **search:** sticky zero-tab filter draft seeds next search ([b97c6d2](https://github.com/mlnl221/nicotineHub/commit/b97c6d29fc336248e3067b4011cb3a9cff2fd856))
+* **search:** sticky zero-tab filter draft seeds next search ([cab626c](https://github.com/mlnl221/nicotineHub/commit/cab626c9e3ae5045b43cf60ae0cf3467bd10bce8))
+
 ## [0.31.0](https://github.com/mlnl221/nicotineHub/compare/v0.30.1...v0.31.0) (2026-09-06)
 
 
