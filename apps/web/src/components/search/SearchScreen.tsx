@@ -151,6 +151,24 @@ export function SearchScreen() {
             {visibleRows.length !== activeTab.total ? ` • showing ${visibleRows.length}` : ""}
           </span>
           <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              aria-pressed={activeTab.filters.publicOnly}
+              title={activeTab.filters.publicOnly ? "Showing public files only — tap to show private results" : "Private results visible — tap to hide private shares"}
+              onClick={() => {
+                if (!activeId) return;
+                const next = !activeTab.filters.publicOnly;
+                setFilters(activeId, { publicOnly: next });
+                setOption("searches", "defilter", { ...settings.searches.defilter, publicFiles: next });
+              }}
+              className={`rounded-full px-2 py-1 text-[10px] font-semibold outline-none ${
+                activeTab.filters.publicOnly
+                  ? "bg-primary text-on-primary"
+                  : "bg-surface-container-high text-on-surface-variant"
+              }`}
+            >
+              {activeTab.filters.publicOnly ? "Public only" : "Hide private"}
+            </button>
             <select
               value={settings.searches.group_searches}
               onChange={(e) => setOption("searches", "group_searches", e.target.value)}
