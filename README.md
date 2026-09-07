@@ -201,3 +201,15 @@ PRs welcome! Please read [`CONTRIBUTING.md`](./CONTRIBUTING.md) first — target
 **License:** [`GPL-3.0-or-later`](./LICENSE). © 2001–2026 Nicotine+, PySoulSeek; © 2025–2026 Nicotine Hub. See [`ATTRIBUTION.md`](./ATTRIBUTION.md) (upstream `8d81e66`) and [`LICENSE`](LICENSE).
 
 **Soulseek** network / `server.slsknet.org` is volunteer-operated and not affiliated with this project. By connecting you agree to the [Soulseek rules](https://www.slsknet.org/news/node/681) and [Terms](https://www.slsknet.org/news/node/682). Soulseek is unencrypted; see Security above.
+
+---
+
+## Star History
+
+<a href="https://www.star-history.com/mlnl221/nicotineHub">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=mlnl221/nicotineHub&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=mlnl221/nicotineHub&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=mlnl221/nicotineHub&type=Date" />
+  </picture>
+</a>
