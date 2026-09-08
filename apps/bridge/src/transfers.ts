@@ -1246,9 +1246,13 @@ export class TransferManager {
     this.emit(t);
     this.emitStats();
 
-    // Send FileOffset (uint64 LE)
-    try { socket.write(packUint64(startOffset)); } catch (e) { try { logger.warn("transfer", "FileOffset write failed", { token, error: (e as Error)?.message }); } catch {} }
-    try { logger.debug("transfer", "FileOffset sent, awaiting bytes", { username: t.username, file: t.virtualPath.slice(-60), token, offset: String(startOffset), size: t.size }); } catch {}
+    // Send FileOffset (uint64 LE) — log write result: proves bytes left our socket
+    // (distinguishes local write fail from loss in transit to peer).
+    try {
+      const off = packUint64(startOffset);
+      const wr = (socket as unknown as { write: (b: Buffer) => unknown }).write(off);
+      try { logger.debug("transfer", "FileOffset sent, awaiting bytes", { username: t.username, file: t.virtualPath.slice(-60), token, offset: String(startOffset), size: t.size, wrote: typeof wr === "number" ? wr : String(wr) }); } catch {}
+    } catch (e) { try { logger.warn("transfer", "FileOffset write failed", { token, error: (e as Error)?.message }); } catch {} }
     try { this.session?.unregisterFileToken(token); } catch {}
 
     // Stream raw bytes → file
