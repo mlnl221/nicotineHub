@@ -97,8 +97,11 @@ const BrowsePageSchema = z.object({
   type: z.literal("browse:page"),
   username: z.string().min(1).max(64),
   offset: z.number().int().min(0).max(100000),
-  limit: z.number().int().min(1).max(200),
+  limit: z.number().int().min(1).max(1000),
 });
+// Internal web<->bridge paging only — the peer always sends one full zlib blob
+// (SharedFileListRequest code 4, empty payload), so page size is wire-invisible.
+const BROWSE_PAGE_SIZE = 1000;
 const PingSchema = z.object({
   type: z.literal("ping"),
   ts: z.number().optional(),
@@ -527,8 +530,8 @@ function sharedSessionCallbacks() {
             out.push(f);
           }
           try { browseCache.set(event.username.toLowerCase(), { folders: out as unknown[], ts: Date.now() }); } catch {}
-          const page = out.slice(0, 200);
-          const hasMore = out.length > 200;
+          const page = out.slice(0, BROWSE_PAGE_SIZE);
+          const hasMore = out.length > BROWSE_PAGE_SIZE;
           const lockedCount = Array.isArray(event.lockedFolders) ? event.lockedFolders.length : 0;
           // Stash the full result on every attached client so browse:page works per client.
           // NB: browse:page reads ws.data — stash there, not on the wrapper object.
@@ -1597,8 +1600,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           if (isSelf) {
             try {
               const all = foldersForBrowse as unknown[];
-              const page = all.slice(0, 200);
-              const hasMore = all.length > 200;
+              const page = all.slice(0, BROWSE_PAGE_SIZE);
+              const hasMore = all.length > BROWSE_PAGE_SIZE;
               logger.info("browse", "local self-shares", { username: result.data.username, dirs: all.length });
               try { browseCache.set(result.data.username.toLowerCase(), { folders: all as unknown[], ts: Date.now() }); } catch {}
               (ws.data as unknown as Record<string, unknown>)._browseFull = all;

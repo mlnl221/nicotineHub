@@ -25,7 +25,11 @@ export function BrowseTabs() {
             <span className="max-w-[28vw] truncate whitespace-nowrap min-h-[28px] flex items-center gap-1 pointer-events-none">
               <span className="truncate">{tab.username}</span>
               {tab.loading ? <span className="ml-1 animate-pulse">•</span> : null}
-              {!tab.loading && tab.folders.length ? <span className="opacity-60">({tab.folders.length})</span> : null}
+              {tab.folders.length || tab.total ? (
+                <span className="opacity-60">
+                  ({tab.loading && tab.total ? `${tab.folders.length}/${tab.total}` : tab.folders.length})
+                </span>
+              ) : null}
             </span>
             {showClose ? (
               <span
