@@ -430,6 +430,14 @@ function createSharedTransfers(): TransferManager {
     getSession: () => sharedSession as unknown as ReturnType<TransferManager["getByToken"]> extends never ? never : unknown as never,
   });
   tm.setSessionGetter(() => sharedSession as unknown as never);
+  const pt = PERSISTED_SETTINGS?.transfers ?? {};
+  const keys = ["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "groupdownloads", "groupuploads", "incomplete_strategy", "download_destination_template", "download_subdirectory"];
+  const init: Record<string, unknown> = {};
+  for (const k of keys) if (pt[k] !== undefined) init[k] = pt[k];
+  if (pt["incompleteStrategy"] !== undefined) init["incomplete_strategy"] = pt["incompleteStrategy"];
+  if (pt["downloadDestinationTemplate"] !== undefined) init["download_destination_template"] = pt["downloadDestinationTemplate"];
+  if (pt["downloadSubdirectory"] !== undefined) init["download_subdirectory"] = pt["downloadSubdirectory"];
+  if (Object.keys(init).length) tm.setConfig(init);
   tm.setBanlistUpdatedCb((banlist, byUser) => {
     broadcastJson({ type: "banlist:updated", banlist, byUser, reason: "honeypot" });
   });

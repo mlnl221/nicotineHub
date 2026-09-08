@@ -56,6 +56,9 @@ export function TransferCard({
     transfer.status === "Too many files" ||
     transfer.status === "Too many megabytes";
   const isTransferring = transfer.status === "Transferring" || transfer.status === "Getting status";
+  const basename = (transfer.virtualPath.split("\\").pop() ?? transfer.fileName).replace(/[/\\]/g, "_");
+  const safeUser = transfer.username.replace(/[/\\]/g, "_").replace(/\.\./g, "_");
+  const savePath = `downloads/${settings.transfers.usernamesubfolders ? `${safeUser}/` : ""}${basename}`;
 
   const barColor = transfer.isUpload
     ? isQueued
@@ -93,6 +96,11 @@ export function TransferCard({
           <p className="font-label text-[11px] text-outline mt-0.5 truncate hidden md:block" title={reverse ? transfer.virtualPath : transfer.fileName}>
             {reverse ? transfer.virtualPath : transfer.fileName}
           </p>
+          {!transfer.isUpload ? (
+            <p className="font-label text-[11px] text-outline mt-0.5 truncate hidden md:block" title={savePath}>
+              Expected: {savePath}
+            </p>
+          ) : null}
         </div>
         <div className="text-right shrink-0">
           <div className={`font-label font-bold text-sm ${isQueued || isPaused || isFinished || isCancelled ? "text-outline" : speedColor}`}>

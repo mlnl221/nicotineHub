@@ -97,6 +97,17 @@ function fileNameOf(virtualPath: string): string {
   return parts[parts.length - 1] || virtualPath;
 }
 
+// ponytail: single sink for peer-controlled names; per-user dirs if stricter mapping needed
+function safeUsername(username: string): string {
+  const s = username.replace(/[/\\]/g, "_").replace(/\.\./g, "_");
+  return s === "" || s === "." ? "_" : s;
+}
+
+function safeBasename(virtualPath: string): string {
+  const b = fileNameOf(virtualPath).replace(/[/\\]/g, "_") || "file";
+  return b === "." || b === ".." ? "file" : b;
+}
+
 function getIncompletePath(virtualPath: string, username: string, incompleteDir: string): string {
   const hash = createHash("md5").update(virtualPath + username).digest("hex");
   const prefix = `INCOMPLETE${hash}`;
@@ -111,10 +122,10 @@ function getIncompletePath(virtualPath: string, username: string, incompleteDir:
 function getFinishedPath(virtualPath: string, downloadsDir: string, username?: string, usernamesubfolders?: boolean): string {
   let dir = downloadsDir;
   if (usernamesubfolders && username) {
-    dir = join(downloadsDir, username.replace(/[/\\]/g, "_"));
+    dir = join(downloadsDir, safeUsername(username));
     try { mkdirSync(dir, { recursive: true }); } catch {}
   }
-  const base = fileNameOf(virtualPath).replace(/[/\\]/g, "_") || "file";
+  const base = safeBasename(virtualPath);
   let dest = join(dir, base);
   // avoid conflict "(1)" loop
   let counter = 1;
@@ -481,7 +492,7 @@ export class TransferManager {
     const byName = join(this.downloadsDir, t.fileName);
     if (existsSync(byName)) return byName;
     if (this.config.usernamesubfolders && t.username) {
-      const sub = join(this.downloadsDir, t.username.replace(/[/\\]/g, "_"), t.fileName);
+      const sub = join(this.downloadsDir, safeUsername(t.username), t.fileName);
       if (existsSync(sub)) return sub;
     }
     // Derive via template (same as finishDownload)
@@ -494,9 +505,9 @@ export class TransferManager {
       // scan subfolders if usernamesubfolders
       if (this.config.usernamesubfolders && t.username) {
         try {
-          const subFiles = readdirSync(join(this.downloadsDir, t.username.replace(/[/\\]/g, "_")));
+          const subFiles = readdirSync(join(this.downloadsDir, safeUsername(t.username)));
           const m2 = subFiles.find((f) => f === t.fileName);
-          if (m2) return join(this.downloadsDir, t.username.replace(/[/\\]/g, "_"), m2);
+          if (m2) return join(this.downloadsDir, safeUsername(t.username), m2);
         } catch {}
       }
     } catch {}
@@ -1518,7 +1529,7 @@ export class TransferManager {
     expanded = expanded.replace(/\.\./g, "_").replace(/^[/\\]+/, "");
     let dir = join(this.downloadsDir, expanded);
     try { mkdirSync(dir, { recursive: true }); } catch {}
-    const base = fileNameOf(virtualPath).replace(/[/\\]/g, "_") || "file";
+    const base = safeBasename(virtualPath);
     let dest = join(dir, base);
     let counter = 1; let candidate = dest;
     while (existsSync(candidate)) {

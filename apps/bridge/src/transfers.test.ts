@@ -151,6 +151,33 @@ describe("transfers — download engine (Phase 2)", () => {
     // Instead test helper directly via second download of same file different user
     mgr.close();
   });
+
+  test("usernamesubfolders saves under downloads/<user> and neutralizes ..", async () => {
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    (mgr as any).transfers.clear();
+    mgr.setConfig({ usernamesubfolders: true });
+    const finishOne = async (user: string, virtual: string, name: string, size: number) => {
+      const t = mgr.requestDownload(user, virtual, size, name);
+      mgr.handleTransferRequest(1, t.token!, virtual);
+      const mockSocket: any = { write: () => {}, end: () => {} };
+      await (mgr as any).handleFileConnection(t.token!, mockSocket);
+      (mgr as any).handleFileChunk(t.token!, Buffer.alloc(size, 0x41));
+      return t;
+    };
+    await finishOne("alice", "Music\\song.mp3", "song.mp3", 1024);
+    expect(existsSync(join(tmp, "downloads", "alice", "song.mp3"))).toBe(true);
+    await finishOne("..", "Music\\evil.mp3", "evil.mp3", 16);
+    expect(existsSync(join(tmp, "downloads", "_", "evil.mp3"))).toBe(true);
+    expect(existsSync(join(tmp, "evil.mp3"))).toBe(false);
+    mgr.close();
+  });
 });
 
 describe("transfers — upload serving (Phase 4)", () => {
