@@ -81,6 +81,16 @@ describe("readChatLogTail", () => {
     expect(readChatLogTail("rooms", "../../etc", 10)).toEqual([]);
     expect(readChatLogTail("private", "..", 10)).toEqual([]);
   });
+  test("multiline messages collapse to one line and round-trip whole", () => {
+    logPrivateMessage("peer", "peer", "line one\nline two\r\nline three");
+    logRoomMessage("Jazz", "a", "room\nsplit");
+    const pm = readChatLogTail("private", "peer", 10);
+    expect(pm.length).toBe(1);
+    expect(pm[0].message).toBe("line one line two  line three");
+    const room = readChatLogTail("rooms", "Jazz", 10);
+    expect(room.length).toBe(1);
+    expect(room[0].message).toBe("room split");
+  });
   test("unknown key returns empty", () => {
     expect(readChatLogTail("rooms", "Nope", 10)).toEqual([]);
   });

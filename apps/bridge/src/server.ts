@@ -1531,6 +1531,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           const out = pluginManager.outgoingPrivateChatEvent(result.data.username, msg);
           if (out === null) return;
           const finalMsg = (out?.[1] as string) ?? msg;
+          // No typing indicator protocol on the wire — drop our own legacy
+          // TYPING control messages so peers never see them (mixed-version defense).
+          if (/^\x01TYPING\x01$/i.test(finalMsg)) return;
           session.sendPrivateMessage(result.data.username, finalMsg);
           pluginManager.outgoingPrivateChatNotification(result.data.username, finalMsg);
           // log outgoing private (tag is own username, peer is recipient)
