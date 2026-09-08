@@ -9,7 +9,7 @@ export function AboutSection() {
   const router = useRouter();
   const [bridgeHealth, setBridgeHealth] = useState<{ version?: string; commitSha?: string; buildDate?: string; } | null>(null);
   useEffect(() => {
-    // fetch bridge health for matching version (homelab) — optional, ignore errors (Vercel demo has no bridge)
+    // fetch bridge health for matching version — optional, ignore errors (Vercel demo has no bridge)
     const url = typeof window !== "undefined" ? (localStorage.getItem("nicotineHub.bridgeUrl") || "") : "";
     const healthUrl = url ? url.replace(/\/ws\/?$/, "/health?json") : "/health?json";
     // try relative + absolute, but avoid CORS noise: only try same-origin when no custom url
@@ -34,7 +34,7 @@ export function AboutSection() {
                 About Nicotine Hub
               </h3>
               <p className="font-body text-sm text-on-surface-variant dark:text-outline mt-1">
-                Browser-first Soulseek client for your homelab. Not affiliated with Soulseek.
+                Browser-first Soulseek client. Not affiliated with Soulseek.
               </p>
             </div>
             <div className="flex flex-col items-end gap-1 text-right">

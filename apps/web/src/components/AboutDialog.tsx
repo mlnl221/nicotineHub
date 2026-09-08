@@ -109,7 +109,7 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
           {tab === "about" ? (
             <>
               <p className="font-body text-sm leading-relaxed text-on-surface-variant">
-                Browser-first Soulseek client for your homelab. Not affiliated with Soulseek. Port of Nicotine+ framing and settings — see Attribution.
+                Browser-first Soulseek client. Not affiliated with Soulseek. Port of Nicotine+ framing and settings — see Attribution.
               </p>
               <div className="rounded-xl bg-surface-container-low p-4 ghost-border space-y-2">
                 <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Links</h4>
