@@ -3019,7 +3019,9 @@ export class SoulseekSession {
     const pendingReq = this.peerAddressRequests.get(username);
     const isLivePending = !!pendingReq && (now - (pendingReq.createdAt ?? 0) < PEER_ADDRESS_TIMEOUT_MS);
     const hasLiveSocketForUser = !!(cachedCheck && now - cachedCheck.updated < USER_ADDRESS_TTL_MS && (() => {
-      for (const [, st] of this.peerStates) if (st.username?.toLowerCase() === keyLower && st.connType === connType) return true;
+      // Only fully-initialized sockets count: coalescing behind a half-open
+      // dial strands the message when the sweep kills it (initTimeout).
+      for (const [, st] of this.peerStates) if (st.username?.toLowerCase() === keyLower && st.connType === connType && st.initDone) return true;
       return false;
     })());
     // Only coalesce if there's a live GetPeerAddress in flight or a live socket for this exact user+type.
