@@ -12,6 +12,8 @@ export interface BrowseTab {
   loading: boolean;
   error: string | null;
   folders: BrowseFolder[];
+  /** Authoritative folder count from bridge `total` — drives loading progress bar. */
+  total: number | null;
   currentFolder: string | null;
   currentFiles: BrowseFile[] | null;
   query: string;
@@ -64,6 +66,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
         loading: true,
         error: null,
         folders: [],
+        total: null,
         currentFolder: null,
         currentFiles: null,
         query: "",
@@ -110,7 +113,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
     const newTabs: BrowseTab[] = [...DEMO_BROWSE_USERS].map((username) => {
       const id = `b${++counter.current}`;
       const folders = mockBrowseFolders(username);
-      return { id, username, loading: false, error: null, folders, currentFolder: null, currentFiles: null, query: "" };
+      return { id, username, loading: false, error: null, folders, total: folders.length, currentFolder: null, currentFiles: null, query: "" };
     });
     setTabs(newTabs);
     setActiveId(newTabs[0]?.id ?? null);
@@ -160,7 +163,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
         const isFreshStart = off === 0;
         if (more) {
           // Schedule next page from authoritative nextOffset per tab (avoids held+page race when two chains interleave)
-          // Use the max tracker seen for this user, default 200 after first page
+          // Use the max tracker seen for this user, default 1000 after first page
           const tabIds = tabsRef.current.filter((t) => t.username.toLowerCase() === lower).map((t) => t.id);
           for (const tid of tabIds) {
             const expected = nextOffsetRef.current.get(tid) ?? 0;
@@ -169,7 +172,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
             if (off !== 0 && off !== expected) continue;
             const nextOff = off + pageFolders.length;
             nextOffsetRef.current.set(tid, nextOff);
-            try { send({ type: "browse:page", username: m.username, offset: nextOff, limit: 200 }); } catch {}
+            try { send({ type: "browse:page", username: m.username, offset: nextOff, limit: 1000 }); } catch {}
           }
         } else {
           // Final page — clear trackers for this user
@@ -190,10 +193,11 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
             const seen = off === 0 ? new Set<string>() : new Set(t.folders.map((f) => f.name));
             const novel = off === 0 ? pageFolders : pageFolders.filter((p) => !seen.has(p.name));
             const merged = off === 0 ? novel : [...t.folders, ...novel];
-            if (more) return { ...t, loading: true, error: null, folders: merged };
+            const total = typeof m.total === "number" ? m.total : null;
+            if (more) return { ...t, loading: true, error: null, folders: merged, total };
             const timer = timersRef.current.get(t.id);
             if (timer) { clearTimeout(timer); timersRef.current.delete(t.id); }
-            return { ...t, loading: false, error: null, folders: merged };
+            return { ...t, loading: false, error: null, folders: merged, total: total ?? merged.length };
           });
         });
       } else if (isFolderMsg || isLegacyFolderError) {
@@ -258,7 +262,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const requestShares = useCallback((id: string, username: string) => {
-    setTabs((prev) => prev.map((t) => t.id === id ? { ...t, loading: true, error: null, folders: [] } : t));
+    setTabs((prev) => prev.map((t) => t.id === id ? { ...t, loading: true, error: null, folders: [], total: null } : t));
     nextOffsetRef.current.set(id, 0);
     const existingTimer = timersRef.current.get(id);
     if (existingTimer) { clearTimeout(existingTimer); timersRef.current.delete(id); }
@@ -295,7 +299,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
     if (tabsRef.current.length >= MAX_TABS) return;
     pendingOpenRef.current.add(lower);
     const id = `b${++counter.current}`;
-    const tab: BrowseTab = { id, username, loading: true, error: null, folders: [], currentFolder: null, currentFiles: null, query: "" };
+    const tab: BrowseTab = { id, username, loading: true, error: null, folders: [], total: null, currentFolder: null, currentFiles: null, query: "" };
     setTabs((prev) => {
       if (prev.some((t) => t.username.toLowerCase() === lower)) return prev;
       return [...prev, tab];
