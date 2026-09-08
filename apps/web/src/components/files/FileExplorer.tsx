@@ -38,6 +38,8 @@ function formatMtime(ms: number): string {
   } catch { return "—"; }
 }
 
+export type SharePermission = "public" | "buddy" | "trusted";
+
 export type FileExplorerProps = {
   initialPath?: string;
   onSelect: (path: string) => void;
@@ -46,6 +48,8 @@ export type FileExplorerProps = {
   confirmLabel?: string;
   title?: string;
   showFiles?: boolean;
+  sharePermission?: SharePermission;
+  onSharePermissionChange?: (p: SharePermission) => void;
 };
 
 export function FileExplorer({
@@ -56,6 +60,8 @@ export function FileExplorer({
   confirmLabel = "Share this folder",
   title = "Browse /data",
   showFiles = true,
+  sharePermission = "public",
+  onSharePermissionChange,
 }: FileExplorerProps) {
   const [current, setCurrent] = useState(initialPath);
   const [entries, setEntries] = useState<BridgeFileEntry[]>([]);
@@ -485,6 +491,25 @@ export function FileExplorer({
           </button>
         </div>
       </div>
+
+      {/* Share-as permission — rendered only when parent wires onSharePermissionChange (/files page) */}
+      {onSharePermissionChange && (
+        <div className="flex items-center gap-1.5 border-b border-outline-variant/10 bg-amber-50/50 px-3 py-2 dark:bg-amber-950/10" role="radiogroup" aria-label="Share as">
+          <span className="font-label text-[11px] font-medium text-amber-800/80 dark:text-amber-200/70">Share as:</span>
+          {(["public", "buddy", "trusted"] as const).map((p) => (
+            <button
+              key={p}
+              type="button"
+              role="radio"
+              aria-checked={sharePermission === p}
+              onClick={() => onSharePermissionChange(p)}
+              className={`rounded-full px-3 py-1.5 font-label text-[11px] font-semibold ${sharePermission === p ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest dark:bg-surface-variant dark:text-outline"}`}
+            >
+              {p === "public" ? "Public" : p === "buddy" ? "Buddies" : "Trusted"}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Inline scan progress — shows during rescan even when sharesDirty is empty */}
       {rescanning && (

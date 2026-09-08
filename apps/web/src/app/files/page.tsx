@@ -5,10 +5,11 @@ import { useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
-import { FileExplorer } from "@/components/files/FileExplorer";
+import { FileExplorer, type SharePermission } from "@/components/files/FileExplorer";
 import { PageHeader } from "@/components/PageHeader";
 import { RequireAuth } from "@/components/RequireAuth";
 import { isDemo } from "@/lib/demo";
+import { getLocal, setLocal } from "@/lib/storage";
 import { useConfig } from "@/lib/config/provider";
 import { useSaveSection } from "@/lib/config/save";
 import { useSession } from "@/lib/session";
@@ -54,9 +55,18 @@ function FilesInner() {
   const [lastSelected, setLastSelected] = useState<string | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [sharePerm, setSharePerm] = useState<SharePermission>(() => {
+    const v = getLocal("nicotineHub.files.sharePermission");
+    return v === "buddy" || v === "trusted" ? v : "public";
+  });
   const { settings, setOption } = useConfig();
   const saveSection = useSaveSection();
   const { state: sessionState, send } = useSession();
+
+  const changeSharePerm = (p: SharePermission) => {
+    setSharePerm(p);
+    setLocal("nicotineHub.files.sharePermission", p);
+  };
 
   const notify = (title: string, body: string) => {
     try {
@@ -64,7 +74,7 @@ function FilesInner() {
     } catch {}
   };
 
-  // Auto-save on pick: normalize → dedup → setOption(transfers.shared) → saveSection → shares:rescan
+  // Auto-save on pick: normalize → dedup → setOption(transfers.*) → saveSection → shares:rescan
   const handleSelect = async (p: string) => {
     if (saving) return;
     const norm = normalizeFolderPath(p);
@@ -85,21 +95,23 @@ function FilesInner() {
       notify("Already shared", `${norm} is already in your shares.`);
       return;
     }
+    const key = sharePerm === "buddy" ? "buddyshared" : sharePerm === "trusted" ? "trustedshared" : "shared";
+    const permLabel = sharePerm === "buddy" ? "Buddies" : sharePerm === "trusted" ? "Trusted" : "Public";
     const virtual = getNormalizedVirtualName(getBasename(norm), all);
-    const nextShared: [string, string][] = [...t.shared, [virtual, norm]];
+    const nextList: [string, string][] = [...t[key], [virtual, norm]];
     // Pass the post-append draft explicitly — settings closure is pre-setOption until re-render
-    const nextDraft = { ...settings, transfers: { ...t, shared: nextShared } };
-    setOption("transfers", "shared", nextShared);
+    const nextDraft = { ...settings, transfers: { ...t, [key]: nextList } };
+    setOption("transfers", key, nextList);
     setLastSelected(norm);
     if (sessionState.status !== "connected") {
       try { await saveSection("transfers", () => nextDraft); } catch {}
-      notify("Saved locally", `"${virtual}" saved — bridge offline, syncs on connect.`);
+      notify("Saved locally", `"${virtual}" saved (${permLabel}) — bridge offline, syncs on connect.`);
       return;
     }
     setSaving(true);
     try {
       await saveSection("transfers", () => nextDraft);
-      notify("Share saved", `"${virtual}" → ${norm} — rescanning…`);
+      notify("Share saved", `"${virtual}" → ${norm} (${permLabel}) — rescanning…`);
       try {
         send({ type: "shares:rescan" });
       } catch (e) {
@@ -156,6 +168,8 @@ function FilesInner() {
               confirmLabel="Use this folder"
               title="Explorer — /data"
               onSelect={handleSelect}
+              sharePermission={sharePerm}
+              onSharePermissionChange={changeSharePerm}
             />
             {lastSelected && (
               <div className="mt-3 flex flex-col gap-2 rounded-xl bg-surface-container-high px-4 py-3 dark:bg-surface-variant/40 sm:flex-row sm:items-center sm:justify-between">

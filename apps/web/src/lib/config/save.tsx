@@ -71,13 +71,13 @@ export function useSaveSection() {
       const messages = buildSectionMessages(section, draft);
       // Demo / offline: commit locally; the connect-push delivers committed state when connected.
       if (isDemo || state.status !== "connected") {
-        markSectionSaved(section);
+        markSectionSaved(section, draft[section]);
         return;
       }
       const awaited = messages.filter((m) => m.type === "config:update");
       if (awaited.length === 0) {
         for (const m of messages) send(m);
-        markSectionSaved(section);
+        markSectionSaved(section, draft[section]);
         return;
       }
       const pending = new Map(awaited.map((m) => [`${m.section}:${m.key}`, false]));
@@ -104,7 +104,7 @@ export function useSaveSection() {
         });
         for (const m of messages) send(m);
       });
-      markSectionSaved(section);
+      markSectionSaved(section, draft[section]);
     },
     [markSectionSaved, send, subscribe, state.status],
   );
