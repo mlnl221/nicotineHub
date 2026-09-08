@@ -92,6 +92,8 @@ export function FileExplorer({
   const [sharesDirty, setSharesDirty] = useState<string[]>([]);
   const [rescanning, setRescanning] = useState(false);
   const [rescanError, setRescanError] = useState<string | null>(null);
+  const [scanProgress, setScanProgress] = useState<{ dirs: number; files: number; current?: string } | null>(null);
+  const rescanTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { settings } = useConfig();
   const { state: sessionState, send, subscribe } = useSession();
   const [secInfoOpen, setSecInfoOpen] = useState(false);
@@ -350,22 +352,33 @@ export function FileExplorer({
     }
     setRescanning(true);
     setRescanError(null);
-    try { send({ type: "shares:rescan" } as unknown as never); } catch (e) { setRescanning(false); setRescanError(e instanceof Error ? e.message : String(e)); }
-    setTimeout(() => setRescanning((v) => (v ? false : v)), 30_000);
+    setScanProgress(null);
+    try { send({ type: "shares:rescan" } as unknown as never); } catch (e) { setRescanning(false); setRescanError(e instanceof Error ? e.message : String(e)); return; }
+    if (rescanTimer.current) clearTimeout(rescanTimer.current);
+    rescanTimer.current = setTimeout(() => { setRescanning(false); setScanProgress(null); }, 30_000);
   }, [sessionState.status, send]);
+
+  useEffect(() => () => { if (rescanTimer.current) clearTimeout(rescanTimer.current); }, []);
 
   useEffect(() => {
     const unsub = subscribe((msg: unknown) => {
-      const m = msg as { type?: string; counts?: { dirs:number; files:number }; error?: string };
-      if (m.type === "shares:rescanned") {
+      const m = msg as { type?: string; counts?: { dirs:number; files:number }; dirs?: number; files?: number; current?: string; error?: string };
+      if (m.type === "shares:scan:progress") {
+        setScanProgress({ dirs: m.dirs ?? 0, files: m.files ?? 0, current: m.current });
+        setRescanning(true);
+        if (rescanTimer.current) clearTimeout(rescanTimer.current);
+        rescanTimer.current = setTimeout(() => { setRescanning(false); setScanProgress(null); }, 30_000);
+      } else if (m.type === "shares:rescanned") {
         if (rescanning) {
           setRescanning(false);
+          setScanProgress(null);
           setSharesDirty([]);
           try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Shares rescanned", body: m.counts ? `${m.counts.dirs} dirs · ${m.counts.files} files` : "Done" } })); } catch {}
           fetchDir(current);
         }
       } else if (m.type === "error" && rescanning) {
         setRescanning(false);
+        setScanProgress(null);
         setRescanError(m.error || "Rescan failed");
       }
     });
@@ -449,16 +462,40 @@ export function FileExplorer({
             {dirs.length} folder(s){showFiles ? ` · ${files.length} file(s)` : ""}{selectMode && bulk.size ? ` · ${bulk.size} selected (max 50)` : ""} · {canSelectCurrent ? "Select current folder to share" : ""}
           </div>
         </div>
-        <button
-          type="button"
-          disabled={!canSelectCurrent}
-          onClick={() => onSelect(current)}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-primary px-4 py-2 font-label text-xs font-semibold text-on-primary shadow-sm hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <span className="material-symbols-outlined text-[16px]">drive_folder_upload</span>
-          {confirmLabel}
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            aria-label="Rescan shares"
+            title={sessionState.status !== "connected" ? "Connect to the bridge to rescan" : "Rescan shares"}
+            disabled={rescanning || sessionState.status !== "connected"}
+            onClick={handleSharesRescan}
+            className="inline-flex h-11 min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-surface-container-high px-3 font-label text-xs font-semibold text-on-surface-variant shadow-sm hover:bg-surface-container-highest disabled:opacity-40 disabled:cursor-not-allowed dark:bg-surface-variant dark:text-outline"
+          >
+            <span className={`material-symbols-outlined text-[18px] ${rescanning ? "animate-spin" : ""}`}>{rescanning ? "progress_activity" : "refresh"}</span>
+            <span className="hidden sm:inline">{rescanning ? "Rescanning…" : "Rescan"}</span>
+          </button>
+          <button
+            type="button"
+            disabled={!canSelectCurrent}
+            onClick={() => onSelect(current)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-primary px-4 py-2 font-label text-xs font-semibold text-on-primary shadow-sm hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <span className="material-symbols-outlined text-[16px]">drive_folder_upload</span>
+            {confirmLabel}
+          </button>
+        </div>
       </div>
+
+      {/* Inline scan progress — shows during rescan even when sharesDirty is empty */}
+      {rescanning && (
+        <div className="border-b border-outline-variant/10 bg-surface-container-low px-3 py-1.5 font-body text-[11px] text-on-surface-variant dark:text-outline" role="status" aria-live="polite">
+          {scanProgress ? (
+            <>Scanning… {scanProgress.dirs} dirs · {scanProgress.files} files{scanProgress.current ? ` — ${scanProgress.current}` : ""}</>
+          ) : (
+            <>Scanning shares…</>
+          )}
+        </div>
+      )}
 
       {/* Shares-dirty rescan strip */}
       {sharesDirty.length > 0 && (

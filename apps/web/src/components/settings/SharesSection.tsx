@@ -80,6 +80,7 @@ export function SharesSection() {
   useEffect(() => setMounted(true), []);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [rescanning, setRescanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState<{ dirs: number; files: number } | null>(null);
   const [lastCounts, setLastCounts] = useState<{ dirs: number; files: number } | null>(null);
   const [rescanError, setRescanError] = useState<string | null>(null);
   const [lastRescanAt, setLastRescanAt] = useState<number | null>(null);
@@ -92,9 +93,14 @@ export function SharesSection() {
 
   useEffect(() => {
     return subscribe((msg) => {
-      if ((msg as { type: string }).type === "shares:rescanned") {
+      if ((msg as { type: string }).type === "shares:scan:progress") {
+        const m = msg as unknown as { dirs?: number; files?: number };
+        setScanProgress({ dirs: m.dirs ?? 0, files: m.files ?? 0 });
+        setRescanning(true);
+      } else if ((msg as { type: string }).type === "shares:rescanned") {
         const m = msg as unknown as { counts?: { dirs: number; files: number }; unavailable?: [string, string][]; secretHits?: string[] };
         setRescanning(false);
+        setScanProgress(null);
         if (m.counts) setLastCounts(m.counts);
         setLastRescanAt(Date.now());
         setRescanError(null);
@@ -109,7 +115,7 @@ export function SharesSection() {
         }
       } else if ((msg as { type: string }).type === "error" && (rescanning || previewLoading)) {
         const m = msg as unknown as { error?: string };
-        if (rescanning) { setRescanning(false); setRescanError(m.error || "Rescan failed"); }
+        if (rescanning) { setRescanning(false); setScanProgress(null); setRescanError(m.error || "Rescan failed"); }
         if (previewLoading) { setPreviewLoading(false); setPreviewError(m.error || "Preview failed"); }
       }
     });
@@ -812,7 +818,7 @@ export function SharesSection() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <div className="font-body text-xs leading-relaxed text-on-surface-variant dark:text-outline">
-                {rescanning ? "Scanning shares…" : lastCounts ? `${lastCounts.dirs} dirs · ${lastCounts.files} files` : state.status !== "connected" ? "Connect to bridge to rescan" : "Re-scan watched folders on the bridge (picks up new files)."}
+                {rescanning ? (scanProgress ? `Scanning… ${scanProgress.dirs} dirs · ${scanProgress.files} files` : "Scanning shares…") : lastCounts ? `${lastCounts.dirs} dirs · ${lastCounts.files} files` : state.status !== "connected" ? "Connect to bridge to rescan" : "Re-scan watched folders on the bridge (picks up new files)."}
               </div>
               {lastRescanAt && !rescanning && (
                 <div className="font-body text-[11px] text-on-surface-variant/70 dark:text-outline/70">
@@ -830,7 +836,6 @@ export function SharesSection() {
                 setRescanError(null);
                 setUnavailableShares(null);
                 send({ type: "shares:rescan" });
-                // ponytail: single-promise rescan, no progress stream — add shares:scan:progress if scans >5s become common
                 setTimeout(() => setRescanning((v) => (v ? false : v)), 30_000);
               }}
               disabled={rescanning || state.status !== "connected"}

@@ -1646,7 +1646,18 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
 
       if (data.type === "shares:rescan") {
         const session = requireLogin(); if (!session) return;
-        (session as unknown as { rescanShares: () => Promise<unknown> }).rescanShares().then((folders: unknown) => {
+        let lastProgress = 0;
+        const onProgress = (p: { dirs: number; files: number; current: string }) => {
+          const now = Date.now();
+          if (now - lastProgress < 200) return;
+          lastProgress = now;
+          try {
+            const rs = (ws as unknown as { readyState?: number }).readyState;
+            if (rs !== undefined && rs !== 1) return;
+            ws.send(JSON.stringify({ type: "shares:scan:progress", ...p }));
+          } catch {}
+        };
+        (session as unknown as { rescanShares: (onProgress?: (p: { dirs: number; files: number; current: string }) => void) => Promise<unknown> }).rescanShares(onProgress).then((folders: unknown) => {
           const sdb = (session as unknown as { shareDBInstance: { getSharedCounts: () => { dirs:number; files:number }; getUnavailableShares: () => [string,string][]; getSecretHits: (n?: number) => string[] } }).shareDBInstance;
           const counts = sdb.getSharedCounts();
           const unavailable = sdb.getUnavailableShares();
