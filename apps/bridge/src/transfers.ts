@@ -1274,7 +1274,10 @@ export class TransferManager {
     logger.debug("transfer", "F accepted, FileOffset sent", { id: t.id, token, startOffset });
 
     // Send FileOffset (uint64 LE)
-    try { socket.write(packUint64(startOffset)); } catch {}
+    try {
+      const n = socket.write(packUint64(startOffset));
+      logger.debug("transfer", "FileOffset write result", { id: t.id, token, startOffset, wrote: typeof n === "number" ? n : String(n) });
+    } catch (e) { logger.debug("transfer", "FileOffset write failed", { id: t.id, err: String(e).slice(0, 120) }); }
     try { this.session?.unregisterFileToken(token); } catch {}
 
     // Stream raw bytes → file
@@ -1386,6 +1389,7 @@ export class TransferManager {
     }
     const cb = (t as unknown as { _onFileData?: (c: Buffer) => void })._onFileData;
     if (cb) cb(chunk);
+    else logger.debug("transfer", "F chunk dropped, no handler yet", { id: t.id, token, bytes: chunk.length });
   }
 
   private startUploadStream(t: BridgeTransfer, offset: number, _initialTail?: Buffer) {
