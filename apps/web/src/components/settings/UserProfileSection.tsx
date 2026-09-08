@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useConfig } from "@/lib/config/provider";
 import { SectionCard, SectionSaveButton, TextFieldControl, ToggleControl } from "@/components/settings/controls";
 import { useSession } from "@/lib/session";
