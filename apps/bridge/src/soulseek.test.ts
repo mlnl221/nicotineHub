@@ -645,6 +645,9 @@ describe("transfers — protocol shims (Phase 0)", () => {
     expect(parseTransferResponse(ok.payload)).toEqual({ token: 7, allowed: true, size: 2048 });
     const no = tryParseMessage(buildTransferResponse(7, false, "File not shared."))!;
     expect(parseTransferResponse(no.payload)).toEqual({ token: 7, allowed: false, reason: "File not shared." });
+    // nicotine-plus parity: bare allowed reply is token+bool only (no u64)
+    const bare = tryParseMessage(buildTransferResponse(9, true))!;
+    expect(bare.payload.length).toBe(5);
   });
 
   test("PlaceInQueue / UploadFailed / UploadDenied round-trip", () => {
