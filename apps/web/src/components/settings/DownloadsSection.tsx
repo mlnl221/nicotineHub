@@ -10,7 +10,7 @@ export function DownloadsSection() {
 
   return (
     <div className="flex flex-col gap-6">
-      <SectionCard title="Downloads" description="How incoming files are handled. Folder paths are browser-local notes; actual saves use the browser download location." actions={<SectionSaveButton section="transfers" />}>
+      <SectionCard title="Downloads" description="How incoming files are handled. Folder paths below are notes; actual saves use the bridge DATA_DIR/downloads folder." actions={<SectionSaveButton section="transfers" />}>
         <ToggleControl
           label="Auto-clear finished downloads"
           checked={t.autoclear_downloads}
@@ -52,6 +52,7 @@ export function DownloadsSection() {
         />
         <ToggleControl
           label="Create subfolders per user"
+          description="ON saves new downloads to downloads/<user>/<file>, OFF flat to downloads/<file>. Applies to new finishes only; a bridge destination template overrides this."
           checked={t.usernamesubfolders}
           onChange={(v) => setOption("transfers", "usernamesubfolders", v)}
         />
