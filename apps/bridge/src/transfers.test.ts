@@ -122,6 +122,63 @@ describe("transfers — download engine (Phase 2)", () => {
     mgr2.close();
   });
 
+  test("waiting for peer never fakes bytes (no phantom 99.999%)", async () => {
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    const t = mgr.requestDownload("alice", "Music\\wait.mp3", 5_000_000, "wait.mp3");
+    // let the Queued→Getting-status timers (350ms) and the old stub window (1200ms) pass
+    await new Promise((r) => setTimeout(r, 1700));
+    const cur = mgr.get(t.id)!;
+    expect(cur.status).toBe("Getting status");
+    expect(cur.current).toBe(0);
+    expect((cur as any)._timer).toBeUndefined();
+    // nothing persisted as progress either
+    const raw = JSON.parse(readFileSync(join(tmp, "downloads.json"), "utf8")) as Array<{ id: string; current: number }>;
+    expect(raw.find((r) => r.id === t.id)?.current).toBe(0);
+    mgr.close();
+  });
+
+  test("loadFromDisk reconciles phantom progress to real staging bytes", () => {
+    const { mgr } = makeManager(tmp);
+    mgr.requestDownload("alice", "Music\\ghost.mp3", 1000, "ghost.mp3");
+    mgr.close();
+    // corrupt persisted row like the stub era did: size-1 with no staging file
+    const dlPath = join(tmp, "downloads.json");
+    const raw = JSON.parse(readFileSync(dlPath, "utf8")) as any[];
+    const row = raw.find((r) => r.id === "alice::Music\\ghost.mp3");
+    row.current = 999;
+    row.status = "Transferring";
+    writeFileSync(dlPath, JSON.stringify(raw));
+    const { mgr: mgr2 } = makeManager(tmp);
+    const reloaded = mgr2.get("alice::Music\\ghost.mp3")!;
+    expect(reloaded.current).toBe(0);
+    expect(reloaded.status).toBe("User logged off");
+    mgr2.close();
+  });
+
+  test("loadFromDisk clamps to partial staging file, keeps real bytes", async () => {
+    const { mgr } = makeManager(tmp);
+    mgr.requestDownload("alice", "Music\\part.mp3", 4096, "part.mp3");
+    mgr.close();
+    const { writeFileSync: wfs, mkdirSync: mks } = await import("node:fs");
+    const { createHash: ch } = await import("node:crypto");
+    const hash = ch("md5").update("Music\\part.mp3" + "alice").digest("hex");
+    mks(join(tmp, "incomplete"), { recursive: true });
+    wfs(join(tmp, "incomplete", `INCOMPLETE${hash}part.mp3`), Buffer.alloc(2048, 0x42));
+    const dlPath = join(tmp, "downloads.json");
+    const raw = JSON.parse(readFileSync(dlPath, "utf8")) as any[];
+    raw.find((r) => r.id === "alice::Music\\part.mp3").current = 4095;
+    writeFileSync(dlPath, JSON.stringify(raw));
+    const { mgr: mgr2 } = makeManager(tmp);
+    expect(mgr2.get("alice::Music\\part.mp3")?.current).toBe(2048);
+    mgr2.close();
+  });
+
   test("incomplete path uses INCOMPLETE<md5> prefix", () => {
     const { mgr } = makeManager(tmp);
     // regression: ensure hash is md5(virtualPath+username)

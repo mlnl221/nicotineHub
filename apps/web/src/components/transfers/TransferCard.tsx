@@ -56,6 +56,8 @@ export function TransferCard({
     transfer.status === "Too many files" ||
     transfer.status === "Too many megabytes";
   const isTransferring = transfer.status === "Transferring" || transfer.status === "Getting status";
+  // Waiting for the peer F connection: no bytes yet, show spinner + queue truth, never fake progress.
+  const isWaiting = !transfer.isUpload && transfer.status === "Getting status" && transfer.current <= 0;
   const basename = (transfer.virtualPath.split("\\").pop() ?? transfer.fileName).replace(/[/\\]/g, "_");
   const safeUser = transfer.username.replace(/[/\\]/g, "_").replace(/\.\./g, "_");
   const savePath = `downloads/${settings.transfers.usernamesubfolders ? `${safeUser}/` : ""}${basename}`;
@@ -69,9 +71,9 @@ export function TransferCard({
       : "bg-primary";
 
   const speedLabel =
-    isFinished ? "Finished" : isQueued ? "Queued" : isPaused ? "Paused" : isCancelled ? "Cancelled" : humanSpeed(transfer.speed);
+    isFinished ? "Finished" : isQueued ? "Queued" : isWaiting ? "Waiting for peer" : isPaused ? "Paused" : isCancelled ? "Cancelled" : humanSpeed(transfer.speed);
   const etaLabel =
-    isFinished ? "Complete" : isQueued ? `Place ${transfer.queuePosition ?? "—"}` : isPaused ? "Paused" : isCancelled ? "Cancelled" : `ETA: ${humanETA(transfer.timeLeft)}`;
+    isFinished ? "Complete" : isQueued ? `Place ${transfer.queuePosition ?? "—"}` : isWaiting ? (transfer.queuePosition ? `Queue ${transfer.queuePosition}` : "Waiting for peer") : isPaused ? "Paused" : isCancelled ? "Cancelled" : `ETA: ${humanETA(transfer.timeLeft)}`;
 
   const speedColor = transfer.isUpload ? "text-tertiary" : "text-primary";
 
@@ -90,7 +92,7 @@ export function TransferCard({
           <p className="font-label text-xs text-on-surface-variant dark:text-outline mt-1 truncate">
             {transfer.isUpload ? "To: " : "Peer: "}
             {transfer.username} • {humanSize(transfer.size)}
-            {isQueued && transfer.queuePosition ? ` • Queue ${transfer.queuePosition}` : ""}
+            {(isQueued || transfer.status === "Getting status") && transfer.queuePosition ? ` • Queue ${transfer.queuePosition}` : ""}
             {transfer.isSlopLike && <span className="ml-1 inline-flex rounded-full bg-tertiary-container/50 px-2 py-0.5 text-[10px] font-medium text-on-tertiary-container">Slop-like</span>}
           </p>
           <p className="font-label text-[11px] text-outline mt-0.5 truncate hidden md:block" title={reverse ? transfer.virtualPath : transfer.fileName}>
@@ -112,8 +114,8 @@ export function TransferCard({
 
       <div className="w-full bg-surface-container-highest dark:bg-surface-container-high rounded-full h-1.5 overflow-hidden">
         <div
-          className={`h-1.5 rounded-full transition-all duration-500 ${barColor} ${transfer.isUpload ? "" : isTransferring ? "progress-glow" : ""}`}
-          style={{ width: `${isQueued ? 0 : pct}%` }}
+          className={`h-1.5 rounded-full transition-all duration-500 ${barColor} ${transfer.isUpload ? "" : isTransferring ? "progress-glow" : ""} ${isWaiting ? "animate-pulse opacity-60" : ""}`}
+          style={{ width: `${isQueued ? 0 : isWaiting ? 100 : pct}%` }}
           role="progressbar"
           aria-valuenow={pct}
           aria-valuemin={0}

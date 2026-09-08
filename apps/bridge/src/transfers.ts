@@ -402,6 +402,25 @@ export class TransferManager {
         }
         if ((t.status as any) === "Transferring") (t as any).status = "Paused";
         t.current = t.current ?? 0;
+        // Backfill/reconcile: stub-era rows may persist current with no bytes
+        // on disk (phantom 99.999%). Clamp to real staging size so a retry
+        // resumes from truth. Idempotent: second load finds current == real.
+        if (!t.isUpload && t.status !== "Finished") {
+          const bt = t as BridgeTransfer;
+          const staging = bt._incompletePath || getIncompletePath(t.virtualPath, t.username, this.incompleteDir);
+          let real = 0;
+          try {
+            if (staging && existsSync(staging)) real = Math.min(statSync(staging).size, t.size);
+          } catch {}
+          if (t.current > real) {
+            logger.info("transfer", "phantom progress corrected", { id: t.id, claimed: t.current, actual: real });
+            t.current = real;
+          }
+          if (!staging || !existsSync(staging)) delete (t as BridgeTransfer)._incompletePath;
+          t.speed = 0;
+          t.avgSpeed = 0;
+          t.timeLeft = null;
+        }
         t.speed = 0;
         t.queuePosition = t.queuePosition ?? null;
         t.timeLeft = null;
@@ -598,46 +617,30 @@ export class TransferManager {
       if (cur.status === "Queued") {
         cur.status = "Getting status";
         this.emit(cur);
-        // 45 s timeout → Connection timeout
-        cur._statusTimer = setTimeout(() => {
-          const c = this.transfers.get(id);
-          if (!c || c.status !== "Getting status") return;
-          c.status = "Connection timeout";
-          this.emit(c);
-          this.scheduleRetry(id, 180_000);
-        }, 45_000);
+        // 45 s without an F connection → Connection timeout + retry.
+        // The transfer stays in Getting status (waiting for peer) the whole
+        // time: never promote to Transferring and never fake bytes — a stub
+        // doing that once shipped phantom 99.999% downloads (see mistakes.md).
+        this.armGettingStatusTimeout(id, 45_000);
       }
     }, 350);
 
-    // For stub/demo without real peer, simulate Transferring after 1200 ms (as before) only if no F
-    setTimeout(() => {
-      const cur = this.transfers.get(id);
-      if (!cur || cur.status !== "Getting status") return;
-      // If we haven't received real TransferRequest, we simulate Transferring for demo
-      // Check if we have a real F pending — if token is registered, don't simulate
-      if (this.session && cur.token && this.transfers.has(id)) {
-        // Real path would have been activated via handleTransferRequest; if not, keep stub simulation
-        if (cur.status === "Getting status") {
-          cur.status = "Transferring";
-          cur._startTime = Date.now();
-          cur._transferredAtStart = 0;
-          if (cur._statusTimer) clearTimeout(cur._statusTimer);
-          this.startProgressStub(id);
-          this.emit(cur);
-          this.emitStats();
-        }
-      } else {
-        cur.status = "Transferring";
-        cur._startTime = Date.now();
-        cur._transferredAtStart = 0;
-        if (cur._statusTimer) clearTimeout(cur._statusTimer);
-        this.startProgressStub(id);
-        this.emit(cur);
-        this.emitStats();
-      }
-    }, 1200);
-
     return t;
+  }
+
+  // F-missing guard: a Getting-status transfer that never yields a peer F
+  // connection expires into Connection timeout + retry.
+  private armGettingStatusTimeout(id: string, afterMs: number) {
+    const t = this.transfers.get(id);
+    if (!t) return;
+    if (t._statusTimer) clearTimeout(t._statusTimer);
+    t._statusTimer = setTimeout(() => {
+      const c = this.transfers.get(id);
+      if (!c || c.status !== "Getting status") return;
+      c.status = "Connection timeout";
+      this.emit(c);
+      this.scheduleRetry(id, 180_000);
+    }, afterMs);
   }
 
   private async sendQueueUpload(t: BridgeTransfer) {
@@ -1228,8 +1231,8 @@ export class TransferManager {
     }
     if (t._statusTimer) { clearTimeout(t._statusTimer); t._statusTimer = undefined; }
     if (t._timer) { clearInterval(t._timer); t._timer = undefined; }
-    // Real F owns progress from here — the pre-F progress stub stands down (see startProgressStub).
-    (t as unknown as { _hadRealF?: boolean })._hadRealF = true;
+    // Real F owns progress from here: current was real staging bytes (or 0)
+    // and only real onData chunks advance it from this point on.
     t.status = "Transferring";
     t._startTime = Date.now();
     const startOffset = await this.prepareIncompleteFile(t);
@@ -1550,6 +1553,7 @@ export class TransferManager {
     try {
       const dest = this.deriveDestination(t.virtualPath, t.username);
       renameSync(t._incompletePath!, dest);
+      logger.info("transfer", "download finished", { username: t.username, dest, size: t.size });
       t._downloadUrl = `/files/${t.token}`;
       t._incompletePath = dest;
     } catch {
@@ -1582,38 +1586,6 @@ export class TransferManager {
     }
     try { socket.end(); } catch {}
     if (t._pollTimer) { clearInterval(t._pollTimer); t._pollTimer = undefined; }
-  }
-
-  private startProgressStub(id: string) {
-    const t = this.transfers.get(id);
-    if (!t) return;
-    if (t._timer) clearInterval(t._timer);
-    t._timer = setInterval(() => {
-      const cur = this.transfers.get(id);
-      if (!cur || cur.status !== "Transferring") {
-        if (cur?._timer) clearInterval(cur._timer);
-        return;
-      }
-      // Real F connection owns progress once bytes flow — never fake those.
-      if ((cur as unknown as { _hadRealF?: boolean })._hadRealF) {
-        if (cur._timer) { clearInterval(cur._timer); cur._timer = undefined; }
-        return;
-      }
-      const chunk = 2_000_000 + Math.random() * 3_000_000;
-      // Never complete or touch size: stub is pre-F eye-candy only (rebased when F arrives).
-      const step = Math.min(chunk * 0.5, Math.max(0, cur.size - cur.current - 1));
-      cur.current += step;
-      const elapsed = (Date.now() - (cur._startTime ?? Date.now())) / 1000;
-      const dlLimit = this.getDownloadLimit();
-      cur.speed = dlLimit ? Math.min(step * 2, dlLimit) : step * 2;
-      cur.avgSpeed = elapsed > 0 ? cur.current / elapsed : cur.speed;
-      cur.timeLeft = cur.speed > 0 ? Math.ceil((cur.size - cur.current) / cur.speed) : null;
-      // NOTE: the stub never completes transfers. Only real F bytes via
-      // finishDownload() may mark Finished — a stub finish once shipped a
-      // synth sine tone as the user's download (data loss). See mistakes.md.
-      this.emit(cur);
-      this.emitStats();
-    }, 500);
   }
 
   controlDownload(id: string, action: "cancel" | "pause" | "resume" | "retry" | "clear") {
@@ -1654,9 +1626,9 @@ export class TransferManager {
         setTimeout(() => {
           const cur = this.transfers.get(id);
           if (!cur || cur.status !== "Getting status") return;
-          cur.status = "Transferring";
-          cur._startTime = Date.now() - (cur.current / (cur.avgSpeed || 1_000_000)) * 1000;
-          this.startProgressStub(id);
+          // Stay waiting for the peer F connection: re-arm the 45 s
+          // F-missing timeout. No Transferring promotion, no stub bytes.
+          this.armGettingStatusTimeout(id, 45_000);
           this.emit(cur);
         }, 900);
         break;
