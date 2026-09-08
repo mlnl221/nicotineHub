@@ -72,7 +72,7 @@ export function userMenu(username: string, tabName: string, opts?: { onBrowse?: 
   return items;
 }
 
-export function searchResultMenu(row: { user: string; path: string; filename: string; folder: string }, opts: { onDownload: () => void; onProps?: () => void }) : MenuItem[] {
+export function searchResultMenu(row: { user: string; path: string; filename: string; folder: string }, opts: { onDownload: () => void; onProps?: () => void; onDownloadFolder?: () => void; onBrowse?: () => void; onProfile?: () => void; onMessage?: () => void }) : MenuItem[] {
   const fileUrl = `slsk://${encodeURIComponent(row.user)}/${row.path.replace(/\\/g, "/")}`;
   const folderPath = row.path.replace(/[^\\]*$/, "").replace(/\\$/, "");
   const folderUrl = `slsk://${encodeURIComponent(row.user)}/${folderPath.replace(/\\/g, "/")}`;
@@ -81,12 +81,13 @@ export function searchResultMenu(row: { user: string; path: string; filename: st
     { id: "sep", label: "---", icon: "" },
     { id: "download", label: "Download File", icon: "download", action: opts.onDownload },
     { id: "download-to", label: "Download File To…", icon: "download", action: () => toast("Download To — folder picker unavailable") },
-    { id: "download-folder", label: "Download Folder…", icon: "folder", action: () => toast("Download folder — use Download File") },
+    { id: "download-folder", label: "Download Folder", icon: "folder_download", action: opts.onDownloadFolder ?? (() => toast("Download folder — unavailable")) },
     { id: "sep2", label: "---", icon: "" },
     { id: "props", label: "File Properties", icon: "info", action: opts.onProps ?? (() => toast(`${row.filename} • ${row.path}`)) },
     { id: "sep3", label: "---", icon: "" },
-    { id: "view-profile", label: "View User Profile", icon: "account_circle", action: () => navigate(`/profile/${encodeURIComponent(row.user)}`) },
-    { id: "browse-folder", label: "Browse Folder", icon: "folder_managed", action: () => navigate(`/browse/${encodeURIComponent(row.user)}`) },
+    { id: "view-profile", label: "View User Profile", icon: "account_circle", action: opts.onProfile ?? (() => navigate(`/profile/${encodeURIComponent(row.user)}`)) },
+    { id: "browse-folder", label: "Browse Folder", icon: "folder_managed", action: opts.onBrowse ?? (() => navigate(`/browse/${encodeURIComponent(row.user)}`)) },
+    { id: "send-message", label: "Send Message", icon: "chat_bubble", action: opts.onMessage ?? (() => navigate(`/private-chat?user=${encodeURIComponent(row.user)}`)) },
     { id: "sep4", label: "---", icon: "" },
     {
       id: "copy", label: "Copy", icon: "content_copy", submenu: [
