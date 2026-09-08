@@ -157,6 +157,7 @@ export class TransferManager {
   private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; sendUploadDenied?: (u: string, f: string, reason?: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; sendTransferResponse?: (u: string, t: number, allowed: boolean, sizeOrReason?: number | bigint | string) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
   private onBanlistUpdated?: (banlist: string[], byUser: string) => void;
   private tokenCounter = Math.floor(Math.random() * 900000) + 10000;
+  private tokenIndex = new Map<number, string>();
   private statsManager: StatsManager;
   private userUpdateCounter = new Map<string, number>();
   private globalUpdateCounter = 0;
@@ -323,6 +324,7 @@ export class TransferManager {
       toDelete.push(id);
     }
     for (const id of toDelete) {
+      this.forgetTokensFor(id);
       this.transfers.delete(id);
       this.onRemoved(id);
     }
@@ -479,7 +481,15 @@ export class TransferManager {
 
   getByToken(token: number): BridgeTransfer | undefined {
     for (const t of this.transfers.values()) if (t.token === token) return t;
+    // Repeat grants carry new tokens while an older F may still be in flight —
+    // fall back to any token this transfer was granted (see handleTransferRequest).
+    const id = this.tokenIndex.get(token >>> 0);
+    if (id !== undefined) return this.transfers.get(id);
     return undefined;
+  }
+
+  private forgetTokensFor(id: string) {
+    for (const [tok, mapped] of this.tokenIndex) if (mapped === id) this.tokenIndex.delete(tok);
   }
 
   // For GET /files/:token — tolerant fallback so spectrum works on legacy stubs + subfolders + WSL share dirs
@@ -1047,6 +1057,8 @@ export class TransferManager {
     // Activate
     target.token = token;
     target._realRequest = true;
+    // Keep every granted token mapped: repeat grants race in-flight F conns.
+    this.tokenIndex.set(token >>> 0, target.id);
     // Uploader authoritative size wins (nicotine-plus downloads.py _transfer_request_downloads)
     if (typeof size === "number" || typeof size === "bigint") {
       const n = typeof size === "bigint" ? (size <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(size) : size) : size;
@@ -1222,6 +1234,9 @@ export class TransferManager {
       try { socket.end(); } catch {}
       return;
     }
+    // Adopt the live F token (may be an older grant racing a newer request).
+    t.token = token;
+    this.tokenIndex.set(token >>> 0, t.id);
     // Upload serving: peer (downloader) connected via F to fetch file from us
     if (t.isUpload) {
       if (t._statusTimer) { clearTimeout(t._statusTimer); t._statusTimer = undefined; }
@@ -1477,6 +1492,7 @@ export class TransferManager {
         if (this.config.autoclear_uploads) {
           setTimeout(() => {
             if (this.transfers.has(t.id) && t.status === "Finished") {
+              this.forgetTokensFor(t.id);
               this.transfers.delete(t.id);
               this.onRemoved(t.id);
               this.emitStats();
@@ -1592,6 +1608,7 @@ export class TransferManager {
     if (this.config.autoclear_downloads) {
       setTimeout(() => {
         if (this.transfers.has(t.id) && t.status === "Finished") {
+          this.forgetTokensFor(t.id);
           this.transfers.delete(t.id);
           this.onRemoved(t.id);
           this.emitStats();
@@ -1686,6 +1703,7 @@ export class TransferManager {
         if (t._pollTimer) clearInterval(t._pollTimer);
         if (t._retryTimer) clearTimeout(t._retryTimer);
         if (t._fileHandle !== undefined) try { const { closeSync } = require("node:fs"); closeSync(t._fileHandle); } catch {}
+        this.forgetTokensFor(id);
         this.transfers.delete(id);
         this.onRemoved(id);
         this.emitStats();
@@ -1704,6 +1722,7 @@ export class TransferManager {
       this.emitStats();
       this.persist();
     } else if (action === "clear") {
+      this.forgetTokensFor(id);
       this.transfers.delete(id);
       this.onRemoved(id);
       this.emitStats();
@@ -1721,6 +1740,7 @@ export class TransferManager {
     if (t._pollTimer) clearInterval(t._pollTimer);
     if (t._retryTimer) clearTimeout(t._retryTimer);
     if (t._fileHandle !== undefined) try { const { closeSync } = require("node:fs"); closeSync(t._fileHandle); } catch {}
+    this.forgetTokensFor(id);
     this.transfers.delete(id);
     this.onRemoved(id);
     this.emitStats();
