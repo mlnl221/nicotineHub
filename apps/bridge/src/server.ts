@@ -531,9 +531,11 @@ function sharedSessionCallbacks() {
           const hasMore = out.length > 200;
           const lockedCount = Array.isArray(event.lockedFolders) ? event.lockedFolders.length : 0;
           // Stash the full result on every attached client so browse:page works per client.
+          // NB: browse:page reads ws.data — stash there, not on the wrapper object.
           for (const c of attachedClients) {
-            try { (c as unknown as Record<string, unknown>)._browseFull = out; } catch {}
-            try { (c as unknown as Record<string, unknown>)._browseUser = event.username; } catch {}
+            const bag = ((c as unknown as { data?: Record<string, unknown> }).data ?? (c as unknown as Record<string, unknown>));
+            try { bag._browseFull = out; } catch {}
+            try { bag._browseUser = event.username; } catch {}
           }
           broadcastJson({ type: "browse:shares", username: event.username, folders: page as never, total: out.length, hasMore, offset: 0, lockedCount });
         }
