@@ -1058,10 +1058,11 @@ export class TransferManager {
     this.emit(target);
     // Register file token for F demux
     try { this.session?.registerFileToken(token); } catch {}
-    // nicotine-plus: reply TransferResponse(allowed=True) so uploader dials F
+    // SLSKPROTOCOL: TransferResponse allowed carries u64 filesize — echo the
+    // uploader's own size (bare replies made SoulseekQt abort with UploadFailed).
     try {
       const peer = username || target.username;
-      if (peer && this.session?.sendTransferResponse) this.session.sendTransferResponse(peer, token, true);
+      if (peer && this.session?.sendTransferResponse) this.session.sendTransferResponse(peer, token, true, target.size);
     } catch {}
     // 45 s timer to timeout if F doesn't arrive
     target._statusTimer = setTimeout(() => {
