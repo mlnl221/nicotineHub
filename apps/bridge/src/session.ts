@@ -2365,6 +2365,10 @@ export class SoulseekSession {
             state.initDone = true;
             state.connType = "F";
             state.buf = state.buf.subarray(4);
+            // Same wiring as the framed path below: TransferManager prepares
+            // the file and replies FileOffset. Without this the uploader gets
+            // no offset and aborts with UploadFailed.
+            try { this.opts.onFileConnection?.(peekToken, peer); } catch {}
             continue;
           }
         }
