@@ -120,6 +120,33 @@ export function SearchScreen() {
     }
   };
 
+  const downloadRow = (row: SearchRow) => {
+    if (isDemo) {
+      flash("Demo — downloads are disabled on Vercel.");
+      return;
+    }
+    requestDownload({ username: row.user, virtualPath: row.path, size: row.size, fileName: row.filename });
+    flash(`Queued "${row.filename}" — see Downloads`);
+  };
+
+  // Client fan-out: queue every visible result sharing the row's user+folder,
+  // staggered like BrowseView downloadFolder to avoid hammering the peer.
+  const downloadFolderFor = (row: SearchRow) => {
+    if (isDemo) {
+      flash("Demo — downloads are disabled on Vercel.");
+      return;
+    }
+    const matches = visibleRows.filter((r) => r.user === row.user && r.folder === row.folder);
+    if (matches.length === 0) {
+      flash("No files in this folder");
+      return;
+    }
+    matches.forEach((m, idx) => {
+      setTimeout(() => requestDownload({ username: m.user, virtualPath: m.path, size: m.size, fileName: m.filename }), idx * 150);
+    });
+    flash(`Queued ${matches.length} file${matches.length === 1 ? "" : "s"} from "${row.folder || "(root)"}"`);
+  };
+
   const searchSubtitle = activeTab
     ? `${visibleRows.length} of ${activeTab.total} results${activeTab.status === "searching" ? " · searching…" : ""}${activeTab.mode !== "global" ? ` · ${activeTab.mode}${activeTab.target ? `:${activeTab.target}` : ""}` : ""} • ${tabs.length} tabs`
     : `Find files across the network • ${tabs.length} tabs`;
@@ -284,7 +311,7 @@ export function SearchScreen() {
               }
             }}
           >
-            <ResultsList rows={visibleRows} onRowTap={setSheetRow} grouping={settings.searches.group_searches} expand={settings.searches.expand_results} />
+            <ResultsList rows={visibleRows} onRowTap={setSheetRow} onRowDoubleClick={downloadRow} grouping={settings.searches.group_searches} expand={settings.searches.expand_results} />
           </div>
         )
       ) : (
@@ -318,14 +345,14 @@ export function SearchScreen() {
         </div>
       )}
 
-      {/* Action sheet */}
+      {/* Action sheet — z-[70] keeps it above Sidebar/TopBar/BottomNav */}
       {sheetRow ? (
         <div
-          className="fixed inset-0 z-30 flex items-end bg-black/40"
+          className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 md:items-center"
           onClick={() => setSheetRow(null)}
         >
           <div
-            className="w-full max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-surface-container p-3 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]"
+            className="w-full max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-surface-container p-3 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] md:max-w-md md:rounded-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-outline-variant" />
@@ -341,15 +368,7 @@ export function SearchScreen() {
               icon="download"
               label={isDemo ? "Download (disabled in demo)" : "Download"}
               onClick={() => {
-                if (isDemo) {
-                  flash("Demo — downloads are disabled on Vercel.");
-                  setSheetRow(null);
-                  return;
-                }
-                if (sheetRow) {
-                  requestDownload({ username: sheetRow.user, virtualPath: sheetRow.path, size: sheetRow.size, fileName: sheetRow.filename });
-                  flash(`Queued "${sheetRow.filename}" — see Downloads`);
-                }
+                if (sheetRow) downloadRow(sheetRow);
                 setSheetRow(null);
               }}
             />
@@ -402,10 +421,19 @@ export function SearchScreen() {
           y={ctxMenu.anchor.y}
           items={searchResultMenu(menuRow, {
             onDownload: () => {
-              if (menuRow) {
-                requestDownload({ username: menuRow.user, virtualPath: menuRow.path, size: menuRow.size, fileName: menuRow.filename });
-                flash(`Queued "${menuRow.filename}"`);
-              }
+              if (menuRow) downloadRow(menuRow);
+            },
+            onDownloadFolder: () => {
+              if (menuRow) downloadFolderFor(menuRow);
+            },
+            onBrowse: () => {
+              if (menuRow) router.push(`/browse/${encodeURIComponent(menuRow.user)}`);
+            },
+            onProfile: () => {
+              if (menuRow) router.push(`/profile/${encodeURIComponent(menuRow.user)}`);
+            },
+            onMessage: () => {
+              if (menuRow) router.push(`/private-chat?user=${encodeURIComponent(menuRow.user)}`);
             },
             onProps: () => {
               if (menuRow) setPropsRow(menuRow);
@@ -439,10 +467,7 @@ export function SearchScreen() {
             <div className="mt-6 flex gap-2">
               <button
                 onClick={() => {
-                  if (propsRow) {
-                    if (isDemo) flash("Demo — downloads disabled");
-                    else { requestDownload({ username: propsRow.user, virtualPath: propsRow.path, size: propsRow.size, fileName: propsRow.filename }); flash(`Queued "${propsRow.filename}"`); }
-                  }
+                  if (propsRow) downloadRow(propsRow);
                   setPropsRow(null);
                 }}
                 className={`flex-1 rounded-xl py-3 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline" : "bg-primary text-on-primary hover:bg-primary-container"}`}

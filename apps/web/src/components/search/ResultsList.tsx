@@ -47,13 +47,30 @@ function qualityBadge(row: SearchRow): { label: string; cls: string } | null {
 interface ResultsListProps {
   rows: SearchRow[];
   onRowTap: (row: SearchRow) => void;
+  onRowDoubleClick?: (row: SearchRow) => void;
   grouping?: string;
   expand?: string;
 }
 
-export function ResultsList({ rows, onRowTap, grouping = "folder_grouping", expand = "all" }: ResultsListProps) {
+export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "folder_grouping", expand = "all" }: ResultsListProps) {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  // Single-tap timer: delays the sheet so a double-click can download instead.
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (tapTimer.current) clearTimeout(tapTimer.current); }, []);
+  const handleTap = (row: SearchRow) => {
+    if (!onRowDoubleClick) {
+      onRowTap(row);
+      return;
+    }
+    if (tapTimer.current) clearTimeout(tapTimer.current);
+    tapTimer.current = setTimeout(() => onRowTap(row), 250);
+  };
+  const handleDouble = (row: SearchRow) => {
+    if (tapTimer.current) clearTimeout(tapTimer.current);
+    tapTimer.current = null;
+    onRowDoubleClick?.(row);
+  };
 
   // reset when filter/query changes (rows identity)
   useEffect(() => {
@@ -140,7 +157,8 @@ export function ResultsList({ rows, onRowTap, grouping = "folder_grouping", expa
                       data-row-filename={row.filename}
                       data-row-folder={row.folder}
                       data-row-size={String(row.size)}
-                      onClick={() => onRowTap(row)}
+                      onClick={() => handleTap(row)}
+                      onDoubleClick={() => handleDouble(row)}
                       className="flex w-full items-center gap-3 border-t border-outline-variant/15 px-4 py-2.5 text-left transition-colors active:bg-surface-container max-w-full overflow-hidden first:border-t-0"
                     >
                       <span className="material-symbols-outlined text-[22px] text-primary-container shrink-0">{fileTypeIcon(row.fileType)}</span>
@@ -197,7 +215,8 @@ export function ResultsList({ rows, onRowTap, grouping = "folder_grouping", expa
                       data-row-filename={row.filename}
                       data-row-folder={row.folder}
                       data-row-size={String(row.size)}
-                      onClick={() => onRowTap(row)}
+                      onClick={() => handleTap(row)}
+                      onDoubleClick={() => handleDouble(row)}
                       className="flex w-full items-center gap-3 border-t border-outline-variant/15 px-4 py-2.5 text-left transition-colors active:bg-surface-container max-w-full overflow-hidden"
                     >
                       <span className="material-symbols-outlined text-[22px] text-primary-container shrink-0">
