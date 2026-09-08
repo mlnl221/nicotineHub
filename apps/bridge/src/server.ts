@@ -456,6 +456,9 @@ function sharedSessionCallbacks() {
     onFileChunk: (token: number, chunk: Buffer) => {
       try { (sharedTransfers as unknown as { handleFileChunk: (t: number, c: Buffer) => void })?.handleFileChunk(token, chunk); } catch {}
     },
+    onFileClosed: (token: number) => {
+      try { (sharedTransfers as unknown as { handleFileClosed: (t: number) => void })?.handleFileClosed(token); } catch {}
+    },
     getQueuePlace: (file: string) => {
       try { return (sharedTransfers as unknown as { getQueuePlace: (f: string) => number })?.getQueuePlace(file) ?? 1; } catch { return 1; }
     },
@@ -563,7 +566,7 @@ function sharedSessionCallbacks() {
         broadcastJson({ type: "search:start", searchId: event.searchId, token: event.token });
       }
     },
-    onTransferEvent: (event: { type: string; username?: string; file?: string; token?: number; place?: number; reason?: string }) => {
+    onTransferEvent: (event: { type: string; username?: string; file?: string; token?: number; place?: number; reason?: string; direction?: number; size?: number | bigint }) => {
       if (event.type === "queue-upload" && event.username && event.file) pluginManager.uploadQueuedNotification(event.username, event.file);
       else if (event.type === "transfer-response" && event.username && event.file) {
         pluginManager.uploadStartedNotification(event.username, event.file);
@@ -576,7 +579,7 @@ function sharedSessionCallbacks() {
         if (event.type === "place-in-queue" && event.file && event.place !== undefined) {
           (tm as unknown as { handlePlaceInQueueResponse: (f: string, p: number) => void }).handlePlaceInQueueResponse(event.file, event.place);
         } else if (event.type === "transfer-request" && event.file && event.token !== undefined) {
-          (tm as unknown as { handleTransferRequest: (d: number, t: number, f: string) => void }).handleTransferRequest(1, event.token, event.file);
+          (tm as unknown as { handleTransferRequest: (d: number, t: number, f: string, s?: number | bigint, u?: string) => void }).handleTransferRequest(event.direction ?? 1, event.token, event.file, event.size, event.username);
         } else if (event.type === "transfer-response" && event.reason) {
           const f = event.file || "";
           (tm as unknown as { handleUploadDenied: (f: string, r: string) => void }).handleUploadDenied(f, event.reason);

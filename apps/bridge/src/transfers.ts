@@ -153,7 +153,7 @@ export class TransferManager {
   private configDir: string;
   private incompleteDir: string;
   private downloadsDir: string;
-  private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; sendUploadDenied?: (u: string, f: string, reason?: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
+  private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; sendUploadDenied?: (u: string, f: string, reason?: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; connectPeer: (u: string, t: string) => Promise<Socket>; transferResponse?: (u: string, token: number, allowed: boolean, sizeOrReason?: number | bigint | string) => void; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
   private onBanlistUpdated?: (banlist: string[], byUser: string) => void;
   private tokenCounter = Math.floor(Math.random() * 900000) + 10000;
   private statsManager: StatsManager;
@@ -1024,16 +1024,11 @@ export class TransferManager {
     }
   }
 
-  handleTransferRequest(direction: number, token: number, file: string, size?: number | bigint) {
+  handleTransferRequest(direction: number, token: number, file: string, size?: number | bigint, username?: string) {
     // Legacy direction 0 = download from peer (slskd/Museek) — treat as QueueUpload
     if (direction === 0) {
-      // find or create queued upload? For interop, treat as queue-upload request from peer that wants our file
-      // but direction 0 here means peer wants to download from us via TransferRequest not QueueUpload — handle as upload
-      // Reuse queue logic: if file matches a queued download awaiting upload? Instead treat as handleQueueUpload if we have shares
-      // Simplest: if we are the uploader (peer wants file), handle as queue upload
-      // Check if any transfer with this file is queued as upload? fallback to ignore but try to handle
-      // We treat direction 0 with file as peer wanting to download -> queue upload
-      try { this.handleQueueUpload("unknown", file); } catch {}
+      // Peer wants to download from us via old-style TransferRequest — queue upload under real username
+      try { if (username) this.handleQueueUpload(username, file); } catch {}
       return;
     }
     if (direction !== 1) return;
@@ -1047,11 +1042,21 @@ export class TransferManager {
     if (!target) return;
     // Activate
     target.token = token;
+    // nicotine-plus parity: trust uploader's size (search results can be stale)
+    if (size !== undefined) {
+      const n = typeof size === "bigint" ? (size <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(size) : target.size) : size;
+      if (n > 0) target.size = n;
+    }
     target.status = "Getting status";
     if (target._statusTimer) clearTimeout(target._statusTimer);
     this.emit(target);
     // Register file token for F demux
     try { this.session?.registerFileToken(token); } catch {}
+    // nicotine-plus parity: uploader waits for TransferResponse(41) accept before opening F.
+    // Without this reply the upload never starts (Queued -> Getting status -> 45s timeout loop).
+    // Include the uploader's own size: SoulseekQt requires filesize on accept, nicotine-plus ignores it.
+    try { (this.session as unknown as { transferResponse?: (u: string, t: number, a: boolean, s?: number | bigint) => void })?.transferResponse?.(target.username, token, true, target.size); } catch {}
+    try { logger.debug("transfer", "transfer-response sent", { username: target.username, token }); } catch {}
     // 45 s timer to timeout if F doesn't arrive
     target._statusTimer = setTimeout(() => {
       const cur = this.get(target!.id);
@@ -1235,13 +1240,15 @@ export class TransferManager {
     // and only real onData chunks advance it from this point on.
     t.status = "Transferring";
     t._startTime = Date.now();
+    (t as unknown as { _gotBytes?: boolean })._gotBytes = false;
     const startOffset = await this.prepareIncompleteFile(t);
     t.current = startOffset;
     this.emit(t);
     this.emitStats();
 
     // Send FileOffset (uint64 LE)
-    try { socket.write(packUint64(startOffset)); } catch {}
+    try { socket.write(packUint64(startOffset)); } catch (e) { try { logger.warn("transfer", "FileOffset write failed", { token, error: (e as Error)?.message }); } catch {} }
+    try { logger.debug("transfer", "FileOffset sent, awaiting bytes", { username: t.username, file: t.virtualPath.slice(-60), token, offset: String(startOffset), size: t.size }); } catch {}
     try { this.session?.unregisterFileToken(token); } catch {}
 
     // Stream raw bytes → file
@@ -1352,7 +1359,27 @@ export class TransferManager {
       return;
     }
     const cb = (t as unknown as { _onFileData?: (c: Buffer) => void })._onFileData;
-    if (cb) cb(chunk);
+    if (cb) {
+      if (!(t as unknown as { _gotBytes?: boolean })._gotBytes) {
+        (t as unknown as { _gotBytes?: boolean })._gotBytes = true;
+        try { logger.debug("transfer", "first F bytes arrived", { username: t.username, file: t.virtualPath.slice(-60), token, bytes: chunk.length }); } catch {}
+      }
+      cb(chunk);
+    }
+  }
+
+  /** F socket closed — fail fast instead of waiting out the 60 s stall timer. */
+  handleFileClosed(token: number) {
+    const t = this.getByToken(token);
+    if (!t || t.isUpload) return;
+    if (t.status !== "Transferring") return;
+    if (t.current >= t.size) return; // finished already, close is normal
+    const stall = (t as unknown as { _stallTimer?: Timer })._stallTimer;
+    if (stall) { clearTimeout(stall); (t as unknown as { _stallTimer?: Timer })._stallTimer = undefined; }
+    t.status = "Connection closed";
+    this.emit(t);
+    try { logger.debug("transfer", "F closed mid-transfer, retrying", { username: t.username, file: t.virtualPath.slice(-60), current: t.current, size: t.size }); } catch {}
+    this.scheduleRetry(t.id, 180_000);
   }
 
   private startUploadStream(t: BridgeTransfer, offset: number, _initialTail?: Buffer) {

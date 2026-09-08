@@ -67,11 +67,13 @@ describe("transfers — download engine (Phase 2)", () => {
 
   test("handleTransferRequest sets Getting status and registers token", () => {
     let registered: number | undefined;
+    const responses: any[] = [];
     const mockSession = {
       registerFileToken: (tok: number) => { registered = tok; },
       unregisterFileToken: () => {},
       queueUpload: () => {},
       placeInQueueRequest: () => {},
+      transferResponse: (u: string, tok: number, allowed: boolean) => { responses.push({ u, tok, allowed }); },
     };
     const { mgr } = makeManager(tmp, mockSession);
     mgr.requestDownload("alice", "Music\\song.mp3", 5000);
@@ -80,6 +82,8 @@ describe("transfers — download engine (Phase 2)", () => {
     expect(t?.status).toBe("Getting status");
     expect(t?.token).toBe(12345);
     expect(registered).toBe(12345);
+    // nicotine-plus parity: must accept with TransferResponse(41) or uploader never opens F
+    expect(responses).toEqual([{ u: "alice", tok: 12345, allowed: true }]);
     mgr.close();
   });
 
@@ -335,6 +339,36 @@ describe("transfers — file streaming (Phase 4 - download & upload)", () => {
     expect(existsSync(dlPath)).toBe(true);
     const content = readFileSync(dlPath);
     expect(content.length).toBe(4096);
+    mgr.close();
+  });
+
+  test("handleFileClosed fails fast mid-transfer, ignores finished", async () => {
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+      transferResponse: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    (mgr as any).transfers.clear();
+    const t = mgr.requestDownload("alice", "Music\\cut.mp3", 4096, "cut.mp3");
+    const token = t.token!;
+    mgr.handleTransferRequest(1, token, "Music\\cut.mp3");
+    const mockSocket: any = { write: () => {}, end: () => {} };
+    await (mgr as any).handleFileConnection(token, mockSocket);
+    expect(mgr.get(t.id)?.status).toBe("Transferring");
+    (mgr as any).handleFileClosed(token);
+    expect(mgr.get(t.id)?.status).toBe("Connection closed");
+    // finished transfers are untouched by a trailing F close
+    const t2 = mgr.requestDownload("bob", "Music\\done.mp3", 100, "done.mp3");
+    mgr.handleTransferRequest(1, t2.token!, "Music\\done.mp3");
+    await (mgr as any).handleFileConnection(t2.token!, mockSocket);
+    (mgr as any).handleFileChunk(t2.token!, Buffer.alloc(100, 0x41));
+    expect(mgr.get(t2.id)?.status).toBe("Finished");
+    (mgr as any).handleFileClosed(t2.token!);
+    expect(mgr.get(t2.id)?.status).toBe("Finished");
     mgr.close();
   });
 
