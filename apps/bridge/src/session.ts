@@ -335,6 +335,9 @@ export class SoulseekSession {
   private pendingBrowseShares = new Map<string, { timer: ReturnType<typeof setTimeout>; createdAt: number }>();
   private pendingBrowseFolder = new Map<number, { username: string; folder: string; timer: ReturnType<typeof setTimeout>; retryCount: number }>();
   private pendingPeerMessages = new Map<string, Array<{ connType: string; msg: Buffer }>>();
+  // inbound pierce parked when the peer dials before our ConnectToPeer copy
+  // arrives (remote got the relay first). Adopted on ConnectToPeer match.
+  private parkedPierce = new Map<number, { sock: unknown; at: number }>();
   // user status cache for offline check (P1 hardening)
   private userStatusCache = new Map<string, { status: number; privileged: boolean; updated: number }>();
   // allowed peer responses gating (nicotine allowed_message_responses) — prevent unsolicited 448M
@@ -2132,6 +2135,12 @@ export class SoulseekSession {
           try { this.pendingPeerMessages.delete(user.toLowerCase()); } catch {}
         }
       }
+      for (const [token, parked] of this.parkedPierce) {
+        if (now - parked.at > 60_000) {
+          try { (parked.sock as unknown as { end?: () => void })?.end?.(); } catch {}
+          this.parkedPierce.delete(token);
+        }
+      }
       // pendingConnects timeout is handled per-token (45 s), but sweep stale just in case
       for (const [token, pending] of this.pendingConnects) {
         // if timer already fired, pending would be deleted; no extra handling
@@ -2187,6 +2196,25 @@ export class SoulseekSession {
 
   private connectToPeer(ctp: ReturnType<typeof parseConnectToPeer>) {
     if (ctp.connType !== "P" && ctp.connType !== "F" && ctp.connType !== "D") return;
+    // Adopt a parked inbound pierce: peer dialed before our relay copy arrived.
+    // Dialing out too would leave the uploader waiting on a dead socket.
+    const parked = this.parkedPierce.get(ctp.token >>> 0);
+    if (parked) {
+      this.parkedPierce.delete(ctp.token >>> 0);
+      const sock = parked.sock as unknown as Socket;
+      const st = this.peerStates.get(sock);
+      if (st) {
+        st.username = ctp.username;
+        st.connType = ctp.connType;
+        st.initDone = true;
+        st.lastActive = Date.now();
+        logger.debug("peer", "adopted parked pierce", { username: ctp.username, connType: ctp.connType });
+        setTimeout(() => this.flushPendingPeerMessages(ctp.username, ctp.connType), 10);
+        this.dequeuePendingSockets();
+        return;
+      }
+      // parked socket already gone — fall through to dial
+    }
     // If this token matches a pending outbound connectPeer, resolve it
     const pending = this.pendingConnects.get(ctp.token);
     if (pending) {
@@ -2404,7 +2432,14 @@ export class SoulseekSession {
               state.connType = pending.connType;
               setTimeout(() => this.flushPendingPeerMessages(pending.username, pending.connType), 10);
             } else {
-              logger.debug("peer", "inbound PierceFireWall unknown token", { token: pf.token });
+              logger.debug("peer", "inbound PierceFireWall unknown token, parking", { token: pf.token });
+              try {
+                if (this.parkedPierce.size > 64) {
+                  const oldest = [...this.parkedPierce.entries()].sort((a, b) => a[1].at - b[1].at)[0]?.[0];
+                  if (oldest !== undefined) { try { (this.parkedPierce.get(oldest)?.sock as unknown as { end?: () => void })?.end?.(); } catch {} this.parkedPierce.delete(oldest); }
+                }
+                this.parkedPierce.set(pf.token >>> 0, { sock: peer, at: Date.now() });
+              } catch {}
             }
           } catch { logger.debug("peer", "inbound PierceFireWall parse failed"); }
         } else {
@@ -2432,9 +2467,21 @@ export class SoulseekSession {
         state.buf = state.buf.subarray(total);
         continue;
       }
+      // FileInit on a pierced F socket (inbound-adopted or outbound): raw token
+      // with no PeerInit framing. Same wiring as the pre-init demux above.
+      if (state.connType === "F" && !state.isFileConn && state.fileToken === undefined && state.buf.length >= 4) {
+        const fileInitToken = state.buf.readUInt32LE(0);
+        if (this.pendingFileTokens.has(fileInitToken)) {
+          logger.debug("transfer", "F FileInit on pierced socket", { token: fileInitToken });
+          state.isFileConn = true;
+          state.fileToken = fileInitToken;
+          state.buf = state.buf.subarray(4);
+          try { this.opts.onFileConnection?.(fileInitToken, peer); } catch {}
+          continue;
+        }
+      }
       // File connection: raw [uint32 token] + [uint64 offset] + bytes (nicotine downloads.py FileTransferInit+FileOffset)
-      if (state.isFileConn) {
-        if (state.fileToken === undefined) {
+      if (state.isFileConn) {        if (state.fileToken === undefined) {
           if (state.buf.length < 4) break;
           state.fileToken = state.buf.readUInt32LE(0);
           state.buf = state.buf.subarray(4);

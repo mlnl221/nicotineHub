@@ -1231,6 +1231,7 @@ export class TransferManager {
   async handleFileConnection(token: number, socket: Socket) {
     const t = this.getByToken(token);
     if (!t) {
+      logger.debug("transfer", "F connection unknown token, closing", { token });
       try { socket.end(); } catch {}
       return;
     }
@@ -1270,6 +1271,7 @@ export class TransferManager {
     t.current = startOffset;
     this.emit(t);
     this.emitStats();
+    logger.debug("transfer", "F accepted, FileOffset sent", { id: t.id, token, startOffset });
 
     // Send FileOffset (uint64 LE)
     try { socket.write(packUint64(startOffset)); } catch {}
