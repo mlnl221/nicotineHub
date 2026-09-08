@@ -186,15 +186,6 @@ export interface Settings {
   privatechat: {
     store: boolean;
   };
-  players: {
-    npplayer: string;
-    npformat: string;
-    npothercommand: string;
-    npformatlist: string[];
-  };
-  urls: {
-    protocols: Record<string, string>;
-  };
   plugins: {
     enable: boolean;
     enabled: string[];
@@ -257,10 +248,9 @@ export const defaults: Settings = {
       chat: false,
       privateChat: true,
       buddies: false,
-      interests: false,
       profile: true,
     },
-    modes_order: ["search", "browse", "downloads", "uploads", "files", "chat", "privateChat", "buddies", "interests", "profile"],
+    modes_order: ["search", "browse", "downloads", "uploads", "files", "chat", "privateChat", "buddies", "profile"],
     width: 800,
     height: 600,
     xposition: -1,
@@ -412,15 +402,6 @@ export const defaults: Settings = {
   },
   privatechat: {
     store: true,
-  },
-  players: {
-    npplayer: "mpris",
-    npformat: "",
-    npothercommand: "",
-    npformatlist: [],
-  },
-  urls: {
-    protocols: {},
   },
   plugins: {
     enable: true,

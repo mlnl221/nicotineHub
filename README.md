@@ -76,7 +76,7 @@ The browser can't open raw TCP sockets, so the bridge translates JSON over WebSo
 - **Worker (scrape/spectrum/tag)** — separate Python FastAPI service for CPU/IO-heavy ops (same-origin `/api/worker`; `:8789` internal only); bridge stays SLSK-only
 - **Browse** — shares & folders via peers
 - **Chat** — rooms + private, tickers, owned/member lists
-- **Social** — buddies, interests/recommendations/similar users
+- **Social** — buddies
 - **Profiles** — description, picture, stats, privileges
 - **Mobile shell** — `TopBar`/`BottomNav`, safe-area, PWA, diagnostics live tail
 

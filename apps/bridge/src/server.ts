@@ -123,15 +123,6 @@ const UserInfoMessageSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("get"), username: z.string().min(1).max(64) }),
   z.object({ action: z.literal("interests"), username: z.string().min(1).max(64) }),
   z.object({ action: z.literal("peerAddress"), username: z.string().min(1).max(64) }),
-  z.object({ action: z.literal("recommendations") }),
-  z.object({ action: z.literal("globalRecommendations") }),
-  z.object({ action: z.literal("similarUsers") }),
-  z.object({ action: z.literal("itemRecommendations"), item: z.string().min(1).max(255) }),
-  z.object({ action: z.literal("itemSimilarUsers"), item: z.string().min(1).max(255) }),
-  z.object({ action: z.literal("addLike"), thing: z.string().min(1).max(255) }),
-  z.object({ action: z.literal("removeLike"), thing: z.string().min(1).max(255) }),
-  z.object({ action: z.literal("addHate"), thing: z.string().min(1).max(255) }),
-  z.object({ action: z.literal("removeHate"), thing: z.string().min(1).max(255) }),
   z.object({ action: z.literal("givePrivileges"), username: z.string().min(1).max(64), days: z.number().int().min(1).max(3650) }),
   z.object({ action: z.literal("setStatus"), status: z.number().int().min(0).max(2) }),
   z.object({ action: z.literal("setProfile"), profile: ProfileSchema }),
@@ -2105,15 +2096,6 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             break;
           }
           case "interests": session.requestUserInterests(msg.username); break;
-          case "recommendations": session.requestRecommendations(); break;
-          case "globalRecommendations": session.requestGlobalRecommendations(); break;
-          case "similarUsers": session.requestSimilarUsers(); break;
-          case "itemRecommendations": session.requestItemRecommendations(msg.item); break;
-          case "itemSimilarUsers": session.requestItemSimilarUsers(msg.item); break;
-          case "addLike": session.addThingILike(msg.thing); break;
-          case "removeLike": session.removeThingILike(msg.thing); break;
-          case "addHate": session.addThingIHate(msg.thing); break;
-          case "removeHate": session.removeThingIHate(msg.thing); break;
           case "givePrivileges": session.givePrivileges(msg.username, msg.days); break;
           case "setStatus": session.setStatus(msg.status); break;
           case "checkPrivileges": session.checkPrivileges(); break;

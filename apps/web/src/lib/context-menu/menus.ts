@@ -290,37 +290,6 @@ export function chatRoomMenu(room: string | null, view: "activity"|"chat", actio
   ];
 }
 
-export function userInfoLikesMenu(thing: string, isLike: boolean, actions: { onToggleLike: () => void; onToggleDislike: () => void; onRecommend: () => void; onSearch: () => void }): MenuItem[] {
-  return [
-    { id: "like", label: "I Like This", icon: "favorite", checked: isLike, action: actions.onToggleLike },
-    { id: "dislike", label: "I Dislike This", icon: "heart_broken", checked: !isLike, action: actions.onToggleDislike },
-    { id: "sep", label: "---", icon: "" },
-    { id: "rec", label: "Recommendations for Item", icon: "auto_awesome", action: actions.onRecommend },
-    { id: "search", label: "Search for Item", icon: "search", action: actions.onSearch },
-  ];
-}
-
-export function interestsMenu(thing: string, actions: { onRecommend: () => void; onSearch: () => void; onRemove: () => void; onWishlist?: () => void }): MenuItem[] {
-  return [
-    { id: "rec", label: "Recommendations for Item", icon: "auto_awesome", action: actions.onRecommend },
-    { id: "search", label: "Search for Item", icon: "search", action: actions.onSearch },
-    ...(actions.onWishlist ? [{ id: "wishlist", label: "Add to Wishlist", icon: "favorite", action: actions.onWishlist } as MenuItem] : []),
-    { id: "sep", label: "---", icon: "" },
-    { id: "remove", label: "Remove", icon: "delete", danger: true, action: actions.onRemove },
-  ];
-}
-
-export function interestsRecMenu(thing: string, isLiked: boolean, isDisliked: boolean, actions: { onLike: () => void; onDislike: () => void; onRecommend: () => void; onSearch: () => void; onWishlist?: () => void }): MenuItem[] {
-  return [
-    { id: "like", label: "I Like This", icon: "favorite", checked: isLiked, action: actions.onLike },
-    { id: "dislike", label: "I Dislike This", icon: "heart_broken", checked: isDisliked, action: actions.onDislike },
-    { id: "sep", label: "---", icon: "" },
-    { id: "rec", label: "Recommendations for Item", icon: "auto_awesome", action: actions.onRecommend },
-    { id: "search", label: "Search for Item", icon: "search", action: actions.onSearch },
-    ...(actions.onWishlist ? [{ id: "wishlist", label: "Add to Wishlist", icon: "favorite", action: actions.onWishlist } as MenuItem] : []),
-  ];
-}
-
 export function buddyMenu(buddy: string, opts?: { onNote?: () => void; onRemove?: () => void }): MenuItem[] {
   return [
     ...userMenu(buddy, "userlist"),

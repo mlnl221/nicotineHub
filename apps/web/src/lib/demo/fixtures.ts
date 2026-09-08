@@ -221,22 +221,6 @@ export function mockProfile(username: string): MockProfileBundle {
   };
 }
 
-export function mockRecommendations(): import("@/lib/protocol").Recommendation[] {
-  return [
-    { thing: "jazz", rating: 240 },
-    { thing: "soul", rating: 198 },
-    { thing: "hip-hop", rating: 176 },
-    { thing: "ambient", rating: 154 },
-    { thing: "funk", rating: 132 },
-    { thing: "electronic", rating: 120 },
-    { thing: "blues", rating: 98 },
-  ];
-}
-
-export function mockSimilarUsers(): import("@/lib/protocol").SimilarUser[] {
-  return DEMO_USERS.slice(0, 6).map((u, i) => ({ username: u, rating: 100 - i * 12 }));
-}
-
 // ------------------------------------------------------------------
 // Demo seed constants — single source of truth for all demo fixtures
 // ------------------------------------------------------------------

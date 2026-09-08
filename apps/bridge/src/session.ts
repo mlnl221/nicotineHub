@@ -17,8 +17,6 @@ import { isUserBanned, shouldBlockUser, shouldIgnoreUser, getCountryCode, setCou
 import { PortMapper } from "./portmapper.ts";
 import {
   buildAcceptChildren,
-  buildAddThingIHate,
-  buildAddThingILike,
   buildBranchLevel,
   buildBranchRoot,
   buildCantConnectToPeer,
@@ -45,8 +43,6 @@ import {
   buildPlaceInQueueRequest,
   buildPlaceInQueueResponse,
   buildQueueUpload,
-  buildRemoveThingIHate,
-  buildRemoveThingILike,
   buildRoomListRequest,
   buildRoomSearch,
   buildSayChatroom,
@@ -86,8 +82,6 @@ import {
   parseFileSearchResponse,
   parseFolderContentsResponse,
   parseGlobalRoomMessage,
-  parseItemRecommendations,
-  parseItemSimilarUsers,
   parseJoinRoom,
   parseLoginResponse,
   parseMessageUser,
@@ -102,7 +96,6 @@ import {
   parseQueueUpload,
   parseUploadDenied,
   parseUploadFailed,
-  parseRecommendations,
   parseSharedFileListResponse,
   SlskReader,
   parseRoomList,
@@ -112,7 +105,6 @@ import {
   parseRoomTickers,
   parseRoomTickerEvent,
   parseSayChatroom,
-  parseSimilarUsers,
   parseTransferRequest,
   parseTransferResponse,
   parseUserInterests,
@@ -131,8 +123,6 @@ import {
   type LoginResponse,
   type PeerAddress,
   type SearchFile,
-  type Recommendation,
-  type SimilarUser,
   type UserInterestsMessage,
   type UserStatsMessage,
   type UserStatusMessage,
@@ -212,13 +202,12 @@ export interface SessionOptions {
   getQueuePlace?: (file: string) => number;
 }
 export interface UserInfoEvent {
-  type: "user-status" | "user-stats" | "user-interests" | "recommendations" | "global-recommendations"
-    | "similar-users" | "item-recommendations" | "item-similar-users" | "peer-address"
+  type: "user-status" | "user-stats" | "user-interests" | "peer-address"
     | "user-info-response" | "user-info-failed" | "privileged-users" | "check-privileges"
     | "excluded-search-phrases" | "wishlist-interval" | "watch-user" | "admin-message"
     | "privilege-time";
   username?: string; status?: UserStatusMessage; stats?: UserStatsMessage;
-  interests?: UserInterestsMessage; recommendations?: Recommendation[]; similarUsers?: SimilarUser[];
+  interests?: UserInterestsMessage;
   peerAddress?: PeerAddress; info?: UserInfoResponseMessage; privilegedUsers?: string[];
   checkPrivileges?: number; excludedPhrases?: string[]; wishlistInterval?: number;
   watchUser?: ReturnType<typeof parseWatchUser>; adminMessage?: string;
@@ -1584,26 +1573,6 @@ export class SoulseekSession {
     }
     if (code === SERVER_MESSAGE_CODES.userInterests) {
       try { const interests = parseUserInterests(payload); this.emit({ type: "user-interests", username: interests.username, interests }); } catch {}
-      return;
-    }
-    if (code === SERVER_MESSAGE_CODES.recommendations) {
-      try { this.emit({ type: "recommendations", recommendations: parseRecommendations(payload).recommendations }); } catch {}
-      return;
-    }
-    if (code === SERVER_MESSAGE_CODES.globalRecommendations) {
-      try { this.emit({ type: "global-recommendations", recommendations: parseRecommendations(payload).recommendations }); } catch {}
-      return;
-    }
-    if (code === SERVER_MESSAGE_CODES.similarUsers) {
-      try { this.emit({ type: "similar-users", similarUsers: parseSimilarUsers(payload) }); } catch {}
-      return;
-    }
-    if (code === SERVER_MESSAGE_CODES.itemRecommendations) {
-      try { this.emit({ type: "item-recommendations", recommendations: parseItemRecommendations(payload).recommendations }); } catch {}
-      return;
-    }
-    if (code === SERVER_MESSAGE_CODES.itemSimilarUsers) {
-      try { this.emit({ type: "item-similar-users", similarUsers: parseItemSimilarUsers(payload).users }); } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.getPeerAddress) {
@@ -2987,21 +2956,12 @@ export class SoulseekSession {
     this.serverSocket?.write(buildGetPeerAddress(username));
   }
   requestUserInterests(username: string) { this.serverSocket?.write(buildUserInterests(username)); }
-  requestRecommendations() { this.serverSocket?.write(frameMessage(SERVER_MESSAGE_CODES.recommendations, Buffer.alloc(0))); }
-  requestGlobalRecommendations() { this.serverSocket?.write(frameMessage(SERVER_MESSAGE_CODES.globalRecommendations, Buffer.alloc(0))); }
-  requestSimilarUsers() { this.serverSocket?.write(frameMessage(SERVER_MESSAGE_CODES.similarUsers, Buffer.alloc(0))); }
-  requestItemRecommendations(item: string) { this.serverSocket?.write(buildItemRec(item)); }
-  requestItemSimilarUsers(item: string) { this.serverSocket?.write(buildItemSim(item)); }
   setStatus(status: number) {
     this.away = status === 1;
     if (!this.away) this._lastActivity = Date.now();
     this.serverSocket?.write(buildSetStatus(status));
   }
   reportShares(folders: number, files: number) { this.serverSocket?.write(buildSharedFoldersFiles(folders, files)); }
-  addThingILike(thing: string) { this.serverSocket?.write(buildAddThingILike(thing)); }
-  removeThingILike(thing: string) { this.serverSocket?.write(buildRemoveThingILike(thing)); }
-  addThingIHate(thing: string) { this.serverSocket?.write(buildAddThingIHate(thing)); }
-  removeThingIHate(thing: string) { this.serverSocket?.write(buildRemoveThingIHate(thing)); }
   givePrivileges(username: string, days: number) { this.serverSocket?.write(buildGivePrivileges(username, days)); }
   sendUploadSpeed(speed: number) { this.serverSocket?.write(buildSendUploadSpeed(speed)); }
   changePassword(password: string) { this.serverSocket?.write(buildChangePassword(password)); }
@@ -3326,12 +3286,6 @@ function toRow(username: string, freeUploadSlots: boolean, inQueue: number, uplo
   const name = file.name; const idx = name.lastIndexOf("\\"); const folder = idx >= 0 ? name.slice(0, idx) : ""; const filename = idx >= 0 ? name.slice(idx + 1) : name;
   const dot = filename.lastIndexOf("."); const fileType = dot >= 0 ? filename.slice(dot + 1).toLowerCase() : "";
   return { user: username, folder, filename, path: name, size: file.size, fileType, slotFree: freeUploadSlots, speed: uploadSpeed, inQueue, quality: file.attrs.bitrate ?? 0, length: file.attrs.length ?? 0, private: file.private, attributes: file.attrs };
-}
-function buildItemRec(item: string): Buffer {
-  return frameMessage(SERVER_MESSAGE_CODES.itemRecommendations, packString(item));
-}
-function buildItemSim(item: string): Buffer {
-  return frameMessage(SERVER_MESSAGE_CODES.itemSimilarUsers, packString(item));
 }
 function inflateProbeToken(payload: Buffer): number | null {
   try {

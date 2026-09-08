@@ -51,12 +51,6 @@ export const SERVER_MESSAGE_CODES = {
   uploadSlotsFull: 40,
   relogged: 41,
   userSearch: 42,
-  similarRecommendations: 50,
-  addThingILike: 51,
-  removeThingILike: 52,
-  recommendations: 54,
-  myRecommendations: 55,
-  globalRecommendations: 56,
   userInterests: 57,
   adminCommand: 58,
   placeInLineRequest: 59,
@@ -84,15 +78,10 @@ export const SERVER_MESSAGE_CODES = {
   possibleParents: 102,
   wishlistSearch: 103,
   wishlistInterval: 104,
-  similarUsers: 110,
-  itemRecommendations: 111,
-  itemSimilarUsers: 112,
   roomTickers: 113,
   roomTickerAdded: 114,
   roomTickerRemoved: 115,
   setRoomTicker: 116,
-  addThingIHate: 117,
-  removeThingIHate: 118,
   roomSearch: 120,
   sendUploadSpeed: 121,
   userPrivileged: 122,
@@ -467,10 +456,6 @@ export function buildSetStatus(status: number): Buffer { return frameMessage(SER
 export function buildSharedFoldersFiles(dirs: number, files: number): Buffer {
   return frameMessage(SERVER_MESSAGE_CODES.sharedFoldersFiles, Buffer.concat([packUint32(dirs), packUint32(files)]));
 }
-export function buildAddThingILike(thing: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.addThingILike, packString(thing)); }
-export function buildRemoveThingILike(thing: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.removeThingILike, packString(thing)); }
-export function buildAddThingIHate(thing: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.addThingIHate, packString(thing)); }
-export function buildRemoveThingIHate(thing: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.removeThingIHate, packString(thing)); }
 export function buildGivePrivileges(username: string, days: number): Buffer {
   return frameMessage(SERVER_MESSAGE_CODES.givePrivileges, Buffer.concat([packString(username), packUint32(days)]));
 }
@@ -516,9 +501,6 @@ export function buildCancelRoomMembership(room: string): Buffer { return frameMe
 export function buildCancelRoomOwnership(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.cancelRoomOwnership, packString(room)); }
 export function buildAddRoomOperator(room: string, username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.addRoomOperator, Buffer.concat([packString(room), packString(username)])); }
 export function buildRemoveRoomOperator(room: string, username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.removeRoomOperator, Buffer.concat([packString(room), packString(username)])); }
-export function buildRecommendationsEmpty(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.recommendations, Buffer.alloc(0)); }
-export function buildGlobalRecommendationsEmpty(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.globalRecommendations, Buffer.alloc(0)); }
-export function buildSimilarUsersEmpty(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.similarUsers, Buffer.alloc(0)); }
 export function buildHaveNoParent(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.haveNoParent, packBool(true)); }
 export function buildBranchLevel(level: number): Buffer { return frameMessage(SERVER_MESSAGE_CODES.branchLevel, packUint32(level >>> 0)); }
 export function buildBranchRoot(root: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.branchRoot, packString(root)); }
@@ -764,30 +746,6 @@ export function parseUserInterests(payload: Buffer): UserInterestsMessage {
   const nLikes = r.uint32(); for (let i = 0; i < nLikes; i++) likes.push(r.string());
   const nHates = r.uint32(); for (let i = 0; i < nHates; i++) hates.push(r.string());
   return { username, likes, hates };
-}
-export interface Recommendation { thing: string; rating: number; }
-export function parseRecommendations(payload: Buffer): { recommendations: Recommendation[]; unrecommendations: Recommendation[] } {
-  const r = new SlskReader(payload);
-  const recommendations: Recommendation[] = []; const unrecommendations: Recommendation[] = [];
-  const nRecs = r.uint32(); for (let i = 0; i < nRecs; i++) { const thing = r.string(); const rating = r.int32(); recommendations.push({ thing, rating }); }
-  const nUnrecs = r.uint32(); for (let i = 0; i < nUnrecs; i++) { const thing = r.string(); const rating = r.int32(); unrecommendations.push({ thing, rating }); }
-  return { recommendations, unrecommendations };
-}
-export interface SimilarUser { username: string; rating: number; }
-export function parseSimilarUsers(payload: Buffer): SimilarUser[] {
-  const r = new SlskReader(payload); const count = r.uint32(); const users: SimilarUser[] = [];
-  for (let i = 0; i < count; i++) { const username = r.string(); const rating = r.uint32(); users.push({ username, rating }); }
-  return users;
-}
-export function parseItemRecommendations(payload: Buffer): { thing: string; recommendations: Recommendation[] } {
-  const r = new SlskReader(payload); const thing = r.string(); const recommendations: Recommendation[] = []; const n = r.uint32();
-  for (let i = 0; i < n; i++) { const recThing = r.string(); const rating = r.int32(); recommendations.push({ thing: recThing, rating }); }
-  return { thing, recommendations };
-}
-export function parseItemSimilarUsers(payload: Buffer): { thing: string; users: SimilarUser[] } {
-  const r = new SlskReader(payload); const thing = r.string(); const users: SimilarUser[] = []; const n = r.uint32();
-  for (let i = 0; i < n; i++) { const username = r.string(); const rating = r.uint32(); users.push({ username, rating }); }
-  return { thing, users };
 }
 export interface PeerAddress { username: string; ip: string; port: number; obfuscationType?: number; obfuscatedPort?: number; }
 export function parsePeerAddress(payload: Buffer): PeerAddress {
