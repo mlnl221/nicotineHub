@@ -77,7 +77,7 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "try{var t=localStorage.getItem('nicotineHub.theme')||localStorage.getItem('nicotine.theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}try{if(localStorage.getItem('nicotineHub.demoBannerDismissed')==='0'){document.documentElement.style.setProperty('--demo-banner-h','32px');}else{document.documentElement.style.setProperty('--demo-banner-h','0px');}}catch(e){document.documentElement.style.setProperty('--demo-banner-h','0px')}",
+              "try{var t=localStorage.getItem('nicotineHub.theme')||localStorage.getItem('nicotine.theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}try{if(localStorage.getItem('nicotineHub.demoBannerDismissed')==='0'){document.documentElement.style.setProperty('--demo-banner-h','0px');}else{document.documentElement.style.setProperty('--demo-banner-h','0px');}}catch(e){document.documentElement.style.setProperty('--demo-banner-h','0px')}",
           }}
         />
       </head>
