@@ -839,7 +839,11 @@ export class SoulseekSession {
     const list = this.pendingPeerMessages.get(key);
     if (!list || list.length === 0) return;
     const sock = this.getPeerSocket(username, connType);
-    if (!sock) return;
+    if (!sock) {
+      const states = [...this.peerStates.values()].filter((s) => s.username?.toLowerCase() === key).map((s) => ({ t: s.connType, init: s.initDone }));
+      logger.debug("peer", "flush miss, no socket", { username, connType, queued: list.length, states });
+      return;
+    }
     const remaining: Array<{ connType: string; msg: Buffer }> = [];
     for (const item of list) {
       if (item.connType !== connType) { remaining.push(item); continue; }
@@ -2803,11 +2807,10 @@ export class SoulseekSession {
         // Obsolete/deprecated 42/52 — no-op to silence unknown-peer warnings (nicotine keeps but never handles)
       }
     }
-    if (state.buf.length === 0) {
-      this.peerStates.delete(peer);
-      if (state.username && state.connType === "D") this._removeChildPeerConnection(state.username);
-      this.dequeuePendingSockets();
-    } else this.peerStates.set(peer, state);
+    // Keep per-socket state for the life of the connection (close/sweep clean
+    // up). Deleting on drain forgets init/username, so the next message on a
+    // persistent P socket re-parses as init and legit traffic dies.
+    this.peerStates.set(peer, state);
   }
 
   private routeResult(resp: { token: number; username: string; freeUploadSlots: boolean; inQueue: number; uploadSpeed: number; results: SearchFile[] }) {
