@@ -104,12 +104,90 @@ describe("transfers — download engine (Phase 2)", () => {
     mgr.close();
   });
 
-  test("handleUploadDenied sets status and schedules retry (immediate check)", () => {
+  test("grant binds owner only; same path from another user ignored", () => {
+    const mockSession = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendTransferResponse: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    mgr.requestDownload("alice", "Music\\same.mp3", 100);
+    mgr.requestDownload("bob", "Music\\same.mp3", 100);
+    mgr.handleTransferRequest(1, 777, "Music\\same.mp3", "bob", 100);
+    expect(mgr.get("alice::Music\\same.mp3")?.status).toBe("Queued");
+    expect(mgr.get("bob::Music\\same.mp3")?.status).toBe("Getting status");
+    expect(mgr.get("bob::Music\\same.mp3")?.token).toBe(777);
+    mgr.close();
+  });
+
+  test("permanent denial does not schedule retry", () => {
     const { mgr } = makeManager(tmp);
-    mgr.requestDownload("alice", "Music\\song.mp3", 1000);
-    mgr.handleUploadDenied("Music\\song.mp3", "File not shared.");
-    const t = mgr.get("alice::Music\\song.mp3");
-    expect(t?.status).toBe("File not shared.");
+    mgr.requestDownload("alice", "Music\\x.mp3", 100);
+    mgr.handleUploadDenied("Music\\x.mp3", "Banned", "alice");
+    const t = mgr.get("alice::Music\\x.mp3");
+    expect(t?.status).toBe("Banned");
+    expect((t as any)?._retryTimer).toBeUndefined();
+    mgr.close();
+  });
+
+  test("upload granted dials F and arms offset wait", async () => {
+    const fsends: Buffer[] = [];
+    const fakeSock: any = { write: (b: Buffer) => fsends.push(Buffer.from(b)), end: () => {} };
+    let requested: { u: string; t: number } | undefined;
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+      transferRequest: (u: string, _d: number, t: number) => { requested = { u, t }; },
+      dialFileUpload: async (_u: string, t: number) => {
+        const b = Buffer.alloc(4); b.writeUInt32LE(t >>> 0, 0);
+        fakeSock.write(b);
+        return fakeSock;
+      },
+    };
+    const { mkdirSync: mks, writeFileSync: wfs } = require("node:fs") as typeof import("node:fs");
+    mks(join(tmp, "shared"), { recursive: true });
+    wfs(join(tmp, "shared", "up.mp3"), Buffer.alloc(100, 0x44));
+    const { mgr } = makeManager(tmp, mockSession);
+    const t = mgr.handleQueueUpload("bob", "Music\\up.mp3");
+    expect(t.status).toBe("Queued");
+    (mgr as any).checkUploadQueue();
+    expect(requested?.u).toBe("bob");
+    expect(mgr.get(t.id)?.size).toBe(100);
+    await (mgr as any).handleUploadGranted("bob", requested!.t);
+    expect(fsends.length).toBeGreaterThanOrEqual(1);
+    expect((mgr.get(t.id) as any)?._uploadAwaitingOffset).toBe(true);
+    mgr.close();
+  });
+
+  test("complete partial finishes instantly on F without new bytes", async () => {
+    const writes: Buffer[] = [];
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+    };
+    const { mgr, finished } = makeManager(tmp, mockSession);
+    const virtual = "Music\\whole.mp3";
+    const user = "alice";
+    const t = mgr.requestDownload(user, virtual, 1024, "whole.mp3");
+    const incompleteDir = join(tmp, "incomplete");
+    const { mkdirSync: mks, writeFileSync: wfs } = await import("node:fs");
+    const hash = createHash("md5").update(virtual + user).digest("hex");
+    mks(incompleteDir, { recursive: true });
+    wfs(join(incompleteDir, `INCOMPLETE${hash}whole.mp3`), Buffer.alloc(1024, 0x43));
+    const sock: any = { write: (b: Buffer) => writes.push(b), end: () => {} };
+    mgr.handleTransferRequest(1, 999, virtual, user, 1024);
+    await (mgr as any).handleFileConnection(999, sock);
+    expect(mgr.get(t.id)?.status).toBe("Finished");
+    expect(finished.length).toBe(1);
+    expect(existsSync(join(tmp, "downloads", "whole.mp3"))).toBe(true);
     mgr.close();
   });
 

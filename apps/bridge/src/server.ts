@@ -462,6 +462,12 @@ function sharedSessionCallbacks() {
     onFileChunk: (token: number, chunk: Buffer) => {
       try { (sharedTransfers as unknown as { handleFileChunk: (t: number, c: Buffer) => void })?.handleFileChunk(token, chunk); } catch {}
     },
+    onFileClosed: (token: number) => {
+      try { (sharedTransfers as unknown as { handleFileClosed: (t: number) => void })?.handleFileClosed(token); } catch {}
+    },
+    onUploadPierce: (username: string, socket: unknown) => {
+      try { (sharedTransfers as unknown as { handleUploadPierced: (u: string, s: unknown) => Promise<void> })?.handleUploadPierced(username, socket as unknown as never); } catch {}
+    },
     getQueuePlace: (file: string) => {
       try { return (sharedTransfers as unknown as { getQueuePlace: (f: string) => number })?.getQueuePlace(file) ?? 1; } catch { return 1; }
     },
@@ -577,7 +583,7 @@ function sharedSessionCallbacks() {
         broadcastJson({ type: "search:start", searchId: event.searchId, token: event.token });
       }
     },
-    onTransferEvent: (event: { type: string; username?: string; file?: string; token?: number; place?: number; reason?: string; direction?: number; size?: number | bigint }) => {
+    onTransferEvent: (event: { type: string; username?: string; file?: string; token?: number; place?: number; reason?: string; direction?: number; size?: number | bigint; allowed?: boolean }) => {
       if (event.type === "queue-upload" && event.username && event.file) pluginManager.uploadQueuedNotification(event.username, event.file);
       else if (event.type === "transfer-response" && event.username && event.file) {
         pluginManager.uploadStartedNotification(event.username, event.file);
@@ -588,18 +594,21 @@ function sharedSessionCallbacks() {
       if (!tm) return;
       try {
         if (event.type === "place-in-queue" && event.file && event.place !== undefined) {
-          (tm as unknown as { handlePlaceInQueueResponse: (f: string, p: number) => void }).handlePlaceInQueueResponse(event.file, event.place);
+          (tm as unknown as { handlePlaceInQueueResponse: (f: string, p: number, u?: string) => void }).handlePlaceInQueueResponse(event.file, event.place, event.username);
         } else if (event.type === "transfer-request" && event.file && event.token !== undefined) {
           (tm as unknown as { handleTransferRequest: (d: number, t: number, f: string, u?: string, s?: number | bigint) => void }).handleTransferRequest(event.direction ?? 1, event.token, event.file, event.username, event.size);
-        } else if (event.type === "transfer-response" && event.reason) {
-          const f = event.file || "";
-          (tm as unknown as { handleUploadDenied: (f: string, r: string) => void }).handleUploadDenied(f, event.reason);
+        } else if (event.type === "transfer-response" && event.token !== undefined && event.username) {
+          if (event.allowed) {
+            (tm as unknown as { handleUploadGranted: (u: string, t: number) => void }).handleUploadGranted(event.username, event.token);
+          } else {
+            (tm as unknown as { handleUploadRejected: (u: string, t: number, r: string) => void }).handleUploadRejected(event.username, event.token, event.reason || "Cancelled");
+          }
         } else if (event.type === "queue-upload" && event.file && event.username) {
           (tm as unknown as { handleQueueUpload: (u: string, f: string) => void }).handleQueueUpload(event.username, event.file);
         } else if (event.type === "upload-denied" && event.file) {
-          (tm as unknown as { handleUploadDenied: (f: string, r: string) => void }).handleUploadDenied(event.file, event.reason || "Cancelled");
+          (tm as unknown as { handleUploadDenied: (f: string, r: string, u?: string) => void }).handleUploadDenied(event.file, event.reason || "Cancelled", event.username);
         } else if (event.type === "upload-failed" && event.file) {
-          (tm as unknown as { handleUploadFailed: (f: string) => void }).handleUploadFailed(event.file);
+          (tm as unknown as { handleUploadFailed: (f: string, u?: string) => void }).handleUploadFailed(event.file, event.username);
         }
       } catch {}
     },

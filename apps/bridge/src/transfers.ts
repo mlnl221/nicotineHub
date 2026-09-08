@@ -20,6 +20,7 @@ import { existsSync, mkdirSync, renameSync, statSync, writeFileSync, readFileSyn
 import { join } from "node:path";
 import type { Socket } from "bun";
 import {
+  buildFileTransferInit,
   buildPlaceInQueueRequest,
   buildQueueUpload,
   packUint64,
@@ -77,7 +78,6 @@ export interface BridgeTransfer {
   _fileHandle?: number; // fd
   _incompletePath?: string;
   _downloadUrl?: string;
-  _realRequest?: boolean; // true once a real TransferRequest arrived (suppresses pre-F progress stub)
 }
 
 export type TransferUpdateCb = (t: BridgeTransfer) => void;
@@ -154,7 +154,7 @@ export class TransferManager {
   private configDir: string;
   private incompleteDir: string;
   private downloadsDir: string;
-  private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; sendUploadDenied?: (u: string, f: string, reason?: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; sendTransferResponse?: (u: string, t: number, allowed: boolean, sizeOrReason?: number | bigint | string) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
+  private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; sendUploadDenied?: (u: string, f: string, reason?: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; sendTransferResponse?: (u: string, t: number, allowed: boolean, sizeOrReason?: number | bigint | string) => void; dialFileUpload?: (u: string, t: number) => Promise<Socket>; markFileUploadSocket?: (s: Socket, t: number, u: string) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
   private onBanlistUpdated?: (banlist: string[], byUser: string) => void;
   private tokenCounter = Math.floor(Math.random() * 900000) + 10000;
   private tokenIndex = new Map<number, string>();
@@ -601,53 +601,16 @@ export class TransferManager {
     // Send QueueUpload via P
     this.sendQueueUpload(t);
 
-    // Simulate fallback timers if no real peer (stub path for demo)
-    setTimeout(() => {
+    // Honest timeout only: stay Queued until a real peer event (queue grant,
+    // deny, place). No fake Getting/Transferring — those hid dial stalls.
+    const reqTimer = setTimeout(() => {
       const cur = this.transfers.get(id);
       if (!cur || cur.status !== "Queued") return;
-      // If we still haven't gotten TransferRequest, simulate Getting status (only if not already)
-      if (cur.status === "Queued") {
-        cur.status = "Getting status";
-        this.emit(cur);
-        // 45 s timeout → Connection timeout
-        cur._statusTimer = setTimeout(() => {
-          const c = this.transfers.get(id);
-          if (!c || c.status !== "Getting status") return;
-          c.status = "Connection timeout";
-          this.emit(c);
-          this.scheduleRetry(id, 180_000);
-        }, 45_000);
-      }
-    }, 350);
-
-    // For stub/demo without real peer, simulate Transferring after 1200 ms (as before) only if no F
-    setTimeout(() => {
-      const cur = this.transfers.get(id);
-      if (!cur || cur.status !== "Getting status") return;
-      if (cur._realRequest) return; // real TransferRequest arrived — wait for F, never fake
-      // If we haven't received real TransferRequest, we simulate Transferring for demo
-      // Check if we have a real F pending — if token is registered, don't simulate
-      if (this.session && cur.token && this.transfers.has(id)) {
-        // Real path would have been activated via handleTransferRequest; if not, keep stub simulation
-        if (cur.status === "Getting status") {
-          cur.status = "Transferring";
-          cur._startTime = Date.now();
-          cur._transferredAtStart = 0;
-          if (cur._statusTimer) clearTimeout(cur._statusTimer);
-          this.startProgressStub(id);
-          this.emit(cur);
-          this.emitStats();
-        }
-      } else {
-        cur.status = "Transferring";
-        cur._startTime = Date.now();
-        cur._transferredAtStart = 0;
-        if (cur._statusTimer) clearTimeout(cur._statusTimer);
-        this.startProgressStub(id);
-        this.emit(cur);
-        this.emitStats();
-      }
-    }, 1200);
+      cur.status = "Connection timeout";
+      this.emit(cur);
+      this.scheduleRetry(id, 180_000);
+    }, 45_000);
+    t._statusTimer = reqTimer;
 
     return t;
   }
@@ -1019,17 +982,36 @@ export class TransferManager {
     this.statsManager.recordUploadStarted();
     const token = this.tokenCounter++ >>> 0;
     candidate.token = token;
+    this.tokenIndex.set(token >>> 0, candidate.id);
+    // Stat the real file first so the request advertises a true size.
+    const resolved = this.resolveSharedFile(candidate.virtualPath, candidate.fileName);
+    if (!resolved) {
+      candidate.status = "File not shared.";
+      this.emit(candidate);
+      this.emitStats();
+      this.persist();
+      setTimeout(() => this.checkUploadQueue(), 100);
+      return;
+    }
+    if (resolved.size > 0) candidate.size = resolved.size;
     try { (this.session as any)?.transferRequest?.(candidate.username, 1, token, candidate.virtualPath, BigInt(candidate.size || 0)); } catch {}
   }
 
-  handlePlaceInQueueResponse(file: string, place: number) {
-    for (const t of this.transfers.values()) {
-      if (t.virtualPath === file) {
-        t.queuePosition = place;
-        this.emit(t);
-        this.emitQueue(t.id, place);
-        break;
+  handlePlaceInQueueResponse(file: string, place: number, username?: string) {
+    let hit: BridgeTransfer | undefined;
+    if (username) hit = this.transfers.get(`${username}::${file}`);
+    if (!hit) {
+      for (const t of this.transfers.values()) {
+        if (t.virtualPath === file && (!username || t.username === username)) {
+          hit = t;
+          break;
+        }
       }
+    }
+    if (hit) {
+      hit.queuePosition = place;
+      this.emit(hit);
+      this.emitQueue(hit.id, place);
     }
   }
 
@@ -1046,24 +1028,54 @@ export class TransferManager {
       return;
     }
     if (direction !== 1) return;
-    // Find queued transfer by file
+    // Find queued transfer by owner + file (ids are username::path; never bind
+    // one user's grant to another user's same path).
+    const owner = typeof username === "string" ? username : undefined;
     let target: BridgeTransfer | undefined;
-    for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) target = t;
+    if (owner) target = this.transfers.get(`${owner}::${file}`);
+    if (!target && owner) {
+      for (const t of this.transfers.values()) {
+        if (t.isUpload || t.username !== owner) continue;
+        if (t.virtualPath === file || file.endsWith(t.fileName)) { target = t; break; }
+      }
+    }
     if (!target) {
-      // Maybe file path with \ vs / — try basename match
-      for (const t of this.transfers.values()) if (file.endsWith(t.fileName) && !t.isUpload) target = t;
+      // Legacy: grant without username — exact path only, no basename guessing.
+      for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) { target = t; break; }
     }
     if (!target) return;
+    // Repeat grant while already streaming: keep the live F, just map + ack.
+    if (target.status === "Transferring" && (target as unknown as { _hadRealF?: boolean })._hadRealF) {
+      this.tokenIndex.set(token >>> 0, target.id);
+      try { this.session?.registerFileToken(token); } catch {}
+      const peer = owner || target.username;
+      try { if (peer && this.session?.sendTransferResponse) this.session.sendTransferResponse(peer, token, true, target.size); } catch {}
+      return;
+    }
     // Activate
     target.token = token;
-    target._realRequest = true;
     // Keep every granted token mapped: repeat grants race in-flight F conns.
     this.tokenIndex.set(token >>> 0, target.id);
-    // Uploader authoritative size wins (nicotine-plus downloads.py _transfer_request_downloads)
+    // Uploader authoritative size wins (nicotine-plus downloads.py _transfer_request_downloads).
+    // Guard: ignore non-finite/huge values instead of corrupting arithmetic.
     if (typeof size === "number" || typeof size === "bigint") {
-      const n = typeof size === "bigint" ? (size <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(size) : size) : size;
-      if (typeof n === "number" && n > 0) target.size = n;
-      else if (typeof n === "bigint") target.size = n as unknown as number;
+      const n = typeof size === "bigint"
+        ? (size >= 0 && size <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(size) : NaN)
+        : size;
+      if (Number.isFinite(n) && (n as number) > 0 && (n as number) !== target.size) {
+        // Partial bytes belong to different content — restart (nicotine size_changed).
+        try {
+          const { statSync: ss } = require("node:fs") as typeof import("node:fs");
+          const partial = getIncompletePath(target.virtualPath, target.username, this.incompleteDir);
+          if (ss(partial).size > 0) {
+            const { unlinkSync: ul } = require("node:fs") as typeof import("node:fs");
+            try { ul(partial); } catch {}
+            logger.info("transfer", "size changed, partial discarded", { id: target.id });
+          }
+        } catch {}
+        target.size = n as number;
+        target.current = 0;
+      }
     }
     target.status = "Getting status";
     if (target._statusTimer) clearTimeout(target._statusTimer);
@@ -1087,21 +1099,88 @@ export class TransferManager {
     }, 45_000);
   }
 
-  handleUploadDenied(file: string, reason: string) {
-    let hit: BridgeTransfer | undefined;
-    for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) { hit = t; break; }
-    if (!hit) for (const t of this.transfers.values()) if (!t.isUpload && (file.endsWith(t.fileName) || t.virtualPath.endsWith(file))) { hit = t; break; }
-    if (hit) {
-      hit.status = reason as TransferStatus;
-      this.emit(hit);
-      this.scheduleRetry(hit.id, 180_000);
+  // Permanent denials never succeed on retry (nicotine-plus denial categories).
+  private static readonly terminalDenials = new Set(["Banned", "File not shared.", "Filtered"]);
+
+  /** Downloader rejected our upload request. */
+  handleUploadRejected(username: string, token: number, reason: string) {
+    const t = this.getByToken(token);
+    if (!t || !t.isUpload || t.username !== username) return;
+    if (t.status === "Finished" || t.status === "Cancelled") return;
+    t.status = (TransferManager.terminalDenials.has(reason) ? reason : "Cancelled") as TransferStatus;
+    this.emit(t);
+    this.emitStats();
+    this.persist();
+    setTimeout(() => this.checkUploadQueue(), 100);
+  }
+
+  /** Downloader allowed our upload: dial F and start serving (nicotine uploads.py). */
+  async handleUploadGranted(username: string, token: number) {
+    const t = this.getByToken(token);
+    if (!t || !t.isUpload || t.status === "Finished" || t.status === "Cancelled") return;
+    if ((t as unknown as { _uploadSocket?: unknown })._uploadSocket) return; // already serving
+    const sess = this.sessionGetter?.() as unknown as {
+      dialFileUpload?: (u: string, t: number) => Promise<Socket>;
+    } | undefined;
+    if (!sess?.dialFileUpload) return;
+    try {
+      const sock = await sess.dialFileUpload(username, token);
+      await this.handleFileConnection(token, sock);
+    } catch {
+      t.status = "Connection timeout";
+      this.emit(t);
+      this.scheduleRetry(t.id, 180_000);
     }
   }
 
-  handleUploadFailed(file: string) {
+  /** Firewalled downloader pierced to us: serve oldest queued upload for them. */
+  async handleUploadPierced(username: string, socket: Socket) {
+    const t = [...this.transfers.values()].find((x) => x.isUpload && x.username === username && x.status === "Queued");
+    if (!t) { try { socket.end(); } catch {} return; }
+    if (t.token === undefined) { try { socket.end(); } catch {} return; }
+    const sess = this.sessionGetter?.() as unknown as { markFileUploadSocket?: (s: Socket, t: number, u: string) => void } | undefined;
+    try { sess?.markFileUploadSocket?.(socket, t.token, username); } catch {}
+    try { (socket as unknown as { write: (b: Buffer) => void }).write(buildFileTransferInit(t.token)); } catch {}
+    await this.handleFileConnection(t.token, socket);
+  }
+
+  /** F socket died mid-transfer: fail fast instead of waiting out the 60s stall. */
+  handleFileClosed(token: number) {
+    const t = this.getByToken(token);
+    if (!t || t.status !== "Transferring") return;
+    t.status = "Connection closed";
+    this.emit(t);
+    try { this.session?.unregisterFileToken(token); } catch {}
+    this.scheduleRetry(t.id, 180_000);
+  }
+
+  handleUploadDenied(file: string, reason: string, username?: string) {
     let hit: BridgeTransfer | undefined;
-    for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) { hit = t; break; }
-    if (!hit) for (const t of this.transfers.values()) if (!t.isUpload && (file.endsWith(t.fileName) || t.virtualPath.endsWith(file))) { hit = t; break; }
+    if (username) hit = this.transfers.get(`${username}::${file}`);
+    if (!hit && username) {
+      for (const t of this.transfers.values()) {
+        if (t.isUpload || t.username !== username) continue;
+        if (t.virtualPath === file || file.endsWith(t.fileName)) { hit = t; break; }
+      }
+    }
+    if (!hit) for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) { hit = t; break; }
+    if (hit) {
+      hit.status = reason as TransferStatus;
+      this.emit(hit);
+      if (!TransferManager.terminalDenials.has(reason)) this.scheduleRetry(hit.id, 180_000);
+    }
+  }
+
+  handleUploadFailed(file: string, username?: string) {
+    let hit: BridgeTransfer | undefined;
+    if (username) hit = this.transfers.get(`${username}::${file}`);
+    if (!hit && username) {
+      for (const t of this.transfers.values()) {
+        if (t.isUpload || t.username !== username) continue;
+        if (t.virtualPath === file || file.endsWith(t.fileName)) { hit = t; break; }
+      }
+    }
+    if (!hit) for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) { hit = t; break; }
     if (hit) {
       hit.status = "Connection closed";
       this.statsManager.recordDownloadFailed();
@@ -1271,14 +1350,22 @@ export class TransferManager {
     }
     if (t._statusTimer) { clearTimeout(t._statusTimer); t._statusTimer = undefined; }
     if (t._timer) { clearInterval(t._timer); t._timer = undefined; }
-    // Real F owns progress from here — the pre-F progress stub stands down (see startProgressStub).
+    // Real F drove progress from here (no fake progress exists anymore).
     (t as unknown as { _hadRealF?: boolean })._hadRealF = true;
+    (t as unknown as { _hadRealF?: boolean })._hadRealF = true;
+    (t as unknown as { _fileSocket?: Socket })._fileSocket = socket;
     t.status = "Transferring";
     t._startTime = Date.now();
     const startOffset = await this.prepareIncompleteFile(t);
     t.current = startOffset;
     this.emit(t);
     this.emitStats();
+    // Already whole: nothing to fetch (nicotine-plus downloads.py parity).
+    if (t.size > 0 && startOffset >= t.size) {
+      logger.debug("transfer", "already complete, finishing", { id: t.id });
+      this.finishDownload(t, socket);
+      return;
+    }
     logger.debug("transfer", "F accepted, FileOffset sent", { id: t.id, token, startOffset });
 
     // Send FileOffset (uint64 LE)
@@ -1296,6 +1383,7 @@ export class TransferManager {
       return;
     }
     const onData = async (chunk: Buffer) => {
+      if (t.status === "Cancelled" || t.status === "Paused" || t.status === "Finished") return;
       if (left <= 0) return;
       const toWrite = chunk.subarray(0, Math.min(chunk.length, left));
       const dlLimit = this.getEffectiveDownloadLimit();
@@ -1351,6 +1439,12 @@ export class TransferManager {
     // We'll monkey-patch socket data via session's pending — simpler: rely on session to call this method with buffered data
     // This stub will be driven by session's file chunk forwarding
     (t as unknown as { _onFileData?: (c: Buffer) => void })._onFileData = onData;
+    // Drain bytes that arrived during async file preparation, in order.
+    const early = (t as unknown as { _earlyChunks?: Buffer[] })._earlyChunks;
+    if (early?.length) {
+      (t as unknown as { _earlyChunks?: Buffer[] })._earlyChunks = [];
+      for (const c of early) { try { await onData(c); } catch {} }
+    }
 
     // If socket already has buffered data, process it
     // Timeout for stalled transfer
@@ -1396,17 +1490,18 @@ export class TransferManager {
       return;
     }
     const cb = (t as unknown as { _onFileData?: (c: Buffer) => void })._onFileData;
-    if (cb) cb(chunk);
-    else logger.debug("transfer", "F chunk dropped, no handler yet", { id: t.id, token, bytes: chunk.length });
+    if (cb) { cb(chunk); return; }
+    // Handler installs after async file prep — stash early bytes (cap 1MB).
+    const early = ((t as unknown as { _earlyChunks?: Buffer[] })._earlyChunks ??= []);
+    const buffered = early.reduce((n, c) => n + c.length, 0);
+    if (buffered + chunk.length <= 1024 * 1024) early.push(chunk);
+    else logger.debug("transfer", "F early buffer full, dropping", { id: t.id, token });
   }
 
-  private startUploadStream(t: BridgeTransfer, offset: number, _initialTail?: Buffer) {
-    const socket = (t as unknown as { _uploadSocket?: Socket })._uploadSocket as Socket | undefined;
-    if (!socket) return;
-    // Resolve real file path: ShareDB virtual2real first (any mounted path),
-    // then Shared dirs -> DATA_DIR/shared -> uploads basename fallback.
+  /** Resolve a shared virtual path to a real readable file + size. */
+  private resolveSharedFile(virtualPath: string, fileName: string): { path: string; size: number } | null {
     let realPath: string | null = null;
-    let fileSize = t.size || 0;
+    let fileSize = 0;
     try {
       const { existsSync: es, statSync: ss } = require("node:fs") as typeof import("node:fs");
       const { join: jp } = require("node:path") as typeof import("node:path");
@@ -1419,10 +1514,10 @@ export class TransferManager {
         const sess: any = this.session;
         const sdb = sess?.shareDBInstance ?? (this.sessionGetter?.() as any)?.shareDBInstance ?? (sess as any)?.shareDB ?? null;
         if (sdb && typeof sdb.getVirtual2Real === "function") {
-          const exact = sdb.getVirtual2Real(t.virtualPath) as string | undefined;
+          const exact = sdb.getVirtual2Real(virtualPath) as string | undefined;
           if (!exact || !use(exact)) {
             // longest mapped folder prefix + remainder (e.g. "M\Orpheus" + "song.flac")
-            const parts = t.virtualPath.split("\\");
+            const parts = virtualPath.split("\\");
             for (let i = parts.length - 1; i > 0 && !realPath; i--) {
               const folderReal = sdb.getVirtual2Real(parts.slice(0, i).join("\\")) as string | undefined;
               if (folderReal) use(jp(folderReal, ...parts.slice(i)));
@@ -1435,7 +1530,7 @@ export class TransferManager {
       const sharedEnv = process.env.SHARED_DIRS || process.env.SHARES_DIR || "";
       if (sharedEnv) candidates.push(...sharedEnv.split(":").map((s) => s.trim()).filter(Boolean));
       candidates.push(jp(this.dataDir, "shared"), jp(this.dataDir, "shares"), jp(this.dataDir, "uploads"), this.dataDir);
-      const base = t.fileName;
+      const base = fileName;
       for (const dir of candidates) {
         const cand = jp(dir, base);
         if (es(cand)) { realPath = cand; try { fileSize = ss(cand).size; } catch {} break; }
@@ -1454,6 +1549,18 @@ export class TransferManager {
       }
       }
     } catch {}
+    if (!realPath) return null;
+    return { path: realPath, size: fileSize };
+  }
+
+  private startUploadStream(t: BridgeTransfer, offset: number, _initialTail?: Buffer) {
+    const socket = (t as unknown as { _uploadSocket?: Socket })._uploadSocket as Socket | undefined;
+    if (!socket) return;
+    // Resolve real file path: ShareDB virtual2real first (any mounted path),
+    // then Shared dirs -> DATA_DIR/shared -> uploads basename fallback.
+    const resolved = this.resolveSharedFile(t.virtualPath, t.fileName);
+    let realPath = resolved?.path ?? null;
+    let fileSize = resolved?.size ?? t.size ?? 0;
     if (!realPath) {
       // No real file on disk — deny (do not stream dummy zeros). Previously was demo fallback.
       t.status = "File not shared.";
@@ -1612,6 +1719,10 @@ export class TransferManager {
     t.speed = 0;
     t.timeLeft = null;
     t.queuePosition = null;
+    // Live token stays on t.token for /files/ lookup; drop historic grants so
+    // a stale token can never reopen a finished transfer.
+    this.forgetTokensFor(t.id);
+    this.tokenIndex.set(t.token >>> 0, t.id);
     try { this.session?.sendUploadSpeed(t.avgSpeed || 0); } catch {}
     this.statsManager.recordDownloadCompleted(t.size);
     this.emit(t);
@@ -1634,36 +1745,14 @@ export class TransferManager {
     if (t._pollTimer) { clearInterval(t._pollTimer); t._pollTimer = undefined; }
   }
 
-  private startProgressStub(id: string) {
-    const t = this.transfers.get(id);
-    if (!t) return;
-    if (t._timer) clearInterval(t._timer);
-    t._timer = setInterval(() => {
-      const cur = this.transfers.get(id);
-      if (!cur || cur.status !== "Transferring") {
-        if (cur?._timer) clearInterval(cur._timer);
-        return;
-      }
-      // Real F connection owns progress once bytes flow — never fake those.
-      if ((cur as unknown as { _hadRealF?: boolean })._hadRealF) {
-        if (cur._timer) { clearInterval(cur._timer); cur._timer = undefined; }
-        return;
-      }
-      const chunk = 2_000_000 + Math.random() * 3_000_000;
-      // Never complete or touch size: stub is pre-F eye-candy only (rebased when F arrives).
-      const step = Math.min(chunk * 0.5, Math.max(0, cur.size - cur.current - 1));
-      cur.current += step;
-      const elapsed = (Date.now() - (cur._startTime ?? Date.now())) / 1000;
-      const dlLimit = this.getDownloadLimit();
-      cur.speed = dlLimit ? Math.min(step * 2, dlLimit) : step * 2;
-      cur.avgSpeed = elapsed > 0 ? cur.current / elapsed : cur.speed;
-      cur.timeLeft = cur.speed > 0 ? Math.ceil((cur.size - cur.current) / cur.speed) : null;
-      // NOTE: the stub never completes transfers. Only real F bytes via
-      // finishDownload() may mark Finished — a stub finish once shipped a
-      // synth sine tone as the user's download (data loss). See mistakes.md.
-      this.emit(cur);
-      this.emitStats();
-    }, 500);
+  /** End live F/upload sockets and detach chunk handlers. */
+  private closeTransferSockets(t: BridgeTransfer) {
+    try { (t as unknown as { _fileSocket?: Socket })._fileSocket?.end?.(); } catch {}
+    try { (t as unknown as { _uploadSocket?: Socket })._uploadSocket?.end?.(); } catch {}
+    (t as unknown as { _fileSocket?: Socket })._fileSocket = undefined;
+    (t as unknown as { _uploadSocket?: Socket })._uploadSocket = undefined;
+    (t as unknown as { _onFileData?: unknown })._onFileData = undefined;
+    (t as unknown as { _earlyChunks?: Buffer[] })._earlyChunks = [];
   }
 
   controlDownload(id: string, action: "cancel" | "pause" | "resume" | "retry" | "clear") {
@@ -1674,6 +1763,7 @@ export class TransferManager {
       case "cancel":
         if (t.status !== "Finished" && t.status !== "Cancelled") this.statsManager.recordDownloadCancelled();
         t.status = "Cancelled";
+        this.closeTransferSockets(t);
         if (t._timer) clearInterval(t._timer);
         if (t._statusTimer) clearTimeout(t._statusTimer);
         if (t._pollTimer) clearInterval(t._pollTimer);
@@ -1684,6 +1774,7 @@ export class TransferManager {
       case "pause":
         if (t.status === "Transferring" && t._timer) clearInterval(t._timer);
         t.status = "Paused";
+        this.closeTransferSockets(t);
         t.speed = 0;
         this.emit(t);
         this.emitStats();
@@ -1693,23 +1784,18 @@ export class TransferManager {
         if (t._retryTimer) clearTimeout(t._retryTimer);
         t.status = "Queued";
         t.queuePosition = 1;
+        t.current = 0;
         this.emit(t);
         this.sendQueueUpload(t);
+        // Honest timeout only: no fake Getting/Transferring. Real peer
+        // events (queue/grant/deny) drive status from here.
         setTimeout(() => {
           const cur = this.transfers.get(id);
           if (!cur || cur.status !== "Queued") return;
-          cur.status = "Getting status";
+          cur.status = "Connection timeout";
           this.emit(cur);
-        }, 300);
-        setTimeout(() => {
-          const cur = this.transfers.get(id);
-          if (!cur || cur.status !== "Getting status") return;
-          if (cur._realRequest) return; // granted path waits for F, never fake
-          cur.status = "Transferring";
-          cur._startTime = Date.now() - (cur.current / (cur.avgSpeed || 1_000_000)) * 1000;
-          this.startProgressStub(id);
-          this.emit(cur);
-        }, 900);
+          this.scheduleRetry(id, 180_000);
+        }, 45_000);
         break;
       case "clear":
         if (t._timer) clearInterval(t._timer);
@@ -1717,6 +1803,7 @@ export class TransferManager {
         if (t._pollTimer) clearInterval(t._pollTimer);
         if (t._retryTimer) clearTimeout(t._retryTimer);
         if (t._fileHandle !== undefined) try { const { closeSync } = require("node:fs"); closeSync(t._fileHandle); } catch {}
+        this.closeTransferSockets(t);
         this.forgetTokensFor(id);
         this.transfers.delete(id);
         this.onRemoved(id);
