@@ -19,7 +19,7 @@ function PrivateChatInner() {
   const router = useRouter();
   const params = useSearchParams();
   const initialUser = params.get("user") || "";
-  const { conversations, users, activeUser, setActiveUser, sendMessage, sendTyping, isTyping, closeAll, closeConversation } = usePrivateChat();
+  const { conversations, users, activeUser, setActiveUser, sendMessage, isTyping, closeAll, closeConversation } = usePrivateChat();
   const [input, setInput] = useState("");
   const { settings } = useConfig();
   const [newChatUser, setNewChatUser] = useState(initialUser);
@@ -297,7 +297,7 @@ function PrivateChatInner() {
                     <textarea
                       value={input}
                       spellCheck={settings.ui.spellcheck}
-                      onChange={(e) => { setInput(e.target.value); if (activeUser && e.target.value) sendTyping(activeUser); }}
+                      onChange={(e) => { setInput(e.target.value); }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey) {
                           e.preventDefault();

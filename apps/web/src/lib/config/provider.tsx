@@ -60,7 +60,7 @@ interface ConfigApi {
   ) => void;
   setSection: <S extends keyof Settings>(section: S, patch: Partial<Settings[S]>) => void;
   /** Mark a section saved after its save flow (localStorage + bridge push) completed. */
-  markSectionSaved: (section: keyof Settings) => void;
+  markSectionSaved: (section: keyof Settings, snapshot?: Settings[typeof section]) => void;
   /**
    * Reconcile durable bridge state (config:get) into local settings.
    * Only fills keys that are still at defaults locally — never clobbers
@@ -121,8 +121,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     [settings, saved],
   );
 
-  const markSectionSaved = useCallback((section: keyof Settings) => {
-    const current = settingsRef.current[section];
+  const markSectionSaved = useCallback((section: keyof Settings, snapshot?: Settings[typeof section]) => {
+    // Accept the exact snapshot the save flow pushed — settingsRef can still be
+    // pre-setOption when setOption + save run back-to-back in the same tick.
+    const current = snapshot ?? settingsRef.current[section];
     setSaved((prev) => ({ ...prev, [section]: current }));
   }, []);
 

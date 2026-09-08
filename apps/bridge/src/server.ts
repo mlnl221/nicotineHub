@@ -1531,6 +1531,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           const out = pluginManager.outgoingPrivateChatEvent(result.data.username, msg);
           if (out === null) return;
           const finalMsg = (out?.[1] as string) ?? msg;
+          // No typing indicator protocol on the wire — drop our own legacy
+          // TYPING control messages so peers never see them (mixed-version defense).
+          if (/^\x01TYPING\x01$/i.test(finalMsg)) return;
           session.sendPrivateMessage(result.data.username, finalMsg);
           pluginManager.outgoingPrivateChatNotification(result.data.username, finalMsg);
           // log outgoing private (tag is own username, peer is recipient)
@@ -1646,7 +1649,18 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
 
       if (data.type === "shares:rescan") {
         const session = requireLogin(); if (!session) return;
-        (session as unknown as { rescanShares: () => Promise<unknown> }).rescanShares().then((folders: unknown) => {
+        let lastProgress = 0;
+        const onProgress = (p: { dirs: number; files: number; current: string }) => {
+          const now = Date.now();
+          if (now - lastProgress < 200) return;
+          lastProgress = now;
+          try {
+            const rs = (ws as unknown as { readyState?: number }).readyState;
+            if (rs !== undefined && rs !== 1) return;
+            ws.send(JSON.stringify({ type: "shares:scan:progress", ...p }));
+          } catch {}
+        };
+        (session as unknown as { rescanShares: (onProgress?: (p: { dirs: number; files: number; current: string }) => void) => Promise<unknown> }).rescanShares(onProgress).then((folders: unknown) => {
           const sdb = (session as unknown as { shareDBInstance: { getSharedCounts: () => { dirs:number; files:number }; getUnavailableShares: () => [string,string][]; getSecretHits: (n?: number) => string[] } }).shareDBInstance;
           const counts = sdb.getSharedCounts();
           const unavailable = sdb.getUnavailableShares();

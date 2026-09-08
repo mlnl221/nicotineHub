@@ -661,6 +661,13 @@ export interface SharesRescannedMessage {
   unavailable?: [string, string][];
 }
 
+export interface SharesScanProgressMessage {
+  type: "shares:scan:progress";
+  dirs: number;
+  files: number;
+  current?: string;
+}
+
 /* ------------------------------------------------------------------ *
  * Heartbeat (bridge <-> web keepalive, 25s)
  * ------------------------------------------------------------------ */
@@ -877,7 +884,8 @@ export type BridgeOutboundMessage =
   | SpectrumStatusMessage
   | SpectrumReadyMessage
   | SpectrumErrorMessage
-  | SharesRescannedMessage
+   | SharesRescannedMessage
+   | SharesScanProgressMessage
   | ConfigUpdatedMessage
   | ConfigStateMessage
   | PongMessage;

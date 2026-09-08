@@ -443,8 +443,8 @@ export class SoulseekSession {
 
   // Expose ShareDB for rescan via server.ts WS
   get shareDBInstance(): ShareDB { return this.shareDB; }
-  async rescanShares(): Promise<import("./shares.ts").ShareFolder[]> {
-    const res = await this.shareDB.rescanAsync();
+  async rescanShares(onProgress?: (p: import("./shares.ts").ShareScanProgress) => void): Promise<import("./shares.ts").ShareFolder[]> {
+    const res = await this.shareDB.rescanAsync(onProgress);
     try {
       const { dirs, files } = this.shareDB.getSharedCounts();
       this.reportShares(dirs, files);

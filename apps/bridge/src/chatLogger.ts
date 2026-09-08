@@ -61,6 +61,11 @@ function appendLogFile(filePath: string, line: string) {
   } catch {}
 }
 
+/** Collapse newlines — one message per log line so the tail reader never fragments (nicotine-plus send_message parity). */
+function oneLine(message: string): string {
+  return message.replace(/\r/g, " ").replace(/\n/g, " ");
+}
+
 /** Log a public room message — only call while room is joined (active rooms) */
 export function logRoomMessage(room: string, username: string, message: string, opts?: { isAction?: boolean; isGlobal?: boolean; globalRoom?: string }) {
   const configDir = getConfigDir();
@@ -68,8 +73,8 @@ export function logRoomMessage(room: string, username: string, message: string, 
   const isAction = !!opts?.isAction;
   // nicotine chatrooms.py:605-608: f"* {username} {message}" else f"[{username}] {message}"
   let formatted: string;
-  if (isAction) formatted = `* ${username} ${message}`;
-  else formatted = `[${username}] ${message}`;
+  if (isAction) formatted = `* ${username} ${oneLine(message)}`;
+  else formatted = `[${username}] ${oneLine(message)}`;
   if (opts?.isGlobal && opts.globalRoom) {
     formatted = `${opts.globalRoom} | ${formatted}`;
   }
@@ -85,8 +90,8 @@ export function logPrivateMessage(peerUsername: string, tagUsername: string, mes
   const privateFolder = join(configDir, "logs", "private");
   const isAction = !!opts?.isAction;
   let formatted: string;
-  if (isAction) formatted = `* ${tagUsername} ${message}`;
-  else formatted = `[${tagUsername}] ${message}`;
+  if (isAction) formatted = `* ${tagUsername} ${oneLine(message)}`;
+  else formatted = `[${tagUsername}] ${oneLine(message)}`;
   const ts = timestampPrefix();
   const line = `${ts} ${formatted}`;
   const filePath = dailyPath(privateFolder, peerUsername);
