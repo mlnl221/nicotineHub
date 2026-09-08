@@ -20,6 +20,7 @@ import {
 } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
 import { DEMO_SEARCH_QUERIES, mockSearchRows } from "@/lib/demo/fixtures";
+import { parseWishlistTerm } from "@/lib/wishlist";
 
 export type SearchMode = "global" | "user" | "room" | "wishlist" | "buddies";
 
@@ -172,7 +173,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
           const exists = prev.some((t) => t.id === searchId);
           if (isWishlist && !exists) {
             // Auto-create wishlist tab on interval hit (needs UI tab for wishlist:*)
-            const term = searchId.split(":")[1] || searchId;
+            const term = parseWishlistTerm(searchId);
             const capped = cap > 0 ? rows.slice(0, cap) : rows;
             const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [...capped], total: capped.length, filters: { ...emptyFilters(), publicOnly: settings.searches.defilter.publicFiles ?? false } };
             setActiveId(searchId);
@@ -199,7 +200,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         if (isWishlist) {
           setTabs((prev) => {
             if (prev.some((t) => t.id === searchId)) return prev;
-            const term = searchId.split(":")[1] || searchId;
+            const term = parseWishlistTerm(searchId);
             const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [], total: 0, filters: { ...emptyFilters(), publicOnly: settings.searches.defilter.publicFiles ?? false } };
             setActiveId(searchId);
             return [...prev, wlTab];

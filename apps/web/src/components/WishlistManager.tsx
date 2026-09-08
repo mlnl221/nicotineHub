@@ -17,7 +17,7 @@ export function WishlistManager() {
   };
 
   const triggerManualSearch = (term: string) => {
-    const searchId = `wishlist:${term}:${Date.now()}`;
+    const searchId = `wishlist:${Date.now()}:${term}`;
     send({ type: "search:wishlist", searchId, query: term } as unknown as never);
   };
 

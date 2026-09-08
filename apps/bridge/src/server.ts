@@ -74,7 +74,8 @@ const SearchRoomSchema = z.object({
 });
 const SearchWishlistSchema = z.object({
   type: z.literal("search:wishlist"),
-  searchId: z.string().min(1).max(64),
+  // Wishlist ids embed `wishlist:<ts>:<term>` so long terms can exceed 64 — WS-local key, no protocol limit.
+  searchId: z.string().min(1).max(320),
   query: z.string().min(1).max(255),
 });
 const SearchBuddiesSchema = z.object({
@@ -208,9 +209,14 @@ const BanControlSchema = z.object({
   username: z.string().min(1).max(64),
 });
 
+const WishlistEntrySchema = z.object({
+  term: z.string().min(1).max(255),
+  auto: z.boolean(),
+});
 const WishlistUpdateSchema = z.object({
   type: z.literal("wishlist:update"),
   terms: z.array(z.string().min(1).max(255)).max(100),
+  entries: z.array(WishlistEntrySchema).max(100).optional(),
 });
 
 const StatsRequestSchema = z.object({
@@ -271,7 +277,7 @@ try { mkdirSync(join(CONFIG_DIR, "logs", "private"), { recursive: true }); } cat
 // One-time migration: copy config files from old DATA_DIR to new CONFIG_DIR if CONFIG_DIR is separate and empty
 try {
   if (CONFIG_DIR !== DATA_DIR) {
-    const cfgFiles = ["listen_port", "host.env", "upnp_enabled", "worker.json", "shares.json", "browse.cache", "downloads.json", "transfers.json", "statistics.json", "plugins.json", "diagnostics.log", "settings.json"];
+    const cfgFiles = ["listen_port", "host.env", "upnp_enabled", "worker.json", "shares.json", "browse.cache", "downloads.json", "transfers.json", "statistics.json", "plugins.json", "diagnostics.log", "settings.json", "wishlist.json"];
     for (const f of cfgFiles) {
       const src = join(DATA_DIR, f);
       const dst = join(CONFIG_DIR, f);
@@ -459,7 +465,12 @@ function sharedSessionCallbacks() {
     getQueuePlace: (file: string) => {
       try { return (sharedTransfers as unknown as { getQueuePlace: (f: string) => number })?.getQueuePlace(file) ?? 1; } catch { return 1; }
     },
-    onUserEvent: (event: { type: string; username?: string; status?: unknown; stats?: unknown; peerAddress?: unknown }) => {
+    filterWishlistTerm: (t: string): string | null => {
+      const out = pluginManager.outgoingWishlistSearchEvent(t);
+      if (out === null) return null;
+      return (out?.[0] as string) ?? t;
+    },
+    onUserEvent: (event: { type: string; username?: string; status?: unknown; stats?: unknown; peerAddress?: unknown; wishlistInterval?: number }) => {
       if (event.type === "user-status" && event.status) {
         const st = event.status as { username: string; status: number; privileged: boolean };
         pluginManager.userStatusNotification(st.username, st.status, st.privileged);
@@ -473,6 +484,9 @@ function sharedSessionCallbacks() {
       }
       logger.debug("server", "user event", { type: event.type, username: event.username });
       broadcastJson({ type: "userinfo:event", event });
+      if (event.type === "wishlist-interval" && typeof event.wishlistInterval === "number") {
+        broadcastJson({ type: "wishlist:interval", wishlistInterval: event.wishlistInterval });
+      }
     },
     onChatEvent: (event: { type: string; room?: string; username?: string; message?: string }) => {
       if (event.type === "private-message" && event.username && event.message) {
@@ -1960,9 +1974,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const result = WishlistUpdateSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid wishlist:update")); return; }
         const session = requireLogin(); if (!session) return;
-        (session as unknown as { setWishlistTerms?: (t: string[]) => void }).setWishlistTerms?.(result.data.terms);
-        logger.info("search", "wishlist terms updated", { count: result.data.terms.length });
-        ws.send(JSON.stringify({ type: "wishlist:updated", count: result.data.terms.length }));
+        const entries = result.data.entries?.length ? result.data.entries : undefined;
+        const terms = entries ? entries.map((e) => e.term) : result.data.terms;
+        (session as unknown as { setWishlistTerms?: (t: string[], e?: Array<{ term: string; auto: boolean }>) => void }).setWishlistTerms?.(terms, entries);
+        logger.info("search", "wishlist terms updated", { count: terms.length });
+        ws.send(JSON.stringify({ type: "wishlist:updated", count: terms.length }));
         return;
       }
 

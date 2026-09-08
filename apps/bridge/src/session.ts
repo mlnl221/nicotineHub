@@ -115,6 +115,7 @@ import {
   parseUserInfoResponse,
   parseUserStatus,
   parseWatchUser,
+  parseWishlistInterval,
   tryParseMessage,
   PEER_MESSAGE_CODES,
   SERVER_MESSAGE_CODES,
@@ -156,6 +157,40 @@ export interface BrowseEvent {
   files?: import("./soulseek.ts").BrowseFileEntry[];
   error?: string;
 }
+export interface WishlistEntry { term: string; auto: boolean; timeAdded?: number }
+
+export function buildWishlistSearchId(term: string, now = Date.now()): string {
+  return `wishlist:${now}:${term}`;
+}
+
+export function parseWishlistSearchId(searchId: string): { term: string; timestamp: number } | null {
+  const prefix = "wishlist:";
+  if (!searchId.startsWith(prefix)) return null;
+  const rest = searchId.slice(prefix.length);
+  // New format wishlist:<ts>:<term> — timestamp first so colons in term survive
+  const firstColon = rest.indexOf(":");
+  if (firstColon > 0) {
+    const ts = Number(rest.slice(0, firstColon));
+    if (Number.isInteger(ts) && ts > 0) return { timestamp: ts, term: rest.slice(firstColon + 1) };
+  }
+  // Legacy wishlist:<term>:<ts>
+  const lastColon = rest.lastIndexOf(":");
+  if (lastColon > 0) {
+    const ts = Number(rest.slice(lastColon + 1));
+    if (Number.isInteger(ts) && ts > 0) return { timestamp: ts, term: rest.slice(0, lastColon) };
+  }
+  return null;
+}
+
+export function getAutoTerms(terms: string[], autoByTerm?: Map<string, boolean> | Record<string, boolean>): string[] {
+  if (!autoByTerm) return terms.slice();
+  const isAuto = (t: string): boolean => {
+    const v = autoByTerm instanceof Map ? autoByTerm.get(t) : (autoByTerm as Record<string, boolean>)[t];
+    return v !== false;
+  };
+  return terms.filter(isAuto);
+}
+
 export interface SessionOptions {
   username: string; password: string; host?: string; port?: number; listenPort: number;
   profile: UserInfoResponseMessage; dataDir?: string; onUserEvent?: (event: UserInfoEvent) => void;
@@ -163,6 +198,7 @@ export interface SessionOptions {
   onTransferEvent?: (event: TransferEvent) => void; onBrowseEvent?: (event: BrowseEvent) => void;
   onServerEvent?: (event: ServerEvent) => void; signal?: AbortSignal;
   onWishlistEvent?: (event: { type: "result" | "end"; searchId: string; token: number; rows?: SearchRow[]; reason?: string }) => void;
+  filterWishlistTerm?: (term: string) => string | null;
   // F-stream wiring to TransferManager (Phase 4)
   onFileConnection?: (token: number, socket: Socket) => void;
   onFileChunk?: (token: number, chunk: Buffer) => void;
@@ -276,6 +312,9 @@ export class SoulseekSession {
   private shareDB: ShareDB;
   private wishlistInterval = 12 * 60; // seconds, server 12 min default (2 min privileged)
   private wishlistTerms: string[] = [];
+  private wishlistAuto = new Map<string, boolean>();
+  private wishlistTokens = new Map<string, number>();
+  private wishlistTimeAdded = new Map<string, number>();
   private wishlistIndex = 0;
   // ban/ignore/geo config — updated via server WS
   private banlist: string[] = [];
@@ -558,9 +597,30 @@ export class SoulseekSession {
     return this.shareDB.previewWithExclusions(exclusions);
   }
 
-  setWishlistTerms(terms: string[]) {
-    this.wishlistTerms = terms.slice();
+  setWishlistTerms(terms: string[], entries?: Array<{ term: string; auto: boolean }>) {
+    if (entries && entries.length) {
+      this.wishlistTerms = entries.map((e) => e.term);
+      this.wishlistAuto.clear();
+      for (const e of entries) this.wishlistAuto.set(e.term, e.auto !== false);
+      // Prune token/time state for removed terms
+      for (const k of [...this.wishlistTokens.keys()]) {
+        if (!this.wishlistTerms.includes(k)) {
+          const t = this.wishlistTokens.get(k);
+          if (t !== undefined) this.allowedSearchTokens.delete(t);
+          this.wishlistTokens.delete(k);
+        }
+      }
+    } else {
+      this.wishlistTerms = terms.slice();
+      for (const t of this.wishlistTerms) if (!this.wishlistAuto.has(t)) this.wishlistAuto.set(t, true);
+      // Drop flags for removed terms
+      for (const k of [...this.wishlistAuto.keys()]) if (!this.wishlistTerms.includes(k)) this.wishlistAuto.delete(k);
+    }
+    const now = Date.now();
+    for (const t of this.wishlistTerms) if (!this.wishlistTimeAdded.has(t)) this.wishlistTimeAdded.set(t, now);
+    for (const k of [...this.wishlistTimeAdded.keys()]) if (!this.wishlistTerms.includes(k)) this.wishlistTimeAdded.delete(k);
     this.wishlistIndex = 0;
+    this.saveWishlistToDisk();
     this.restartWishlistTimer();
   }
 
@@ -795,20 +855,30 @@ export class SoulseekSession {
 
   private restartWishlistTimer() {
     if (this.wishlistTimer) { clearInterval(this.wishlistTimer); this.wishlistTimer = undefined; }
-    if (!this.wishlistTerms.length || !this.loggedIn) return;
+    const autoTerms = getAutoTerms(this.wishlistTerms, this.wishlistAuto);
+    if (!autoTerms.length || !this.loggedIn) return;
     const intervalMs = Math.max(30_000, this.wishlistInterval * 1000);
     this.wishlistTimer = setInterval(() => {
-      if (!this.loggedIn || !this.serverSocket || !this.wishlistTerms.length) return;
-      const rawTerm = this.wishlistTerms[this.wishlistIndex % this.wishlistTerms.length];
+      if (!this.loggedIn || !this.serverSocket) return;
+      const auto = getAutoTerms(this.wishlistTerms, this.wishlistAuto);
+      if (!auto.length) return;
+      const rawTerm = auto[this.wishlistIndex % auto.length];
       this.wishlistIndex++;
       const clean = sanitizeSearchTerm(rawTerm);
-      const term = clean.transmitted || clean.sanitized || rawTerm;
+      let term = clean.transmitted || clean.sanitized || rawTerm;
       if (!term) return;
       try {
-        const token = this.tokenCounter++;
-        if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
-        this.allowedSearchTokens.add(token);
-        const searchId = `wishlist:${term}:${Date.now()}`;
+        const filtered = this.opts.filterWishlistTerm?.(term);
+        if (filtered === null) return;
+        if (typeof filtered === "string") {
+          if (!filtered) return;
+          term = filtered;
+        }
+      } catch { return; }
+      if (!term) return;
+      try {
+        const token = this.allocWishlistToken(term);
+        const searchId = buildWishlistSearchId(term);
         const handlers: SearchHandlers = {
           onResult: (p) => this.opts.onWishlistEvent?.({ type: "result", searchId: p.searchId, token: p.token, rows: p.rows }),
           onEnd: (p) => this.opts.onWishlistEvent?.({ type: "end", searchId: p.searchId, token, reason: p.reason }),
@@ -1033,6 +1103,70 @@ export class SoulseekSession {
     this.profile = opts.profile;
     this._listenPort = opts.listenPort;
     this.shareDB = new ShareDB({ dataDir: opts.dataDir || process.env.DATA_DIR || "/data" });
+    this.loadWishlistFromDisk();
+  }
+
+  private wishlistFilePath(): string {
+    try {
+      const { join } = require("node:path") as typeof import("node:path");
+      const dir = process.env.CONFIG_DIR || "/config";
+      return join(dir, "wishlist.json");
+    } catch { return "/config/wishlist.json"; }
+  }
+
+  private loadWishlistFromDisk(): void {
+    try {
+      const { existsSync, mkdirSync, readFileSync } = require("node:fs") as typeof import("node:fs");
+      const { dirname } = require("node:path") as typeof import("node:path");
+      const p = this.wishlistFilePath();
+      try { mkdirSync(dirname(p), { recursive: true }); } catch {}
+      if (!existsSync(p)) return;
+      const raw = JSON.parse(readFileSync(p, "utf8")) as unknown;
+      if (!Array.isArray(raw)) return;
+      const terms: string[] = [];
+      for (const e of raw) {
+        const term = typeof e === "string" ? e : (e as { term?: unknown }).term;
+        if (typeof term !== "string" || !term) continue;
+        const auto = (e as { auto?: unknown }).auto;
+        const timeAdded = (e as { timeAdded?: unknown }).timeAdded;
+        terms.push(term);
+        this.wishlistAuto.set(term, auto !== false);
+        if (typeof timeAdded === "number" && Number.isFinite(timeAdded)) this.wishlistTimeAdded.set(term, timeAdded);
+        else this.wishlistTimeAdded.set(term, Date.now());
+      }
+      if (terms.length) this.wishlistTerms = terms;
+    } catch {}
+  }
+
+  private saveWishlistToDisk(): void {
+    try {
+      const { mkdirSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
+      const { dirname } = require("node:path") as typeof import("node:path");
+      const p = this.wishlistFilePath();
+      try { mkdirSync(dirname(p), { recursive: true }); } catch {}
+      const now = Date.now();
+      const out = this.wishlistTerms.map((term) => ({
+        term,
+        auto: this.wishlistAuto.get(term) !== false,
+        timeAdded: this.wishlistTimeAdded.get(term) ?? now,
+      }));
+      writeFileSync(p, JSON.stringify(out));
+    } catch {}
+  }
+
+  private allocWishlistToken(term: string): number {
+    const existing = this.wishlistTokens.get(term);
+    // Reuse stable token only when no search currently holds it — otherwise
+    // a concurrent search for the same term would orphan the prior handlers.
+    if (existing !== undefined && !this.searches.has(existing)) {
+      this.allowedSearchTokens.add(existing);
+      return existing;
+    }
+    const token = this.tokenCounter++ >>> 0;
+    if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
+    this.allowedSearchTokens.add(token);
+    this.wishlistTokens.set(term, token);
+    return token;
   }
 
   /**
@@ -1563,7 +1697,7 @@ export class SoulseekSession {
       return;
     }
     if (code === SERVER_MESSAGE_CODES.wishlistInterval) {
-      try { const secs = payload.readUInt32LE(0); this.wishlistInterval = secs; this.restartWishlistTimer(); this.emit({ type: "wishlist-interval", wishlistInterval: secs }); } catch {}
+      try { const secs = parseWishlistInterval(payload); this.wishlistInterval = secs; this.restartWishlistTimer(); this.emit({ type: "wishlist-interval", wishlistInterval: secs }); } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.roomTickers) {
@@ -2735,9 +2869,7 @@ export class SoulseekSession {
     const clean = sanitizeSearchTerm(query);
     const outQuery = clean.transmitted || clean.sanitized || query.trim();
     if (!outQuery) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
-    const token = this.tokenCounter++ >>> 0;
-    if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
-    this.allowedSearchTokens.add(token);
+    const token = this.allocWishlistToken(outQuery);
     const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
     this.serverSocket.write(buildWishlistSearch(token, outQuery));
@@ -3040,7 +3172,7 @@ export class SoulseekSession {
     // Portmapper: remove mapping on quit (like nicotine _server_disconnect portmapper.remove)
     try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}
     for (const token of [...this.searches.keys()]) { const s = this.searches.get(token); if (s?.timer) clearTimeout(s.timer); if (s) s.onEnd({ searchId: s.searchId, reason: "error" }); this.searches.delete(token); }
-    this.searchIds.clear(); this.allowedSearchTokens.clear();
+    this.searchIds.clear(); this.allowedSearchTokens.clear(); this.wishlistTokens.clear();
     for (const { timer } of this.peerAddressRequests.values()) clearTimeout(timer);
     for (const { timer } of this.pendingConnects.values()) clearTimeout(timer);
     for (const { timer } of this.pendingBrowseShares.values()) clearTimeout(timer);
