@@ -226,6 +226,68 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const pagedFolders = useMemo(() => visibleTreeFolders.slice(0, visibleFolderCount), [visibleTreeFolders, visibleFolderCount]);
   const pagedFiles = useMemo(() => sortedFiles.slice(0, visibleFileCount), [sortedFiles, visibleFileCount]);
 
+  // Keyboard tree nav: Up/Down move, Right expand/child, Left collapse/parent, Enter opens
+  const folderListRef = useRef<HTMLDivElement | null>(null);
+  const selectFolder = (name: string) => {
+    setSelectedFolder(name);
+    openFolder(tab.id, name);
+    const idx = visibleTreeFolders.findIndex((f) => f.name === name);
+    if (idx >= visibleFolderCount) setVisibleFolderCount(Math.min(idx + PAGE_SIZE, visibleTreeFolders.length));
+    requestAnimationFrame(() => {
+      try { folderListRef.current?.querySelector(`[data-folder-row="${CSS.escape(name)}"]`)?.scrollIntoView({ block: "nearest" }); } catch {}
+    });
+  };
+  const toggleFolder = (name: string, expand: boolean) => {
+    setExpandedPaths((prev) => {
+      if (prev.has(name) === expand) return prev;
+      const n = new Set(prev);
+      if (expand) n.add(name);
+      else n.delete(name);
+      return n;
+    });
+  };
+  const handleFolderKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.target as HTMLElement | null)?.closest?.("input,textarea,select,[contenteditable]")) return;
+    // Let focused inner buttons handle Enter/Space natively (expand toggle / select)
+    if ((e.key === "Enter" || e.key === " ") && (e.target as HTMLElement | null)?.closest?.("button")) return;
+    const idx = Math.max(0, visibleTreeFolders.findIndex((f) => f.name === selectedFolder));
+    const cur = visibleTreeFolders[idx];
+    if (!cur) return;
+    const meta = folderMeta.get(cur.name);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const next = Math.max(0, Math.min(visibleTreeFolders.length - 1, idx + (e.key === "ArrowDown" ? 1 : -1)));
+      const target = visibleTreeFolders[next];
+      if (target && target.name !== selectedFolder) selectFolder(target.name);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      if (meta?.hasChildren && !expandedPaths.has(cur.name)) toggleFolder(cur.name, true);
+      else {
+        const child = visibleTreeFolders.slice(idx + 1).find((f) => f.name.startsWith(cur.name + "\\"));
+        if (child) selectFolder(child.name);
+      }
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      if (meta?.hasChildren && expandedPaths.has(cur.name)) toggleFolder(cur.name, false);
+      else {
+        const prefix = cur.name.slice(0, cur.name.lastIndexOf("\\"));
+        const parent = [...visibleTreeFolders].reverse().find((f) => f.name === prefix || cur.name.startsWith(f.name + "\\"));
+        if (parent) selectFolder(parent.name);
+      }
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openFolder(tab.id, cur.name);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      const first = visibleTreeFolders[0];
+      if (first) selectFolder(first.name);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      const last = visibleTreeFolders[visibleTreeFolders.length - 1];
+      if (last) selectFolder(last.name);
+    }
+  };
+
   // Download helpers — always recursive per user request
   const downloadFolder = (folderName: string) => {
     if (isDemo) return;
@@ -349,7 +411,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
               <span className="material-symbols-outlined text-[20px]">unfold_less</span>
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto overflow-x-auto overscroll-contain min-h-0 p-2 space-y-1" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
+          <div ref={folderListRef} tabIndex={0} role="tree" aria-label={`${username} folders`} aria-activedescendant={selectedFolder ? `browse-folder-${Math.max(0, visibleTreeFolders.findIndex((f) => f.name === selectedFolder))}` : undefined} onKeyDown={handleFolderKeyDown} className="flex-1 overflow-y-auto overflow-x-auto overscroll-contain min-h-0 p-2 space-y-1" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
             {loading && folders.length === 0 ? (
               <div className="space-y-2 p-2">
                 <div className="h-10 animate-pulse rounded-lg bg-surface-container-high" />
@@ -359,7 +421,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
               <p className="p-4 font-body text-sm text-outline">No folders found.</p>
             ) : (
               <>
-                {pagedFolders.map((f) => {
+                {pagedFolders.map((f, rowIdx) => {
                   const meta = folderMeta.get(f.name);
                   const depth = meta?.depth ?? 0;
                   const hasChildren = meta?.hasChildren ?? false;
@@ -369,6 +431,11 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                       <div
                       key={f.name}
                       title={f.name}
+                      role="treeitem"
+                      id={`browse-folder-${rowIdx}`}
+                      data-folder-row={f.name}
+                      aria-selected={isSelected}
+                      aria-expanded={hasChildren ? isExpanded : undefined}
                       className={`flex w-full min-w-max items-center gap-1 rounded-lg text-left transition-colors ${isSelected ? "bg-primary-fixed/20 text-primary border border-primary/10" : "hover:bg-surface-container-low text-on-surface-variant"}`}
                       style={{ paddingLeft: `${8 + depth * 16}px`, paddingRight: '8px', paddingTop: '6px', paddingBottom: '6px' }}
                     >

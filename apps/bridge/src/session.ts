@@ -290,7 +290,7 @@ export class SoulseekSession {
   private customgeoblock = "Sorry, your country is blocked";
 
   // pending browse tracking
-  private pendingBrowseShares = new Map<string, { timer: ReturnType<typeof setTimeout> }>();
+  private pendingBrowseShares = new Map<string, { timer: ReturnType<typeof setTimeout>; createdAt: number }>();
   private pendingBrowseFolder = new Map<number, { username: string; folder: string; timer: ReturnType<typeof setTimeout>; retryCount: number }>();
   private pendingPeerMessages = new Map<string, Array<{ connType: string; msg: Buffer }>>();
   // user status cache for offline check (P1 hardening)
@@ -2176,8 +2176,9 @@ export class SoulseekSession {
   registerFileToken(token: number) { this.pendingFileTokens.add(token >>> 0); }
   unregisterFileToken(token: number) { this.pendingFileTokens.delete(token >>> 0); }
   getPeerSocket(username: string, connType: string): Socket | undefined {
+    const lower = username.toLowerCase();
     for (const [sock, st] of this.peerStates) {
-      if (st.username === username && st.connType === connType && st.initDone) return sock;
+      if (st.username?.toLowerCase() === lower && st.connType === connType && st.initDone) return sock;
     }
     return undefined;
   }
@@ -2496,6 +2497,9 @@ export class SoulseekSession {
           const parsed = parseSharedFileListResponse(msg.payload);
           const pending = this.pendingBrowseShares.get(username.toLowerCase());
           if (pending) { clearTimeout(pending.timer); this.pendingBrowseShares.delete(username.toLowerCase()); }
+          // Queue leak fix: success must drain the queued P/SharedFileListRequest
+          // like the timeout path does, or queueLen grows forever on re-browse.
+          try { this.pendingPeerMessages.delete(username.toLowerCase()); } catch {}
           logger.info("browse", "sharedFileListResponse success", { username, folders: parsed.folders.length, locked: parsed.lockedFolders.length });
           this.emitBrowse({ type: "browse-shares", username, folders: parsed.folders, lockedFolders: parsed.lockedFolders });
           try { (peer as Socket).end(); } catch {}
@@ -2806,7 +2810,16 @@ export class SoulseekSession {
       return;
     }
     const existing = this.pendingBrowseShares.get(key);
-    if (existing) { clearTimeout(existing.timer); }
+    // Dedupe rapid re-requests (web double-send / retry storm): a fresh
+    // pending entry already has a dial in flight — requeueing only grows
+    // pendingPeerMessages unbounded (seen queueLen 128+ looping).
+    if (existing) {
+      if (Date.now() - existing.createdAt < 3000) {
+        logger.debug("browse", "requestSharedFileList deduped (fresh pending)", { username });
+        return;
+      }
+      clearTimeout(existing.timer);
+    }
     const timer = setTimeout(() => {
       logger.warn("browse", "browse timeout", { username });
       this.pendingBrowseShares.delete(key);
@@ -2816,7 +2829,7 @@ export class SoulseekSession {
       // More helpful: peer may be offline, firewalled, or our LISTEN_PORT not forwarded
       this.emitBrowse({ type: "browse-error", username, error: "Timed out fetching shares — peer may be offline, firewalled, or your LISTEN_PORT not port-forwarded (check Diagnostics → Network)" });
     }, 30000);
-    this.pendingBrowseShares.set(key, { timer });
+    this.pendingBrowseShares.set(key, { timer, createdAt: Date.now() });
     this.addAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);
     this.ensurePeerAndSend(username, "P", buildSharedFileListRequest());
   }
