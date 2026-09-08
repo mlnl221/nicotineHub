@@ -85,17 +85,8 @@ export function SearchScreen() {
     },
     [activeTab, deferredRows, deferredFilters, getIgnored],
   );
+  const visibleUsers = useMemo(() => [...new Set(visibleRows.map((r) => r.user))], [visibleRows]);
   const isStale = activeTab ? deferredRows !== activeTab.rows || deferredFilters !== activeTab.filters : false;
-
-  // wishlist: mark visible users as seen when tab becomes active/read
-  useEffect(() => {
-    if (!activeTab || activeTab.mode !== "wishlist") return;
-    if (visibleRows.length === 0) return;
-    const users = [...new Set(visibleRows.map((r) => r.user))];
-    // debounce seen marking 1s after visible
-    const id = setTimeout(() => markSeen(activeTab.query, users), 1000);
-    return () => clearTimeout(id);
-  }, [activeTab?.id, visibleRows, markSeen]);
 
   const activeFilterCount = useMemo(() => {
     const f = activeTab?.filters ?? draft;
@@ -182,6 +173,16 @@ export function SearchScreen() {
             {visibleRows.length !== activeTab.total ? ` • showing ${visibleRows.length}` : ""}
           </span>
           <div className="flex items-center gap-1 shrink-0">
+            {activeTab.mode === "wishlist" && visibleRows.length > 0 ? (
+              <button
+                type="button"
+                title="Mark visible users as seen"
+                onClick={() => markSeen(activeTab.query, visibleUsers)}
+                className="min-h-11 rounded-full bg-surface-container-high px-3 py-2 text-xs font-semibold text-on-surface-variant outline-none active:bg-surface-container-highest"
+              >
+                Dismiss new ({visibleRows.length})
+              </button>
+            ) : null}
             <button
               type="button"
               aria-pressed={activeTab.filters.publicOnly}
