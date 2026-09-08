@@ -2083,6 +2083,9 @@ export class SoulseekSession {
                 this.pendingFileTokens.delete(token);
                 logger.debug("transfer", "inbound F demux via token", { token });
                 this.peerStates.set(peer as Socket, st);
+                // Wire the transfer now: processPeer below only sees post-token
+                // bytes and would never call onFileConnection for this path.
+                try { this.opts.onFileConnection?.(token, peer); } catch {}
                 this.processPeer(peer as Socket, buf.subarray(4), true);
                 return;
               }
