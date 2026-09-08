@@ -2492,6 +2492,7 @@ export class SoulseekSession {
         // Forward raw bytes to TransferManager via callback; also emit diagnostic
         if (state.buf.length > 0) {
           const chunk = Buffer.from(state.buf);
+          logger.debug("transfer", "F bytes in", { token: state.fileToken, bytes: chunk.length, head: chunk.subarray(0, 16).toString("hex") });
           try { this.opts.onFileChunk?.(state.fileToken, chunk); } catch {}
           this.emitTransfer({ type: "transfer-request", username: state.username, token: state.fileToken, file: `F:${state.fileToken}` });
           state.buf = Buffer.alloc(0);
