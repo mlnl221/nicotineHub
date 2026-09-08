@@ -2197,7 +2197,7 @@ export class SoulseekSession {
       if (state.buf.length + bytes.length > maxForState && state.buf.length >= 4) {
         const declared = state.buf.readUInt32LE(0);
         const hintedMax = (() => {
-          // Before initDone, first message is PeerInit/Pierce (5+len framing) — always ≤1M
+          // Before initDone, first message is PeerInit/Pierce ([len][u8 code][payload] wire total 4+len) — always ≤1M
           if (!state.initDone) return 1024 * 1024;
           // After init, peek peer message code (framed as [len][code][payload])
           // Need at least 8 bytes (len+code) buffered; otherwise conservatively allow append
@@ -2233,7 +2233,7 @@ export class SoulseekSession {
         if (state.buf.length < 5) break;
         const len = state.buf.readUInt32LE(0);
         if (len > 1024 * 1024) { try { peer.end(); } catch {} break; }
-        const total = 5 + len;
+        const total = 4 + len;
         if (state.buf.length < total) break;
         const code = state.buf[4];
         const initPayload = state.buf.subarray(5, total);
@@ -2309,7 +2309,7 @@ export class SoulseekSession {
         if (state.buf.length < 5) break;
         const len = state.buf.readUInt32LE(0);
         if (len > MAX_INCOMING.server16K) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
-        const total = 5 + len; if (state.buf.length < total) break;
+        const total = 4 + len; if (state.buf.length < total) break;
         const code = state.buf[4];
         const payload = state.buf.subarray(5, total);
         state.buf = state.buf.subarray(total);
@@ -2415,13 +2415,13 @@ export class SoulseekSession {
       if (state.outbound && state.connType === "P" && state.buf.length >= 5) {
         const lenProbe = state.buf.readUInt32LE(0);
         const codeProbe = state.buf[4];
-        if ((codeProbe === 0 || codeProbe === 1) && lenProbe < 1024 * 1024 && state.buf.length >= 5 + lenProbe) {
+        if ((codeProbe === 0 || codeProbe === 1) && lenProbe < 1024 * 1024 && state.buf.length >= 4 + lenProbe) {
           try {
-            const initPayloadProbe = state.buf.subarray(5, 5 + lenProbe);
+            const initPayloadProbe = state.buf.subarray(5, 4 + lenProbe);
             if (codeProbe === 1) {
               const piProbe = parsePeerInit(initPayloadProbe);
               if (piProbe.targetUser && piProbe.connType) {
-                state.buf = state.buf.subarray(5 + lenProbe);
+                state.buf = state.buf.subarray(4 + lenProbe);
                 // Update username if peer provided different (rare)
                 if (!state.username) state.username = piProbe.targetUser;
                 continue;
@@ -2429,7 +2429,7 @@ export class SoulseekSession {
             } else if (codeProbe === 0) {
               const pfProbe = parsePierceFireWall(initPayloadProbe);
               if (pfProbe.token !== undefined) {
-                state.buf = state.buf.subarray(5 + lenProbe);
+                state.buf = state.buf.subarray(4 + lenProbe);
                 continue;
               }
             }
