@@ -1672,6 +1672,7 @@ export class TransferManager {
         setTimeout(() => {
           const cur = this.transfers.get(id);
           if (!cur || cur.status !== "Getting status") return;
+          if (cur._realRequest) return; // granted path waits for F, never fake
           cur.status = "Transferring";
           cur._startTime = Date.now() - (cur.current / (cur.avgSpeed || 1_000_000)) * 1000;
           this.startProgressStub(id);
