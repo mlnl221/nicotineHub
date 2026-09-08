@@ -2370,7 +2370,7 @@ export class SoulseekSession {
         }
         if (state.buf.length < 5) break;
         const len = state.buf.readUInt32LE(0);
-        if (len > 1024 * 1024) { try { peer.end(); } catch {} break; }
+        if (len > 1024 * 1024) { logger.debug("peer", "inbound init oversize, closing", { len }); try { peer.end(); } catch {} break; }
         const total = 4 + len;
         if (state.buf.length < total) break;
         const code = state.buf[4];
@@ -2380,6 +2380,7 @@ export class SoulseekSession {
             const pi = parsePeerInit(initPayload);
             // validation: username size + printable
             if (pi.targetUser.length === 0 || pi.targetUser.length > 256 || pi.targetUser === "server") {
+              logger.debug("peer", "inbound PeerInit rejected", { user: pi.targetUser.slice(0, 40), connType: pi.connType });
               try { peer.end(); } catch {}
               break;
             }
@@ -2387,7 +2388,7 @@ export class SoulseekSession {
             state.connType = pi.connType;
             // File conn detection: type F has no further peer messages — token follows as raw
             if (pi.connType === "F") state.isFileConn = true;
-          } catch {}
+          } catch { logger.debug("peer", "inbound PeerInit parse failed", { bytes: initPayload.length }); }
         } else if (code === 0) {
           try {
             const pf = parsePierceFireWall(initPayload);
@@ -2398,8 +2399,12 @@ export class SoulseekSession {
               state.username = pending.username;
               state.connType = pending.connType;
               setTimeout(() => this.flushPendingPeerMessages(pending.username, pending.connType), 10);
+            } else {
+              logger.debug("peer", "inbound PierceFireWall unknown token", { token: pf.token });
             }
-          } catch {}
+          } catch { logger.debug("peer", "inbound PierceFireWall parse failed"); }
+        } else {
+          logger.debug("peer", "inbound init unknown code", { code });
         }
         state.initDone = true;
         if (state.username && state.connType) {
