@@ -67,19 +67,22 @@ describe("transfers — download engine (Phase 2)", () => {
 
   test("handleTransferRequest sets Getting status and registers token", () => {
     let registered: number | undefined;
+    let responded: { u: string; t: number; allowed: boolean } | undefined;
     const mockSession = {
       registerFileToken: (tok: number) => { registered = tok; },
       unregisterFileToken: () => {},
       queueUpload: () => {},
       placeInQueueRequest: () => {},
+      sendTransferResponse: (u: string, t: number, allowed: boolean) => { responded = { u, t, allowed }; },
     };
     const { mgr } = makeManager(tmp, mockSession);
     mgr.requestDownload("alice", "Music\\song.mp3", 5000);
-    mgr.handleTransferRequest(1, 12345, "Music\\song.mp3");
+    mgr.handleTransferRequest(1, 12345, "Music\\song.mp3", "alice", 5000);
     const t = mgr.get("alice::Music\\song.mp3");
     expect(t?.status).toBe("Getting status");
     expect(t?.token).toBe(12345);
     expect(registered).toBe(12345);
+    expect(responded).toEqual({ u: "alice", t: 12345, allowed: true });
     mgr.close();
   });
 

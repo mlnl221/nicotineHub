@@ -61,6 +61,7 @@ import {
   buildSharedFileListRequest,
   buildSharedFoldersFiles,
   buildTransferRequest,
+  buildTransferResponse,
   buildUploadDenied,
   buildUnwatchUser,
   buildUserInfoRequest,
@@ -97,6 +98,8 @@ import {
   parsePrivileges,
   parsePrivilegedUsers,
   parseQueueUpload,
+  parseUploadDenied,
+  parseUploadFailed,
   parseRecommendations,
   parseSharedFileListResponse,
   SlskReader,
@@ -231,7 +234,7 @@ export interface RoomEvent {
 }
 export interface TransferEvent {
   type: "transfer-request" | "transfer-response" | "queue-upload" | "place-in-queue" | "upload-failed" | "upload-denied";
-  username?: string; file?: string; token?: number; place?: number; reason?: string;
+  username?: string; file?: string; token?: number; place?: number; reason?: string; direction?: number; size?: number | bigint;
 }
 
 const DEFAULT_SEARCH_TIMEOUT_MS = 20_000; // kept for reference — not used (nicotine parity: searches live until explicit stop, no timeout)
@@ -2711,7 +2714,7 @@ export class SoulseekSession {
           } catch {}
         }
       } else if (msg.code === PEER_MESSAGE_CODES.transferRequest) {
-        try { const tr = parseTransferRequest(msg.payload); this.emitTransfer({ type: "transfer-request", username: state.username, token: tr.token, file: tr.file }); } catch {}
+        try { const tr = parseTransferRequest(msg.payload); this.emitTransfer({ type: "transfer-request", username: state.username, token: tr.token, file: tr.file, direction: tr.direction, size: tr.size }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.transferResponse) {
         try { const tr = parseTransferResponse(msg.payload); this.emitTransfer({ type: "transfer-response", username: state.username, token: tr.token, reason: tr.reason }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.queueUpload) {
@@ -2729,7 +2732,15 @@ export class SoulseekSession {
       } else if (msg.code === PEER_MESSAGE_CODES.placeInQueueResponse) {
         try { const p = parsePlaceInQueueResponse(msg.payload); this.emitTransfer({ type: "place-in-queue", username: state.username, file: p.file, place: p.place }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.uploadFailed || msg.code === PEER_MESSAGE_CODES.uploadDenied) {
-        try { this.emitTransfer({ type: msg.code === PEER_MESSAGE_CODES.uploadFailed ? "upload-failed" : "upload-denied", username: state.username, file: msg.payload.toString("utf8").slice(0, 256) }); } catch {}
+        try {
+          if (msg.code === PEER_MESSAGE_CODES.uploadDenied) {
+            const d = parseUploadDenied(msg.payload);
+            this.emitTransfer({ type: "upload-denied", username: state.username, file: d.file, reason: d.reason });
+          } else {
+            const f = parseUploadFailed(msg.payload);
+            this.emitTransfer({ type: "upload-failed", username: state.username, file: f.file });
+          }
+        } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.placeholdUpload || msg.code === PEER_MESSAGE_CODES.uploadQueueNotification) {
         // Obsolete/deprecated 42/52 — no-op to silence unknown-peer warnings (nicotine keeps but never handles)
       }
@@ -2993,6 +3004,9 @@ export class SoulseekSession {
   placeInQueueRequest(username: string, file: string) { this.ensurePeerAndSend(username, "P", buildPlaceInQueueRequest(file)); }
   transferRequest(username: string, direction: number, token: number, file: string, size?: bigint) {
     this.ensurePeerAndSend(username, "P", buildTransferRequest(direction, token, file, size));
+  }
+  sendTransferResponse(username: string, token: number, allowed: boolean, sizeOrReason?: number | bigint | string) {
+    this.ensurePeerAndSend(username, "P", buildTransferResponse(token, allowed, sizeOrReason));
   }
 
   private ensurePeerAndSend(username: string, connType: string, msg: Buffer) {
