@@ -2651,6 +2651,7 @@ export class SoulseekSession {
         : (msg.code === PEER_MESSAGE_CODES.fileSearchResponse ? MAX_INCOMING.server16M : MAX_INCOMING.server1M);
       if (msg.payload.length > maxForCode) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
       state.buf = state.buf.subarray(8 + msg.payload.length);
+      if (!state.outbound) logger.debug("peer", "P msg parsed", { username: state.username, code: msg.code, payloadLen: msg.payload.length });
       if (msg.code === 9) {
         // Gate on allowed token to prevent zlib bomb from unsolicited peers
         const tokenProbe = (() => { try { const b = inflateProbeToken(msg.payload); return b; } catch { return null; } })();
