@@ -53,19 +53,50 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   // Pane width persisted
   const [asideW, onAsideDown] = usePaneWidth("nicotineHub.browse.asideW");
 
-  // reset selection when username changes (tab switch handled via new tab prop, but folders may change)
-  useEffect(() => {
-    if (!folders.find((f) => f.name === selectedFolder)) {
-      if (folders.length) setSelectedFolder(folders[0].name);
-      else setSelectedFolder(null);
+  const allFoldersWithParents = useMemo(() => {
+    const names = new Set(folders.map((f) => f.name));
+    const extras: typeof folders = [];
+    for (const f of folders) {
+      const parts = f.name.split("\\");
+      for (let i = 1; i < parts.length; i++) {
+        const prefix = parts.slice(0, i).join("\\");
+        if (prefix && !names.has(prefix)) {
+          names.add(prefix);
+          extras.push({ name: prefix, files: [] });
+        }
+      }
     }
-  }, [folders, selectedFolder]);
+    // Parent above children (lexicographic) — filesystem walk order can emit child before parent, making tree illogical
+    return [...folders, ...extras].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+  }, [folders]);
 
   const filteredFolders = useMemo(() => {
-    const base = !query ? folders : folders.filter((f) => f.name.toLowerCase().includes(query.toLowerCase()) || f.files.some((file) => file.name.toLowerCase().includes(query.toLowerCase())));
-    // Parent above children (lexicographic) — filesystem walk order can emit child before parent, making tree illogical
-    return [...base].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
-  }, [folders, query]);
+    if (!query) return allFoldersWithParents;
+    const q = query.toLowerCase();
+    const matches = allFoldersWithParents.filter((f) => f.name.toLowerCase().includes(q) || f.files.some((file) => file.name.toLowerCase().includes(q)));
+    const visible = new Set(matches.map((f) => f.name));
+    for (const m of matches) {
+      let cur = m.name;
+      while (true) {
+        const idx = cur.lastIndexOf("\\");
+        if (idx < 0) break;
+        cur = cur.slice(0, idx);
+        visible.add(cur);
+      }
+    }
+    return allFoldersWithParents.filter((f) => visible.has(f.name));
+  }, [allFoldersWithParents, query]);
+
+  // reset selection when username changes (tab switch handled via new tab prop, but folders may change)
+  // NB: match against allFoldersWithParents so selecting a synthetic parent isn't wiped
+  useEffect(() => {
+    if (!allFoldersWithParents.find((f) => f.name === selectedFolder)) {
+      const expand = (settings as unknown as { userbrowse?: { expand_folders?: string } }).userbrowse?.expand_folders ?? "all";
+      if (expand === "none") { setSelectedFolder(null); return; } // stay unpicked until user picks
+      if (allFoldersWithParents.length) setSelectedFolder(allFoldersWithParents[0].name);
+      else setSelectedFolder(null);
+    }
+  }, [allFoldersWithParents, selectedFolder, settings]);
 
   // Subdirectory tree: depth + parent collapse (minimal + optional tree)
   const minDepth = useMemo(() => {
@@ -104,15 +135,9 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
     return map;
   }, [filteredFolders]);
 
-  // auto-expand parents when expand_folders !== "none"
   useEffect(() => {
-    const expand = (settings as unknown as { userbrowse?: { expand_folders?: string } }).userbrowse?.expand_folders ?? "all";
-    if (expand === "none") return;
-    if (filteredFolders.length && expandedPaths.size === 0) {
-      const parents = filteredFolders.filter((f) => folderMeta.get(f.name)?.hasChildren).map((f) => f.name);
-      if (parents.length) setExpandedPaths(new Set(parents));
-    }
-  }, [filteredFolders, folderMeta, settings]);
+    setExpandedPaths(new Set());
+  }, [tab.id]);
 
   const visibleTreeFolders = useMemo(() => {
     return filteredFolders.filter((f) => {
@@ -128,10 +153,11 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   }, [filteredFolders, folderMeta, expandedPaths, minDepth]);
 
   // Fix stale files: only use currentFiles when it matches the selected folder (prevents showing previous folder's files)
+  // NB: fall back to allFoldersWithParents so synthetic parents stay selectable (Download Folder is recursive)
   const activeFolder = useMemo(() => {
     if (currentFiles && currentFolder && currentFolder === selectedFolder) return { name: currentFolder, files: currentFiles };
-    return folders.find((f) => f.name === selectedFolder) || null;
-  }, [currentFiles, currentFolder, folders, selectedFolder]);
+    return allFoldersWithParents.find((f) => f.name === selectedFolder) || null;
+  }, [currentFiles, currentFolder, allFoldersWithParents, selectedFolder]);
 
   const visibleFiles = useMemo(() => {
     if (!activeFolder) return [];
@@ -228,7 +254,6 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const totalSize = folders.reduce((acc, f) => acc + f.files.reduce((a, file) => a + (file.size || 0), 0), 0);
   const totalFiles = folders.reduce((acc, f) => acc + f.files.length, 0);
 
-  const expandFolders = (settings as unknown as { userbrowse?: { expand_folders?: string } }).userbrowse?.expand_folders ?? "all";
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
       {!loading && !error && folders.length === 0 ? (
@@ -291,8 +316,8 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
       <div className="flex flex-1 overflow-hidden min-h-0" style={isDemo ? ({ marginTop: "var(--demo-banner-h)" } as React.CSSProperties) : undefined}>
         {/* Folder list */}
         <aside className="hidden flex-shrink-0 flex-col border-r border-surface-container-highest/30 bg-surface-container-lowest md:flex min-h-0" style={{ width: asideW }}>
-          <div className="border-b border-surface-container-highest/20 p-3">
-            <div className="relative">
+          <div className="flex items-center gap-2 border-b border-surface-container-highest/20 p-3">
+            <div className="relative flex-1">
               <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-outline">search</span>
               <input
                 value={query}
@@ -301,6 +326,28 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                 className="w-full rounded-full bg-surface-container-low py-2 pl-9 pr-4 font-body text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
               />
             </div>
+            <button
+              type="button"
+              title="Expand all"
+              aria-label="Expand all"
+              data-testid="browse-expand-all"
+              disabled={filteredFolders.length === 0}
+              onClick={() => setExpandedPaths(new Set(filteredFolders.filter((f) => folderMeta.get(f.name)?.hasChildren).map((f) => f.name)))}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface-container-low hover:bg-surface-container-high disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[20px]">unfold_more</span>
+            </button>
+            <button
+              type="button"
+              title="Collapse all"
+              aria-label="Collapse all"
+              data-testid="browse-collapse-all"
+              disabled={filteredFolders.length === 0 || expandedPaths.size === 0}
+              onClick={() => setExpandedPaths(new Set())}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface-container-low hover:bg-surface-container-high disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[20px]">unfold_less</span>
+            </button>
           </div>
           <div className="flex-1 overflow-y-auto overflow-x-auto overscroll-contain min-h-0 p-2 space-y-1" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
             {loading && folders.length === 0 ? (
