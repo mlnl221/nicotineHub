@@ -1238,6 +1238,14 @@ export class TransferManager {
     // Adopt the live F token (may be an older grant racing a newer request).
     t.token = token;
     this.tokenIndex.set(token >>> 0, t.id);
+    // Second F dial for a transfer that already streams: close the spare so
+    // two sockets never share _onFileData/left accounting. Timed-out or
+    // retried transfers (status != Transferring) still accept a fresh F.
+    if (!t.isUpload && t.status === "Transferring" && (t as unknown as { _hadRealF?: boolean })._hadRealF && (t as unknown as { _onFileData?: unknown })._onFileData) {
+      logger.debug("transfer", "duplicate F ignored", { id: t.id, token });
+      try { socket.end(); } catch {}
+      return;
+    }
     // Upload serving: peer (downloader) connected via F to fetch file from us
     if (t.isUpload) {
       if (t._statusTimer) { clearTimeout(t._statusTimer); t._statusTimer = undefined; }
