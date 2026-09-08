@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { defaults, type Settings } from "@/lib/config/defaults";
+import { defaults, migrateLogDir, migrateLoggingDirsToConfig, type Settings } from "@/lib/config/defaults";
 import { deepMerge } from "@/lib/config/merge";
 import { getLocal } from "@/lib/storage";
 
@@ -20,7 +20,7 @@ function readStored(): Settings {
   try {
     const raw = getLocal(STORAGE_KEY);
     if (!raw) return defaults;
-    return deepMerge(defaults, JSON.parse(raw));
+    return migrateLoggingDirsToConfig(deepMerge(defaults, JSON.parse(raw)));
   } catch {
     return defaults;
   }
@@ -139,7 +139,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       const patch: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(keys)) {
         if (!(k in base)) continue; // unknown key — ignore, defaults win
-        if (stable(local[k]) === stable(base[k])) patch[k] = v; // still default locally → adopt bridge value
+        const nv = s === "logging" ? migrateLogDir(v) : v;
+        if (stable(local[k]) === stable(base[k])) patch[k] = nv; // still default locally → adopt bridge value
       }
       if (Object.keys(patch).length > 0) {
         const merged = { ...(local as object), ...patch };

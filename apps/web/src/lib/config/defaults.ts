@@ -393,13 +393,13 @@ export const defaults: Settings = {
   },
   logging: {
     privatechat: true,
-    privatelogsdir: "${DATA_DIR}/logs/private",
+    privatelogsdir: "${CONFIG_DIR}/logs/private",
     chatrooms: true,
-    roomlogsdir: "${DATA_DIR}/logs/rooms",
+    roomlogsdir: "${CONFIG_DIR}/logs/rooms",
     transfers: false,
-    transferslogsdir: "${DATA_DIR}/logs/transfers",
+    transferslogsdir: "${CONFIG_DIR}/logs/transfers",
     debug_file_output: false,
-    debuglogsdir: "${DATA_DIR}/logs/debug",
+    debuglogsdir: "${CONFIG_DIR}/logs/debug",
     log_timestamp: "%x %X",
     rooms_timestamp: "%X",
     private_timestamp: "%x %X",
@@ -434,3 +434,30 @@ export const defaults: Settings = {
     expand_folders: "all",
   },
 };
+
+/** Logging dir keys that live under the config dir (bridge writes CONFIG_DIR/logs). */
+export const LOG_DIR_KEYS = ["privatelogsdir", "roomlogsdir", "transferslogsdir", "debuglogsdir"] as const;
+
+/** Rewrite one stored log dir from the old DATA location to CONFIG. */
+export function migrateLogDir(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  if (value.startsWith("${DATA_DIR}")) return "${CONFIG_DIR}" + value.slice("${DATA_DIR}".length);
+  if (value.startsWith("$DATA_DIR")) return "$CONFIG_DIR" + value.slice("$DATA_DIR".length);
+  if (value.startsWith("/data/")) return "${CONFIG_DIR}/" + value.slice("/data/".length);
+  return value;
+}
+
+/** Normalize stored logging dirs so old DATA_DIR values move to CONFIG_DIR. */
+export function migrateLoggingDirsToConfig<T extends { logging: Record<string, unknown> }>(s: T): T {
+  const logging = { ...(s.logging as Record<string, unknown>) };
+  let changed = false;
+  for (const k of LOG_DIR_KEYS) {
+    const nv = migrateLogDir(logging[k]);
+    if (nv !== logging[k]) {
+      logging[k] = nv;
+      changed = true;
+    }
+  }
+  if (!changed) return s;
+  return { ...s, logging: logging as T["logging"] };
+}
