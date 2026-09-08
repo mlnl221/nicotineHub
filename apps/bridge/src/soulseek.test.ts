@@ -5,6 +5,11 @@ import {
   buildSetWaitPort,
   buildFileSearch,
   buildPeerInit,
+  buildPierceFireWall,
+  buildSharedFileListRequest,
+  buildUserInfoRequest,
+  frameInitMessage,
+  parsePierceFireWall,
   parseLoginResponse,
   parsePeerInit,
   parseFileSearchResponse,
@@ -245,6 +250,44 @@ describe("buildPeerInit / parsePeerInit", () => {
     const init = parsePeerInit(raw.subarray(5));
     expect(init.targetUser).toBe("alice");
     expect(init.connType).toBe("P");
+  });
+
+  // Regression: inbound init consume is total=4+len (4-byte len + len bytes).
+  // 5+len ate 1 byte of the pipelined peer message, so browse/userinfo never parsed.
+  test("pipelined PeerInit + SharedFileListRequest parses both with 4+len", () => {
+    const init = buildPeerInit("Donald_Trump_Soulseek", "P");
+    const req = buildSharedFileListRequest();
+    const wire = Buffer.concat([init, req]);
+    const len = wire.readUInt32LE(0);
+    expect(len).toBe(init.length - 4);
+    const total = 4 + len;
+    expect(total).toBe(init.length);
+    const initPayload = wire.subarray(5, total);
+    const pi = parsePeerInit(initPayload);
+    expect(pi.targetUser).toBe("Donald_Trump_Soulseek");
+    const rest = wire.subarray(total);
+    const msg = tryParseMessage(rest, MAX_INCOMING.server448M);
+    expect(msg?.code).toBe(PEER_MESSAGE_CODES.sharedFileListRequest);
+  });
+
+  test("pipelined PierceFireWall + UserInfoRequest parses both with 4+len", () => {
+    const pierce = buildPierceFireWall(12345);
+    expect(pierce.length).toBe(9); // 4 len + 1 code + 4 token
+    const req = buildUserInfoRequest();
+    const wire = Buffer.concat([pierce, req]);
+    const len = wire.readUInt32LE(0);
+    const total = 4 + len;
+    expect(total).toBe(pierce.length);
+    expect(parsePierceFireWall(wire.subarray(5, total)).token).toBe(12345);
+    const msg = tryParseMessage(wire.subarray(total), MAX_INCOMING.server448M);
+    expect(msg?.code).toBe(PEER_MESSAGE_CODES.userInfoRequest);
+  });
+
+  test("distrib frame total is 4+len like init", () => {
+    const framed = frameInitMessage(3, Buffer.from([0x01, 0x02]));
+    const len = framed.readUInt32LE(0);
+    expect(4 + len).toBe(framed.length);
+    expect(framed[4]).toBe(3);
   });
 });
 

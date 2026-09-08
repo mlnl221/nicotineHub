@@ -27,6 +27,13 @@ export interface ShareFolder {
   level?: PermissionLevel;
 }
 
+/** Progress snapshot emitted per directory visited during async scans */
+export interface ShareScanProgress {
+  dirs: number;
+  files: number;
+  current: string;
+}
+
 export enum PermissionLevel {
   PUBLIC = "public",
   BUDDY = "buddy",
@@ -707,24 +714,26 @@ export class ShareDB {
   }
 
   /** Async FS scanner (no local enrichment — bridge stays SLSK-only) */
-  async scanFsSharesAsync(sharedDirs?: string[]): Promise<ShareFolder[]> {
+  async scanFsSharesAsync(sharedDirs?: string[], onProgress?: (p: ShareScanProgress) => void): Promise<ShareFolder[]> {
     const dirs = sharedDirs || this.resolveSharedDirs();
     const folders: ShareFolder[] = [];
+    const state = { dirs: 0, files: 0 };
     for (const realDir of dirs) {
       if (!existsSync(realDir)) continue;
       try {
         const virtualBase = basename(realDir);
-        await this.walkDirAsync(realDir, virtualBase, folders);
+        await this.walkDirAsync(realDir, virtualBase, folders, onProgress, state);
       } catch {}
     }
     return folders;
   }
 
-  private async walkDirAsync(realPath: string, virtualPath: string, out: ShareFolder[]) {
+  private async walkDirAsync(realPath: string, virtualPath: string, out: ShareFolder[], onProgress?: (p: ShareScanProgress) => void, state = { dirs: 0, files: 0 }) {
     let entries: string[];
     try { entries = readdirSync(realPath); } catch { return; }
     const folderTest = `${virtualPath}\\`;
     if (this.isFolderFiltered(folderTest) || this.isFolderFiltered(virtualPath) || this.isFolderExcludedByExclusions(folderTest) || this.isFolderExcludedByExclusions(virtualPath)) return;
+    state.dirs++;
     // prev map for async reuse
     const prevByName = new Map<string, ShareFile>();
     for (const fo of this.folders) for (const f of fo.files) prevByName.set(f.name, f);
@@ -738,7 +747,7 @@ export class ShareDB {
       if (st.isDirectory()) {
         const subVirtual = `${virtualPath}\\${ent}`;
         if (this.isFolderFiltered(`${subVirtual}\\`) || this.isFolderFiltered(subVirtual) || this.isFolderExcludedByExclusions(`${subVirtual}\\`) || this.isFolderExcludedByExclusions(subVirtual)) continue;
-        await this.walkDirAsync(full, subVirtual, out);
+        await this.walkDirAsync(full, subVirtual, out, onProgress, state);
       } else if (st.isFile()) {
         if (this.isFileFiltered(ent) || this.isFileFiltered(`${virtualPath}\\${ent}`) || this.isFileExcludedByExclusions(ent) || this.isFileExcludedByExclusions(`${virtualPath}\\${ent}`)) continue;
         const ext = extname(ent).slice(1).toLowerCase();
@@ -761,12 +770,16 @@ export class ShareDB {
       }
     }
     if (files.length) out.push({ name: virtualPath, files: files.sort((a,b)=> a.name.localeCompare(b.name)) });
+    state.files += files.length;
+    onProgress?.({ dirs: state.dirs, files: state.files, current: virtualPath });
+    await new Promise((r) => setImmediate(r));
   }
 
-  private async scanCustomRootsAsync(roots: [string, string][]): Promise<ShareFolder[]> {
+  private async scanCustomRootsAsync(roots: [string, string][], onProgress?: (p: ShareScanProgress) => void): Promise<ShareFolder[]> {
     const prevByName = new Map<string, ShareFile>();
     for (const fo of this.folders) for (const f of fo.files) prevByName.set(f.name, f);
     const folders: ShareFolder[] = [];
+    const state = { dirs: 0, files: 0 };
     for (const [virtualRaw, realRaw] of roots) {
       const vName = (virtualRaw || "").trim().replace(/[/\\]+/g, "_").replace(/^[" ]+|[" ]+$/g, "") || "Shared";
       const rawPath = (realRaw || "").trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
@@ -800,13 +813,15 @@ export class ShareDB {
               const attrs: Array<[number, number]> = [];
               folders.push({ name: vName, files: [{ name: fileName, size: stats.size, ext, attrs }] });
             }
+            state.files++;
+            onProgress?.({ dirs: state.dirs, files: state.files, current: fileName });
             this.virtual2real.set(vName, rPath);
             this.real2virtual.set(rPath, vName);
             this.virtual2real.set(fileName, rPath);
             this.real2virtual.set(rPath, fileName);
           }
         } else if (stats.isDirectory()) {
-          await this.walkDirAsync(rPath, vName, folders);
+          await this.walkDirAsync(rPath, vName, folders, onProgress, state);
         }
       } catch {}
     }
@@ -863,7 +878,7 @@ export class ShareDB {
     return folders;
   }
 
-  async rescanAsync(): Promise<ShareFolder[]> {
+  async rescanAsync(onProgress?: (p: ShareScanProgress) => void): Promise<ShareFolder[]> {
     // ponytail: full rescan covers custom mounts + SHARED_DIRS, not just SHARED_DIRS
     if (this.customRootsByLevel.size > 0) {
       let touched = false;
@@ -871,7 +886,7 @@ export class ShareDB {
       for (const lvl of levels) {
         const roots = this.customRootsByLevel.get(lvl);
         if (!roots) continue;
-        const rescanned = await this.scanCustomRootsAsync(roots);
+        const rescanned = await this.scanCustomRootsAsync(roots, onProgress);
         if (lvl === PermissionLevel.PUBLIC) this.publicFolders = rescanned;
         else if (lvl === PermissionLevel.BUDDY) this.buddyFolders = rescanned;
         else this.trustedFolders = rescanned;
@@ -880,7 +895,7 @@ export class ShareDB {
       // If public had no custom roots, still scan SHARED_DIRS fallback
       const publicRoots = this.customRootsByLevel.get(PermissionLevel.PUBLIC);
       if (!publicRoots || publicRoots.length === 0) {
-        const scanned = await this.scanFsSharesAsync();
+        const scanned = await this.scanFsSharesAsync(undefined, onProgress);
         if (scanned.length > 0) { this.publicFolders = scanned; touched = true; }
       }
       if (touched) { this.rebuildCombined(); this.persist(); }
@@ -888,7 +903,7 @@ export class ShareDB {
     }
     // Legacy: no customRoots yet — be careful not to wipe custom shares that haven't been re-synced after upgrade.
     // If public folders look custom (virtual names not matching SHARED_DIRS basenames), skip destructive overwrite.
-    const scanned = await this.scanFsSharesAsync();
+    const scanned = await this.scanFsSharesAsync(undefined, onProgress);
     if (scanned.length > 0) {
       if (this.publicFolders.length === 0) {
         this.publicFolders = scanned; this.rebuildCombined(); this.persist();

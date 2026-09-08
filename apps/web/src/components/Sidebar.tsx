@@ -8,6 +8,7 @@ import { useTransfers } from "@/lib/transfers";
 import { useConfig } from "@/lib/config/provider";
 import { useSidebarCollapsed } from "@/components/SidebarContext";
 import { AboutDialog } from "@/components/AboutDialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useI18n } from "@/lib/i18n";
 
 const NAV = [
@@ -31,6 +32,7 @@ export function Sidebar() {
   const { t } = useI18n();
   const [mounted, setMounted] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [logoffOpen, setLogoffOpen] = useState(false);
   useEffect(() => setMounted(true), []);
   const downloadsCount = mounted ? downloads.length : 0;
   const uploadsCount = mounted ? uploads.length : 0;
@@ -55,7 +57,7 @@ export function Sidebar() {
                 NICOTINE HUB
               </div>
               <div className="font-label text-xs uppercase tracking-widest text-on-surface-variant dark:text-outline">
-                {t("Secure Homelab Node")}
+                {t("A Slsk Hub")}
               </div>
             </button>
           ) : (
@@ -187,7 +189,7 @@ export function Sidebar() {
           </>
         ) : null}
         <button
-          onClick={() => logout()}
+          onClick={() => setLogoffOpen(true)}
           title={collapsed ? t("Logoff") : "Log off — signs out all devices (shared server login)"}
           className={`flex w-full items-center rounded-xl px-3 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant ${collapsed ? "justify-center" : "space-x-3"}`}
         >
@@ -208,6 +210,14 @@ export function Sidebar() {
         </div>
       </nav>
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      <ConfirmDialog
+        open={logoffOpen}
+        title="Log off?"
+        message="This signs out all devices (shared server login). Continue?"
+        confirmLabel="Log off"
+        onConfirm={() => logout()}
+        onClose={() => setLogoffOpen(false)}
+      />
     </>
   );
 }

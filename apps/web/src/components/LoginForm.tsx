@@ -5,6 +5,7 @@ import { useSession } from "@/lib/session";
 import { useConfig } from "@/lib/config/provider";
 import { DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT } from "@/lib/config/defaults";
 import { isDemo } from "@/lib/demo";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 export function LoginForm() {
   const { login, logout, state, conflict, resolveConflict } = useSession();
@@ -16,6 +17,7 @@ export function LoginForm() {
   const [host, setHost] = useState(settings.server.server.host);
   const [port, setPort] = useState(String(settings.server.server.port));
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [logoffOpen, setLogoffOpen] = useState(false);
 
   // Keep host/port in sync when Settings → Network changes them (settings-audit P0)
   useEffect(() => {
@@ -71,12 +73,20 @@ export function LoginForm() {
 
         <button
           type="button"
-          onClick={() => logout()}
+          onClick={() => setLogoffOpen(true)}
           title="Signs out every device — the server session is shared"
           className="w-full rounded-xl border border-outline-variant bg-surface-container-lowest py-3 font-label text-sm font-semibold text-on-surface transition-all active:scale-[0.98] hover:bg-surface-container"
         >
           Sign out all devices
         </button>
+        <ConfirmDialog
+          open={logoffOpen}
+          title="Log off?"
+          message="This signs out all devices (shared server login). Continue?"
+          confirmLabel="Log off"
+          onConfirm={() => logout()}
+          onClose={() => setLogoffOpen(false)}
+        />
       </div>
     );
   }

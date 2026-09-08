@@ -18,7 +18,7 @@ const STRINGS: Record<string, Record<Locale, string>> = {
   Settings: { "": "Settings", en: "Settings", de: "Einstellungen", fr: "Paramètres", es: "Ajustes", pt: "Definições" },
   Diagnostics: { "": "Diagnostics", en: "Diagnostics", de: "Diagnose", fr: "Diagnostics", es: "Diagnóstico", pt: "Diagnóstico" },
   Statistics: { "": "Statistics", en: "Statistics", de: "Statistiken", fr: "Statistiques", es: "Estadísticas", pt: "Estatísticas" },
-  "Secure Homelab Node": { "": "Secure Homelab Node", en: "Secure Homelab Node", de: "Sicherer Homelab-Knoten", fr: "Nœud homelab sécurisé", es: "Nodo homelab seguro", pt: "Nó homelab seguro" },
+  "A Slsk Hub": { "": "A Slsk Hub", en: "A Slsk Hub", de: "A Slsk Hub", fr: "A Slsk Hub", es: "A Slsk Hub", pt: "A Slsk Hub" },
   "About": { "": "About", en: "About", de: "Über", fr: "À propos", es: "Acerca de", pt: "Sobre" },
   Logoff: { "": "Logoff", en: "Logoff", de: "Abmelden", fr: "Déconnexion", es: "Cerrar sesión", pt: "Terminar sessão" },
 };

@@ -430,6 +430,14 @@ function createSharedTransfers(): TransferManager {
     getSession: () => sharedSession as unknown as ReturnType<TransferManager["getByToken"]> extends never ? never : unknown as never,
   });
   tm.setSessionGetter(() => sharedSession as unknown as never);
+  const pt = PERSISTED_SETTINGS?.transfers ?? {};
+  const keys = ["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "groupdownloads", "groupuploads", "incomplete_strategy", "download_destination_template", "download_subdirectory"];
+  const init: Record<string, unknown> = {};
+  for (const k of keys) if (pt[k] !== undefined) init[k] = pt[k];
+  if (pt["incompleteStrategy"] !== undefined) init["incomplete_strategy"] = pt["incompleteStrategy"];
+  if (pt["downloadDestinationTemplate"] !== undefined) init["download_destination_template"] = pt["downloadDestinationTemplate"];
+  if (pt["downloadSubdirectory"] !== undefined) init["download_subdirectory"] = pt["downloadSubdirectory"];
+  if (Object.keys(init).length) tm.setConfig(init);
   tm.setBanlistUpdatedCb((banlist, byUser) => {
     broadcastJson({ type: "banlist:updated", banlist, byUser, reason: "honeypot" });
   });
@@ -523,9 +531,11 @@ function sharedSessionCallbacks() {
           const hasMore = out.length > 200;
           const lockedCount = Array.isArray(event.lockedFolders) ? event.lockedFolders.length : 0;
           // Stash the full result on every attached client so browse:page works per client.
+          // NB: browse:page reads ws.data — stash there, not on the wrapper object.
           for (const c of attachedClients) {
-            try { (c as unknown as Record<string, unknown>)._browseFull = out; } catch {}
-            try { (c as unknown as Record<string, unknown>)._browseUser = event.username; } catch {}
+            const bag = ((c as unknown as { data?: Record<string, unknown> }).data ?? (c as unknown as Record<string, unknown>));
+            try { bag._browseFull = out; } catch {}
+            try { bag._browseUser = event.username; } catch {}
           }
           broadcastJson({ type: "browse:shares", username: event.username, folders: page as never, total: out.length, hasMore, offset: 0, lockedCount });
         }
@@ -1523,6 +1533,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           const out = pluginManager.outgoingPrivateChatEvent(result.data.username, msg);
           if (out === null) return;
           const finalMsg = (out?.[1] as string) ?? msg;
+          // No typing indicator protocol on the wire — drop our own legacy
+          // TYPING control messages so peers never see them (mixed-version defense).
+          if (/^\x01TYPING\x01$/i.test(finalMsg)) return;
           session.sendPrivateMessage(result.data.username, finalMsg);
           pluginManager.outgoingPrivateChatNotification(result.data.username, finalMsg);
           // log outgoing private (tag is own username, peer is recipient)
@@ -1638,7 +1651,18 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
 
       if (data.type === "shares:rescan") {
         const session = requireLogin(); if (!session) return;
-        (session as unknown as { rescanShares: () => Promise<unknown> }).rescanShares().then((folders: unknown) => {
+        let lastProgress = 0;
+        const onProgress = (p: { dirs: number; files: number; current: string }) => {
+          const now = Date.now();
+          if (now - lastProgress < 200) return;
+          lastProgress = now;
+          try {
+            const rs = (ws as unknown as { readyState?: number }).readyState;
+            if (rs !== undefined && rs !== 1) return;
+            ws.send(JSON.stringify({ type: "shares:scan:progress", ...p }));
+          } catch {}
+        };
+        (session as unknown as { rescanShares: (onProgress?: (p: { dirs: number; files: number; current: string }) => void) => Promise<unknown> }).rescanShares(onProgress).then((folders: unknown) => {
           const sdb = (session as unknown as { shareDBInstance: { getSharedCounts: () => { dirs:number; files:number }; getUnavailableShares: () => [string,string][]; getSecretHits: (n?: number) => string[] } }).shareDBInstance;
           const counts = sdb.getSharedCounts();
           const unavailable = sdb.getUnavailableShares();

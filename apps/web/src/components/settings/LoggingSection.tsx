@@ -12,7 +12,7 @@ export function LoggingSection() {
     <div className="flex flex-col gap-6">
       <SectionCard
         title="Logging"
-        description="Mirrors log.ui (preferences.py:2743). In the browser, logs are stored client-side (localStorage/IndexedDB). Folder paths are notes — they map to retention/storage, not filesystem locations (settings-mapping.md:266)."
+        description="Mirrors log.ui (preferences.py:2743). Chat/transfer/debug logs live under the config dir (CONFIG_DIR/logs) — the bridge writes them there."
         actions={<SectionSaveButton section="logging" />}
       >
         <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs leading-relaxed text-on-surface-variant dark:bg-surface-container-highest/40">
@@ -30,7 +30,7 @@ export function LoggingSection() {
         <ToggleControl label="Log private chats" checked={l.privatechat} onChange={(v) => setOption("logging", "privatechat", v)} />
         <TextFieldControl
           label="Private log folder"
-          description="Browser note — not a real path."
+          description="Config dir (CONFIG_DIR/logs). Bridge writes chat logs here."
           value={l.privatelogsdir}
           onChange={(v) => setOption("logging", "privatelogsdir", v)}
           onReset={() => setOption("logging", "privatelogsdir", defaults.logging.privatelogsdir)}
@@ -38,7 +38,7 @@ export function LoggingSection() {
         <ToggleControl label="Log chatrooms" checked={l.chatrooms} onChange={(v) => setOption("logging", "chatrooms", v)} />
         <TextFieldControl
           label="Room log folder"
-          description="Browser note — not a real path."
+          description="Config dir (CONFIG_DIR/logs). Bridge writes chat logs here."
           value={l.roomlogsdir}
           onChange={(v) => setOption("logging", "roomlogsdir", v)}
           onReset={() => setOption("logging", "roomlogsdir", defaults.logging.roomlogsdir)}
@@ -46,6 +46,7 @@ export function LoggingSection() {
         <ToggleControl label="Log transfers" checked={l.transfers} onChange={(v) => setOption("logging", "transfers", v)} />
         <TextFieldControl
           label="Transfer log folder"
+          description="Config dir (CONFIG_DIR/logs)."
           value={l.transferslogsdir}
           onChange={(v) => setOption("logging", "transferslogsdir", v)}
           onReset={() => setOption("logging", "transferslogsdir", defaults.logging.transferslogsdir)}
@@ -53,6 +54,7 @@ export function LoggingSection() {
         <ToggleControl label="Debug to file" checked={l.debug_file_output} onChange={(v) => setOption("logging", "debug_file_output", v)} />
         <TextFieldControl
           label="Debug log folder"
+          description="Config dir (CONFIG_DIR/logs)."
           value={l.debuglogsdir}
           onChange={(v) => setOption("logging", "debuglogsdir", v)}
           onReset={() => setOption("logging", "debuglogsdir", defaults.logging.debuglogsdir)}

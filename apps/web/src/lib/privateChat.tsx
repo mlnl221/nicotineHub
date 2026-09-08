@@ -7,6 +7,7 @@ import type { ChatEvent, ChatLogRow } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
 import { mockPrivateConversations } from "@/lib/demo/fixtures";
 import { censorText, replaceText, truncateMessages } from "@/lib/chatFormat";
+import { appVersion } from "@/lib/version";
 
 export interface PrivateMessage {
   id: string;
@@ -25,7 +26,6 @@ interface PrivateChatApi {
   activeUser: string | null;
   setActiveUser: (u: string | null) => void;
   sendMessage: (username: string, message: string) => void;
-  sendTyping: (username: string) => void;
   isTyping: (username: string) => boolean;
   typingUsers: Map<string, number>;
   closeConversation: (username: string) => void;
@@ -148,6 +148,7 @@ export function PrivateChatProvider({ children }: { children: ReactNode }) {
           const seeded: PrivateMessage[] = [];
           rows.forEach((r, i) => {
             if (!r || typeof r.message !== "string") return;
+            if (/^\x01.*\x01$/.test(r.message)) return; // CTCP control rows never render
             const ts = Number(r.timestamp) || Date.now();
             const self = !!r.isSelf;
             const k = `${self ? 1 : 0}|${r.message}|${Math.floor(ts / 1000)}`;
@@ -173,27 +174,39 @@ export function PrivateChatProvider({ children }: { children: ReactNode }) {
       if (msg.type !== "chat:event") return;
       const ev = (msg as unknown as { event: ChatEvent }).event;
       if (ev.type === "private-message" && ev.username && ev.message) {
-        if (ev.message.includes("\u0001TYPING")) {
-          setTypingUsers((prev) => {
-            const next = new Map(prev);
-            next.set(ev.username!, Date.now() + 3000);
-            return next;
-          });
-          setTimeout(() => {
+        // CTCP control messages (whole body wrapped in \x01) are never chat —
+        // nicotine-plus parity: TYPING drives the indicator, VERSION gets a
+        // reply, everything else is dropped silently. We never SEND typing
+        // (no peer protocol for it); the indicator only fires for foreign clients.
+        const ctcp = /^\x01(.*?)\x01$/.exec(ev.message);
+        if (ctcp) {
+          const query = (ctcp[1].trim().split(/\s+/)[0] ?? "").toUpperCase();
+          if (query === "TYPING") {
             setTypingUsers((prev) => {
               const next = new Map(prev);
-              const exp = next.get(ev.username!);
-              if (exp && Date.now() >= exp) next.delete(ev.username!);
+              next.set(ev.username!, Date.now() + 3000);
               return next;
             });
-          }, 3100);
+            setTimeout(() => {
+              setTypingUsers((prev) => {
+                const next = new Map(prev);
+                const exp = next.get(ev.username!);
+                if (exp && Date.now() >= exp) next.delete(ev.username!);
+                return next;
+              });
+            }, 3100);
+            return;
+          }
+          if (query === "VERSION") {
+            const last = ctcpThrottle.current.get(ev.username!) || 0;
+            if (Date.now() - last < 1000) return;
+            ctcpThrottle.current.set(ev.username!, Date.now());
+            if (settings.ctcp.enable) {
+              try { send({ type: "chat:private", action: "send", username: ev.username!, message: "VERSION: nicotineHub " + appVersion }); } catch {}
+            }
+            return;
+          }
           return;
-        }
-        if (ev.message.includes("\u0001VERSION")) {
-          const last = ctcpThrottle.current.get(ev.username!) || 0;
-          if (Date.now() - last < 1000) return;
-          ctcpThrottle.current.set(ev.username!, Date.now());
-          if (!settings.ctcp.enable) return;
         }
         const display = settings.words.censorwords ? censorText(ev.message, settings.words.censored) : ev.message;
         const pm: PrivateMessage = {
@@ -236,20 +249,12 @@ export function PrivateChatProvider({ children }: { children: ReactNode }) {
     return unsub;
   }, [state.status, subscribe, settings.words.censorwords, settings.words.censored, settings.logging.readprivatelines, settings.ctcp.enable]);
 
-  const sendTyping = useCallback((username: string) => {
-    if (!settings.ctcp.enable) return;
-    const last = ctcpThrottle.current.get(`typing:${username}`) || 0;
-    if (Date.now() - last < 2000) return;
-    ctcpThrottle.current.set(`typing:${username}`, Date.now());
-    send({ type: "chat:private", action: "send", username, message: "\u0001TYPING\u0001" });
-  }, [send, settings.ctcp.enable]);
-
   const sendMessage = useCallback(
     (username: string, message: string) => {
       if (!message.trim()) return;
       let out = message.trim();
       if (out.startsWith("/me ")) out = `* ${out.slice(4)}`;
-      if (!settings.ctcp.enable && out.includes("\u0001VERSION")) return;
+      if (!settings.ctcp.enable && /^\x01.*\x01$/.test(out)) return; // no CTCP out when disabled
       if (state.status !== "connected") {
         try {
           const pending = JSON.parse((localStorage.getItem("nicotineHub.pendingPrivate") ?? localStorage.getItem("nicotine.pendingPrivate")) || "[]");
@@ -355,7 +360,7 @@ export function PrivateChatProvider({ children }: { children: ReactNode }) {
     return exp !== undefined && Date.now() < exp;
   }, [typingUsers]);
 
-  const value: PrivateChatApi = { conversations, users, activeUser, setActiveUser, sendMessage, sendTyping, isTyping, typingUsers, closeConversation, closeAll };
+  const value: PrivateChatApi = { conversations, users, activeUser, setActiveUser, sendMessage, isTyping, typingUsers, closeConversation, closeAll };
   return <PrivateChatContext.Provider value={value}>{children}</PrivateChatContext.Provider>;
 }
 

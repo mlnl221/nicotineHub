@@ -218,28 +218,36 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   }, [subscribe, send]);
 
   // On connected, re-trigger pending loads for persisted tabs that are still loading
+  // Guard: only fresh tabs (no folders yet, no live timer) refetch — paged
+  // hasMore merges set loading:true with folders.length>0 and must NOT re-arm
+  // a full shares request or shares page in with 9629 folders loops forever.
   const pendingRefetch = useRef<Set<string>>(new Set());
+  const lastAutoSendRef = useRef<Map<string, number>>(new Map());
   useEffect(() => {
     if (state.status !== "connected") return;
     for (const t of tabs) {
-      if (t.loading && !pendingRefetch.current.has(t.id)) {
-        pendingRefetch.current.add(t.id);
-        // stagger to avoid burst
-        const delay = [...tabs].indexOf(t) * 400;
-        setTimeout(() => {
-          send({ type: "browse", action: "shares", username: t.username });
-          const timer = setTimeout(() => {
-            setTabs((prev) => prev.map((x) => {
-              if (x.id !== t.id || !x.loading) return x;
-              if (x.folders.length) return { ...x, loading: false, error: null };
-              return { ...x, loading: false, error: "Timed out — user may be offline or not sharing." };
-            }));
-            timersRef.current.delete(t.id);
-          }, 32000);
-          timersRef.current.set(t.id, timer);
-          pendingRefetch.current.delete(t.id);
-        }, delay);
-      }
+      if (!t.loading || t.folders.length > 0) continue;
+      if (timersRef.current.has(t.id)) continue;
+      if (pendingRefetch.current.has(t.id)) continue;
+      const last = lastAutoSendRef.current.get(t.username.toLowerCase()) ?? 0;
+      if (Date.now() - last < 2000) continue;
+      lastAutoSendRef.current.set(t.username.toLowerCase(), Date.now());
+      pendingRefetch.current.add(t.id);
+      // stagger to avoid burst
+      const delay = [...tabs].indexOf(t) * 400;
+      setTimeout(() => {
+        send({ type: "browse", action: "shares", username: t.username });
+        const timer = setTimeout(() => {
+          setTabs((prev) => prev.map((x) => {
+            if (x.id !== t.id || !x.loading) return x;
+            if (x.folders.length) return { ...x, loading: false, error: null };
+            return { ...x, loading: false, error: "Timed out — user may be offline or not sharing." };
+          }));
+          timersRef.current.delete(t.id);
+        }, 32000);
+        timersRef.current.set(t.id, timer);
+        pendingRefetch.current.delete(t.id);
+      }, delay);
     }
   }, [state.status, tabs, send]);
 
@@ -255,6 +263,7 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
     const existingTimer = timersRef.current.get(id);
     if (existingTimer) { clearTimeout(existingTimer); timersRef.current.delete(id); }
     if (state.status !== "connected") return;
+    lastAutoSendRef.current.set(username.toLowerCase(), Date.now());
     send({ type: "browse", action: "shares", username });
     const timer = setTimeout(() => {
       setTabs((prev) => prev.map((x) => {

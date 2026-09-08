@@ -290,7 +290,7 @@ export class SoulseekSession {
   private customgeoblock = "Sorry, your country is blocked";
 
   // pending browse tracking
-  private pendingBrowseShares = new Map<string, { timer: ReturnType<typeof setTimeout> }>();
+  private pendingBrowseShares = new Map<string, { timer: ReturnType<typeof setTimeout>; createdAt: number }>();
   private pendingBrowseFolder = new Map<number, { username: string; folder: string; timer: ReturnType<typeof setTimeout>; retryCount: number }>();
   private pendingPeerMessages = new Map<string, Array<{ connType: string; msg: Buffer }>>();
   // user status cache for offline check (P1 hardening)
@@ -443,8 +443,8 @@ export class SoulseekSession {
 
   // Expose ShareDB for rescan via server.ts WS
   get shareDBInstance(): ShareDB { return this.shareDB; }
-  async rescanShares(): Promise<import("./shares.ts").ShareFolder[]> {
-    const res = await this.shareDB.rescanAsync();
+  async rescanShares(onProgress?: (p: import("./shares.ts").ShareScanProgress) => void): Promise<import("./shares.ts").ShareFolder[]> {
+    const res = await this.shareDB.rescanAsync(onProgress);
     try {
       const { dirs, files } = this.shareDB.getSharedCounts();
       this.reportShares(dirs, files);
@@ -2176,8 +2176,9 @@ export class SoulseekSession {
   registerFileToken(token: number) { this.pendingFileTokens.add(token >>> 0); }
   unregisterFileToken(token: number) { this.pendingFileTokens.delete(token >>> 0); }
   getPeerSocket(username: string, connType: string): Socket | undefined {
+    const lower = username.toLowerCase();
     for (const [sock, st] of this.peerStates) {
-      if (st.username === username && st.connType === connType && st.initDone) return sock;
+      if (st.username?.toLowerCase() === lower && st.connType === connType && st.initDone) return sock;
     }
     return undefined;
   }
@@ -2197,7 +2198,7 @@ export class SoulseekSession {
       if (state.buf.length + bytes.length > maxForState && state.buf.length >= 4) {
         const declared = state.buf.readUInt32LE(0);
         const hintedMax = (() => {
-          // Before initDone, first message is PeerInit/Pierce (5+len framing) — always ≤1M
+          // Before initDone, first message is PeerInit/Pierce ([len][u8 code][payload] wire total 4+len) — always ≤1M
           if (!state.initDone) return 1024 * 1024;
           // After init, peek peer message code (framed as [len][code][payload])
           // Need at least 8 bytes (len+code) buffered; otherwise conservatively allow append
@@ -2233,7 +2234,7 @@ export class SoulseekSession {
         if (state.buf.length < 5) break;
         const len = state.buf.readUInt32LE(0);
         if (len > 1024 * 1024) { try { peer.end(); } catch {} break; }
-        const total = 5 + len;
+        const total = 4 + len;
         if (state.buf.length < total) break;
         const code = state.buf[4];
         const initPayload = state.buf.subarray(5, total);
@@ -2309,7 +2310,7 @@ export class SoulseekSession {
         if (state.buf.length < 5) break;
         const len = state.buf.readUInt32LE(0);
         if (len > MAX_INCOMING.server16K) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
-        const total = 5 + len; if (state.buf.length < total) break;
+        const total = 4 + len; if (state.buf.length < total) break;
         const code = state.buf[4];
         const payload = state.buf.subarray(5, total);
         state.buf = state.buf.subarray(total);
@@ -2415,13 +2416,13 @@ export class SoulseekSession {
       if (state.outbound && state.connType === "P" && state.buf.length >= 5) {
         const lenProbe = state.buf.readUInt32LE(0);
         const codeProbe = state.buf[4];
-        if ((codeProbe === 0 || codeProbe === 1) && lenProbe < 1024 * 1024 && state.buf.length >= 5 + lenProbe) {
+        if ((codeProbe === 0 || codeProbe === 1) && lenProbe < 1024 * 1024 && state.buf.length >= 4 + lenProbe) {
           try {
-            const initPayloadProbe = state.buf.subarray(5, 5 + lenProbe);
+            const initPayloadProbe = state.buf.subarray(5, 4 + lenProbe);
             if (codeProbe === 1) {
               const piProbe = parsePeerInit(initPayloadProbe);
               if (piProbe.targetUser && piProbe.connType) {
-                state.buf = state.buf.subarray(5 + lenProbe);
+                state.buf = state.buf.subarray(4 + lenProbe);
                 // Update username if peer provided different (rare)
                 if (!state.username) state.username = piProbe.targetUser;
                 continue;
@@ -2429,7 +2430,7 @@ export class SoulseekSession {
             } else if (codeProbe === 0) {
               const pfProbe = parsePierceFireWall(initPayloadProbe);
               if (pfProbe.token !== undefined) {
-                state.buf = state.buf.subarray(5 + lenProbe);
+                state.buf = state.buf.subarray(4 + lenProbe);
                 continue;
               }
             }
@@ -2496,6 +2497,9 @@ export class SoulseekSession {
           const parsed = parseSharedFileListResponse(msg.payload);
           const pending = this.pendingBrowseShares.get(username.toLowerCase());
           if (pending) { clearTimeout(pending.timer); this.pendingBrowseShares.delete(username.toLowerCase()); }
+          // Queue leak fix: success must drain the queued P/SharedFileListRequest
+          // like the timeout path does, or queueLen grows forever on re-browse.
+          try { this.pendingPeerMessages.delete(username.toLowerCase()); } catch {}
           logger.info("browse", "sharedFileListResponse success", { username, folders: parsed.folders.length, locked: parsed.lockedFolders.length });
           this.emitBrowse({ type: "browse-shares", username, folders: parsed.folders, lockedFolders: parsed.lockedFolders });
           try { (peer as Socket).end(); } catch {}
@@ -2806,7 +2810,16 @@ export class SoulseekSession {
       return;
     }
     const existing = this.pendingBrowseShares.get(key);
-    if (existing) { clearTimeout(existing.timer); }
+    // Dedupe rapid re-requests (web double-send / retry storm): a fresh
+    // pending entry already has a dial in flight — requeueing only grows
+    // pendingPeerMessages unbounded (seen queueLen 128+ looping).
+    if (existing) {
+      if (Date.now() - existing.createdAt < 3000) {
+        logger.debug("browse", "requestSharedFileList deduped (fresh pending)", { username });
+        return;
+      }
+      clearTimeout(existing.timer);
+    }
     const timer = setTimeout(() => {
       logger.warn("browse", "browse timeout", { username });
       this.pendingBrowseShares.delete(key);
@@ -2816,7 +2829,7 @@ export class SoulseekSession {
       // More helpful: peer may be offline, firewalled, or our LISTEN_PORT not forwarded
       this.emitBrowse({ type: "browse-error", username, error: "Timed out fetching shares — peer may be offline, firewalled, or your LISTEN_PORT not port-forwarded (check Diagnostics → Network)" });
     }, 30000);
-    this.pendingBrowseShares.set(key, { timer });
+    this.pendingBrowseShares.set(key, { timer, createdAt: Date.now() });
     this.addAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);
     this.ensurePeerAndSend(username, "P", buildSharedFileListRequest());
   }
