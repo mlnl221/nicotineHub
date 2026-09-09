@@ -53,7 +53,7 @@ Reference: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plu
 ## Chat / Rooms / Privileges
 
 - `SayChatroom 13`, `MessageUser 22`+`MessageAcked 23`/`MessageUsers 149`, `JoinRoom 14`/`LeaveRoom 15`/`UserJoined/Left 16/17`/`RoomList 64`/`RoomMembers 133`/`Add/RemoveMember 134/135`/`RoomTickers 113-116`/`GlobalRoom 150-152`
-- `WatchUser 5`/`Unwatch 6`/`GetUserStatus 7`/`GetUserStats 36`/`UserInterests 57` (view-only, shown on profiles)/`GivePrivileges 123`/`CheckPrivileges 92`/`ChangePassword 142` (likes/hates/recs/similar-users codes removed — see `docs/porting-status.md`)
+- `WatchUser 5`/`Unwatch 6`/`GetUserStatus 7`/`GetUserStats 36`/`UserInterests 57` (view-only, shown on profiles)/`GivePrivileges 123`/`CheckPrivileges 92`/`ChangePassword 142` (likes/hates/recs/similar-users codes 50/51/52/54/55/56/110/111/112/117/118 removed; unhandled inbound codes hit the silent-ignore fallback)
 - `UserInfo` `descr/pic/totalupl/queuesize/slotsavail/uploadallowed` via `UserProfileSection.tsx`: `userinfo: {action:"setProfile", profile: {...}}` → stored (`session.ts:956`) and served via `buildUserInfoResponse` (`soulseek.ts:879`, banned peers get empty descr); web debounces 800 ms when `useSession` `connected`, base64 `pic` 5 MB guard + WebP 512 px resize
 
 ## WebSocket JSON bridge (`apps/bridge/src/server.ts`)
