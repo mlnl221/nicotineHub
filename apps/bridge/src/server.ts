@@ -1199,7 +1199,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
               } catch {}
               return null;
             };
-            const hit = scan(DATA_DIR, safeName, 2) || scan(DATA_DIR, sanitizeFileNameForHeader(fileName), 2);
+            const hit = scan(DATA_DIR, safeName, 4) || scan(DATA_DIR, sanitizeFileNameForHeader(fileName), 4);
             if (hit && existsSync(hit)) filePath = hit;
           } catch {}
         }

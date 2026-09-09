@@ -17,7 +17,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, statSync, writeFileSync, readFileSync, unlinkSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname, resolve, sep, relative } from "node:path";
 import type { Socket } from "bun";
 import {
   buildFileTransferInit,
@@ -94,19 +94,82 @@ export type TransferQueueCb = (id: string, place: number) => void;
 export type TransferFinishedCb = (id: string, fileName: string, size: number, downloadUrl: string) => void;
 
 function fileNameOf(virtualPath: string): string {
-  const parts = virtualPath.split("\\");
+  const parts = virtualPath.split(/[\\/]/);
   return parts[parts.length - 1] || virtualPath;
 }
 
 // ponytail: single sink for peer-controlled names; per-user dirs if stricter mapping needed
 function safeUsername(username: string): string {
-  const s = username.replace(/[/\\]/g, "_").replace(/\.\./g, "_");
+  const s = username.replace(/[/\\]+/g, "_").replace(/[\x00-\x1f\x7f]/g, "").replace(/\.\./g, "_").trim().slice(0, 64);
   return s === "" || s === "." ? "_" : s;
 }
 
 function safeBasename(virtualPath: string): string {
-  const b = fileNameOf(virtualPath).replace(/[/\\]/g, "_") || "file";
-  return b === "." || b === ".." ? "file" : b;
+  return safeSegment(fileNameOf(virtualPath), "file");
+}
+
+// Windows reserved device names (case-insensitive, extension ignored)
+const RESERVED_BASENAMES = new Set([
+  "CON", "PRN", "AUX", "NUL",
+  ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`),
+  ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`),
+]);
+
+function safeSegment(raw: string, fallback: string): string {
+  let s = raw.replace(/[/\\]+/g, "_").replace(/[\x00-\x1f\x7f]/g, "");
+  s = s.replace(/\s+/g, " ").trim();
+  s = s.replace(/[. ]+$/, "");
+  if (s === "" || s === "." || s === "..") return fallback;
+  const dot = s.indexOf(".");
+  const stem = dot >= 0 ? s.slice(0, dot) : s;
+  const out = RESERVED_BASENAMES.has(stem.toUpperCase()) ? `_${s}` : s;
+  return out.slice(0, 100) || fallback;
+}
+
+// Split remote virtual path on \ (also tolerates /); drops [0] share alias.
+function splitVirtual(virtualPath: string): { dirs: string[]; base: string } {
+  const parts = virtualPath.split(/[\\/]/);
+  const rest = parts.length > 1 ? parts.slice(1) : parts.slice();
+  const base = safeSegment(rest.pop() ?? "", "file");
+  const dirs: string[] = [];
+  for (const p of rest) {
+    if (p === "") continue;
+    dirs.push(safeSegment(p, "dir"));
+  }
+  return { dirs, base };
+}
+
+function joinUnique(dir: string, base: string): string {
+  let candidate = join(dir, base);
+  let counter = 1;
+  while (existsSync(candidate)) {
+    const dot = base.lastIndexOf(".");
+    const name = dot >= 0 ? base.slice(0, dot) : base;
+    const ext = dot >= 0 ? base.slice(dot) : "";
+    candidate = join(dir, `${name} (${counter})${ext}`);
+    counter++;
+    if (counter > 1000) break;
+  }
+  return candidate;
+}
+
+// Shrink longest segments until measure fits budget (total path ~200 chars).
+function shrinkSegments(segs: string[], overBy: () => number): void {
+  let guard = 0;
+  while (overBy() > 0 && guard++ < 64) {
+    let idx = -1;
+    for (let i = 0; i < segs.length; i++) {
+      if (segs[i].length > 1 && (idx < 0 || segs[i].length > segs[idx].length)) idx = i;
+    }
+    if (idx < 0) return;
+    segs[idx] = segs[idx].slice(0, Math.max(1, segs[idx].length - overBy()));
+  }
+}
+
+function containedPath(dest: string, downloadsDir: string): string | null {
+  const root = resolve(downloadsDir);
+  const r = resolve(dest);
+  return r === root || r.startsWith(root + sep) ? dest : null;
 }
 
 function getIncompletePath(virtualPath: string, username: string, incompleteDir: string): string {
@@ -120,26 +183,31 @@ function getIncompletePath(virtualPath: string, username: string, incompleteDir:
   return join(incompleteDir, prefix + safeBase);
 }
 
-function getFinishedPath(virtualPath: string, downloadsDir: string, username?: string, usernamesubfolders?: boolean): string {
-  let dir = downloadsDir;
-  if (usernamesubfolders && username) {
-    dir = join(downloadsDir, safeUsername(username));
+function getFinishedPath(virtualPath: string, downloadsDir: string, username?: string, _usernamesubfolders?: boolean): string {
+  // Layout: <downloads>/<user>/<subdirs...>/<base>. Alias dropped, username always
+  // included; _usernamesubfolders kept as no-op for config compat.
+  const user = username ? safeUsername(username) : "";
+  const { dirs, base } = splitVirtual(virtualPath);
+  const flatBase = (): string => {
+    const dir = user ? join(downloadsDir, user) : downloadsDir;
     try { mkdirSync(dir, { recursive: true }); } catch {}
+    return joinUnique(dir, base);
+  };
+  if (!user || dirs.length === 0) return flatBase();
+  const segs = dirs.slice();
+  shrinkSegments(segs, () => join(downloadsDir, user, ...segs, base).length - 200);
+  let outBase = base;
+  if (join(downloadsDir, user, ...segs, outBase).length > 200) {
+    // ponytail: middle segments already at floor; trim base stem, keep extension
+    const dot = outBase.lastIndexOf(".");
+    const stem = dot > 0 ? outBase.slice(0, dot) : outBase;
+    const ext = dot > 0 ? outBase.slice(dot) : "";
+    outBase = stem.slice(0, Math.max(1, 200 - join(downloadsDir, user, ...segs, ext).length)) + ext;
   }
-  const base = safeBasename(virtualPath);
-  let dest = join(dir, base);
-  // avoid conflict "(1)" loop
-  let counter = 1;
-  let candidate = dest;
-  while (existsSync(candidate)) {
-    const dot = base.lastIndexOf(".");
-    const name = dot >= 0 ? base.slice(0, dot) : base;
-    const ext = dot >= 0 ? base.slice(dot) : "";
-    candidate = join(dir, `${name} (${counter})${ext}`);
-    counter++;
-    if (counter > 1000) break;
-  }
-  return candidate;
+  const dir = join(downloadsDir, user, ...segs);
+  if (!containedPath(join(dir, outBase), downloadsDir)) return flatBase();
+  try { mkdirSync(dir, { recursive: true }); } catch {}
+  return joinUnique(dir, outBase);
 }
 
 export class TransferManager {
@@ -186,7 +254,7 @@ export class TransferManager {
     preferfriends: false,
     autoclear_downloads: false,
     autoclear_uploads: false,
-    usernamesubfolders: false,
+    usernamesubfolders: true, // always-true layout <downloads>/<user>/...; kept for config compat, forced in setConfig
     incomplete_strategy: "resume" as "resume" | "overwrite",
     download_destination_template: null as string | null, // slskd DeriveDestination tokens e.g. "${SOURCE_DIRECTORY}/${SOURCE_USERNAME}"
     download_subdirectory: null as string | null, // legacy alias
@@ -234,6 +302,7 @@ export class TransferManager {
         if (!existsSync(p)) mkdirSync(p, { recursive: true });
       }
       this.loadFromDisk();
+      try { this.migrateFlatDownloads(); } catch {}
     } catch {}
 
     // Keep demo uploads for UI unless real transfers exist — only when explicitly enabled to avoid masking empty state in docker prod
@@ -255,6 +324,8 @@ export class TransferManager {
 
   setConfig(partial: Partial<typeof this.config>) {
     Object.assign(this.config, partial);
+    // no-op compat: folder layout always includes <downloads>/<user>/...
+    this.config.usernamesubfolders = true;
     try { const ul = this.getUploadLimit(); if (ul) this.uploadBucket.configure(ul); const dl = this.getDownloadLimit(); if (dl) this.downloadBucket.configure(dl); } catch {}
   }
 
@@ -413,6 +484,48 @@ export class TransferManager {
     } catch {}
   }
 
+  migrateFlatDownloads(): { moved: number; skipped: number } {
+    let moved = 0;
+    let skipped = 0;
+    try {
+      const root = resolve(this.downloadsDir);
+      for (const t of this.transfers.values()) {
+        try {
+          if (t.isUpload) continue;
+          if (!t.virtualPath || typeof t.virtualPath !== "string") { skipped++; continue; }
+          const stored = (t as unknown as { _incompletePath?: unknown })._incompletePath;
+          if (!stored || typeof stored !== "string") continue;
+          const sRes = resolve(stored);
+          if (sRes !== root && !sRes.startsWith(root + sep)) continue;
+          const parent = dirname(sRes);
+          let userDir = root;
+          try { userDir = resolve(join(this.downloadsDir, safeUsername(t.username))); } catch {}
+          if (parent !== root && parent !== userDir) continue;
+          if (!existsSync(sRes)) continue;
+          // cheap skips before deriveDestination (it mkdirs as a side effect)
+          const { dirs, base } = splitVirtual(t.virtualPath);
+          if (dirs.length === 0) { skipped++; continue; }
+          const ideal = join(this.downloadsDir, safeUsername(t.username), ...dirs, base);
+          const iRes = resolve(ideal);
+          if (iRes === sRes) continue;
+          if (relative(root, iRes).split(sep).filter(Boolean).length < 3 || iRes !== root && !iRes.startsWith(root + sep)) { skipped++; continue; }
+          if (existsSync(ideal)) { skipped++; continue; }
+          const expected = this.deriveDestination(t.virtualPath, t.username);
+          const eRes = resolve(expected);
+          if (eRes === sRes) continue;
+          if (existsSync(eRes)) { skipped++; continue; }
+          try { mkdirSync(dirname(eRes), { recursive: true }); } catch {}
+          renameSync(sRes, eRes);
+          (t as unknown as { _incompletePath?: string })._incompletePath = eRes;
+          moved++;
+        } catch { skipped++; continue; }
+      }
+    } catch {}
+    if (moved > 0) { try { this.persist(); } catch {} }
+    try { logger.info("transfer", "migrated flat downloads", { moved, skipped }); } catch {}
+    return { moved, skipped };
+  }
+
   private seedDemoUploads() {
     const demo: BridgeTransfer[] = [
       {
@@ -500,10 +613,11 @@ export class TransferManager {
     const stored = (t as unknown as { _incompletePath?: string })._incompletePath;
     if (stored && existsSync(stored)) return stored;
     // Also allow _downloadUrl missing for legacy entries — still try to locate file
-    const byName = join(this.downloadsDir, t.fileName);
+    const bareName = t.fileName.replace(/[/\\]+/g, "_") || "file";
+    const byName = join(this.downloadsDir, bareName);
     if (existsSync(byName)) return byName;
     if (this.config.usernamesubfolders && t.username) {
-      const sub = join(this.downloadsDir, safeUsername(t.username), t.fileName);
+      const sub = join(this.downloadsDir, safeUsername(t.username), bareName);
       if (existsSync(sub)) return sub;
     }
     // Derive via template (same as finishDownload)
@@ -524,19 +638,22 @@ export class TransferManager {
     } catch {}
     // Fallback: scan DATA_DIR recursively (WSL share copy e.g. DATA_DIR/DJSplash/file.m4a) — ponytail: handles legacy stubs where dest never written
     try {
-      const scan = (dir: string, target: string, depth = 2): string | null => {
+      // sanitize: scan target must be a bare name, never a path (fileName arrives via WS)
+      const target = t.fileName.replace(/[/\\]+/g, "_").replace(/[\x00-\x1f\x7f]/g, "").slice(0, 255) || "file";
+      const dataRoot = resolve(this.dataDir);
+      const scan = (dir: string, depth = 2): string | null => {
         try {
-          const cand = join(dir, target);
-          if (existsSync(cand)) return cand;
+          const cand = resolve(join(dir, target));
+          if ((cand === dataRoot || cand.startsWith(dataRoot + sep)) && existsSync(cand)) return cand;
           if (depth <= 0 || !existsSync(dir)) return null;
           for (const ent of readdirSync(dir)) {
-            const p = join(dir, ent);
-            try { if (statSync(p).isDirectory()) { const r = scan(p, target, depth - 1); if (r) return r; } } catch {}
+            const p = resolve(join(dir, ent));
+            try { if (!p.startsWith(dataRoot + sep)) continue; if (statSync(p).isDirectory()) { const r = scan(p, depth - 1); if (r) return r; } } catch {}
           }
         } catch {}
         return null;
       };
-      const hit = scan(this.dataDir, t.fileName, 2);
+      const hit = scan(this.dataDir, 4);
       if (hit) return hit;
     } catch {}
     return null;
@@ -1669,33 +1786,37 @@ export class TransferManager {
     }
   }
   private deriveDestination(virtualPath: string, username: string): string {
+    const { dirs, base } = splitVirtual(virtualPath);
     const tmpl = this.config.download_destination_template || this.config.download_subdirectory || null;
     if (!tmpl) return getFinishedPath(virtualPath, this.downloadsDir, username, this.config.usernamesubfolders);
     // Simple token replacement like slskd: ${SOURCE_USERNAME}, ${SOURCE_DIRECTORY}, ${SOURCE_PATH}, ${BATCH_ID}
-    const sourcePath = virtualPath;
-    const sourceDir = virtualPath.includes("\\") ? virtualPath.slice(0, virtualPath.lastIndexOf("\\")) : "";
     const sourceUsername = username.replace(/[/\\]/g, "_");
     const clean = (s: string) => s.replace(/[/\\]/g, "_").replace(/\.\./g, "_");
     let expanded = tmpl
       .replace(/\$\{SOURCE_USERNAME\}/g, clean(sourceUsername))
-      .replace(/\$\{SOURCE_DIRECTORY\}/g, clean(sourceDir.split("\\")[0] || ""))
-      .replace(/\$\{SOURCE_PATH\}/g, clean(sourcePath))
+      .replace(/\$\{SOURCE_DIRECTORY\}/g, clean(dirs[0] || ""))
+      .replace(/\$\{SOURCE_PATH\}/g, clean(virtualPath))
       .replace(/\$\{BATCH_ID\}/g, "batch");
     // guard traversal
     expanded = expanded.replace(/\.\./g, "_").replace(/^[/\\]+/, "");
-    let dir = join(this.downloadsDir, expanded);
-    try { mkdirSync(dir, { recursive: true }); } catch {}
-    const base = safeBasename(virtualPath);
-    let dest = join(dir, base);
-    let counter = 1; let candidate = dest;
-    while (existsSync(candidate)) {
-      const dot = base.lastIndexOf(".");
-      const name = dot >= 0 ? base.slice(0, dot) : base;
-      const ext = dot >= 0 ? base.slice(dot) : "";
-      candidate = join(dir, `${name} (${counter})${ext}`);
-      counter++; if (counter > 1000) break;
+    // Append preserved subpath past what the template already ends with:
+    // longest prefix of dirs matching the template suffix continues from there.
+    const expSegs = expanded.split(/[\\/]/).filter((s) => s !== "");
+    let k = 0;
+    for (let n = Math.min(dirs.length, expSegs.length); n > 0; n--) {
+      if (expSegs.slice(-n).every((s, i) => s === dirs[i])) { k = n; break; }
     }
-    return candidate;
+    const tail = dirs.slice(k);
+    shrinkSegments(tail, () => join(this.downloadsDir, expanded, ...tail, base).length - 200);
+    const flatDir = join(this.downloadsDir, expanded);
+    const flatBase = safeBasename(virtualPath);
+    if (!containedPath(join(this.downloadsDir, expanded, ...tail, base), this.downloadsDir)) {
+      try { mkdirSync(flatDir, { recursive: true }); } catch {}
+      return joinUnique(flatDir, flatBase);
+    }
+    const dir = join(this.downloadsDir, expanded, ...tail);
+    try { mkdirSync(dir, { recursive: true }); } catch {}
+    return joinUnique(dir, base);
   }
 
   private finishDownload(t: BridgeTransfer, socket: Socket) {
@@ -1705,6 +1826,7 @@ export class TransferManager {
     // Move to downloads dir with collision handling + templating (slskd DeriveDestination)
     try {
       const dest = this.deriveDestination(t.virtualPath, t.username);
+      try { mkdirSync(dirname(dest), { recursive: true }); } catch {}
       renameSync(t._incompletePath!, dest);
       t._downloadUrl = `/files/${t.token}`;
       t._incompletePath = dest;
