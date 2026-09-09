@@ -71,7 +71,7 @@ The browser can't open raw TCP sockets, so the bridge translates JSON over WebSo
 
 ## Features
 
-- **Search** — global, user, room, wishlist & buddies; tabs + live filters (size/bitrate/length/type/slot/country); paste a Discogs/Bandcamp/Apple/Qobuz/Tidal/MusicBrainz/Deezer/Beatport link to auto-identify the release (worker `POST /scrape`)
+- **Search** — global, user, room, wishlist & buddies; tabs + live filters (size/bitrate/length/type/slot/country); paste a Discogs/Bandcamp/Apple/Qobuz/Tidal/MusicBrainz/Deezer link to auto-identify the release (worker `POST /scrape`)
 - **Transfers** — queue, resume (`INCOMPLETE<md5>`), `GET /files/:token`, throttled streaming; **Analyze Spectrum** (see below) for finished audio via worker `sox` Full 2000×513 + Zoom 500×1025 (`oxipng`, shared `/tmp` cache)
 - **Worker (scrape/spectrum/tag)** — separate Python FastAPI service for CPU/IO-heavy ops (same-origin `/api/worker`; `:8789` internal only); bridge stays SLSK-only
 - **Browse** — shares & folders via peers

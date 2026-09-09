@@ -23,16 +23,16 @@ class DiscogsScraper(BaseScraper):
         tracks = [t for t in data.get("tracklist", []) if t.get("type_") == "track"]
         tracklist = [
             {
-                "pos": str(t.get("position") or (i + 1)),
+                "pos": str(t.get("position") or (i + 1)).upper(),
                 "title": str(t.get("title") or ""),
-                "artist": ", ".join(a.get("name", "") for a in t.get("artists", []) if a.get("name")),
+                "artist": ", ".join(a.get("name", "") for a in t.get("artists", []) if a.get("name")) or ", ".join(a.get("name", "") for a in t.get("extraartists", []) if a.get("name")),
                 "duration": str(t.get("duration") or ""),
             }
             for i, t in enumerate(tracks)
         ]
         labels = data.get("labels") or []
         label_names = [str(l.get("name")) for l in labels if isinstance(l, dict) and l.get("name")]
-        catnos = [str(l.get("catno")) for l in labels if isinstance(l, dict) and l.get("catno")]
+        catnos = [str(l.get("catno")).strip() for l in labels if isinstance(l, dict) and str(l.get("catno") or "").strip() and str(l.get("catno") or "").strip().lower() != "none"]
         country = str(data.get("country")) if data.get("country") else None
         _genres = data.get("genres")
         genre = [str(g) for g in _genres if g] if isinstance(_genres, list) and _genres else None

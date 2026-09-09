@@ -20,12 +20,12 @@ class QobuzScraper(BaseScraper):
         if not app_id:
             raise ScrapeError("qobuz: needs QOBUZ_APP_ID (Settings → Worker)")
         album_id = m.group(1)
-        headers = {}
+        headers = {"X-App-Id": app_id}
         if tokens.get("QOBUZ_USER_AUTH_TOKEN"):
             headers["X-User-Auth-Token"] = tokens.get("QOBUZ_USER_AUTH_TOKEN")
         data = await self.get_json(
             "https://www.qobuz.com/api.json/0.2/album/get",
-            params={"album_id": album_id, "app_id": app_id},
+            params={"album_id": album_id},
             headers=headers or None,
         )
         tracks = data.get("tracks")
@@ -39,7 +39,7 @@ class QobuzScraper(BaseScraper):
             try:
                 tdata = await self.get_json(
                     "https://www.qobuz.com/api.json/0.2/album/getTracks",
-                    params={"album_id": album_id, "app_id": app_id},
+                    params={"album_id": album_id},
                     headers=headers or None,
                 )
                 if isinstance(tdata.get("items"), list):
@@ -62,22 +62,34 @@ class QobuzScraper(BaseScraper):
                     duration = int(t.get("duration") or 0)
                 except (TypeError, ValueError):
                     duration = 0
-                tracklist.append(
-                    {
-                        "pos": str(t.get("track_number") or i + 1),
-                        "title": str(t.get("title") or ""),
-                        "artist": str(artist or ""),
-                        "duration": duration,
-                    }
-                )
+                title = str(t.get("title") or "")
+                version = t.get("version")
+                if version and str(version) not in title:
+                    title = f"{title} ({version})"
+                entry = {
+                    "pos": str(t.get("track_number") or i + 1),
+                    "title": title,
+                    "artist": str(artist or ""),
+                    "duration": duration,
+                }
+                if t.get("isrc"):
+                    entry["isrc"] = str(t.get("isrc"))
+                if t.get("media_number") is not None:
+                    entry["disc"] = t.get("media_number")
+                tracklist.append(entry)
         image = data.get("image") or {}
         cover_url = image.get("large") or image.get("original") or None
         label = data.get("label")
         if isinstance(label, dict):
             label = label.get("name")
+        if not label:
+            label = data.get("copyright")
+        genres_list = data.get("genres_list")
         genres = data.get("genres")
         genre = None
-        if isinstance(genres, dict) and isinstance(genres.get("list"), list):
+        if isinstance(genres_list, list) and genres_list:
+            genre = [str(g.get("name") if isinstance(g, dict) else g) for g in genres_list]
+        elif isinstance(genres, dict) and isinstance(genres.get("list"), list):
             genre = [str(g.get("name") if isinstance(g, dict) else g) for g in genres["list"]]
         elif isinstance(genres, list):
             genre = [str(g.get("name") if isinstance(g, dict) else g) for g in genres]

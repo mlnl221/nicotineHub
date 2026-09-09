@@ -1,4 +1,9 @@
-"""Beatport scraper — embedded __NEXT_DATA__ on the release page."""
+"""Beatport scraper — DISABLED (not registered in app.SCRAPERS).
+
+Page structure no longer matches this parser and the site is bot-walled.
+Revival path: official v4 API (/catalog/releases, /catalog/tracks) with user
+OAuth token (see smoked-salmon beatport source for reference).
+Kept for reference; remove entirely if unneeded after revival decision."""
 
 from __future__ import annotations
 

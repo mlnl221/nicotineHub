@@ -47,24 +47,70 @@ class BandcampScraper(BaseScraper):
                             "artist": str(t_name or ""),
                             "duration": str(dur) if dur else "",
                         })
+                    if not tracklist:
+                        if item.get("@type") == "MusicRecording":
+                            tracklist = [{
+                                "pos": "1",
+                                "title": str(item.get("name", "") or ""),
+                                "artist": str(name or ""),
+                                "duration": str(item.get("duration", "") or ""),
+                            }]
+                        else:
+                            tbl = soup.select_one("#track_table")
+                            if tbl is not None:
+                                rows = [r for r in tbl.select("tr") if r.get_text(strip=True)]
+                                if len(rows) == 1:
+                                    t_el = rows[0].select_one(".track-title")
+                                    t_title = t_el.get_text(strip=True) if t_el else rows[0].get_text(strip=True)
+                                    if not t_title:
+                                        t_title = str(item.get("name", "") or "")
+                                    tracklist = [{
+                                        "pos": "1",
+                                        "title": t_title,
+                                        "artist": str(name or ""),
+                                        "duration": str(item.get("duration", "") or ""),
+                                    }]
+                    if tracklist and not tracks:
+                        tracks = len(tracklist)
+                    art_img = soup.select_one("#tralbumArt img")
+                    art_src = art_img.get("src", "") if art_img else ""
                     image = item.get("image")
                     if isinstance(image, list):
                         image = image[0] if image else None
                     og_image = soup.find("meta", property="og:image")
                     og_image = og_image.get("content", "") if og_image else ""
+                    cover = art_src or image or og_image or ""
+                    og_site = soup.find("meta", property="og:site_name")
+                    og_site = og_site.get("content", "").strip() if og_site else ""
+                    acct_el = soup.select_one(".account_title")
+                    acct_title = acct_el.get_text(strip=True) if acct_el else ""
+                    owner = acct_title or og_site or ""
                     label = item.get("recordLabel")
                     if isinstance(label, dict):
                         label = label.get("name")
-                    genre = item.get("genre", item.get("keywords"))
-                    if isinstance(genre, str):
-                        genre = [genre]
+                    label = owner or label
+                    tag_anchors = [a.get_text(strip=True) for a in soup.select(".tralbum-tags a")]
+                    tag_anchors = [t for t in tag_anchors if t]
+                    if tag_anchors:
+                        genre = tag_anchors
+                    else:
+                        genre = item.get("genre", item.get("keywords"))
+                        if isinstance(genre, str):
+                            genre = [genre]
+                    album_name = str(item.get("name", ""))
+                    catalog_no = None
+                    mcat = re.match(r"^\s*([A-Z0-9][A-Z0-9\-\. ]{2,})\s*[-–—]", album_name)
+                    if mcat:
+                        catalog_no = mcat.group(1).strip()
+                        album_name = album_name[mcat.end():].strip()
                     m = self.match(url)
                     release_id = (m.group(3) if m else None) or str(item.get("@id", "") or "") or None
                     return IdentData(
-                        artist=name or "Unknown", album=str(item.get("name", "")),
+                        artist=name or "Unknown", album=album_name,
                         year=year, track_count=tracks, source=self.source,
-                        tracklist=tracklist or None, cover_url=str(image or og_image or "") or None,
+                        tracklist=tracklist or None, cover_url=str(cover or "") or None,
                         label=str(label or "") or None, genre=genre,
+                        catalog_no=str(catalog_no or "") or None,
                         release_id=str(release_id or "") or None,
                     )
         # fallback: og tags

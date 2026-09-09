@@ -260,7 +260,7 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
           {error ? <div className="rounded-xl bg-error-container/50 px-4 py-3 font-body text-xs text-on-error-container">{error}</div> : null}
           {done ? <div className="rounded-xl bg-green-100 dark:bg-green-900/30 px-4 py-3 font-body text-xs text-green-800 dark:text-green-200">{done}</div> : null}
           <div className="rounded-xl bg-surface-container-low p-4 ghost-border space-y-3">
-            <label className="font-label text-xs font-semibold">Release URL (Discogs/Bandcamp/MusicBrainz/Deezer/Beatport/Apple/Qobuz/Tidal)</label>
+            <label className="font-label text-xs font-semibold">Release URL (Discogs/Bandcamp/MusicBrainz/Deezer/Apple/Qobuz/Tidal)</label>
             <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://www.discogs.com/release/..." className="w-full rounded-xl bg-surface-container-lowest px-3 py-2.5 min-h-11 font-body text-sm ghost-border outline-none" />
             <div className="flex gap-2">
               <button disabled={loading || !url.trim()} onClick={handlePreview} className="flex-1 rounded-xl bg-surface-container-high px-4 py-2 min-h-9 font-label text-xs font-semibold disabled:opacity-40">{loading ? "Fetching…" : "Preview"}</button>

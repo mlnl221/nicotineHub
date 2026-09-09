@@ -21,10 +21,14 @@ class DeezerScraper(BaseScraper):
         artist = data.get("artist", {})
         tracks: list[dict] = []
         for i, t in enumerate((data.get("tracks") or {}).get("data") or []):
+            title = str(t.get("title", ""))
+            version = str(t.get("version") or "").strip()
+            if version and version not in title:
+                title = f"{title} ({version})"
             tracks.append(
                 {
                     "pos": str(t.get("track_position") or i + 1),
-                    "title": str(t.get("title", "")),
+                    "title": title,
                     "artist": str((t.get("artist") or {}).get("name") or ""),
                     "duration": int(t.get("duration") or 0),
                 }
@@ -35,18 +39,20 @@ class DeezerScraper(BaseScraper):
             for t in page.get("data") or []:
                 if len(tracks) >= 200:
                     break
+                title = str(t.get("title", ""))
+                version = str(t.get("version") or "").strip()
+                if version and version not in title:
+                    title = f"{title} ({version})"
                 tracks.append(
                     {
                         "pos": str(t.get("track_position") or len(tracks) + 1),
-                        "title": str(t.get("title", "")),
+                        "title": title,
                         "artist": str((t.get("artist") or {}).get("name") or ""),
                         "duration": int(t.get("duration") or 0),
                     }
                 )
             page_url = page.get("next")
         label = data.get("label")
-        if isinstance(label, dict):
-            label = label.get("name")
         return IdentData(
             artist=str(artist.get("name", "Unknown")),
             album=str(data.get("title", "")),
@@ -57,5 +63,7 @@ class DeezerScraper(BaseScraper):
             label=str(label) if label else None,
             genre=[g.get("name") for g in (data.get("genres") or {}).get("data") or [] if g.get("name")],
             release_id=str(data.get("id", "")),
+            media_type=str(data.get("record_type")).capitalize() if data.get("record_type") else None,
+            catalog_no=str(data.get("upc")) if data.get("upc") else None,
             source=self.source,
         )

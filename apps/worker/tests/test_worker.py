@@ -30,7 +30,7 @@ def test_health(client):
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is True
-    for src in ("discogs", "bandcamp", "apple", "qobuz", "tidal", "musicbrainz", "deezer", "beatport"):
+    for src in ("discogs", "bandcamp", "apple", "qobuz", "tidal", "musicbrainz", "deezer"):
         assert src in body["sources"]
     assert set(body["auth"]) == {"discogs", "tidal", "qobuz", "media_scan"}
 
@@ -456,7 +456,7 @@ def test_scrape_apple_canonical(monkeypatch):
     assert found.tracklist[0]["pos"] == "1"
     assert found.tracklist[0]["title"] == "Song One"
     assert ":" in found.tracklist[0]["duration"]
-    assert found.cover_url == "https://example.com/art/600x600bb.jpg"
+    assert found.cover_url == "https://example.com/art/1200x1200bb.jpg"
     assert found.genre == ["Rock"]
     assert found.release_id == "123456789"
 
@@ -502,26 +502,9 @@ def test_scrape_deezer_canonical(monkeypatch):
     assert found.release_id == "98765"
 
 
-def test_scrape_beatport_canonical(monkeypatch):
-    from sources.beatport import BeatportScraper
-
-    async def _fake(self, url):
-        from bs4 import BeautifulSoup
-        html = '<html><body><script id="__NEXT_DATA__">{"props": {"pageProps": {"release": {"name": "BP Album", "artists": [{"name": "BP Artist"}], "release_date": "2019-11-01", "track_count": 2, "tracks": [{"track_number": 1, "name": "BP One", "artists": [{"name": "BP Artist"}], "length": "6:12"}, {"track_number": 2, "name": "BP Two", "artists": [{"name": "BP Artist"}], "length": ""}], "image": {"url": "https://example.com/bp.jpg"}, "label": {"name": "BP Label"}, "genres": [{"name": "Techno"}], "id": 555}}}}</script></body></html>'
-        return BeautifulSoup(html, "lxml")
-
-    monkeypatch.setattr(BeatportScraper, "fetch_page", _fake)
-    found = asyncio.run(BeatportScraper().scrape("https://www.beatport.com/release/test-release/555"))
-    assert found.artist == "BP Artist"
-    assert found.album == "BP Album"
-    assert found.year == "2019"
-    assert found.tracklist[0]["pos"] == "1"
-    assert found.tracklist[0]["title"] == "BP One"
-    assert found.tracklist[0]["duration"] == "6:12"
-    assert found.cover_url == "https://example.com/bp.jpg"
-    assert found.label == "BP Label"
-    assert found.genre == ["Techno"]
-    assert found.release_id == "555"
+def test_scrape_beatport_disabled(client):
+    r = client.post("/scrape", json={"url": "https://www.beatport.com/release/test-release/555"})
+    assert r.status_code == 422
 
 
 def test_scrape_musicbrainz_canonical(monkeypatch):

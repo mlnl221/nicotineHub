@@ -31,15 +31,18 @@ class AppleMusicScraper(BaseScraper):
             for i, t in enumerate(tracks)
         ]
         artwork = col.get("artworkUrl100") or ""
+        genres = col.get("genreNames") or ([str(col.get("primaryGenreName"))] if col.get("primaryGenreName") else None)
+        label = col.get("recordLabel") or col.get("copyright") or None
         return IdentData(
             artist=str(col.get("artistName", "Unknown")),
             album=str(col.get("collectionName", "")),
             year=str(col.get("releaseDate", ""))[:4] or None,
             track_count=col.get("trackCount") or len(tracks) or None,
             tracklist=tracklist,
-            cover_url=artwork.replace("100x100", "600x600") if artwork else None,
-            genre=[str(col.get("primaryGenreName"))] if col.get("primaryGenreName") else None,
-            label=str(col.get("copyright")) if col.get("copyright") else None,
+            cover_url=artwork.replace("100x100", "1200x1200") if artwork else None,
+            genre=[str(g) for g in genres] if genres else None,
+            label=str(label) if label else None,
+            media_type=str(col.get("collectionType")) if col.get("collectionType") else None,
             release_id=str(col.get("collectionId")) if col.get("collectionId") is not None else None,
             source=self.source,
         )

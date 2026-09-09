@@ -27,7 +27,6 @@ from pydantic import BaseModel, Field
 from sources.apple_music import AppleMusicScraper
 from sources.bandcamp import BandcampScraper
 from sources.base import IdentData, ScrapeError
-from sources.beatport import BeatportScraper
 from sources.deezer import DeezerScraper
 from sources.discogs import DiscogsScraper
 from sources.musicbrainz import MusicBrainzScraper
@@ -42,8 +41,10 @@ MAX_JSON = 1_000_000
 
 SCRAPERS = [
     DiscogsScraper(), BandcampScraper(), AppleMusicScraper(), QobuzScraper(),
-    TidalScraper(), MusicBrainzScraper(), DeezerScraper(), BeatportScraper(),
+    TidalScraper(), MusicBrainzScraper(), DeezerScraper(),
 ]
+# Beatport disabled: page structure no longer matches our parser and the site
+# is bot-walled; needs the official API with creds to revive (see sources/beatport.py).
 
 app = FastAPI(title="nicotine-hub worker", version=VERSION)
 
