@@ -60,9 +60,21 @@ export function TransferCard({
     transfer.status === "Too many files" ||
     transfer.status === "Too many megabytes";
   const isTransferring = transfer.status === "Transferring" || transfer.status === "Getting status";
-  const basename = (transfer.virtualPath.split("\\").pop() ?? transfer.fileName).replace(/[/\\]/g, "_");
+  const basename = (transfer.virtualPath.split(/[\\/]/).pop() ?? transfer.fileName).replace(/[/\\]/g, "_");
   const safeUser = transfer.username.replace(/[/\\]/g, "_").replace(/\.\./g, "_");
-  const savePath = `downloads/${settings.transfers.usernamesubfolders ? `${safeUser}/` : ""}${basename}`;
+  const depth = settings.transfers.download_path_depth ?? "full";
+  const remoteDirs = transfer.virtualPath
+    .split(/[\\/]/)
+    .slice(1, -1)
+    .map((s) => s.replace(/[/\\]/g, "_"))
+    .filter(Boolean);
+  const keptDirs = (() => {
+    if (depth === "full") return remoteDirs;
+    const n = Number(depth);
+    if (!Number.isFinite(n) || n < 0) return remoteDirs;
+    return n === 0 ? [] : remoteDirs.slice(-n);
+  })();
+  const savePath = `downloads/${safeUser}/${[...keptDirs, basename].join("/")}`;
 
   const barColor = transfer.isUpload
     ? isQueued

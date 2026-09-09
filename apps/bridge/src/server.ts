@@ -440,7 +440,7 @@ function createSharedTransfers(): TransferManager {
   });
   tm.setSessionGetter(() => sharedSession as unknown as never);
   const pt = PERSISTED_SETTINGS?.transfers ?? {};
-  const keys = ["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "groupdownloads", "groupuploads", "incomplete_strategy", "download_destination_template", "download_subdirectory"];
+  const keys = ["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "download_path_depth", "groupdownloads", "groupuploads", "incomplete_strategy", "download_destination_template", "download_subdirectory"];
   const init: Record<string, unknown> = {};
   for (const k of keys) if (pt[k] !== undefined) init[k] = pt[k];
   if (pt["incompleteStrategy"] !== undefined) init["incomplete_strategy"] = pt["incompleteStrategy"];
@@ -1144,6 +1144,20 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (!Number.isFinite(token)) return new Response("Not found", { status: 404, headers: secHeaders });
       // Auth gate — mirrors /ws when token enabled; never leak files without valid token
       { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
+      // Exact first: live transfer dest via manager (nested user dirs, migrated
+      // layouts). Flat downloads.json lookup below stays as fallback.
+      try {
+        const mgrPath = sharedTransfers?.getFilePathForToken(token);
+        if (mgrPath) {
+          const { existsSync: es } = require("node:fs") as typeof import("node:fs");
+          const { basename: bn, resolve: res } = require("node:path") as typeof import("node:path");
+          const r = res(mgrPath);
+          const root = sharedTransfers?.downloadsRoot?.() ?? res(join(DATA_DIR, "downloads"));
+          if (es(r) && (r === root || r.startsWith(root + "/"))) {
+            return serveFileWithRanges(r, req, cors, sanitizeFileNameForHeader(bn(r)));
+          }
+        }
+      } catch {}
       try {
         const { existsSync, readFileSync } = require("node:fs") as typeof import("node:fs");
         const { join, basename, resolve } = require("node:path") as typeof import("node:path");
@@ -1753,7 +1767,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             if (key === "downloadfilters" || key === "enablefilters") {
               tm?.setConfig?.({ [key]: value });
             }
-            if (["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "groupdownloads", "groupuploads", "incomplete_strategy", "incompleteStrategy", "download_destination_template", "downloadDestinationTemplate", "download_subdirectory", "downloadSubdirectory"].includes(key)) {
+            if (["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "download_path_depth", "groupdownloads", "groupuploads", "incomplete_strategy", "incompleteStrategy", "download_destination_template", "downloadDestinationTemplate", "download_subdirectory", "downloadSubdirectory"].includes(key)) {
               const norm: Record<string, unknown> = {};
               if (key === "incompleteStrategy") norm["incomplete_strategy"] = value;
               else if (key === "downloadDestinationTemplate") norm["download_destination_template"] = value;

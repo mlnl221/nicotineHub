@@ -16,7 +16,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, statSync, writeFileSync, readFileSync, unlinkSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmdirSync, statSync, writeFileSync, readFileSync, unlinkSync, readdirSync } from "node:fs";
 import { join, dirname, resolve, sep, relative } from "node:path";
 import type { Socket } from "bun";
 import {
@@ -183,18 +183,25 @@ function getIncompletePath(virtualPath: string, username: string, incompleteDir:
   return join(incompleteDir, prefix + safeBase);
 }
 
-function getFinishedPath(virtualPath: string, downloadsDir: string, username?: string, _usernamesubfolders?: boolean): string {
+function getFinishedPath(virtualPath: string, downloadsDir: string, username?: string, _usernamesubfolders?: boolean, depth?: string): string {
   // Layout: <downloads>/<user>/<subdirs...>/<base>. Alias dropped, username always
   // included; _usernamesubfolders kept as no-op for config compat.
+  // depth trims remote dirs: "full" (default) keeps all, "N" keeps last N.
   const user = username ? safeUsername(username) : "";
   const { dirs, base } = splitVirtual(virtualPath);
+  const remote = (() => {
+    if (!depth || depth === "full") return dirs;
+    const n = Number(depth);
+    if (!Number.isFinite(n) || n < 0) return dirs;
+    return n === 0 ? [] : dirs.slice(-n);
+  })();
   const flatBase = (): string => {
     const dir = user ? join(downloadsDir, user) : downloadsDir;
     try { mkdirSync(dir, { recursive: true }); } catch {}
     return joinUnique(dir, base);
   };
-  if (!user || dirs.length === 0) return flatBase();
-  const segs = dirs.slice();
+  if (!user || remote.length === 0) return flatBase();
+  const segs = remote.slice();
   shrinkSegments(segs, () => join(downloadsDir, user, ...segs, base).length - 200);
   let outBase = base;
   if (join(downloadsDir, user, ...segs, outBase).length > 200) {
@@ -255,6 +262,7 @@ export class TransferManager {
     autoclear_downloads: false,
     autoclear_uploads: false,
     usernamesubfolders: true, // always-true layout <downloads>/<user>/...; kept for config compat, forced in setConfig
+    download_path_depth: "full" as "full" | "0" | "1" | "2" | "3", // remote dirs kept under <downloads>/<user>; "full" preserves whole tree
     incomplete_strategy: "resume" as "resume" | "overwrite",
     download_destination_template: null as string | null, // slskd DeriveDestination tokens e.g. "${SOURCE_DIRECTORY}/${SOURCE_USERNAME}"
     download_subdirectory: null as string | null, // legacy alias
@@ -303,6 +311,7 @@ export class TransferManager {
       }
       this.loadFromDisk();
       try { this.migrateFlatDownloads(); } catch {}
+      try { this.migrateTrimmedDownloads(); } catch {}
     } catch {}
 
     // Keep demo uploads for UI unless real transfers exist — only when explicitly enabled to avoid masking empty state in docker prod
@@ -326,6 +335,10 @@ export class TransferManager {
     Object.assign(this.config, partial);
     // no-op compat: folder layout always includes <downloads>/<user>/...
     this.config.usernamesubfolders = true;
+    // Normalize depth: unknown values fall back to full tree (never silent user-only).
+    if (!["full", "0", "1", "2", "3"].includes(this.config.download_path_depth)) {
+      this.config.download_path_depth = "full";
+    }
     try { const ul = this.getUploadLimit(); if (ul) this.uploadBucket.configure(ul); const dl = this.getDownloadLimit(); if (dl) this.downloadBucket.configure(dl); } catch {}
   }
 
@@ -484,6 +497,66 @@ export class TransferManager {
     } catch {}
   }
 
+  migrateTrimmedDownloads(): { moved: number; skipped: number } {
+    // Move finished files deeper than download_path_depth into the trimmed
+    // layout (username + last N remote dirs). Token/_downloadUrl stay valid:
+    // only _incompletePath changes and /files/:token resolves via manager.
+    let moved = 0;
+    let skipped = 0;
+    const depth = this.config.download_path_depth;
+    if (!depth || depth === "full") return { moved, skipped };
+    // Template owners manage their own layout; trim applies to the default tree only.
+    if (this.config.download_destination_template || this.config.download_subdirectory) return { moved, skipped };
+    const n = Number(depth);
+    if (!Number.isFinite(n) || n < 0) return { moved, skipped };
+    try {
+      const root = resolve(this.downloadsDir);
+      for (const t of this.transfers.values()) {
+        try {
+          if (t.isUpload || t.status !== "Finished") { skipped++; continue; }
+          if (!t.virtualPath || typeof t.virtualPath !== "string") { skipped++; continue; }
+          const stored = (t as unknown as { _incompletePath?: unknown })._incompletePath;
+          if (!stored || typeof stored !== "string") continue;
+          const sRes = resolve(stored);
+          if (sRes !== root && !sRes.startsWith(root + sep)) continue;
+          if (!existsSync(sRes)) continue;
+          // Cheap check before deriveDestination (it mkdirs as a side effect)
+          const { dirs, base } = splitVirtual(t.virtualPath);
+          const keep = n === 0 ? [] : dirs.slice(-n);
+          const ideal = join(this.downloadsDir, safeUsername(t.username), ...keep, base);
+          if (resolve(ideal) === sRes) continue;
+          if (existsSync(ideal)) { skipped++; continue; }
+          const expected = this.deriveDestination(t.virtualPath, t.username);
+          const eRes = resolve(expected);
+          if (eRes === sRes) continue;
+          if (eRes !== root && !eRes.startsWith(root + sep)) { skipped++; continue; }
+          if (existsSync(eRes)) { skipped++; continue; }
+          try { mkdirSync(dirname(eRes), { recursive: true }); } catch {}
+          renameSync(sRes, eRes);
+          (t as unknown as { _incompletePath?: string })._incompletePath = eRes;
+          this.pruneEmptyDirs(sRes, root);
+          moved++;
+        } catch { skipped++; continue; }
+      }
+    } catch {}
+    if (moved > 0) { try { this.persist(); } catch {} }
+    try { logger.info("transfer", "migrated trimmed downloads", { moved, skipped }); } catch {}
+    return { moved, skipped };
+  }
+
+  // Remove dirs left empty by a migration move, bottom-up. Stops at the
+  // downloads root and never removes the per-user dir itself.
+  private pruneEmptyDirs(movedFrom: string, root: string) {
+    let dir = dirname(movedFrom);
+    for (let i = 0; i < 32; i++) {
+      const r = resolve(dir);
+      if (r === root || !r.startsWith(root + sep)) return;
+      if (dirname(r) === root) return;
+      try { rmdirSync(r); } catch { return; }
+      dir = dirname(dir);
+    }
+  }
+
   migrateFlatDownloads(): { moved: number; skipped: number } {
     let moved = 0;
     let skipped = 0;
@@ -605,9 +678,13 @@ export class TransferManager {
     for (const [tok, mapped] of this.tokenIndex) if (mapped === id) this.tokenIndex.delete(tok);
   }
 
+  // Downloads root for containment checks (honors DOWNLOADS_DIR override).
+  downloadsRoot(): string {
+    return resolve(this.downloadsDir);
+  }
+
   // For GET /files/:token — tolerant fallback so spectrum works on legacy stubs + subfolders + WSL share dirs
-  getFilePathForToken(token: number): string | null {
-    const t = this.getByToken(token);
+  getFilePathForToken(token: number): string | null {    const t = this.getByToken(token);
     if (!t || t.status !== "Finished") return null;
     // Try stored path first (may be downloads dest or copied shared file)
     const stored = (t as unknown as { _incompletePath?: string })._incompletePath;
@@ -1788,7 +1865,7 @@ export class TransferManager {
   private deriveDestination(virtualPath: string, username: string): string {
     const { dirs, base } = splitVirtual(virtualPath);
     const tmpl = this.config.download_destination_template || this.config.download_subdirectory || null;
-    if (!tmpl) return getFinishedPath(virtualPath, this.downloadsDir, username, this.config.usernamesubfolders);
+    if (!tmpl) return getFinishedPath(virtualPath, this.downloadsDir, username, this.config.usernamesubfolders, this.config.download_path_depth);
     // Simple token replacement like slskd: ${SOURCE_USERNAME}, ${SOURCE_DIRECTORY}, ${SOURCE_PATH}, ${BATCH_ID}
     const sourceUsername = username.replace(/[/\\]/g, "_");
     const clean = (s: string) => s.replace(/[/\\]/g, "_").replace(/\.\./g, "_");

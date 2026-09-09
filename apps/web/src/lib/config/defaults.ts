@@ -132,6 +132,7 @@ export interface Settings {
     download_doubleclick: number;
     upload_doubleclick: number;
     usernamesubfolders: boolean;
+    download_path_depth: "full" | "0" | "1" | "2" | "3";
     groupdownloads: string;
     groupuploads: string;
     expand_downloads: string;
@@ -350,6 +351,7 @@ export const defaults: Settings = {
     download_doubleclick: 2,
     upload_doubleclick: 2,
     usernamesubfolders: false,
+    download_path_depth: "full",
     groupdownloads: "folder_grouping",
     groupuploads: "folder_grouping",
     expand_downloads: "all",
