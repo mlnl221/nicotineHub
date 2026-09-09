@@ -36,9 +36,10 @@ function BrowseInner() {
   const { state } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { tabs, activeTab, openBrowse } = useBrowseTabs();
+  const { tabs, activeTab, openBrowse, openFolder } = useBrowseTabs();
   const [username, setUsername] = useState("");
   const [recent, setRecent] = useState<string[]>([]);
+  const pendingFolderRef = useRef<{ user: string; folder: string } | null>(null);
 
   useEffect(() => { setRecent(loadRecent()); }, [tabs.length]);
 
@@ -54,14 +55,24 @@ function BrowseInner() {
     if (handledRef.current === lower) return;
     handledRef.current = lower;
     saveRecent(u);
+    const folder = searchParams.get("folder");
+    if (folder) pendingFolderRef.current = { user: lower, folder };
     openBrowse(u);
     const url = new URL(window.location.href);
     url.searchParams.delete("user");
     url.searchParams.delete("username");
+    url.searchParams.delete("folder");
     const clean = url.pathname + (url.search ? url.search : "") + url.hash;
     try { router.replace(clean); } catch { window.history.replaceState(null, "", url.toString()); }
     setTimeout(() => { if (handledRef.current === lower) handledRef.current = null; }, 800);
   }, [searchParams, openBrowse, router]);
+
+  useEffect(() => {
+    const pending = pendingFolderRef.current;
+    if (!pending || !activeTab || activeTab.username.toLowerCase() !== pending.user || !activeTab.folders.some((f) => f.name === pending.folder)) return;
+    pendingFolderRef.current = null;
+    openFolder(activeTab.id, pending.folder);
+  }, [activeTab, openFolder]);
 
   const go = () => {
     const u = username.trim();

@@ -34,7 +34,6 @@ export function ConfigBridgeSync() {
         if (remote) applyBridgedState(remote);
         const current = savedRef.current;
         for (const section of Object.keys(current) as (keyof Settings)[]) {
-          if (section === "worker") continue;
           for (const m of buildSectionMessages(section, current)) send(m);
         }
       } finally {
