@@ -21,10 +21,20 @@ class DiscogsScraper(BaseScraper):
         data = await self.get_json(f"https://api.discogs.com/releases/{rid}", headers=headers)
         artists = ", ".join(a.get("name", "") for a in data.get("artists", []) if a.get("name")) or "Unknown"
         tracks = [t for t in data.get("tracklist", []) if t.get("type_") == "track"]
+        tracklist = [
+            {
+                "pos": str(t.get("position") or (i + 1)),
+                "title": str(t.get("title") or ""),
+                "artist": ", ".join(a.get("name", "") for a in t.get("artists", []) if a.get("name")),
+                "duration": str(t.get("duration") or ""),
+            }
+            for i, t in enumerate(tracks)
+        ]
         return IdentData(
             artist=artists,
             album=str(data.get("title", "")),
             year=data.get("year") or None,
             track_count=len(tracks) or None,
             source=self.source,
+            tracklist=tracklist or None,
         )

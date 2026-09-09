@@ -65,6 +65,52 @@ def test_scrape_rejects_ssrf(client):
     assert r.status_code == 422
 
 
+def _fake_discogs_21(monkeypatch):
+    from sources.base import IdentData
+    from sources.discogs import DiscogsScraper
+
+    async def fake_scrape(self, url):
+        return IdentData(
+            artist="D.Kay", album="Bingo Sessions Volume 4", year=2005,
+            track_count=21, source="discogs",
+            tracklist=[
+                {"pos": str(i + 1), "title": f"Track {i + 1}", "artist": "", "duration": ""}
+                for i in range(21)
+            ],
+        )
+
+    monkeypatch.setattr(DiscogsScraper, "scrape", fake_scrape)
+
+
+def test_scrape_returns_tracklist(client, monkeypatch):
+    _fake_discogs_21(monkeypatch)
+    r = client.post("/scrape", json={"url": "https://www.discogs.com/release/1167407-D-Kay-Bingo-Sessions-Volume-4"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["tracklist"]) == 21
+    assert body["tracklist"][1]["title"] == "Track 2"
+
+
+def test_tag_scrape_track_index_preview(client, tmp_path, monkeypatch):
+    _fake_discogs_21(monkeypatch)
+    (tmp_path / "data" / "downloads" / "probe.mp3").write_bytes(b"x")
+    url = "https://www.discogs.com/release/1167407-D-Kay-Bingo-Sessions-Volume-4"
+    r = client.post("/tag/scrape", json={"fileName": "probe.mp3", "url": url, "apply": False, "trackIndex": 1})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["suggested"]["title"] == "Track 2"
+    assert body["suggested"]["tracknumber"] == "2"
+    assert body["suggested"]["album"] == "Bingo Sessions Volume 4"
+    assert len(body["tracklist"]) == 21
+    # out of range
+    r = client.post("/tag/scrape", json={"fileName": "probe.mp3", "url": url, "apply": False, "trackIndex": 21})
+    assert r.status_code == 422
+    # no index = release-level tags only
+    r = client.post("/tag/scrape", json={"fileName": "probe.mp3", "url": url, "apply": False})
+    assert r.status_code == 200, r.text
+    assert "title" not in r.json()["suggested"]
+
+
 def test_auth_enforced(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SPECTRUM_DIR", str(tmp_path))

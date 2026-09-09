@@ -127,6 +127,7 @@ async def scrape(body: ScrapeIn):
                 "artist": found.artist, "album": found.album, "year": found.year,
                 "track_count": found.track_count, "query": query,
                 "source": found.source, "confidence": _confidence(found.source), "url": url,
+                "tracklist": found.tracklist,
             }
     return JSONResponse({"detail": "no scraper handles this URL"}, status_code=422)
 
@@ -516,6 +517,9 @@ class TagScrapeIn(BaseModel):
     fileName: str = Field(min_length=1, max_length=1024)
     url: str = Field(min_length=8, max_length=2048)
     apply: bool = Field(default=False)
+    # 0-based index into the scraper tracklist: maps this file to one release track
+    # (title/artist/tracknumber). None = release-level tags only.
+    trackIndex: int | None = Field(default=None, ge=0, le=500)
     # Optional auto-rename on apply: template like "{track}. {artist} - {title}"
     # Tokens: {track} zero-padded 2-digit, {artist}, {title}. Must contain >=1 token.
     renameTemplate: str | None = Field(default=None, max_length=256)
@@ -681,6 +685,17 @@ async def tag_scrape(body: TagScrapeIn):
         suggested["year"] = str(found.year)
     if found.track_count:
         suggested["track_total"] = str(found.track_count)
+    if body.trackIndex is not None:
+        if not found.tracklist:
+            return JSONResponse({"detail": "this release has no tracklist to map from"}, status_code=422)
+        if body.trackIndex >= len(found.tracklist):
+            return JSONResponse({"detail": f"trackIndex {body.trackIndex} out of range (0-{len(found.tracklist) - 1})"}, status_code=422)
+        entry = found.tracklist[body.trackIndex]
+        if entry.get("title"):
+            suggested["title"] = entry["title"]
+        if entry.get("artist"):
+            suggested["artist"] = entry["artist"]
+        suggested["tracknumber"] = str(body.trackIndex + 1)
     # include source info
     suggested["_source"] = found.source
     suggested["_query"] = f"{found.artist} - {found.album}".strip(" -")
@@ -754,7 +769,7 @@ async def tag_scrape(body: TagScrapeIn):
                                 new_tags, new_info, cover = _read_tags_and_info(path)
                             except Exception:
                                 pass
-            payload: dict = {"artist": found.artist, "album": found.album, "year": found.year, "track_count": found.track_count, "query": suggested["_query"], "source": found.source, "confidence": _confidence(found.source), "url": url, "suggested": suggested, "applied": True, "tags": new_tags, "info": new_info}
+            payload: dict = {"artist": found.artist, "album": found.album, "year": found.year, "track_count": found.track_count, "query": suggested["_query"], "source": found.source, "confidence": _confidence(found.source), "url": url, "tracklist": found.tracklist, "suggested": suggested, "applied": True, "tags": new_tags, "info": new_info}
             if rename_result is not None:
                 payload["rename"] = rename_result
                 if rename_result.get("newPath"):
@@ -762,7 +777,7 @@ async def tag_scrape(body: TagScrapeIn):
             return payload
         except Exception:
             pass
-    return {"artist": found.artist, "album": found.album, "year": found.year, "track_count": found.track_count, "query": suggested["_query"], "source": found.source, "confidence": _confidence(found.source), "url": url, "suggested": suggested, "applied": False}
+    return {"artist": found.artist, "album": found.album, "year": found.year, "track_count": found.track_count, "query": suggested["_query"], "source": found.source, "confidence": _confidence(found.source), "url": url, "tracklist": found.tracklist, "suggested": suggested, "applied": False}
 
 
 class BulkTagIn(BaseModel):

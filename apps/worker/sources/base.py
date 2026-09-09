@@ -32,6 +32,8 @@ class IdentData:
     year: int | str | None
     track_count: int | None
     source: str
+    # Per-track entries [{pos, title, artist, duration}]; None when scraper lacks it.
+    tracklist: list[dict[str, str]] | None = None
 
 
 def assert_public_url(url: str) -> str:

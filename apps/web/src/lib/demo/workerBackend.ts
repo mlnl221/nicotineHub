@@ -54,8 +54,8 @@ export function demoWriteTags(fileName: string): null {
   return null;
 }
 
-export function demoScrapeTags(fileName: string, url: string, apply: boolean): TagScrapeResult | null {
-  const r = demoScrapeResult(fileName, url, apply);
+export function demoScrapeTags(fileName: string, url: string, apply: boolean, trackIndex?: number): TagScrapeResult | null {
+  const r = demoScrapeResult(fileName, url, apply, trackIndex);
   if (r) return r;
   // Non-demo file: fall through to the real worker (unreachable in demo UI).
   return null;

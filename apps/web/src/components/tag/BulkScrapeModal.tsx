@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { scrapeTags } from "@/lib/worker";
+import { scrapeTags, type ScrapeTrack } from "@/lib/worker";
 import { useConfig } from "@/lib/config/provider";
 import { isDemo } from "@/lib/demo";
 
@@ -12,10 +12,25 @@ type Props = {
   onRenamed?: (newPaths: string[]) => void;
 };
 
+// natural sort: numeric prefix then lexicographic (positional match order)
+function naturalSortFiles(list: string[]): string[] {
+  return [...list].sort((a, b) => {
+    const an = a.split("/").pop()?.split("\\").pop() || a;
+    const bn = b.split("/").pop()?.split("\\").pop() || b;
+    const am = an.match(/^(\d+)/);
+    const bm = bn.match(/^(\d+)/);
+    if (am && bm) return parseInt(am[1], 10) - parseInt(bm[1], 10);
+    if (am) return -1;
+    if (bm) return 1;
+    return an.toLowerCase().localeCompare(bn.toLowerCase());
+  });
+}
+
 export function BulkScrapeModal({ open, files, onClose, onRenamed }: Props) {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
-  const [preview, setPreview] = useState<null | { artist: string; album: string; year: string | number | null; source: string; track_count: number | null }>(null);
+  const [preview, setPreview] = useState<null | { artist: string; album: string; year: string | number | null; source: string; track_count: number | null; tracklist: ScrapeTrack[] | null }>(null);
+  const [trackMap, setTrackMap] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [done, setDone] = useState<string | null>(null);
@@ -36,7 +51,16 @@ export function BulkScrapeModal({ open, files, onClose, onRenamed }: Props) {
     try {
       // Use first file as representative for preview (worker tag/scrape needs fileName)
       const r = await scrapeTags(files[0], u, false);
-      setPreview({ artist: r.artist, album: r.album, year: r.year, source: r.source, track_count: r.track_count });
+      const list = r.tracklist ?? null;
+      setPreview({ artist: r.artist, album: r.album, year: r.year, source: r.source, track_count: r.track_count, tracklist: list });
+      // Default map: positional (file i → track i), clamped into range
+      if (list?.length) {
+        const init: Record<string, number> = {};
+        naturalSortFiles(files).forEach((f, i) => { init[f] = Math.min(i, list.length - 1); });
+        setTrackMap(init);
+      } else {
+        setTrackMap({});
+      }
       if (r.track_count && Math.abs(r.track_count - files.length) > 1) {
         setError(`Warning: track count ${r.track_count} differs from selected ${files.length} (tolerance ±1). Apply will still set uniform album/artist.`);
       }
@@ -59,8 +83,10 @@ export function BulkScrapeModal({ open, files, onClose, onRenamed }: Props) {
       let skipped = 0;
       const newPaths: string[] = [];
       const renameOpt = autoRenameEnabled ? { enabled: true, template: renameTemplate } : undefined;
+      const listLen = preview?.tracklist?.length ?? 0;
       for (const f of files.slice(0, 50)) {
-        const r = await scrapeTags(f, u, true, renameOpt);
+        const ti = listLen ? Math.min(trackMap[f] ?? 0, listLen - 1) : undefined;
+        const r = await scrapeTags(f, u, true, renameOpt, ti);
         if (r.applied) ok++;
         if (r.rename?.renamed) {
           renamed++;
@@ -85,17 +111,15 @@ export function BulkScrapeModal({ open, files, onClose, onRenamed }: Props) {
     }
   };
 
-  // natural sort: numeric prefix then lexicographic
-  const sorted = [...files].sort((a, b) => {
-    const an = a.split("/").pop()?.split("\\").pop() || a;
-    const bn = b.split("/").pop()?.split("\\").pop() || b;
-    const am = an.match(/^(\d+)/);
-    const bm = bn.match(/^(\d+)/);
-    if (am && bm) return parseInt(am[1], 10) - parseInt(bm[1], 10);
-    if (am) return -1;
-    if (bm) return 1;
-    return an.toLowerCase().localeCompare(bn.toLowerCase());
-  });
+  const sorted = naturalSortFiles(files);
+
+  const autoMapInOrder = () => {
+    const list = preview?.tracklist;
+    if (!list?.length) return;
+    const init: Record<string, number> = {};
+    sorted.forEach((f, i) => { init[f] = Math.min(i, list.length - 1); });
+    setTrackMap(init);
+  };
 
   return (
     <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/40 backdrop-blur-sm p-0 md:p-4" onClick={onClose} role="dialog" aria-modal="true">
@@ -128,11 +152,31 @@ export function BulkScrapeModal({ open, files, onClose, onRenamed }: Props) {
             {autoRenameEnabled ? <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 px-3 py-2 font-body text-xs text-amber-900 dark:text-amber-200">Auto-rename enabled: <span className="font-mono">{renameTemplate}</span> — files will be renamed after tags are written. Manage in Settings → Shares.</div> : null}
           </div>
           <div className="rounded-xl bg-surface-container-low p-3 ghost-border space-y-2">
-            <h4 className="font-label text-xs font-semibold uppercase tracking-widest">Files (natural sort)</h4>
-            <div className="max-h-[28vh] overflow-auto space-y-1 pr-1">
-              {sorted.map((f, i) => <div key={f} className="flex items-center gap-2 rounded-lg bg-surface-container-lowest px-3 py-2"><span className="font-mono text-[10px] text-outline w-6 shrink-0">{i + 1}</span><span className="font-mono text-xs truncate flex-1" title={f}>{f.split("/").pop()?.split("\\").pop() || f}</span><span className="font-mono text-[10px] text-outline truncate max-w-[40%] hidden md:block" title={f}>{f}</span></div>)}
+            <div className="flex items-center justify-between">
+              <h4 className="font-label text-xs font-semibold uppercase tracking-widest">Files → track map</h4>
+              {preview?.tracklist?.length ? <button onClick={autoMapInOrder} className="rounded-full bg-surface-container-high px-3 py-1.5 font-label text-[11px] font-semibold">Auto-map in order</button> : null}
             </div>
-            <p className="font-body text-[11px] text-outline">v1 uniform: album/artist/year applied to all; title/artist per-file track mapping needs scraper tracklist (deferred). Sorted order is the positional match order.</p>
+            <div className="max-h-[28vh] overflow-auto space-y-1 pr-1">
+              {sorted.map((f, i) => (
+                <div key={f} className="flex items-center gap-2 rounded-lg bg-surface-container-lowest px-3 py-2">
+                  <span className="font-mono text-[10px] text-outline w-6 shrink-0">{i + 1}</span>
+                  <span className="font-mono text-xs truncate flex-1" title={f}>{f.split("/").pop()?.split("\\").pop() || f}</span>
+                  {preview?.tracklist?.length ? (
+                    <select
+                      aria-label={`Track for ${f.split("/").pop()}`}
+                      value={Math.min(trackMap[f] ?? Math.min(i, preview.tracklist.length - 1), preview.tracklist.length - 1)}
+                      onChange={(e) => setTrackMap((m) => ({ ...m, [f]: parseInt(e.target.value, 10) }))}
+                      className="min-h-9 max-w-[45%] rounded-lg bg-surface-container-high px-2 py-1.5 font-body text-xs outline-none"
+                    >
+                      {preview.tracklist.map((t, ti) => (
+                        <option key={ti} value={ti}>{t.pos ? `${t.pos} — ` : `#${ti + 1} — `}{t.title || "(untitled)"}</option>
+                      ))}
+                    </select>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+            <p className="font-body text-[11px] text-outline">{preview?.tracklist?.length ? "Each file maps to one release track (title/artist/tracknumber); album/artist/year apply to all." : "Preview a release URL to map each file to its track."}</p>
           </div>
         </div>
         <div className="px-6 py-4 border-t border-outline-variant/10 bg-surface-container-low/60 flex justify-between gap-3 shrink-0">

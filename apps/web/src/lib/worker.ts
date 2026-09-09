@@ -44,6 +44,13 @@ export async function workerFetch(path: string, init?: RequestInit): Promise<Res
   });
 }
 
+export interface ScrapeTrack {
+  pos: string;
+  title: string;
+  artist: string;
+  duration: string;
+}
+
 export interface ScrapeResult {
   artist: string;
   album: string;
@@ -53,6 +60,7 @@ export interface ScrapeResult {
   source: string;
   confidence: number;
   url: string;
+  tracklist?: ScrapeTrack[] | null;
 }
 
 export async function scrapeRelease(url: string): Promise<ScrapeResult> {
@@ -140,20 +148,22 @@ export interface TagScrapeResult {
   url: string;
   suggested: Record<string, string>;
   applied: boolean;
+  tracklist?: ScrapeTrack[] | null;
   tags?: Record<string, string>;
   info?: Record<string, unknown>;
   newPath?: string;
   rename?: { renamed?: boolean; skipped?: boolean; reason?: string; newPath?: string; suffixed?: boolean };
 }
 
-export async function scrapeTags(fileName: string, url: string, apply = false, rename?: { enabled: boolean; template: string }): Promise<TagScrapeResult> {
+export async function scrapeTags(fileName: string, url: string, apply = false, rename?: { enabled: boolean; template: string }, trackIndex?: number): Promise<TagScrapeResult> {
   if (process.env.NEXT_PUBLIC_DEMO === "true") {
     const backend = await import("@/lib/demo/workerBackend");
-    const r = backend.demoScrapeTags(fileName, url, apply);
+    const r = backend.demoScrapeTags(fileName, url, apply, trackIndex);
     if (r) return r;
   }
   const payload: Record<string, unknown> = { fileName, url, apply };
   if (rename) { payload.renameEnabled = rename.enabled; payload.renameTemplate = rename.template; }
+  if (trackIndex !== undefined) payload.trackIndex = trackIndex;
   const res = await workerFetch("/tag/scrape", { method: "POST", body: JSON.stringify(payload) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Scrape failed (${res.status})`);
