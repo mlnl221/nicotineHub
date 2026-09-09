@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { Socket } from "bun";
-import { buildPeerInit, frameMessage } from "./soulseek.ts";
+import { buildPeerInit, frameMessage, PEER_MESSAGE_CODES } from "./soulseek.ts";
 import { SoulseekSession } from "./session.ts";
+import { PermissionLevel, ShareDB } from "./shares.ts";
 
 describe("peer TCP framing", () => {
   test("keeps initialized state when init and next frame arrive in separate packets", () => {
@@ -162,5 +163,44 @@ describe("peer TCP framing", () => {
     processPeer(peer, prefix, false);
     expect(ended).toBe(false);
     expect(peerStates.has(peer)).toBe(true);
+  });
+
+  test("serves first inbound SharedFileListRequest (no self-throttle)", () => {
+    const session = Object.create(SoulseekSession.prototype) as SoulseekSession;
+    const peerStates = new Map<Socket, unknown>();
+    const shareDB = Object.create(ShareDB.prototype) as ShareDB;
+    Object.assign(shareDB as unknown as Record<string, unknown>, {
+      lastShareRequests: new Map<string, number>(),
+      folders: [],
+      publicFolders: [],
+      buddyFolders: [],
+      trustedFolders: [],
+      revealBuddyShares: false,
+      revealTrustedShares: false,
+    });
+    Object.assign(session as unknown as Record<string, unknown>, {
+      peerStates,
+      closedPeers: new Set<Socket>(),
+      shareDB,
+      pendingFileTokens: new Set<number>(),
+      pendingConnects: new Map(),
+      pendingPeerMessages: new Map(),
+      allowedPeerResponses: new Map(),
+      pendingPeerQueue: [],
+      getSharePermissionLevel: () => PermissionLevel.PUBLIC,
+      opts: { username: "me", onTransferEvent: () => {} },
+      username: "me",
+    });
+
+    const written: Buffer[] = [];
+    const peer = {
+      end() {},
+      write(b: Buffer) { written.push(Buffer.from(b)); },
+    } as unknown as Socket;
+    const processPeer = (session as unknown as { processPeer: (peer: Socket, chunk: Buffer, initDone: boolean) => void }).processPeer.bind(session);
+    processPeer(peer, buildPeerInit("alice", "P"), false);
+    processPeer(peer, frameMessage(PEER_MESSAGE_CODES.sharedFileListRequest, Buffer.alloc(0)), false);
+    // code-5 reply must be written, not throttled by the log-line check
+    expect(written.some((b) => b.length >= 8 && b.readUInt32LE(4) === PEER_MESSAGE_CODES.sharedFileListResponse)).toBe(true);
   });
 });

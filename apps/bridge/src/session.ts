@@ -2770,8 +2770,9 @@ export class SoulseekSession {
         }
       } else if (msg.code === PEER_MESSAGE_CODES.sharedFileListRequest) {
         const peerName = state.username || "unknown";
-        logger.info("browse", "sharedFileListRequest recv inbound", { username: peerName, throttled: this.shareDB.shouldThrottle(peerName) });
-        if (this.shareDB.shouldThrottle(peerName)) {
+        const throttled = this.shareDB.shouldThrottle(peerName); // single call: check records timestamp
+        logger.info("browse", "sharedFileListRequest recv inbound", { username: peerName, throttled });
+        if (throttled) {
           logger.warn("browse", "throttled SharedFileListRequest", { username: peerName });
           break;
         }
