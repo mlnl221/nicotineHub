@@ -73,6 +73,7 @@ import {
   buildWishlistSearch,
   frameMessage,
   MAX_INCOMING,
+  maxIncomingForPeer,
   packString,
   packUint32,
   parseBranchLevel,
@@ -2393,7 +2394,7 @@ export class SoulseekSession {
           // After init, peek peer message code (framed as [len][code][payload])
           // Need at least 8 bytes (len+code) buffered; otherwise conservatively allow append
           if (state.buf.length < 8) return maxForState;
-          try { const c = state.buf.readUInt32LE(4); return c === PEER_MESSAGE_CODES.sharedFileListResponse || c === PEER_MESSAGE_CODES.folderContentsResponse ? MAX_INCOMING.server448M : c === PEER_MESSAGE_CODES.fileSearchResponse ? MAX_INCOMING.server16M : MAX_INCOMING.server1M; } catch { return maxForState; }
+          try { return maxIncomingForPeer(state.buf.readUInt32LE(4)); } catch { return maxForState; }
         })();
         if (declared > hintedMax || state.buf.length + bytes.length > hintedMax) {
           logger.warn("peer", "cap kill (declared-length gated)", { declared, hintedMax, buf: state.buf.length, incoming: bytes.length, connType: state.connType, username: state.username, isFileConn: state.isFileConn });
@@ -2427,7 +2428,8 @@ export class SoulseekSession {
         }
         if (state.buf.length < 5) break;
         const len = state.buf.readUInt32LE(0);
-        if (len > 1024 * 1024) { logger.debug("peer", "inbound init oversize, closing", { len }); try { peer.end(); } catch {} break; }
+        if (len < 1 || len > 1024 * 1024) { logger.debug("peer", "inbound init oversize, closing", { len }); try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
+        // Init length includes its one-byte code; full frame is 4 + len.
         const total = 4 + len;
         if (state.buf.length < total) break;
         const code = state.buf[4];
@@ -2527,7 +2529,7 @@ export class SoulseekSession {
       if (state.connType === "D") {
         if (state.buf.length < 5) break;
         const len = state.buf.readUInt32LE(0);
-        if (len > MAX_INCOMING.server16K) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+        if (len > MAX_INCOMING.server16K) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
         const total = 4 + len; if (state.buf.length < total) break;
         const code = state.buf[4];
         const payload = state.buf.subarray(5, total);
@@ -2556,7 +2558,7 @@ export class SoulseekSession {
               // adoption if no parent yet
               if (this.parent === null) this._adoptParent(ds.username);
               const status = this._verifyParentStatus(peer, "DistribSearch");
-              if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+              if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
               if (status === ParentStatus.ACCEPTED) {
                 this._sendMessageToChildPeers(payload, 3);
                 if (this._searchEnabled) {
@@ -2578,7 +2580,7 @@ export class SoulseekSession {
         } else if (code === 4) {
           try {
             const level = payload.readUInt32LE(0);
-            if (level > 1000) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+            if (level > 1000) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
             const status = this._verifyParentStatus(peer, "DistribBranchLevel");
             if (status === ParentStatus.ACCEPTED) {
               this.branchLevel = (level + 1) >>> 0;
@@ -2589,12 +2591,12 @@ export class SoulseekSession {
               const lower = (state.username || "").toLowerCase();
               const cand = this.potentialParents.get(lower);
               if (cand) { cand.conn = peer; cand.branchLevel = level; if (level === 0) cand.branchRoot = cand.username; if (cand.branchLevel !== null && cand.branchRoot) this._adoptParent(cand.username); }
-            } else if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+            } else if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
           } catch {}
         } else if (code === 5) {
           try {
             const root = new SlskReader(payload).string();
-            if (!root) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+            if (!root) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
             const status = this._verifyParentStatus(peer, "DistribBranchRoot");
             if (status === ParentStatus.ACCEPTED) {
               this.branchRoot = root;
@@ -2605,7 +2607,7 @@ export class SoulseekSession {
               const lower = (state.username || "").toLowerCase();
               const cand = this.potentialParents.get(lower);
               if (cand) { cand.conn = peer; cand.branchRoot = root; if (cand.branchLevel !== null && cand.branchRoot) this._adoptParent(cand.username); }
-            } else if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+            } else if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
           } catch {}
         } else if (code === 7) {
           // childDepth obsolete — ignore, but propagate if needed
@@ -2659,21 +2661,20 @@ export class SoulseekSession {
       if (state.buf.length >= 4) {
         const peekLen = state.buf.readUInt32LE(0);
         // Quick overflow check against max generic; detailed per-code check after parse
-        if (peekLen > MAX_INCOMING.server448M) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+        if (peekLen > MAX_INCOMING.server448M) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
       }
       // Use appropriate max for tryParse (shares need 448M)
       const msg = tryParseMessage(state.buf, MAX_INCOMING.server448M);
       if (!msg) {
         if (state.buf.length >= 4) {
           const len = state.buf.readUInt32LE(0);
-          if (len > MAX_INCOMING.server448M) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+          if (len > MAX_INCOMING.server448M) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
         }
         break;
       }
       // Per-code enforcement: close on overflow for non-shares
-      const maxForCode = (msg.code === PEER_MESSAGE_CODES.sharedFileListResponse || msg.code === PEER_MESSAGE_CODES.folderContentsResponse) ? MAX_INCOMING.server448M
-        : (msg.code === PEER_MESSAGE_CODES.fileSearchResponse ? MAX_INCOMING.server16M : MAX_INCOMING.server1M);
-      if (msg.payload.length > maxForCode) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+      const maxForCode = maxIncomingForPeer(msg.code);
+      if (msg.payload.length > maxForCode) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
       state.buf = state.buf.subarray(8 + msg.payload.length);
       if (msg.code === 9) {
         // Gate on allowed token to prevent zlib bomb from unsolicited peers
@@ -2769,8 +2770,9 @@ export class SoulseekSession {
         }
       } else if (msg.code === PEER_MESSAGE_CODES.sharedFileListRequest) {
         const peerName = state.username || "unknown";
-        logger.info("browse", "sharedFileListRequest recv inbound", { username: peerName, throttled: this.shareDB.shouldThrottle(peerName) });
-        if (this.shareDB.shouldThrottle(peerName)) {
+        const throttled = this.shareDB.shouldThrottle(peerName); // single call: check records timestamp
+        logger.info("browse", "sharedFileListRequest recv inbound", { username: peerName, throttled });
+        if (throttled) {
           logger.warn("browse", "throttled SharedFileListRequest", { username: peerName });
           break;
         }
@@ -2826,10 +2828,7 @@ export class SoulseekSession {
         // Obsolete/deprecated 42/52 — no-op to silence unknown-peer warnings (nicotine keeps but never handles)
       }
     }
-    // Keep per-socket state for the life of the connection (close/sweep clean
-    // up). Deleting on drain forgets init/username, so the next message on a
-    // persistent P socket re-parses as init and legit traffic dies.
-    // Never resurrect a socket the close handler already removed.
+    // Keep state for life of conn (drain-delete forgets init); never resurrect closed sockets.
     if (!this.closedPeers.has(peer as Socket)) this.peerStates.set(peer, state);
   }
 
@@ -3024,6 +3023,10 @@ export class SoulseekSession {
   // File ops via peer
   requestSharedFileList(username: string) {
     logger.info("browse", "requestSharedFileList", { username, pending: this.pendingBrowseShares.has(username.toLowerCase()) });
+    if (!this.loggedIn) {
+      this.emitBrowse({ type: "browse-error", username, error: "Not logged in." });
+      return;
+    }
     // timeout 20s indirect + 10s grace = 30s (nicotine INDIRECT_REQUEST_TIMEOUT 20s + local 10s)
     const key = username.toLowerCase();
     // Fast-fail if we know user is offline from recent status cache
@@ -3058,6 +3061,10 @@ export class SoulseekSession {
     this.ensurePeerAndSend(username, "P", buildSharedFileListRequest());
   }
   requestFolderContents(username: string, dir: string, token: number) {
+    if (!this.loggedIn) {
+      this.emitBrowse({ type: "browse-error", username, token, folder: dir, error: "Not logged in." });
+      return;
+    }
     const doTimeout = (tok: number) => {
       const entry = this.pendingBrowseFolder.get(tok);
       if (!entry) return;

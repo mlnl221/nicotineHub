@@ -419,8 +419,8 @@ export function tryParseMessage(buffer: Buffer, maxLen: number = MAX_INCOMING.se
 /** Per-connection max incoming — nicotine parity: 448M shares, 16M search, 1M generic, 16K distrib */
 export function maxIncomingForPeer(code: number): number {
   // Peer shares are huge (448M)
-  if (code === PEER_MESSAGE_CODES.sharedFileListResponse || code === PEER_MESSAGE_CODES.folderContentsResponse) return MAX_INCOMING.server448M;
-  if (code === PEER_MESSAGE_CODES.fileSearchResponse) return MAX_INCOMING.server16M;
+  if (code === PEER_MESSAGE_CODES.sharedFileListResponse || code === PEER_MESSAGE_CODES.userInfoResponse) return MAX_INCOMING.server448M;
+  if (code === PEER_MESSAGE_CODES.fileSearchResponse || code === PEER_MESSAGE_CODES.folderContentsResponse) return MAX_INCOMING.server16M;
   return MAX_INCOMING.server1M;
 }
 export function frameInitMessage(code: number, payload: Buffer): Buffer {
@@ -997,7 +997,7 @@ export function parseSharedFileListResponse(payload: Buffer): { folders: BrowseF
   const ndirs = r.uint32();
   const folders: BrowseFolderEntry[] = [];
   for (let i = 0; i < ndirs; i++) {
-    const dirName = r.string();
+    const dirName = r.string().replace(/\//g, "\\");
     const nfiles = r.uint32();
     const files: BrowseFileEntry[] = [];
     for (let j = 0; j < nfiles; j++) files.push(parseBrowseFile(r));
@@ -1012,7 +1012,7 @@ export function parseSharedFileListResponse(payload: Buffer): { folders: BrowseF
       if (r.remaining >= 4) {
         const npriv = r.uint32();
         for (let i = 0; i < npriv; i++) {
-          const dirName = r.string();
+          const dirName = r.string().replace(/\//g, "\\");
           const nfiles = r.uint32();
           const files: BrowseFileEntry[] = [];
           for (let j = 0; j < nfiles; j++) files.push(parseBrowseFile(r));
