@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import { buildInitialFilters, useSearches, type SearchMode } from "@/lib/search";
 import { applyFilters } from "@/lib/filter";
+import { sortSearchRows, type SearchSortMode } from "@/lib/sort";
 import { useTransfers } from "@/lib/transfers";
 import { type FilterState, type SearchRow } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
@@ -69,6 +70,7 @@ export function SearchScreen() {
   const deferredRows = useDeferredValue(activeTab?.rows ?? []);
   const deferredFilters = useDeferredValue(activeTab?.filters ?? null);
   // ponytail: inline filtering — useDeferredValue already de-janks 500+ rows, no worker/comlink needed
+  const [sortMode, setSortMode] = useState<SearchSortMode>("best");
 
   const visibleRows = useMemo(
     () => {
@@ -81,9 +83,9 @@ export function SearchScreen() {
         const ignored = getIgnored(activeTab.query);
         if (ignored.size) rows = rows.filter((r) => !ignored.has(r.user));
       }
-      return rows;
+      return sortSearchRows(rows, sortMode);
     },
-    [activeTab, deferredRows, deferredFilters, getIgnored],
+    [activeTab, deferredRows, deferredFilters, getIgnored, sortMode],
   );
   const visibleUsers = useMemo(() => [...new Set(visibleRows.map((r) => r.user))], [visibleRows]);
   const isStale = activeTab ? deferredRows !== activeTab.rows || deferredFilters !== activeTab.filters : false;
@@ -228,6 +230,17 @@ export function SearchScreen() {
             >
               {activeTab.filters.publicOnly ? "Public only" : "Hide private"}
             </button>
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as SearchSortMode)}
+              className="rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-semibold text-on-surface-variant outline-none"
+              title="Sort: Best = free slots, fastest first"
+            >
+              <option value="best">Best first</option>
+              <option value="speed">Fastest</option>
+              <option value="queue">Shortest queue</option>
+              <option value="arrival">Arrival order</option>
+            </select>
             <select
               value={settings.searches.group_searches}
               onChange={(e) => setOption("searches", "group_searches", e.target.value)}

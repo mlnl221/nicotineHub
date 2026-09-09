@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SearchRow } from "@/lib/protocol";
-import { humanLength, humanQuality, humanSize } from "@/lib/format";
+import { humanLength, humanQuality, humanSize, humanSpeed } from "@/lib/format";
 
 const PAGE_SIZE = 50;
 
@@ -50,6 +50,54 @@ interface ResultsListProps {
   onRowDoubleClick?: (row: SearchRow) => void;
   grouping?: string;
   expand?: string;
+}
+
+// Peer health pills shown right after the username: velocity first, then
+// slot state. Neutral surface pills; archival gold reserved for `free`.
+function PeerPills({ row }: { row: SearchRow }) {
+  const speed = humanSpeed(row.speed);
+  return (
+    <>
+      {speed ? (
+        <span className="inline-flex items-center gap-0.5 rounded-full bg-surface-container-high px-1.5 py-0.5 font-semibold text-on-surface-variant">
+          <span className="material-symbols-outlined text-[12px]">bolt</span>
+          {speed}
+        </span>
+      ) : null}
+      {row.slotFree ? (
+        <span className="rounded-full bg-tertiary-container px-1.5 py-0.5 font-semibold text-on-tertiary-container">free</span>
+      ) : (
+        <span className="inline-flex items-center gap-0.5 rounded-full bg-surface-container-high px-1.5 py-0.5 text-outline">
+          <span className="material-symbols-outlined text-[12px]">hourglass_top</span>q:{row.inQueue}
+        </span>
+      )}
+    </>
+  );
+}
+
+// Aggregate peer health for a group header: fastest peer + free count.
+function GroupMeta({ items }: { items: SearchRow[] }) {
+  const users = new Set(items.map((i) => i.user)).size;
+  const fastest = items.reduce((m, i) => Math.max(m, i.speed), 0);
+  const free = items.filter((i) => i.slotFree).length;
+  const speed = humanSpeed(fastest);
+  return (
+    <span className="flex shrink-0 items-center gap-1 font-label text-xs text-outline">
+      {users > 1 ? <span>{users} users</span> : null}
+      {speed ? (
+        <span className="inline-flex items-center gap-0.5 rounded-full bg-surface-container-high px-1.5 py-0.5 text-[10px] font-semibold text-on-surface-variant">
+          <span className="material-symbols-outlined text-[12px]">bolt</span>
+          {speed}
+        </span>
+      ) : null}
+      {free ? (
+        <span className="rounded-full bg-tertiary-container px-1.5 py-0.5 text-[10px] font-semibold text-on-tertiary-container">
+          {free} free
+        </span>
+      ) : null}
+      <span>{items.length}</span>
+    </span>
+  );
 }
 
 export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "folder_grouping", expand = "all" }: ResultsListProps) {
@@ -166,11 +214,11 @@ export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "fold
                         <div className="truncate font-body text-sm font-medium text-on-surface max-w-full">{row.filename}</div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-label text-[11px] text-on-surface-variant max-w-full overflow-hidden">
                           <span className="inline-flex items-center gap-1 min-w-0 max-w-[35vw] truncate"><span className="material-symbols-outlined text-[13px] shrink-0">person</span><span className="truncate">{row.user}</span></span>
+                          <PeerPills row={row} />
                           <span>{humanSize(row.size)}</span>
                           {humanQuality(row.attributes) ? <span>{humanQuality(row.attributes)}</span> : null}
                           {(() => { const qb = qualityBadge(row); return qb ? <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${qb.cls}`}>{qb.label}</span> : null; })()}
                           {humanLength(row.length) ? <span>{humanLength(row.length)}</span> : null}
-                          {row.slotFree ? <span className="rounded-full bg-tertiary-container px-1.5 py-0.5 font-semibold text-on-tertiary-container">free</span> : <span className="text-outline">q:{row.inQueue}</span>}
                           {row.private ? <span className="rounded-full bg-surface-container-highest px-1.5 py-0.5 text-on-surface-variant">private</span> : null}
                         </div>
                       </div>
@@ -201,7 +249,7 @@ export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "fold
               <span className="flex-1 min-w-0 truncate font-label text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
                 {folder}
               </span>
-              <span className="font-label text-xs text-outline shrink-0">{items.length}</span>
+              <GroupMeta items={items} />
             </button>
 
             {!isCollapsed ? (
@@ -231,17 +279,11 @@ export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "fold
                             <span className="material-symbols-outlined text-[13px] shrink-0">person</span>
                             <span className="truncate">{row.user}</span>
                           </span>
+                          <PeerPills row={row} />
                           <span>{humanSize(row.size)}</span>
                           {humanQuality(row.attributes) ? <span>{humanQuality(row.attributes)}</span> : null}
                           {(() => { const qb = qualityBadge(row); return qb ? <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${qb.cls}`}>{qb.label}</span> : null; })()}
                           {humanLength(row.length) ? <span>{humanLength(row.length)}</span> : null}
-                          {row.slotFree ? (
-                            <span className="rounded-full bg-tertiary-container px-1.5 py-0.5 font-semibold text-on-tertiary-container">
-                              free
-                            </span>
-                          ) : (
-                            <span className="text-outline">q:{row.inQueue}</span>
-                          )}
                           {row.private ? (
                             <span className="rounded-full bg-surface-container-highest px-1.5 py-0.5 text-on-surface-variant">
                               private
