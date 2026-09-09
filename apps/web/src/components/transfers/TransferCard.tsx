@@ -27,6 +27,7 @@ export function TransferCard({
   onResume,
   onRetry,
   onClear,
+  onPlay,
 }: {
   transfer: Transfer;
   onPause?: () => void;
@@ -34,6 +35,7 @@ export function TransferCard({
   onResume?: () => void;
   onRetry?: () => void;
   onClear?: () => void;
+  onPlay?: () => void;
 }) {
   const { settings } = useConfig();
   const reverse = settings.ui.reverse_file_paths ?? true;
@@ -122,6 +124,17 @@ export function TransferCard({
       </div>
 
       <div className="flex justify-end gap-2">
+        {onPlay ? (
+          <button
+            aria-label="Play"
+            onClick={onPlay}
+            className="inline-flex items-center gap-1.5 px-4 min-h-11 rounded-full bg-primary text-on-primary font-label text-xs font-bold hover:opacity-90 transition-opacity"
+            title="Play"
+          >
+            <span className="material-symbols-outlined text-[18px]">play_arrow</span>
+            Play
+          </button>
+        ) : null}
         {isFailed || isCancelled ? (
           <button
             aria-label="Retry"
