@@ -122,7 +122,7 @@ export const SERVER_MESSAGE_CODES = {
   joinGlobalRoom: 150,
   leaveGlobalRoom: 151,
   globalRoomMessage: 152,
-  relatedSearch: 153, // intentionally not implemented — low-value spell-correct, no handler (see docs/porting-status.md)
+  relatedSearch: 153, // intentionally not implemented — low-value spell-correct, no handler
   excludedSearchPhrases: 160,
   cantConnectToPeer: 1001,
   cantCreateRoom: 1003,
