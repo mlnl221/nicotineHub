@@ -5,7 +5,8 @@ import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { useConfig } from "@/lib/config/provider";
 import { defaults } from "@/lib/config/defaults";
-import type { SharedFolder } from "@/lib/config/defaults";
+import type { Settings, SharedFolder } from "@/lib/config/defaults";
+import { useSaveSection } from "@/lib/config/save";
 import { SectionCard, SectionSaveButton, ToggleControl, SelectControl, TextFieldControl } from "@/components/settings/controls";
 import { InfoTooltip } from "@/components/ui/InfoTooltip";
 import { useSession } from "@/lib/session";
@@ -72,10 +73,30 @@ const PERM_TO_KEY: Record<Permission, "shared" | "buddyshared" | "trustedshared"
   trusted: "trustedshared",
 };
 
+function computeAddLists(s: SharedFolder[], b: SharedFolder[], tr: SharedFolder[], folderPath: string, permission: Permission, virtualName?: string) {
+  const normPath = normalizeFolderPath(folderPath);
+  if (!normPath) return null;
+  const normLower = normPath.toLowerCase();
+  let ns = s.filter(([, p]) => normalizeFolderPath(p).toLowerCase() !== normLower);
+  let nb = b.filter(([, p]) => normalizeFolderPath(p).toLowerCase() !== normLower);
+  let ntr = tr.filter(([, p]) => normalizeFolderPath(p).toLowerCase() !== normLower);
+  const remaining: SharedFolder[] = [...ns, ...nb, ...ntr];
+  const base = virtualName?.trim() || getBasename(normPath);
+  const virtual = getNormalizedVirtualName(base, remaining);
+  const entry: SharedFolder = [virtual, normPath];
+  if (permission === "public") ns = [...ns, entry];
+  else if (permission === "buddy") nb = [...nb, entry];
+  else ntr = [...ntr, entry];
+  const key = PERM_TO_KEY[permission];
+  const nextList = permission === "public" ? ns : permission === "buddy" ? nb : ntr;
+  return { s: ns, b: nb, tr: ntr, virtual, normPath, key, nextList };
+}
+
 export function SharesSection() {
   const { settings, setOption } = useConfig();
   const t = settings.transfers;
   const { send, subscribe, state } = useSession();
+  const saveSection = useSaveSection();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -149,6 +170,41 @@ export function SharesSection() {
   ].sort((a, b) => a.virtualName.localeCompare(b.virtualName));
   const unavailablePathSet = new Set((unavailableShares ?? []).map(([, p]) => normalizeFolderPath(p).toLowerCase()));
 
+  function notify(title: string, body: string) {
+    try {
+      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title, body } }));
+    } catch {}
+  }
+
+  async function saveAndRescan(nextDraft: Settings, virtual: string, normPath: string, permLabel: string) {
+    try {
+      await saveSection("transfers", () => nextDraft);
+    } catch (e) {
+      notify("Save failed", e instanceof Error ? e.message : String(e));
+      return;
+    }
+    if (state.status !== "connected") {
+      notify("Saved locally", `"${virtual}" saved (${permLabel}) — bridge offline, syncs on connect.`);
+      return;
+    }
+    if (rescanning) return;
+    setRescanning(true);
+    setRescanError(null);
+    setUnavailableShares(null);
+    notify("Share saved", `"${virtual}" → ${normPath} (${permLabel}) — rescanning…`);
+    send({ type: "shares:rescan" });
+    setTimeout(() => setRescanning((v) => (v ? false : v)), 30_000);
+  }
+
+  function handleRescanNow() {
+    if (rescanning || state.status !== "connected") return;
+    setRescanning(true);
+    setRescanError(null);
+    setUnavailableShares(null);
+    send({ type: "shares:rescan" });
+    setTimeout(() => setRescanning((v) => (v ? false : v)), 30_000);
+  }
+
   function removeShareByPathOrName(folderPath: string, virtualName: string) {
     const norm = normalizeFolderPath(folderPath);
     const normLower = norm.toLowerCase();
@@ -171,41 +227,25 @@ export function SharesSection() {
   }
 
   function addShareInternal(folderPath: string, permission: Permission, virtualName?: string) {
-    const normPath = normalizeFolderPath(folderPath);
-    if (!normPath) return null;
-    // Remove prior share with same path (all groups) — mirrors shares.py:1050 core.shares.remove_share
-    const normLower = normPath.toLowerCase();
-    let s = t.shared.filter(([, p]) => normalizeFolderPath(p).toLowerCase() !== normLower);
-    let b = t.buddyshared.filter(([, p]) => normalizeFolderPath(p).toLowerCase() !== normLower);
-    let tr = t.trustedshared.filter(([, p]) => normalizeFolderPath(p).toLowerCase() !== normLower);
-    // Collect remaining for dedup check
-    const remaining: SharedFolder[] = [...s, ...b, ...tr];
-    const base = virtualName?.trim() || getBasename(normPath);
-    const normalizedVirtual = getNormalizedVirtualName(base, remaining);
-    const entry: SharedFolder = [normalizedVirtual, normPath];
-    if (permission === "public") s = [...s, entry];
-    else if (permission === "buddy") b = [...b, entry];
-    else tr = [...tr, entry];
-
-    // Apply — need to compute which key changed
-    // Use sequential setOption calls (provider merges shallow)
+    const r = computeAddLists(t.shared, t.buddyshared, t.trustedshared, folderPath, permission, virtualName);
+    if (!r) return null;
+    const nextDraft = { ...settings, transfers: { ...t, shared: r.s, buddyshared: r.b, trustedshared: r.tr } };
     if (permission === "public") {
-      if (s.length !== t.shared.length || !t.shared.find(([v, p]) => v === normalizedVirtual && p === normPath)) {
-        setOption("transfers", "shared", s);
+      if (r.s.length !== t.shared.length || !t.shared.find(([v, p]) => v === r.virtual && p === r.normPath)) {
+        setOption("transfers", "shared", r.s);
       }
-      // also need to persist removals from other groups if prior duplicate existed there
-      if (b.length !== t.buddyshared.length) setOption("transfers", "buddyshared", b);
-      if (tr.length !== t.trustedshared.length) setOption("transfers", "trustedshared", tr);
+      if (r.b.length !== t.buddyshared.length) setOption("transfers", "buddyshared", r.b);
+      if (r.tr.length !== t.trustedshared.length) setOption("transfers", "trustedshared", r.tr);
     } else if (permission === "buddy") {
-      if (s.length !== t.shared.length) setOption("transfers", "shared", s);
-      setOption("transfers", "buddyshared", b);
-      if (tr.length !== t.trustedshared.length) setOption("transfers", "trustedshared", tr);
+      if (r.s.length !== t.shared.length) setOption("transfers", "shared", r.s);
+      setOption("transfers", "buddyshared", r.b);
+      if (r.tr.length !== t.trustedshared.length) setOption("transfers", "trustedshared", r.tr);
     } else {
-      if (s.length !== t.shared.length) setOption("transfers", "shared", s);
-      if (b.length !== t.buddyshared.length) setOption("transfers", "buddyshared", b);
-      setOption("transfers", "trustedshared", tr);
+      if (r.s.length !== t.shared.length) setOption("transfers", "shared", r.s);
+      if (r.b.length !== t.buddyshared.length) setOption("transfers", "buddyshared", r.b);
+      setOption("transfers", "trustedshared", r.tr);
     }
-    return normalizedVirtual;
+    return { virtual: r.virtual, normPath: r.normPath, key: r.key, nextList: r.nextList, nextDraft };
   }
 
   // Plus button handler — copies nicotine-plus SharesPage.on_add_shared_folder + on_add_shared_folder_selected
@@ -224,7 +264,8 @@ export function SharesSection() {
         // For showDirectoryPicker we store the name as folderPath; edit dialog can promote to absolute later.
         // Nicotine-plus would store absolute like /home/user/Music; browser stores virtual-relative and warns.
         const added = addShareInternal(folderPath, "public", name);
-        if (!added) setDialogError("Could not add folder.");
+        if (!added) { setDialogError("Could not add folder."); return; }
+        await saveAndRescan(added.nextDraft, added.virtual, added.normPath, "Public");
         return;
       } catch (e: unknown) {
         const err = e as { name?: string };
@@ -250,21 +291,35 @@ export function SharesSection() {
     setAddOpen(true);
   }
 
-  function handleFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    // webkitRelativePath like "MyMusic/song.mp3" or "MyMusic/sub/track.flac" — top-level folder is Shared folder name
     const byRoot = new Map<string, string>();
     for (const f of Array.from(files)) {
       const rel = (f as unknown as { webkitRelativePath?: string }).webkitRelativePath || f.name;
       const root = rel.split("/")[0] || f.name.split("/")[0] || "Shared";
       if (!byRoot.has(root)) byRoot.set(root, root);
     }
-    // Add each distinct root as a share (mirrors select_multiple=True)
+    let s = t.shared;
+    let b = t.buddyshared;
+    let tr = t.trustedshared;
+    let lastVirtual: string | null = null;
+    let lastNorm = "";
     for (const [root] of byRoot) {
-      addShareInternal(root, "public", root);
+      const r = computeAddLists(s, b, tr, root, "public", root);
+      if (!r) continue;
+      s = r.s; b = r.b; tr = r.tr;
+      lastVirtual = r.virtual; lastNorm = r.normPath;
     }
-    // reset input
+    if (!lastVirtual) {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+    const nextDraft = { ...settings, transfers: { ...t, shared: s, buddyshared: b, trustedshared: tr } };
+    setOption("transfers", "shared", s);
+    if (b.length !== t.buddyshared.length) setOption("transfers", "buddyshared", b);
+    if (tr.length !== t.trustedshared.length) setOption("transfers", "trustedshared", tr);
+    await saveAndRescan(nextDraft, lastVirtual, lastNorm, "Public");
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -339,14 +394,16 @@ export function SharesSection() {
     if (tr.length !== t.trustedshared.length) setOption("transfers", "trustedshared", tr);
   }
 
-  function handleAddDialogSave() {
+  async function handleAddDialogSave() {
     const v = dialogVirtual.trim() || getBasename(dialogPath);
     const p = dialogPath.trim();
     if (!p) { setDialogError("Folder path is required."); return; }
     if (normalizeFolderPath(p) === "/") { setDialogError("Cannot share the filesystem root — pick a subdirectory."); return; }
     const added = addShareInternal(p, dialogPerm, v);
     if (!added) { setDialogError("Could not add folder."); return; }
+    const permLabel = dialogPerm === "buddy" ? "Buddies" : dialogPerm === "trusted" ? "Trusted" : "Public";
     setAddOpen(false);
+    await saveAndRescan(added.nextDraft, added.virtual, added.normPath, permLabel);
   }
 
   const totalCount = t.shared.length + t.buddyshared.length + t.trustedshared.length;
@@ -355,8 +412,22 @@ export function SharesSection() {
     <div className="flex flex-col gap-6">
       <SectionCard
         title="Shared folders"
-        description="Folders you share on the Soulseek network. WSL (bun): use absolute WSL paths like /home/user/Music or /mnt/c/Users/you/Music. Docker: browse the container filesystem to add any mounted folder. Browser pickers are a fallback."
-        actions={<SectionSaveButton section="transfers" />}
+        description="Folders you share on the Soulseek network. Docker: browse the container filesystem to add any mounted folder. Browser pickers are a fallback."
+        actions={(
+          <span className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-label="Rescan shares"
+              onClick={handleRescanNow}
+              disabled={rescanning || state.status !== "connected"}
+              className="inline-flex h-8 items-center gap-1 rounded-lg bg-surface-container-high px-3 font-label text-[11px] font-semibold uppercase tracking-widest text-on-surface-variant transition-colors hover:bg-surface-container-highest active:scale-95 disabled:pointer-events-none disabled:opacity-50 dark:bg-surface-variant dark:text-outline"
+            >
+              <span className={`material-symbols-outlined text-[16px] ${rescanning ? "animate-spin" : ""}`}>{rescanning ? "progress_activity" : "refresh"}</span>
+              {rescanning ? "Scanning…" : "Rescan"}
+            </button>
+            <SectionSaveButton section="transfers" />
+          </span>
+        )}
       >
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 py-3">
           <span className="flex items-center gap-1 font-body text-xs text-on-surface-variant dark:text-outline">
@@ -366,17 +437,6 @@ export function SharesSection() {
               content={
                 <>
                   Use <span className="font-mono">Browse container</span> below to see the container filesystem (e.g. <span className="font-mono">/data</span>, <span className="font-mono">/media/…</span> — every host folder must be mounted into the container) and add any subdirectory as a share — the path is stored verbatim. This is the browser equivalent of <span className="font-mono">explorer /</span> (container has no display server). Playback/metadata in <span className="font-mono">/files</span> works for any mounted path. For local device folders, use <span className="font-mono">Add folder</span> (File System Access API where available).
-                </>
-              }
-            />
-          </span>
-          <span className="flex items-center gap-1 font-body text-xs text-on-surface-variant dark:text-outline">
-            <span className="font-semibold">WSL</span>
-            <InfoTooltip
-              testId="shares-wsl"
-              content={
-                <>
-                  <span className="font-mono">/data</span> on WSL bun falls back to <span className="font-mono">./data</span> or <span className="font-mono">/tmp/nicotine-hub</span> if <span className="font-mono">/data</span> not writable. Add shares with absolute WSL paths (<span className="font-mono">/home/magnus/Music</span>, <span className="font-mono">/mnt/c/Users/you/Music</span>) that <span className="font-mono">existsSync</span> on the bridge — <span className="font-mono">/data/Music</span> only works inside Docker when mounted. Rescan shows <span className="font-mono">unavailable: [v→p]</span> if the path is not found (you saw <span className="font-mono">1 dirs · 0 files</span>).
                 </>
               }
             />
@@ -401,6 +461,16 @@ export function SharesSection() {
             <div className="mt-0.5 font-body text-xs text-on-surface-variant dark:text-outline" suppressHydrationWarning>
               {mounted ? `${totalCount} folder(s)` : `0 folder(s)`} · Public {mounted ? t.shared.length : 0} · Buddies {mounted ? t.buddyshared.length : 0} · Trusted {mounted ? t.trustedshared.length : 0}
             </div>
+            {rescanning ? (
+              <div className="mt-0.5 font-body text-xs text-on-surface-variant dark:text-outline">
+                {scanProgress ? `Scanning… ${scanProgress.dirs} dirs · ${scanProgress.files} files` : "Scanning shares…"}
+              </div>
+            ) : lastRescanAt ? (
+              <div className="mt-0.5 font-body text-[11px] text-on-surface-variant/70 dark:text-outline/70">
+                Last rescan: {new Date(lastRescanAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })} ·{" "}
+                {lastCounts ? `${lastCounts.files} files` : "done"}
+              </div>
+            ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
@@ -422,6 +492,17 @@ export function SharesSection() {
               <span className="material-symbols-outlined text-[18px]">create_new_folder</span>
               <span className="hidden sm:inline">Add folder</span>
               <span className="sm:hidden">Add</span>
+            </button>
+            <button
+              type="button"
+              aria-label="Rescan shares"
+              onClick={handleRescanNow}
+              disabled={rescanning || state.status !== "connected"}
+              className="inline-flex h-11 min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-surface-container-high px-4 font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant shadow-sm transition-colors hover:bg-surface-container-highest active:scale-95 dark:bg-surface-variant dark:text-outline disabled:opacity-50 disabled:pointer-events-none"
+            >
+              <span className={`material-symbols-outlined text-[18px] ${rescanning ? "animate-spin" : ""}`}>{rescanning ? "progress_activity" : "refresh"}</span>
+              <span className="hidden sm:inline">{rescanning ? "Rescanning…" : "Rescan"}</span>
+              <span className="sm:hidden">Rescan</span>
             </button>
           </div>
         </div>
