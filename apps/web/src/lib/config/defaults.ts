@@ -293,7 +293,7 @@ export const defaults: Settings = {
       country: "",
       fileType: "",
       length: "",
-      publicFiles: false,
+      publicFiles: true,
       quality: "",
     },
     enable_history: true,

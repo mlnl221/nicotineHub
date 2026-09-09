@@ -238,7 +238,7 @@ export function emptyFilters(): FilterState {
     country: "",
     quality: "",
     freeSlot: false,
-    publicOnly: false,
+    publicOnly: true,
   };
 }
 
