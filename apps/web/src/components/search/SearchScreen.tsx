@@ -69,9 +69,17 @@ export function SearchScreen() {
   const [selectMode, setSelectMode] = useState(false);
   const bulk = useBulkSelection();
   const [tabMenuAnchor, setTabMenuAnchor] = useState<{ x: number; y: number; tab: import("@/lib/search").SearchTab } | null>(null);
+  // Desktop (fine pointer) starts in select mode so single click toggles
+  // rows instead of opening the sheet. Touch starts sheet-first; long-press
+  // enters select mode. Read in effects only (never rendered) so SSR/CSR
+  // mismatch cannot leak into hydration.
+  const isFinePointer = useMemo(
+    () => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(pointer:fine)").matches,
+    [],
+  );
 
   const deferredRows = useDeferredValue(activeTab?.rows ?? []);
-  useEffect(() => { bulk.clear(); setSelectMode(false); }, [activeId, bulk.clear]);
+  useEffect(() => { bulk.clear(); setSelectMode(isFinePointer); }, [activeId, bulk.clear, isFinePointer]);
   const deferredFilters = useDeferredValue(activeTab?.filters ?? null);
   // ponytail: inline filtering — useDeferredValue already de-janks 500+ rows, no worker/comlink needed
   const [sortMode, setSortMode] = useState<SearchSortMode>("best");
@@ -340,6 +348,10 @@ export function SearchScreen() {
               const rowEl = (e.target as HTMLElement).closest("[data-row-user]") as HTMLElement | null;
               if (rowEl?.dataset.rowUser) {
                 e.preventDefault();
+                // Claimed: keep the event from reaching document/window
+                // closers (GlobalContextMenu, stale ContextMenu) — the row
+                // menu owns this right-click.
+                e.stopPropagation();
                 const user = rowEl.dataset.rowUser;
                 const path = rowEl.dataset.rowPath || "";
                 // resolve full row from visibleRows to get mocked attributes/size
@@ -355,19 +367,19 @@ export function SearchScreen() {
               }
             }}
           >
-                 <ResultsList
-                   rows={visibleRows}
-                   onRowTap={setSheetRow}
-                   onRowDoubleClick={downloadRow}
-                   selectMode={selectMode}
-                   selectedIds={bulk.selected}
-                   onToggleSelect={toggleSelected}
-                   onRangeSelect={rangeSelected}
-                   onSelectIds={bulk.setSelection}
-                   onLongPress={longPressSelected}
-                   grouping={settings.searches.group_searches}
-                   expand={settings.searches.expand_results}
-                 />
+            <ResultsList
+              rows={visibleRows}
+              onRowTap={setSheetRow}
+              onRowDoubleClick={downloadRow}
+              selectMode={selectMode}
+              selectedIds={bulk.selected}
+              onToggleSelect={toggleSelected}
+              onRangeSelect={rangeSelected}
+              onSelectIds={bulk.setSelection}
+              onLongPress={longPressSelected}
+              grouping={settings.searches.group_searches}
+              expand={settings.searches.expand_results}
+            />
           </div>
         )
       ) : (

@@ -44,7 +44,7 @@ const FolderRow = memo(function FolderRow({ name, short, depth, hasChildren, isE
       )}
       <button
         onClick={onSelect}
-        onContextMenu={(e) => { e.preventDefault(); onMenu(e.clientX, e.clientY); }}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onMenu(e.clientX, e.clientY); }}
         className="flex flex-1 items-center gap-3 min-w-0 text-left"
       >
         <span className="material-symbols-outlined text-[20px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>{hasChildren ? (isExpanded ? "folder_open" : "folder") : "folder"}</span>
@@ -726,7 +726,8 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                              onPointerCancel={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
                              onContextMenu={(e) => {
                                e.preventDefault();
-                              const shortName2 = file.name.split(/[\\\/]/).pop() || file.name;
+                               e.stopPropagation();
+                               const shortName2 = file.name.split(/[\\\/]/).pop() || file.name;
                               const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : `${activeFolder!.name}\\${shortName2}`;
                               setMenuAnchor({
                                 x: e.clientX, y: e.clientY,

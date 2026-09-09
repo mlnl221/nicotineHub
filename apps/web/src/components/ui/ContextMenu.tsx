@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 export type MenuItem = {
@@ -89,8 +89,20 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
   const [mounted, setMounted] = useState(false);
+  const id = useId();
 
   useEffect(() => setMounted(true), []);
+
+  // One menu at a time: mounting broadcasts, other mounted menus close.
+  // (Own listener attaches after dispatch, so no self-close.)
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("nicotineHub:menu-open", { detail: { id } }));
+    const onOther = (e: Event) => {
+      if ((e as CustomEvent<{ id?: string }>).detail?.id !== id) onClose();
+    };
+    window.addEventListener("nicotineHub:menu-open", onOther);
+    return () => window.removeEventListener("nicotineHub:menu-open", onOther);
+  }, [id, onClose]);
 
   useLayoutEffect(() => {
     if (!ref.current) return;
