@@ -72,16 +72,17 @@ export function userMenu(username: string, tabName: string, opts?: { onBrowse?: 
   return items;
 }
 
-export function searchResultMenu(row: { user: string; path: string; filename: string; folder: string }, opts: { onDownload: () => void; onProps?: () => void; onDownloadFolder?: () => void; onBrowse?: () => void; onProfile?: () => void; onMessage?: () => void }) : MenuItem[] {
+export function searchResultMenu(row: { user: string; path: string; filename: string; folder: string }, opts: { onDownload: () => void; onProps?: () => void; onDownloadFolder?: () => void; onDownloadSelected?: () => void; onBrowse?: () => void; onProfile?: () => void; onMessage?: () => void; onSearchFile?: () => void; selectedCount?: number }) : MenuItem[] {
   const fileUrl = `slsk://${encodeURIComponent(row.user)}/${row.path.replace(/\\/g, "/")}`;
   const folderPath = row.path.replace(/[^\\]*$/, "").replace(/\\$/, "");
   const folderUrl = `slsk://${encodeURIComponent(row.user)}/${folderPath.replace(/\\/g, "/")}`;
   return [
-    { id: "hdr", label: "1 File Selected", icon: "description", disabled: true },
+    { id: "hdr", label: `${opts.selectedCount ?? 1} File${(opts.selectedCount ?? 1) === 1 ? "" : "s"} Selected`, icon: "description", disabled: true },
     { id: "sep", label: "---", icon: "" },
-    { id: "download", label: "Download File", icon: "download", action: opts.onDownload },
+    { id: "download", label: opts.selectedCount && opts.selectedCount > 1 ? `Download ${opts.selectedCount} Files` : "Download File", icon: "download", action: opts.onDownload },
     { id: "download-to", label: "Download File To…", icon: "download", action: () => toast("Download To — folder picker unavailable") },
-    { id: "download-folder", label: "Download Folder", icon: "folder_download", action: opts.onDownloadFolder ?? (() => toast("Download folder — unavailable")) },
+    { id: "download-folder", label: opts.selectedCount && opts.selectedCount > 1 ? "Download Folders" : "Download Folder", icon: "folder_download", action: opts.onDownloadFolder ?? (() => toast("Download folder — unavailable")) },
+    ...(opts.onDownloadSelected && opts.selectedCount && opts.selectedCount > 1 ? [{ id: "download-selected", label: `Download ${opts.selectedCount} Selected`, icon: "download", action: opts.onDownloadSelected } as MenuItem] : []),
     { id: "sep2", label: "---", icon: "" },
     { id: "props", label: "File Properties", icon: "info", action: opts.onProps ?? (() => toast(`${row.filename} • ${row.path}`)) },
     { id: "sep3", label: "---", icon: "" },
@@ -102,6 +103,7 @@ export function searchResultMenu(row: { user: string; path: string; filename: st
         { id: "select-results", label: "Select User's Results", icon: "filter_alt", action: () => toast(`Filter to ${row.user}`) },
       ]
     },
+    { id: "search-file", label: "Search for This File (Experimental)", icon: "search", action: opts.onSearchFile ?? (() => toast("Search for this file — unavailable")) },
   ];
 }
 

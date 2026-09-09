@@ -48,8 +48,18 @@ interface ResultsListProps {
   rows: SearchRow[];
   onRowTap: (row: SearchRow) => void;
   onRowDoubleClick?: (row: SearchRow) => void;
+  selectMode?: boolean;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (row: SearchRow) => void;
+  onRangeSelect?: (row: SearchRow) => void;
+  onSelectIds?: (ids: string[]) => void;
+  onLongPress?: (row: SearchRow) => void;
   grouping?: string;
   expand?: string;
+}
+
+export function searchRowId(row: SearchRow): string {
+  return `${row.user}:${row.path}`;
 }
 
 // Peer health pills shown right after the username: velocity first, then
@@ -78,12 +88,51 @@ function PeerPills({ row }: { row: SearchRow }) {
 // Aggregate peer health for a group header is rendered with PeerPills on the
 // group's best row (rows arrive pre-sorted, so items[0] leads).
 
-export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "user_grouping", expand = "all" }: ResultsListProps) {
+export function ResultsList({ rows, onRowTap, onRowDoubleClick, selectMode = false, selectedIds = new Set(), onToggleSelect, onRangeSelect, onSelectIds, onLongPress, grouping = "user_grouping", expand = "all" }: ResultsListProps) {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   // Single-tap timer: delays the sheet so a double-click can download instead.
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressed = useRef(false);
+  const suppressClick = useRef(false);
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const drag = useRef<{ x: number; y: number; active: boolean } | null>(null);
   useEffect(() => () => { if (tapTimer.current) clearTimeout(tapTimer.current); }, []);
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      const start = drag.current;
+      if (!start) return;
+      if (!start.active && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 6) return;
+      start.active = true;
+      const left = Math.min(start.x, e.clientX);
+      const right = Math.max(start.x, e.clientX);
+      const top = Math.min(start.y, e.clientY);
+      const bottom = Math.max(start.y, e.clientY);
+      const ids: string[] = [];
+      rowRefs.current.forEach((el, id) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.right >= left && rect.left <= right && rect.bottom >= top && rect.top <= bottom) ids.push(id);
+      });
+      onSelectIds?.(ids);
+      document.body.style.userSelect = "none";
+    };
+    const up = () => {
+      if (drag.current?.active) {
+        suppressClick.current = true;
+        setTimeout(() => { suppressClick.current = false; }, 0);
+      }
+      drag.current = null;
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      document.body.style.userSelect = "";
+    };
+  }, [onSelectIds]);
   const handleTap = (row: SearchRow) => {
     if (!onRowDoubleClick) {
       onRowTap(row);
@@ -97,6 +146,42 @@ export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "user
     tapTimer.current = null;
     onRowDoubleClick?.(row);
   };
+
+  const handleClick = (e: React.MouseEvent, row: SearchRow) => {
+    if (suppressClick.current) {
+      e.preventDefault();
+      suppressClick.current = false;
+      return;
+    }
+    if (longPressed.current) {
+      e.preventDefault();
+      longPressed.current = false;
+      return;
+    }
+    if (selectMode || e.ctrlKey || e.metaKey || e.shiftKey) {
+      e.preventDefault();
+      if (e.shiftKey) onRangeSelect?.(row);
+      else onToggleSelect?.(row);
+      return;
+    }
+    handleTap(row);
+  };
+
+  const rowEvents = (row: SearchRow) => ({
+    onMouseDown: (e: React.MouseEvent) => {
+      if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) drag.current = { x: e.clientX, y: e.clientY, active: false };
+    },
+    onPointerDown: (e: React.PointerEvent) => {
+      if (e.pointerType !== "touch") return;
+      longPressTimer.current = setTimeout(() => {
+        longPressed.current = true;
+        onLongPress?.(row);
+        if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate?.(10);
+      }, 500);
+    },
+    onPointerUp: () => { if (longPressTimer.current) clearTimeout(longPressTimer.current); },
+    onPointerCancel: () => { if (longPressTimer.current) clearTimeout(longPressTimer.current); },
+  });
 
   // reset when filter/query changes (rows identity)
   useEffect(() => {
@@ -170,7 +255,12 @@ export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "user
   const isUngrouped = grouping === "ungrouped";
 
   return (
-    <div className="flex-1 px-3 py-2 max-w-full overflow-hidden">
+    <div
+      className="flex-1 px-3 py-2 max-w-full overflow-hidden"
+      onMouseDown={(e) => {
+        if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) drag.current = { x: e.clientX, y: e.clientY, active: false };
+      }}
+    >
       {groups.map(([folder, items]) => {
         const isCollapsed = isUngrouped ? false : collapsed.has(folder);
         if (isUngrouped) {
@@ -187,10 +277,13 @@ export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "user
                       data-row-filename={row.filename}
                       data-row-folder={row.folder}
                       data-row-size={String(row.size)}
-                      onClick={() => handleTap(row)}
-                      onDoubleClick={() => handleDouble(row)}
-                      className="flex w-full items-center gap-3 border-t border-outline-variant/15 px-4 py-2.5 text-left transition-colors active:bg-surface-container max-w-full overflow-hidden first:border-t-0"
+                      ref={(el) => { if (el) rowRefs.current.set(searchRowId(row), el); else rowRefs.current.delete(searchRowId(row)); }}
+                      {...rowEvents(row)}
+                      onClick={(e) => handleClick(e, row)}
+                      onDoubleClick={() => !selectMode && handleDouble(row)}
+                      className={`flex w-full items-center gap-3 border-t border-outline-variant/15 px-4 py-2.5 text-left transition-colors active:bg-surface-container max-w-full overflow-hidden first:border-t-0 ${selectedIds.has(searchRowId(row)) ? "bg-primary-fixed/15" : ""}`}
                     >
+                      {selectMode ? <input type="checkbox" tabIndex={-1} checked={selectedIds.has(searchRowId(row))} readOnly className="h-4 w-4 shrink-0 accent-primary" /> : null}
                       <span className="material-symbols-outlined text-[22px] text-primary-container shrink-0">{fileTypeIcon(row.fileType)}</span>
                       <div className="min-w-0 flex-1 overflow-hidden">
                         <div className="truncate font-body text-sm font-medium text-on-surface max-w-full">{row.filename}</div>
@@ -250,10 +343,13 @@ export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "user
                       data-row-filename={row.filename}
                       data-row-folder={row.folder}
                       data-row-size={String(row.size)}
-                      onClick={() => handleTap(row)}
-                      onDoubleClick={() => handleDouble(row)}
-                      className="flex w-full items-center gap-3 border-t border-outline-variant/15 px-4 py-2.5 text-left transition-colors active:bg-surface-container max-w-full overflow-hidden"
+                      ref={(el) => { if (el) rowRefs.current.set(searchRowId(row), el); else rowRefs.current.delete(searchRowId(row)); }}
+                      {...rowEvents(row)}
+                      onClick={(e) => handleClick(e, row)}
+                      onDoubleClick={() => !selectMode && handleDouble(row)}
+                      className={`flex w-full items-center gap-3 border-t border-outline-variant/15 px-4 py-2.5 text-left transition-colors active:bg-surface-container max-w-full overflow-hidden ${selectedIds.has(searchRowId(row)) ? "bg-primary-fixed/15" : ""}`}
                     >
+                      {selectMode ? <input type="checkbox" tabIndex={-1} checked={selectedIds.has(searchRowId(row))} readOnly className="h-4 w-4 shrink-0 accent-primary" /> : null}
                       <span className="material-symbols-outlined text-[22px] text-primary-container shrink-0">
                         {fileTypeIcon(row.fileType)}
                       </span>

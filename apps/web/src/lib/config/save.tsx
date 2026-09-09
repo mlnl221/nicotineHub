@@ -49,8 +49,6 @@ export function buildSectionMessages(section: Section, s: Settings): BridgeInbou
         msg("userinfo", "picture_visible", s.userinfo.picture_visible),
       ];
     }
-    case "worker":
-      return []; // tokens/webhook are save-gated inside WorkerSection (write-only, never auto-pushed)
     default: {
       const obj = s[section] as Record<string, unknown>;
       return Object.entries(obj).map(([k, v]) => msg(section, k, v));

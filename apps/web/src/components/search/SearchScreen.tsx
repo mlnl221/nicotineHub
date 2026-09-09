@@ -14,12 +14,13 @@ import { WishlistManager } from "@/components/WishlistManager";
 import { SearchBar } from "./SearchBar";
 import { SearchTabs } from "./SearchTabs";
 import { FilterBar } from "./FilterBar";
-import { ResultsList } from "./ResultsList";
+import { ResultsList, searchRowId } from "./ResultsList";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { searchResultMenu, searchTabMenu } from "@/lib/context-menu/menus";
 import { useContextMenu } from "@/lib/context-menu/useContextMenu";
 import { useWishlist } from "@/lib/wishlist";
 import { humanLength, humanQuality, humanSize } from "@/lib/format";
+import { useBulkSelection } from "@/lib/bulkSelection";
 
 export function SearchScreen() {
   const { activeTab, activeId, tabs, setActive, closeTab, startSearch, stopSearch, retrySearch, setFilters, clearFilters } = useSearches();
@@ -65,9 +66,12 @@ export function SearchScreen() {
   const ctxMenu = useContextMenu();
   const [menuRow, setMenuRow] = useState<SearchRow | null>(null);
   const [propsRow, setPropsRow] = useState<SearchRow | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const bulk = useBulkSelection();
   const [tabMenuAnchor, setTabMenuAnchor] = useState<{ x: number; y: number; tab: import("@/lib/search").SearchTab } | null>(null);
 
   const deferredRows = useDeferredValue(activeTab?.rows ?? []);
+  useEffect(() => { bulk.clear(); setSelectMode(false); }, [activeId, bulk.clear]);
   const deferredFilters = useDeferredValue(activeTab?.filters ?? null);
   // ponytail: inline filtering — useDeferredValue already de-janks 500+ rows, no worker/comlink needed
   const [sortMode, setSortMode] = useState<SearchSortMode>("best");
@@ -88,6 +92,8 @@ export function SearchScreen() {
     [activeTab, deferredRows, deferredFilters, getIgnored, sortMode],
   );
   const visibleUsers = useMemo(() => [...new Set(visibleRows.map((r) => r.user))], [visibleRows]);
+  const visibleIds = useMemo(() => visibleRows.map(searchRowId), [visibleRows]);
+  const selectedRows = useMemo(() => visibleRows.filter((row) => bulk.has(searchRowId(row))), [visibleRows, bulk]);
   const isStale = activeTab ? deferredRows !== activeTab.rows || deferredFilters !== activeTab.filters : false;
 
   const activeFilterCount = useMemo(() => {
@@ -148,6 +154,32 @@ export function SearchScreen() {
     });
     flash(`Queued ${matches.length} file${matches.length === 1 ? "" : "s"} from "${row.folder || "(root)"}"`);
   };
+
+  const downloadSelected = () => {
+    if (isDemo || !selectedRows.length) return;
+    if (selectedRows.length > 1 && !window.confirm(`Download ${selectedRows.length} selected files?`)) return;
+    selectedRows.forEach((row, idx) => setTimeout(() => requestDownload({ username: row.user, virtualPath: row.path, size: row.size, fileName: row.filename }), idx * 150));
+    flash(`Queued ${selectedRows.length} selected file${selectedRows.length === 1 ? "" : "s"}`);
+  };
+
+  const downloadSelectedFolders = () => {
+    const folders = new Map<string, SearchRow>();
+    for (const row of selectedRows) folders.set(`${row.user}:${row.folder}`, row);
+    if (selectedRows.length > 1 && !window.confirm(`Download ${selectedRows.length} selected files from ${folders.size} folder${folders.size === 1 ? "" : "s"}?`)) return;
+    for (const row of folders.values()) downloadFolderFor(row);
+  };
+
+  const searchForFile = (row: SearchRow) => {
+    const base = row.filename.replace(/\.[^.]+$/, "");
+    const ignored = new Set(["mp3", "flac", "wav", "ogg", "m4a", "aac", "opus", "mp4", "mkv", "avi", "vbr", "cbr", "kbps", "x264", "x265", "bluray", "web-dl"]);
+    const query = base.split(/[\s_.()[\]{}-]+/).map((token) => token.trim()).filter((token) => token && !ignored.has(token.toLowerCase()) && !/^\d{1,4}$/.test(token)).join(" ").trim() || base;
+    startSearch(query);
+    flash(`Searching for "${query}"`);
+  };
+
+  const toggleSelected = (row: SearchRow) => bulk.toggle(searchRowId(row));
+  const rangeSelected = (row: SearchRow) => bulk.toggleRange(searchRowId(row), visibleIds);
+  const longPressSelected = (row: SearchRow) => { setSelectMode(true); bulk.toggle(searchRowId(row)); };
 
   const searchSubtitle = activeTab
     ? `${visibleRows.length} of ${activeTab.total} results${activeTab.status === "searching" ? " · searching…" : ""}${activeTab.mode !== "global" ? ` · ${activeTab.mode}${activeTab.target ? `:${activeTab.target}` : ""}` : ""} • ${tabs.length} tabs`
@@ -323,7 +355,19 @@ export function SearchScreen() {
               }
             }}
           >
-            <ResultsList rows={visibleRows} onRowTap={setSheetRow} onRowDoubleClick={downloadRow} grouping={settings.searches.group_searches} expand={settings.searches.expand_results} />
+                 <ResultsList
+                   rows={visibleRows}
+                   onRowTap={setSheetRow}
+                   onRowDoubleClick={downloadRow}
+                   selectMode={selectMode}
+                   selectedIds={bulk.selected}
+                   onToggleSelect={toggleSelected}
+                   onRangeSelect={rangeSelected}
+                   onSelectIds={bulk.setSelection}
+                   onLongPress={longPressSelected}
+                   grouping={settings.searches.group_searches}
+                   expand={settings.searches.expand_results}
+                 />
           </div>
         )
       ) : (
@@ -376,13 +420,18 @@ export function SearchScreen() {
                 {sheetRow.user} · {sheetRow.folder}
               </div>
             </div>
-            <SheetAction
+             <SheetAction
               icon="download"
               label={isDemo ? "Download (disabled in demo)" : "Download"}
               onClick={() => {
                 if (sheetRow) downloadRow(sheetRow);
                 setSheetRow(null);
               }}
+            />
+            <SheetAction
+              icon="folder_download"
+              label="Download Folder"
+              onClick={() => { if (sheetRow) downloadFolderFor(sheetRow); setSheetRow(null); }}
             />
             <SheetAction
               icon="link"
@@ -402,9 +451,9 @@ export function SearchScreen() {
             />
             <SheetAction
               icon="account_tree"
-              label="Browse user's files"
+              label="Browse Folder"
               onClick={() => {
-                if (sheetRow) router.push(`/browse/${encodeURIComponent(sheetRow.user)}`);
+                if (sheetRow) router.push(`/browse/${encodeURIComponent(sheetRow.user)}?folder=${encodeURIComponent(sheetRow.folder)}`);
                 setSheetRow(null);
               }}
             />
@@ -416,6 +465,8 @@ export function SearchScreen() {
                 setSheetRow(null);
               }}
             />
+            <SheetAction icon="chat_bubble" label="Message User" onClick={() => { if (sheetRow) router.push(`/private-chat?user=${encodeURIComponent(sheetRow.user)}`); setSheetRow(null); }} />
+            <SheetAction icon="search" label="Search for This File (Experimental)" onClick={() => { if (sheetRow) searchForFile(sheetRow); setSheetRow(null); }} />
             <SheetAction icon="close" label="Cancel" muted onClick={() => setSheetRow(null)} />
           </div>
         </div>
@@ -433,20 +484,25 @@ export function SearchScreen() {
           y={ctxMenu.anchor.y}
           items={searchResultMenu(menuRow, {
             onDownload: () => {
-              if (menuRow) downloadRow(menuRow);
+              if (menuRow && bulk.has(searchRowId(menuRow)) && selectedRows.length > 1) downloadSelected();
+              else if (menuRow) downloadRow(menuRow);
             },
             onDownloadFolder: () => {
-              if (menuRow) downloadFolderFor(menuRow);
-            },
-            onBrowse: () => {
-              if (menuRow) router.push(`/browse/${encodeURIComponent(menuRow.user)}`);
+              if (menuRow && bulk.has(searchRowId(menuRow)) && selectedRows.length > 1) downloadSelectedFolders();
+              else if (menuRow) downloadFolderFor(menuRow);
+             },
+             onDownloadSelected: downloadSelected,
+             selectedCount: selectedRows.length > 1 && menuRow && bulk.has(searchRowId(menuRow)) ? selectedRows.length : 1,
+             onBrowse: () => {
+               if (menuRow) router.push(`/browse/${encodeURIComponent(menuRow.user)}?folder=${encodeURIComponent(menuRow.folder)}`);
             },
             onProfile: () => {
               if (menuRow) router.push(`/profile/${encodeURIComponent(menuRow.user)}`);
             },
-            onMessage: () => {
+             onMessage: () => {
               if (menuRow) router.push(`/private-chat?user=${encodeURIComponent(menuRow.user)}`);
-            },
+             },
+             onSearchFile: () => { if (menuRow) searchForFile(menuRow); },
             onProps: () => {
               if (menuRow) setPropsRow(menuRow);
             },
@@ -455,7 +511,15 @@ export function SearchScreen() {
             ctxMenu.close();
             setMenuRow(null);
           }}
-        />
+         />
+       ) : null}
+      {bulk.size > 0 ? (
+        <div className="fixed bottom-[calc(64px+env(safe-area-inset-bottom,0px))] md:bottom-4 left-1/2 z-40 flex w-[min(94vw,560px)] -translate-x-1/2 items-center gap-2 rounded-2xl bg-surface-container-highest p-3 shadow-xl ghost-border">
+          <span className="flex-1 font-label text-xs font-bold">{bulk.size} selected</span>
+          <button onClick={downloadSelected} disabled={isDemo} className="rounded-full bg-primary px-3 py-2 font-label text-xs font-bold text-on-primary disabled:opacity-50">Download</button>
+          <button onClick={downloadSelectedFolders} disabled={isDemo} className="rounded-full bg-surface-container-high px-3 py-2 font-label text-xs">Folders</button>
+          <button onClick={() => bulk.clear()} className="rounded-full bg-surface-container-high px-3 py-2 font-label text-xs">Clear</button>
+        </div>
       ) : null}
       {propsRow ? (
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 p-4" onClick={() => setPropsRow(null)}>

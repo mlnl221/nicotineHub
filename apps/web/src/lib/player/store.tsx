@@ -155,7 +155,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     el.addEventListener("ended", onEnded);
     el.addEventListener("error", onError);
     try {
-      const ms = (navigator as unknown as { mediaSession?: { setActionHandler: (a: string, cb: (() => void) | null) => void } }).mediaSession;
+      const ms = (navigator as unknown as { mediaSession?: { setActionHandler: (a: string, cb: ((d?: unknown) => void) | null) => void } }).mediaSession;
       ms?.setActionHandler("play", () => void el.play().catch(() => {}));
       ms?.setActionHandler("pause", () => el.pause());
       ms?.setActionHandler("seekbackward", () => { el.currentTime = Math.max(0, el.currentTime - 10); });

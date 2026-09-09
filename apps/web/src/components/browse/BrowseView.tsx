@@ -9,7 +9,7 @@ import { isDemo } from "@/lib/demo";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { browseFolderMenu, browseFileMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
-import { useBulkSelection } from "@/lib/bulkSelection";
+import { useBulkSelection, useMarqueeSelection } from "@/lib/bulkSelection";
 import { usePaneWidth } from "@/lib/usePaneWidth";
 
 const PAGE_SIZE = 50;
@@ -93,6 +93,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const bulk = useBulkSelection();
   const [selectMode, setSelectMode] = useState(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // auto-select first folder when folders load — respects userbrowse.expand_folders (nicotine parity)
   useEffect(() => {
@@ -306,6 +307,8 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
 
   const pagedFolders = useMemo(() => visibleTreeFolders.slice(0, visibleFolderCount), [visibleTreeFolders, visibleFolderCount]);
   const pagedFiles = useMemo(() => sortedFiles.slice(0, visibleFileCount), [sortedFiles, visibleFileCount]);
+  const visibleFileIds = useMemo(() => visibleFiles.map((f) => f.name), [visibleFiles]);
+  const marquee = useMarqueeSelection(bulk.setSelection);
 
   // Keyboard tree nav: Up/Down move, Right expand/child, Left collapse/parent, Enter opens
   const folderListRef = useRef<HTMLDivElement | null>(null);
@@ -382,6 +385,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   };
   const downloadSelected = () => {
     if (isDemo || !bulk.selected.size) return;
+    if (bulk.selected.size > 1 && !window.confirm(`Download ${bulk.selected.size} selected files?`)) return;
     const filesByPath = new Map<string, typeof visibleFiles[0]>();
     for (const f of folders) for (const file of f.files) filesByPath.set(file.name, file);
     let i = 0;
@@ -702,10 +706,26 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                         const isEven = idx % 2 === 0;
                         const checked = bulk.has(file.name);
                         return (
-                          <li
-                            key={file.name}
-                            onContextMenu={(e) => {
-                              e.preventDefault();
+                           <li
+                             key={file.name}
+                             {...marquee(file.name)}
+                             onClick={(e) => {
+                               marquee(file.name).onClick(e);
+                               if (e.defaultPrevented) return;
+                               if ((e.target as HTMLElement).closest("button,input")) return;
+                               if (selectMode || e.ctrlKey || e.metaKey || e.shiftKey) {
+                                 e.preventDefault();
+                                 if (e.shiftKey) bulk.toggleRange(file.name, visibleFileIds);
+                                 else bulk.toggle(file.name);
+                               }
+                             }}
+                             onPointerDown={(e) => {
+                               if (e.pointerType === "touch") longPressTimer.current = setTimeout(() => { setSelectMode(true); bulk.toggle(file.name); navigator.vibrate?.(10); }, 500);
+                             }}
+                             onPointerUp={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+                             onPointerCancel={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+                             onContextMenu={(e) => {
+                               e.preventDefault();
                               const shortName2 = file.name.split(/[\\\/]/).pop() || file.name;
                               const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : `${activeFolder!.name}\\${shortName2}`;
                               setMenuAnchor({
@@ -713,8 +733,8 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                                 items: browseFileMenu(username, { path: vp, filename: shortName2 }, false, {
                                   onDownload: () => requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName2 }),
                                   onDownloadFolder: downloadFolder,
-                                  selectedCount: bulk.size,
-                                  onDownloadSelected: downloadSelected,
+                                   selectedCount: bulk.has(file.name) ? bulk.size : 1,
+                                   onDownloadSelected: downloadSelected,
                                 }),
                               });
                             }}
