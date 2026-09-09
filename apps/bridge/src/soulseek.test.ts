@@ -75,6 +75,8 @@ import {
   parseFolderContentsResponse,
   packUint64,
   SlskReader,
+  parseSharedFileListResponse,
+  parseFolderContentsResponse,
 } from "./soulseek.ts";
 import { ShareDB, PermissionLevel } from "./shares.ts";
 
@@ -246,6 +248,7 @@ describe("buildPeerInit / parsePeerInit", () => {
   test("frames init code 1 as uint8 and round-trips user/type", () => {
     const raw = buildPeerInit("alice", "P");
     // [uint32 len][uint8 code=1][payload...]
+    expect(raw.readUInt32LE(0)).toBe(raw.length - 4);
     expect(raw[4]).toBe(1);
     const init = parsePeerInit(raw.subarray(5));
     expect(init.targetUser).toBe("alice");
@@ -288,6 +291,54 @@ describe("buildPeerInit / parsePeerInit", () => {
     const len = framed.readUInt32LE(0);
     expect(4 + len).toBe(framed.length);
     expect(framed[4]).toBe(3);
+  });
+});
+
+describe("browse response parsing", () => {
+  function file(name: string): Buffer {
+    return Buffer.concat([
+      Buffer.from([1]), packString(name), packUint64LE(42), packString(""), packUint32(0),
+    ]);
+  }
+
+  test("parses standard share-list unknown field and private block", () => {
+    const payload = Buffer.concat([
+      packUint32(1), packString("Music"), packUint32(1), file("Music\\song.mp3"),
+      packUint32(0),
+      packUint32(1), packString("Secret"), packUint32(1), file("Secret\\hidden.mp3"),
+    ]);
+    const parsed = parseSharedFileListResponse(deflateSync(payload));
+    expect(parsed.folders.map((folder) => folder.name)).toEqual(["Music"]);
+    expect(parsed.lockedFolders.map((folder) => folder.name)).toEqual(["Secret"]);
+    expect(parsed.lockedFolders[0].files[0].size).toBe(42);
+  });
+
+  test("parses standard folder response wrapper", () => {
+    const payload = Buffer.concat([
+      packUint32(9), packString("Music"), packUint32(1), packString("Music"), packUint32(1), file("song.mp3"),
+    ]);
+    const parsed = parseFolderContentsResponse(deflateSync(payload));
+    expect(parsed).toEqual({ token: 9, dir: "Music", folders: [{ name: "Music", files: [{ name: "song.mp3", size: 42, ext: "", attrs: [] }] }], files: [{ name: "song.mp3", size: 42, ext: "", attrs: [] }] });
+  });
+
+  test("parses share list with unknown 0 and no private block", () => {
+    const payload = Buffer.concat([
+      packUint32(1), packString("Music"), packUint32(1), file("Music\\song.mp3"),
+      packUint32(0),
+    ]);
+    const parsed = parseSharedFileListResponse(deflateSync(payload));
+    expect(parsed.folders.map((folder) => folder.name)).toEqual(["Music"]);
+  });
+
+  test("parses empty share list", () => {
+    const payload = Buffer.concat([packUint32(0), packUint32(0)]);
+    const parsed = parseSharedFileListResponse(deflateSync(payload));
+    expect(parsed.folders).toEqual([]);
+  });
+
+  test("parses empty folder response", () => {
+    const payload = Buffer.concat([packUint32(9), packString("Music"), packUint32(0)]);
+    expect(parseFolderContentsResponse(deflateSync(payload))).toEqual({ token: 9, dir: "Music", folders: [], files: [] });
   });
 });
 
