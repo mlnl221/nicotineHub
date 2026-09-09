@@ -34,6 +34,14 @@ class IdentData:
     source: str
     # Per-track entries [{pos, title, artist, duration}]; None when scraper lacks it.
     tracklist: list[dict[str, str]] | None = None
+    catalog_no: str | None = None
+    country: str | None = None
+    label: str | None = None
+    genre: list[str] | None = None
+    style: list[str] | None = None
+    media_type: str | None = None
+    release_id: str | None = None
+    cover_url: str | None = None
 
 
 def assert_public_url(url: str) -> str:

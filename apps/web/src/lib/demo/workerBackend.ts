@@ -56,9 +56,13 @@ export function demoWriteTags(fileName: string): null {
 
 export function demoScrapeTags(fileName: string, url: string, apply: boolean, trackIndex?: number): TagScrapeResult | null {
   const r = demoScrapeResult(fileName, url, apply, trackIndex);
-  if (r) return r;
+  if (r) return { ...r, catalog_no: "88697 19512 1", country: "US", label: "Columbia", genre: ["Electronic", "Rock"], style: ["Synth-pop", "Indie Rock"], media_type: "Vinyl (LP, Album, Stereo)", release_id: "1304590", cover_url: null as unknown as string };
   // Non-demo file: fall through to the real worker (unreachable in demo UI).
   return null;
+}
+
+export function demoCoverArt(_fileName: string, _url: string, _opts?: { embed?: boolean; saveFile?: boolean }): { embedded: boolean; folderJpg: boolean } {
+  return { embedded: false, folderJpg: false };
 }
 
 export function demoBulkReadTags(files: string[]): Array<{ fileName: string; tags?: Record<string, string>; info?: Record<string, unknown>; coverArtApplied?: boolean; error?: string }> | null {

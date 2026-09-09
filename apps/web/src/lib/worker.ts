@@ -51,7 +51,18 @@ export interface ScrapeTrack {
   duration: string;
 }
 
-export interface ScrapeResult {
+export interface ScrapeMeta {
+  catalog_no?: string;
+  country?: string;
+  label?: string;
+  genre?: string[];
+  style?: string[];
+  media_type?: string;
+  release_id?: string | number;
+  cover_url?: string;
+}
+
+export interface ScrapeResult extends ScrapeMeta {
   artist: string;
   album: string;
   year: number | string | null;
@@ -138,7 +149,7 @@ export async function writeTags(fileName: string, tags: Record<string, string | 
   return body as TagReadResult;
 }
 
-export interface TagScrapeResult {
+export interface TagScrapeResult extends ScrapeMeta {
   artist: string;
   album: string;
   year: number | string | null;
@@ -168,6 +179,20 @@ export async function scrapeTags(fileName: string, url: string, apply = false, r
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Scrape failed (${res.status})`);
   return body as TagScrapeResult;
+}
+
+export async function coverArt(fileName: string, url: string, opts?: { embed?: boolean; saveFile?: boolean }): Promise<{ embedded: boolean; folderJpg: boolean; size?: number }> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    const backend = await import("@/lib/demo/workerBackend") as unknown as { demoCoverArt?: (fileName: string, url: string, opts?: { embed?: boolean; saveFile?: boolean }) => { embedded: boolean; folderJpg: boolean; size?: number } | null | undefined | Promise<{ embedded: boolean; folderJpg: boolean; size?: number } | null | undefined> };
+    if (backend.demoCoverArt) {
+      const r = await backend.demoCoverArt(fileName, url, opts);
+      if (r) return r;
+    }
+  }
+  const res = await workerFetch("/tag/cover", { method: "POST", body: JSON.stringify({ fileName, url, embed: opts?.embed ?? true, saveFile: opts?.saveFile ?? true }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { detail?: string }).detail || `Cover failed (${res.status})`);
+  return body as { embedded: boolean; folderJpg: boolean; size?: number };
 }
 
 export async function bulkReadTags(files: string[]): Promise<{ results: Array<{ fileName: string; tags?: Record<string, string>; info?: Record<string, unknown>; coverArtApplied?: boolean; error?: string }> }> {

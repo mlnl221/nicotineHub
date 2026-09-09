@@ -25,7 +25,7 @@ import { SpectrumHoverCard } from "@/components/transfers/SpectrumHoverCard";
 import { TagEditor } from "@/components/tag/TagEditor";
 import { BulkBar } from "@/components/tag/BulkBar";
 import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
-import { BulkScrapeModal } from "@/components/tag/BulkScrapeModal";
+import { AdjustTagsModal } from "@/components/tag/AdjustTagsModal";
 import { useBulkSelection } from "@/lib/bulkSelection";
 import { bulkVerify, bulkAnalyze, bulkRequestSpectrum } from "@/lib/worker";
 import { bridgeFetchUrl } from "@/lib/bridgeHttp";
@@ -339,7 +339,7 @@ function DownloadsInner() {
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} /> : null}
       <BulkBar count={bulk.size} onClear={bulk.clear} onEdit={() => setBulkEditor(true)} onScrape={() => setBulkScrape(true)} onVerify={handleBulkVerify} onAnalyze={handleBulkAnalyze} onSpectrum={handleBulkSpectrum} />
       {bulkEditor ? <BulkTagEditor open={bulkEditor} files={selectedFileNames} onClose={() => setBulkEditor(false)} onSaved={() => bulk.clear()} /> : null}
-      {bulkScrape ? <BulkScrapeModal open={bulkScrape} files={selectedFileNames} onClose={() => setBulkScrape(false)} /> : null}
+      {bulkScrape ? <AdjustTagsModal open={bulkScrape} files={selectedFileNames} onClose={() => setBulkScrape(false)} /> : null}
       {bulkResult ? (
         <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
           <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col overflow-hidden rounded-t-2xl md:rounded-2xl bg-surface-container-lowest shadow-xl ghost-border" onClick={(e) => e.stopPropagation()}>

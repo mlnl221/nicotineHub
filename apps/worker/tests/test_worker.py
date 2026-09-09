@@ -345,3 +345,91 @@ def test_sanitize_filename():
     assert worker_app._sanitize_filename("a/b.txt") is None
     assert worker_app._sanitize_filename("") is None
     assert worker_app._sanitize_filename("   ") is None
+
+
+def _fake_discogs_vinyl(monkeypatch):
+    from sources.base import IdentData
+    from sources.discogs import DiscogsScraper
+
+    async def fake_scrape(self, url):
+        return IdentData(
+            artist="Test Artist", album="Vinyl LP", year=1977,
+            track_count=2, source="discogs",
+            tracklist=[
+                {"pos": "A1", "title": "Side A Track", "artist": "", "duration": ""},
+                {"pos": "B1", "title": "Side B Track", "artist": "", "duration": ""},
+            ],
+            catalog_no="ABC-123", country="UK", label="Test Label",
+            release_id="999", cover_url="https://example.com/cover.jpg",
+        )
+
+    monkeypatch.setattr(DiscogsScraper, "scrape", fake_scrape)
+
+
+def test_tag_scrape_vinyl_pos_verbatim(client, tmp_path, monkeypatch):
+    _fake_discogs_vinyl(monkeypatch)
+    (tmp_path / "data" / "downloads" / "vinyl.mp3").write_bytes(b"x")
+    url = "https://www.discogs.com/release/999-Test-Artist-Vinyl-LP"
+    r = client.post("/tag/scrape", json={"fileName": "vinyl.mp3", "url": url, "apply": False, "trackIndex": 0})
+    assert r.status_code == 200, r.text
+    suggested = r.json()["suggested"]
+    assert suggested["tracknumber"] == "A1"
+    assert suggested["publisher"] == "Test Label"
+    assert suggested["catalognumber"] == "ABC-123"
+    assert suggested["country"] == "UK"
+    assert suggested["discogs_release_id"] == "999"
+
+
+def _fake_discogs_full_meta(monkeypatch):
+    from sources.base import IdentData
+    from sources.discogs import DiscogsScraper
+
+    async def fake_scrape(self, url):
+        return IdentData(
+            artist="Meta Artist", album="Meta Album", year=2001,
+            track_count=1, source="discogs",
+            tracklist=[{"pos": "1", "title": "Track 1", "artist": "", "duration": ""}],
+            catalog_no="CAT-001", country="Germany", label="Meta Label",
+            genre=["Electronic"], style=["Techno"], media_type="Vinyl (LP)",
+            release_id="12345", cover_url="https://example.com/meta.jpg",
+        )
+
+    monkeypatch.setattr(DiscogsScraper, "scrape", fake_scrape)
+
+
+def test_scrape_returns_meta(client, monkeypatch):
+    _fake_discogs_full_meta(monkeypatch)
+    r = client.post("/scrape", json={"url": "https://www.discogs.com/release/12345-Meta-Artist-Meta-Album"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["catalog_no"] == "CAT-001"
+    assert body["country"] == "Germany"
+    assert body["label"] == "Meta Label"
+    assert body["media_type"] == "Vinyl (LP)"
+    assert body["release_id"] == "12345"
+    assert body["cover_url"] == "https://example.com/meta.jpg"
+
+
+def _fake_discogs_no_cover(monkeypatch):
+    from sources.base import IdentData
+    from sources.discogs import DiscogsScraper
+
+    async def fake_scrape(self, url):
+        return IdentData(
+            artist="No Cover Artist", album="No Cover Album", year=2010,
+            track_count=1, source="discogs",
+            tracklist=[{"pos": "1", "title": "Track 1", "artist": "", "duration": ""}],
+            cover_url=None,
+        )
+
+    monkeypatch.setattr(DiscogsScraper, "scrape", fake_scrape)
+
+
+def test_tag_cover_no_cover_422(client, tmp_path, monkeypatch):
+    _fake_discogs_no_cover(monkeypatch)
+    (tmp_path / "data" / "downloads" / "nocover.mp3").write_bytes(b"x")
+    url = "https://www.discogs.com/release/777-No-Cover-Artist-No-Cover-Album"
+    r = client.post("/tag/cover", json={"fileName": "nocover.mp3", "url": url})
+    assert r.status_code == 422, r.text
+    r = client.post("/tag/cover", json={"fileName": "ghost.mp3", "url": url})
+    assert r.status_code == 404, r.text

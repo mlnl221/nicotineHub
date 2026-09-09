@@ -128,6 +128,10 @@ async def scrape(body: ScrapeIn):
                 "track_count": found.track_count, "query": query,
                 "source": found.source, "confidence": _confidence(found.source), "url": url,
                 "tracklist": found.tracklist,
+                "catalog_no": found.catalog_no, "country": found.country,
+                "label": found.label, "genre": found.genre, "style": found.style,
+                "media_type": found.media_type, "release_id": found.release_id,
+                "cover_url": found.cover_url,
             }
     return JSONResponse({"detail": "no scraper handles this URL"}, status_code=422)
 
@@ -685,6 +689,22 @@ async def tag_scrape(body: TagScrapeIn):
         suggested["year"] = str(found.year)
     if found.track_count:
         suggested["track_total"] = str(found.track_count)
+    if found.label:
+        suggested["publisher"] = found.label
+    if found.catalog_no:
+        suggested["catalognumber"] = found.catalog_no
+    if found.country:
+        suggested["country"] = found.country
+    if found.genre:
+        suggested["genre"] = ", ".join(found.genre)
+    if found.style:
+        suggested["style"] = ", ".join(found.style)
+    if found.media_type:
+        suggested["mediatype"] = found.media_type
+    if found.release_id:
+        suggested["discogs_release_id"] = found.release_id
+    if url:
+        suggested["www"] = url
     if body.trackIndex is not None:
         if not found.tracklist:
             return JSONResponse({"detail": "this release has no tracklist to map from"}, status_code=422)
@@ -695,7 +715,7 @@ async def tag_scrape(body: TagScrapeIn):
             suggested["title"] = entry["title"]
         if entry.get("artist"):
             suggested["artist"] = entry["artist"]
-        suggested["tracknumber"] = str(body.trackIndex + 1)
+        suggested["tracknumber"] = entry.get("pos") or str(body.trackIndex + 1)
     # include source info
     suggested["_source"] = found.source
     suggested["_query"] = f"{found.artist} - {found.album}".strip(" -")
@@ -769,7 +789,7 @@ async def tag_scrape(body: TagScrapeIn):
                                 new_tags, new_info, cover = _read_tags_and_info(path)
                             except Exception:
                                 pass
-            payload: dict = {"artist": found.artist, "album": found.album, "year": found.year, "track_count": found.track_count, "query": suggested["_query"], "source": found.source, "confidence": _confidence(found.source), "url": url, "tracklist": found.tracklist, "suggested": suggested, "applied": True, "tags": new_tags, "info": new_info}
+            payload: dict = {"artist": found.artist, "album": found.album, "year": found.year, "track_count": found.track_count, "query": suggested["_query"], "source": found.source, "confidence": _confidence(found.source), "url": url, "tracklist": found.tracklist, "catalog_no": found.catalog_no, "country": found.country, "label": found.label, "genre": found.genre, "style": found.style, "media_type": found.media_type, "release_id": found.release_id, "cover_url": found.cover_url, "suggested": suggested, "applied": True, "tags": new_tags, "info": new_info}
             if rename_result is not None:
                 payload["rename"] = rename_result
                 if rename_result.get("newPath"):
@@ -777,7 +797,106 @@ async def tag_scrape(body: TagScrapeIn):
             return payload
         except Exception:
             pass
-    return {"artist": found.artist, "album": found.album, "year": found.year, "track_count": found.track_count, "query": suggested["_query"], "source": found.source, "confidence": _confidence(found.source), "url": url, "tracklist": found.tracklist, "suggested": suggested, "applied": False}
+    return {"artist": found.artist, "album": found.album, "year": found.year, "track_count": found.track_count, "query": suggested["_query"], "source": found.source, "confidence": _confidence(found.source), "url": url, "tracklist": found.tracklist, "catalog_no": found.catalog_no, "country": found.country, "label": found.label, "genre": found.genre, "style": found.style, "media_type": found.media_type, "release_id": found.release_id, "cover_url": found.cover_url, "suggested": suggested, "applied": False}
+
+
+class TagCoverIn(BaseModel):
+    fileName: str = Field(min_length=1, max_length=1024)
+    url: str = Field(min_length=8, max_length=2048)
+    embed: bool = Field(default=True)
+    saveFile: bool = Field(default=True)
+
+
+@app.post("/tag/cover", dependencies=[Depends(require_auth)])
+async def tag_cover(body: TagCoverIn):
+    path = _resolve_or_404(body.fileName)
+    if isinstance(path, JSONResponse):
+        return path
+    url = body.url.strip()
+    found = None
+    for scraper in SCRAPERS:
+        if scraper.match(url):
+            try:
+                found = await scraper.scrape(url)
+            except ScrapeError as e:
+                return JSONResponse({"detail": str(e)[:300]}, status_code=422)
+            break
+    if not found:
+        return JSONResponse({"detail": "no scraper handles this URL"}, status_code=422)
+    cover_url = found.cover_url
+    if not cover_url:
+        return JSONResponse({"detail": "release has no cover image"}, status_code=422)
+    from sources.base import assert_public_url
+    try:
+        assert_public_url(cover_url)
+    except ScrapeError as e:
+        return JSONResponse({"detail": str(e)[:300]}, status_code=422)
+    import aiohttp
+    try:
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(timeout=timeout) as sess:
+            async with sess.get(cover_url) as resp:
+                if resp.status != 200:
+                    return JSONResponse({"detail": f"cover download failed: HTTP {resp.status}"}, status_code=422)
+                ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                if not ctype.startswith("image/"):
+                    return JSONResponse({"detail": f"cover download failed: not an image ({ctype or 'unknown'})"[:300]}, status_code=422)
+                try:
+                    if int(resp.headers.get("Content-Length", "0") or 0) > 5_000_000:
+                        return JSONResponse({"detail": "cover download failed: too large"}, status_code=422)
+                except ValueError:
+                    pass
+                data = await resp.read()
+                if not data or len(data) > 5_000_000:
+                    return JSONResponse({"detail": "cover download failed: bad size"}, status_code=422)
+    except Exception as e:
+        return JSONResponse({"detail": f"cover download failed: {e}"[:300]}, status_code=422)
+    folder_jpg = False
+    if body.saveFile:
+        try:
+            (path.parent / "folder.jpg").write_bytes(data)
+            folder_jpg = True
+        except OSError as e:
+            return JSONResponse({"detail": f"cover save failed: {e}"[:300]}, status_code=422)
+    embedded = False
+    if body.embed:
+        try:
+            ext = path.suffix.lstrip(".").lower()
+            mime = ctype or "image/jpeg"
+            if ext == "flac":
+                from mutagen.flac import FLAC, Picture
+                audio = FLAC(str(path))
+                pic = Picture()
+                pic.type = 3
+                pic.mime = mime
+                pic.desc = "cover"
+                pic.data = data
+                audio.clear_pictures()
+                audio.add_picture(pic)
+                audio.save()
+                embedded = True
+            elif ext == "mp3":
+                from mutagen.id3 import APIC, ID3
+                try:
+                    tags = ID3(str(path))
+                except Exception:
+                    tags = ID3()
+                tags.delall("APIC")
+                tags.add(APIC(encoding=3, mime=mime, type=3, desc="cover", data=data))
+                tags.save(str(path))
+                embedded = True
+            elif ext in ("m4a", "mp4"):
+                from mutagen.mp4 import MP4, MP4Cover
+                fmt = MP4Cover.FORMAT_PNG if mime == "image/png" else MP4Cover.FORMAT_JPEG
+                audio = MP4(str(path))
+                audio["covr"] = [MP4Cover(data, imageformat=fmt)]
+                audio.save()
+                embedded = True
+            else:
+                embedded = False
+        except Exception as e:
+            return JSONResponse({"detail": f"cover embed failed: {e}"[:300]}, status_code=422)
+    return {"embedded": embedded, "folderJpg": folder_jpg, "size": len(data)}
 
 
 class BulkTagIn(BaseModel):

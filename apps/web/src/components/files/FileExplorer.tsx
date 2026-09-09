@@ -7,7 +7,7 @@ import { mockFileExplorerResponse, uniqueDemoName } from "@/lib/demo/fixtures";
 import { TagEditor } from "@/components/tag/TagEditor";
 import { BulkBar } from "@/components/tag/BulkBar";
 import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
-import { BulkScrapeModal } from "@/components/tag/BulkScrapeModal";
+import { AdjustTagsModal } from "@/components/tag/AdjustTagsModal";
 import { useBulkSelection } from "@/lib/bulkSelection";
 import { bulkVerify, bulkAnalyze, bulkRequestSpectrum, verifyFile, analyzeFile, getWorkerHttpBase } from "@/lib/worker";
 import { ContextMenu } from "@/components/ui/ContextMenu";
@@ -764,7 +764,7 @@ export function FileExplorer({
       </div>
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} onSaved={() => fetchDir(current)} /> : null}
       {bulkEditor ? <BulkTagEditor open={bulkEditor} files={Array.from(bulk.selected)} onClose={() => setBulkEditor(false)} onSaved={() => { bulk.clear(); fetchDir(current); }} /> : null}
-      {bulkScrape || singleScrapeFile || dirScrapeFiles ? <BulkScrapeModal open={!!(bulkScrape || singleScrapeFile || dirScrapeFiles)} files={dirScrapeFiles ?? (singleScrapeFile ? [singleScrapeFile] : Array.from(bulk.selected))} onClose={() => { setBulkScrape(false); setSingleScrapeFile(null); setDirScrapeFiles(null); }} onRenamed={(paths) => { for (const p of paths) markSharesDirtyIfNeeded(p); if (paths.length) fetchDir(current); }} /> : null}
+      {bulkScrape || singleScrapeFile || dirScrapeFiles ? <AdjustTagsModal open={!!(bulkScrape || singleScrapeFile || dirScrapeFiles)} files={dirScrapeFiles ?? (singleScrapeFile ? [singleScrapeFile] : Array.from(bulk.selected))} onClose={() => { setBulkScrape(false); setSingleScrapeFile(null); setDirScrapeFiles(null); }} onRenamed={(paths) => { for (const p of paths) markSharesDirtyIfNeeded(p); if (paths.length) fetchDir(current); }} /> : null}
       {bulkResult && mounted ? createPortal(
         <div className="fixed inset-0 z-[100] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
           <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col overflow-hidden rounded-t-2xl md:rounded-2xl bg-surface-container-lowest shadow-xl ghost-border" onClick={(e) => e.stopPropagation()}>
