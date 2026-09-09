@@ -108,6 +108,8 @@ export function FileExplorer({
 
   const currentRef = useRef(current);
   useEffect(() => { currentRef.current = current; }, [current]);
+  // Selection keys are absolute paths — drop stale picks on dir change.
+  useEffect(() => { bulk.clear(); }, [current]);
 
   const fetchDir = useCallback(async (path: string, opts?: { push?: boolean }) => {
     if (isDemo) {
@@ -651,9 +653,9 @@ export function FileExplorer({
                 key={e.path}
                 onClick={() => selectMode && isAudio && (isFocused ? bulk.toggleRange(e.path, audioIds) : bulk.toggle(e.path, audioIds))}
                 onContextMenu={(ev) => {
-                  if (selectMode) return;
                   ev.preventDefault();
                   ev.stopPropagation();
+                  if (selectMode) return;
                   setMenuAnchor({ x: ev.clientX, y: ev.clientY, file: e });
                 }}
                 className={`flex items-center gap-3 px-3 py-3 hover:bg-surface-container-high/40 ${checked ? "bg-primary-fixed/20" : "opacity-90"} ${isFocused ? "ring-1 ring-primary" : ""} ${selectMode && isAudio ? "cursor-pointer" : ""}`}
@@ -664,7 +666,7 @@ export function FileExplorer({
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-container-high text-on-surface-variant dark:bg-surface-variant dark:text-outline">
                   <span className="material-symbols-outlined text-[18px]">{isImage ? "image" : isAudio ? "audio_file" : "description"}</span>
                 </span>
-                <div className="min-w-0 flex-1" onClick={() => selectMode && isAudio && bulk.toggle(e.path)}>
+                <div className="min-w-0 flex-1">
                   <div className="truncate font-body text-sm text-on-surface dark:text-inverse-on-surface flex items-center gap-1.5">
                     <span className="truncate">{e.name}</span>
                     {isAudio && hasSpectrum ? (

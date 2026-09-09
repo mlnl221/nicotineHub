@@ -307,7 +307,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
 
   const pagedFolders = useMemo(() => visibleTreeFolders.slice(0, visibleFolderCount), [visibleTreeFolders, visibleFolderCount]);
   const pagedFiles = useMemo(() => sortedFiles.slice(0, visibleFileCount), [sortedFiles, visibleFileCount]);
-  const visibleFileIds = useMemo(() => visibleFiles.map((f) => f.name), [visibleFiles]);
+  const visibleFileIds = useMemo(() => sortedFiles.map((f) => f.name), [sortedFiles]);
   const marquee = useMarqueeSelection(bulk.setSelection);
 
   // Keyboard tree nav: Up/Down move, Right expand/child, Left collapse/parent, Enter opens
@@ -749,7 +749,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                                 onClick={(ev) => {
                                   ev.stopPropagation();
                                   // Shift+click range like FileExplorer — ev has shiftKey
-                                  if ((ev as unknown as { shiftKey?: boolean }).shiftKey) bulk.toggleRange(file.name, visibleFiles.map((f) => f.name));
+                                  if ((ev as unknown as { shiftKey?: boolean }).shiftKey) bulk.toggleRange(file.name, visibleFileIds);
                                 }}
                                 className="h-4 w-4 shrink-0 accent-primary"
                               />

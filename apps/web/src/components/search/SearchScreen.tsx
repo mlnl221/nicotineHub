@@ -242,6 +242,19 @@ export function SearchScreen() {
             {visibleRows.length !== activeTab.total ? ` • showing ${visibleRows.length}` : ""}
           </span>
           <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              aria-pressed={selectMode}
+              title={selectMode ? "Exit selection — row tap opens details" : "Select rows — row tap toggles selection"}
+              onClick={() => { setSelectMode((v) => !v); if (selectMode) bulk.clear(); }}
+              className={`rounded-full px-2 py-1 text-[10px] font-semibold outline-none ${
+                selectMode
+                  ? "bg-primary text-on-primary"
+                  : "bg-surface-container-high text-on-surface-variant"
+              }`}
+            >
+              {selectMode ? `Selecting (${bulk.size}/50)` : "Select"}
+            </button>
             {activeTab.mode === "wishlist" && visibleRows.length > 0 ? (
               <button
                 type="button"

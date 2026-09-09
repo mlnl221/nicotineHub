@@ -12,6 +12,10 @@ export function GlobalContextMenu() {
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
+      // Claimed by a row/component handler (React document listener runs
+      // first and preventDefaults): leave it alone. stopPropagation cannot
+      // help here — same document node — so the flag is the signal.
+      if (e.defaultPrevented) return;
       // Only handle if no other context menu claimed it and target is not an input/context-menu area
       const target = e.target as HTMLElement;
       // Allow custom menus to stop propagation; if we get here it's unclaimed
