@@ -52,9 +52,22 @@ export function DownloadsSection() {
         />
         <ToggleControl
           label="Create subfolders per user"
-          description="ON saves new downloads to downloads/<user>/<file>, OFF flat to downloads/<file>. Applies to new finishes only; a bridge destination template overrides this."
+          description="Always ON on the bridge; new downloads save under downloads/<user>/. A bridge destination template overrides this."
           checked={t.usernamesubfolders}
           onChange={(v) => setOption("transfers", "usernamesubfolders", v)}
+        />
+        <SelectControl
+          label="Download folder depth"
+          description="How much of the sender's folder tree to recreate under downloads/<user>/. Applies to new finishes; existing files move on next bridge boot."
+          value={t.download_path_depth}
+          onChange={(v) => setOption("transfers", "download_path_depth", v)}
+          options={[
+            { value: "full", label: "Full remote path" },
+            { value: "3", label: "User + last 3 folders" },
+            { value: "2", label: "User + last 2 folders" },
+            { value: "1", label: "User + last folder" },
+            { value: "0", label: "User folder only" },
+          ]}
         />
         <SelectControl
           label="Grouping"

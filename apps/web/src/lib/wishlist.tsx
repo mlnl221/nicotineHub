@@ -4,6 +4,17 @@ import { useSession } from "@/lib/session";
 
 const STORAGE_KEY = "nicotineHub.wishlist";
 
+// searchId contract (must match bridge): new `wishlist:${Date.now()}:${term}`,
+// legacy `wishlist:${term}:${timestamp}`. Term may contain colons.
+export function parseWishlistTerm(searchId: string): string {
+  const prefix = "wishlist:";
+  const rest = searchId.startsWith(prefix) ? searchId.slice(prefix.length) : searchId;
+  if (/^\d+:/.test(rest)) return rest.slice(rest.indexOf(":") + 1);
+  const legacy = rest.match(/^(.*):\d+$/);
+  if (legacy) return legacy[1];
+  return rest;
+}
+
 export type WishlistEntry = {
   term: string;
   auto: boolean;
@@ -52,32 +63,30 @@ export function WishlistProvider({ children }: { children: React.ReactNode }) {
   const terms = useMemo(() => entries.map((e) => e.term), [entries]);
   const [interval, setIntervalSec] = useState<number | null>(null);
   const { send, subscribe, state } = useSession();
-  const didSync = useRef(false);
+  const lastSent = useRef("");
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); } catch {}
   }, [entries]);
 
-  // Sync to bridge when connected — only auto terms cycle server-side
+  // Sync to bridge when connected — only auto terms cycle server-side.
+  // Single effect: send on [terms, entries-auto, status], dedupe per payload.
   useEffect(() => {
-    if (state.status !== "connected") return;
-    send({ type: "wishlist:update", terms } as unknown as never);
-    didSync.current = true;
-  }, [terms, state.status, send]);
-
-  // On reconnect, resync
-  useEffect(() => {
-    if (state.status === "connected" && !didSync.current && terms.length) {
-      send({ type: "wishlist:update", terms } as unknown as never);
-    }
-    if (state.status === "connected") didSync.current = false;
-  }, [state.status, terms, send]);
+    // Reset dedupe on disconnect so reconnect always resyncs (bridge may have lost memory).
+    if (state.status !== "connected") { lastSent.current = ""; return; }
+    const key = JSON.stringify({ terms, auto: entries.map((e) => `${e.term}=${e.auto ? 1 : 0}`) });
+    if (lastSent.current === key) return;
+    lastSent.current = key;
+    send({ type: "wishlist:update", terms, entries: entries.map((e) => ({ term: e.term, auto: e.auto })) } as unknown as never);
+  }, [terms, entries, state.status, send]);
 
   useEffect(() => {
     const unsub = subscribe((msg) => {
       const m = msg as unknown as { type: string; wishlistInterval?: number; event?: { type: string; wishlistInterval?: number } };
       if (m.type === "userinfo:event" && m.event?.type === "wishlist-interval" && typeof m.event.wishlistInterval === "number") {
         setIntervalSec(m.event.wishlistInterval);
+      } else if (m.type === "wishlist:interval" && typeof m.wishlistInterval === "number") {
+        setIntervalSec(m.wishlistInterval);
       }
     });
     return unsub;

@@ -126,7 +126,7 @@ export function UiSection() {
         <p className="font-body text-xs text-on-surface-variant">Choose which nav items appear in sidebar / bottom nav. Order below controls sidebar order.</p>
         <div className="mt-3 space-y-2">
           {(ui.modes_order || []).map((id, idx) => {
-            const label: Record<string, string> = { search: "Search", browse: "Browse", downloads: "Downloads", uploads: "Uploads", chat: "Chat Rooms", privateChat: "Private Chat", buddies: "Buddies", interests: "Interests", profile: "Profile" };
+            const label: Record<string, string> = { search: "Search", browse: "Browse", downloads: "Downloads", uploads: "Uploads", chat: "Chat Rooms", privateChat: "Private Chat", buddies: "Buddies", profile: "Profile" };
             const visible = ui.modes_visible?.[id] !== false;
             return (
               <div key={id} className="flex items-center justify-between rounded-lg bg-surface-container-lowest px-3 py-2 ghost-border">

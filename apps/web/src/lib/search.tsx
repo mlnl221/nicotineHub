@@ -20,6 +20,7 @@ import {
 } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
 import { DEMO_SEARCH_QUERIES, mockSearchRows } from "@/lib/demo/fixtures";
+import { parseWishlistTerm } from "@/lib/wishlist";
 
 export type SearchMode = "global" | "user" | "room" | "wishlist" | "buddies";
 
@@ -115,7 +116,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         reason: "max_results",
         rows,
         total: rows.length,
-        filters: { ...emptyFilters(), publicOnly: settings.searches.defilter.publicFiles ?? false },
+        filters: { ...emptyFilters(), publicOnly: settings.searches.defilter.publicFiles ?? true },
       };
     });
     setTabs(newTabs);
@@ -160,7 +161,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         let rows = (msg as { rows: SearchRow[] }).rows || [];
         // Respect searches.max_displayed_results (nicotine-plus parity) — cap before append
         const cap = settings.searches.max_displayed_results ?? 2500;
-        // Eager country fetch: trigger GetPeerAddress for responders to populate SearchRow.country via bridge cache + future peer-address country (porting-status country eager parity)
+        // Eager country fetch: trigger GetPeerAddress for responders to populate SearchRow.country via bridge cache
         if (rows.length) {
           const uniq = Array.from(new Set(rows.map((r) => r.user).filter(Boolean))).slice(0, 20);
           for (const u of uniq) {
@@ -172,9 +173,9 @@ export function SearchProvider({ children }: { children: ReactNode }) {
           const exists = prev.some((t) => t.id === searchId);
           if (isWishlist && !exists) {
             // Auto-create wishlist tab on interval hit (needs UI tab for wishlist:*)
-            const term = searchId.split(":")[1] || searchId;
+            const term = parseWishlistTerm(searchId);
             const capped = cap > 0 ? rows.slice(0, cap) : rows;
-            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [...capped], total: capped.length, filters: { ...emptyFilters(), publicOnly: settings.searches.defilter.publicFiles ?? false } };
+            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [...capped], total: capped.length, filters: { ...emptyFilters(), publicOnly: settings.searches.defilter.publicFiles ?? true } };
             setActiveId(searchId);
             return [...prev, wlTab];
           }
@@ -199,8 +200,8 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         if (isWishlist) {
           setTabs((prev) => {
             if (prev.some((t) => t.id === searchId)) return prev;
-            const term = searchId.split(":")[1] || searchId;
-            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [], total: 0, filters: { ...emptyFilters(), publicOnly: settings.searches.defilter.publicFiles ?? false } };
+            const term = parseWishlistTerm(searchId);
+            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [], total: 0, filters: { ...emptyFilters(), publicOnly: settings.searches.defilter.publicFiles ?? true } };
             setActiveId(searchId);
             return [...prev, wlTab];
           });

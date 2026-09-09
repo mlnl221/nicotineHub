@@ -1,7 +1,7 @@
 "use client";
 
 import type { BridgeInboundMessage, BridgeOutboundMessage } from "@/lib/protocol";
-import { DEMO_ROOMS, mockBrowseFolders, mockDiagnosticsEntries, mockDiagnosticsHealth, mockProfile, mockRecommendations, mockSearchRows, mockSessionStats, mockSimilarUsers, mockStats } from "./fixtures";
+import { DEMO_ROOMS, mockBrowseFolders, mockDiagnosticsEntries, mockDiagnosticsHealth, mockProfile, mockSearchRows, mockSessionStats, mockStats } from "./fixtures";
 
 export type DemoListener = (msg: BridgeOutboundMessage) => void;
 
@@ -166,7 +166,6 @@ export function handleDemoSend(
   if (msg.type === "userinfo") {
     const action = anyMsg.action as string;
     const username = anyMsg.username as string | undefined;
-    const item = anyMsg.item as string | undefined;
 
     const sendProfileBundle = (uname: string) => {
       const bundle = mockProfile(uname);
@@ -191,31 +190,6 @@ export function handleDemoSend(
       setTimeout(() => {
         emit(listeners, { type: "userinfo:event", event: { type: "peer-address", username, peerAddress: { ip: "203.0.113.42", port: 2234 } } });
       }, 300);
-      return true;
-    }
-    if (action === "recommendations" || action === "globalRecommendations") {
-      setTimeout(() => {
-        emit(listeners, { type: "userinfo:event", event: { type: "recommendations", recommendations: mockRecommendations() } });
-        emit(listeners, { type: "userinfo:event", event: { type: "global-recommendations", recommendations: mockRecommendations() } });
-        emit(listeners, { type: "userinfo:event", event: { type: "similar-users", similarUsers: mockSimilarUsers() } });
-      }, 300);
-      return true;
-    }
-    if (action === "similarUsers") {
-      setTimeout(() => emit(listeners, { type: "userinfo:event", event: { type: "similar-users", similarUsers: mockSimilarUsers() } }), 250);
-      return true;
-    }
-    if (action === "itemRecommendations" && item) {
-      setTimeout(() => emit(listeners, { type: "userinfo:event", event: { type: "item-recommendations", recommendations: mockRecommendations().slice(0, 4) } }), 300);
-      return true;
-    }
-    if (action === "itemSimilarUsers" && item) {
-      setTimeout(() => emit(listeners, { type: "userinfo:event", event: { type: "item-similar-users", similarUsers: mockSimilarUsers().slice(0, 3) } }), 300);
-      return true;
-    }
-    if (["addLike", "removeLike", "addHate", "removeHate"].includes(action)) {
-      // locally handled in interests.tsx, just refresh
-      setTimeout(() => emit(listeners, { type: "userinfo:event", event: { type: "recommendations", recommendations: mockRecommendations() } }), 200);
       return true;
     }
     if (action === "checkPrivileges") {

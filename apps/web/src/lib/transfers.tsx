@@ -219,10 +219,11 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
       } else if (msg.type === "transfer:queue") {
         setTransfers((prev) => prev.map((t) => (t.id === msg.id ? { ...t, queuePosition: msg.place, status: "Queued" as const } : t)));
       } else if (msg.type === "transfer:finished") {
+        const finishedUrl = (msg as { downloadUrl?: string }).downloadUrl;
         setTransfers((prev) =>
           prev.map((t) =>
             t.id === msg.id
-              ? { ...t, status: "Finished" as const, current: t.size, speed: 0, timeLeft: null, queuePosition: null }
+              ? { ...t, status: "Finished" as const, current: t.size, speed: 0, timeLeft: null, queuePosition: null, ...(finishedUrl ? { downloadUrl: finishedUrl } : null) }
               : t,
           ),
         );

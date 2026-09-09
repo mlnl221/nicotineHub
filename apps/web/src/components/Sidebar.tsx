@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useSession } from "@/lib/session";
 import { useTransfers } from "@/lib/transfers";
+import { useUnread, type UnreadKey } from "@/lib/unread";
 import { useConfig } from "@/lib/config/provider";
 import { useSidebarCollapsed } from "@/components/SidebarContext";
 import { AboutDialog } from "@/components/AboutDialog";
@@ -20,14 +21,22 @@ const NAV = [
   { icon: "account_circle", label: "User Profiles", href: "/profile", key: "profile" },
   { icon: "group", label: "Buddies", href: "/buddies", key: "buddies" },
   { icon: "groups", label: "Chat Rooms", href: "/chat", key: "chat" },
-  { icon: "interests", label: "Interests", href: "/interests", key: "interests" },
 ];
+
+const HREF_UNREAD: Record<string, UnreadKey> = {
+  "/downloads": "downloads",
+  "/private-chat": "privateChat",
+  "/browse": "browse",
+  "/profile": "profile",
+  "/chat": "chat",
+};
 
 export function Sidebar() {
   const { logout, state } = useSession();
   const pathname = usePathname();
   const { settings } = useConfig();
   const { downloads, uploads } = useTransfers();
+  const { unread } = useUnread();
   const { collapsed, toggle } = useSidebarCollapsed();
   const { t } = useI18n();
   const [mounted, setMounted] = useState(false);
@@ -117,11 +126,12 @@ export function Sidebar() {
       {/* Primary Search — single blue button (replaces old New Transfer + former Search nav) */}
       <Link
         href="/search"
-        className={`mt-6 flex items-center justify-center gap-2 rounded-xl bg-primary py-3 font-label text-xs font-semibold uppercase tracking-widest text-on-primary shadow-sm hover:bg-primary-container hover:text-on-primary-container transition-colors ${collapsed ? "px-0" : "px-4"}`}
+        className={`relative mt-6 flex items-center justify-center gap-2 rounded-xl bg-primary py-3 font-label text-xs font-semibold uppercase tracking-widest text-on-primary shadow-sm hover:bg-primary-container hover:text-on-primary-container transition-colors ${collapsed ? "px-0" : "px-4"}`}
         title="Search Files"
       >
         <span className="material-symbols-outlined text-[18px]">search</span>
         {!collapsed ? <span>{t("Search")}</span> : null}
+        {mounted && unread.search ? <span aria-hidden="true" className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-tertiary ring-2 ring-surface-container-low" /> : null}
       </Link>
 
       <ul className="mt-6 flex-1 space-y-1 overflow-y-auto overflow-x-hidden hide-scrollbar">
@@ -131,8 +141,10 @@ export function Sidebar() {
             item.label === "Downloads" && downloadsCount > 0 ? ` (${downloadsCount})`
             : item.label === "Uploads" && uploadsCount > 0 ? ` (${uploadsCount})`
             : "";
+          const dotKey = HREF_UNREAD[item.href];
+          const dot = mounted && dotKey ? unread[dotKey] : false;
           return (
-            <li key={item.label} className="active:scale-95 duration-150">
+            <li key={item.label} className="relative active:scale-95 duration-150">
               <Link
                 href={item.href}
                 title={collapsed ? `${item.label}${badge}` : undefined}
@@ -147,10 +159,15 @@ export function Sidebar() {
                   {item.icon}
                 </span>
                 {!collapsed ? (
-                  <span className="font-label text-xs uppercase tracking-widest truncate" suppressHydrationWarning>
-                    {t(item.label)}
-                    {badge}
-                  </span>
+                  <>
+                    <span className="font-label text-xs uppercase tracking-widest truncate" suppressHydrationWarning>
+                      {t(item.label)}
+                      {badge}
+                    </span>
+                    {dot ? <span aria-hidden="true" className="ml-auto h-2 w-2 shrink-0 rounded-full bg-primary" /> : null}
+                  </>
+                ) : dot ? (
+                  <span aria-hidden="true" className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-surface-container-low" />
                 ) : badge ? (
                   <span className="absolute -top-1 -right-1 min-w-[16px] h-4 rounded-full bg-tertiary px-1 text-[9px] leading-4 text-center text-on-tertiary font-bold md:hidden">{badge.trim().replace(/[()]/g,"")}</span>
                 ) : null}

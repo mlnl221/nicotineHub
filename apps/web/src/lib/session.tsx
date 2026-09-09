@@ -358,8 +358,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             seedExplicitRef.current = false;
             sendLogin(ws, seed);
           } else {
+            // Server logged out: auto-login from stored creds only when the
+            // server allows auto-connect. Otherwise stay idle (login form).
             const creds = loadCreds();
-            if (creds?.username && creds?.password) {
+            let allowed = true;
+            try {
+              const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
+              if (raw && (JSON.parse(raw) as { server?: { auto_connect_startup?: boolean } })?.server?.auto_connect_startup === false) allowed = false;
+            } catch {}
+            if (allowed && creds?.username && creds?.password) {
               lastLogin.current = creds;
               shouldReconnect.current = true;
               sendLogin(ws, creds);
@@ -684,16 +691,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try {
       if (sessionStorage.getItem("__mockLoggedIn")) return;
     } catch {}
-    // Respect server.auto_connect_startup=false (settings-audit P0)
+    // Respect server.auto_connect_startup=false (settings-audit P0) for
+    // credentialed auto-login only. Singleton attach below needs no password
+    // and must still run — otherwise a logged-in server is unreachable after
+    // every reload when the flag is off.
+    let autoConnectAllowed = true;
     try {
       const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
       if (raw) {
         const parsed = JSON.parse(raw) as { server?: { auto_connect_startup?: boolean } };
-        if (parsed?.server?.auto_connect_startup === false) return;
+        if (parsed?.server?.auto_connect_startup === false) autoConnectAllowed = false;
       }
     } catch {}
     const creds = loadCreds();
-    if (creds?.username && creds?.password) {
+    if (creds?.username && creds?.password && autoConnectAllowed) {
       // Optimistic shell: skip the login screen straight to the app (e.g. /search
       // redirects on `connected`). ReconnectBanner covers `reconnecting`. The real
       // login:result below either confirms (reconnecting:false) or bounces to
@@ -705,9 +716,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       login(creds, { quiet: true });
       setState({ status: "connected", user: creds.username, error: undefined, reconnecting: true });
     } else {
-      // No stored creds on THIS client — still check the server singleton:
-      // another device may have logged in already (attach needs no password).
-      // connectSocket sends session:status first; idle stays idle when logged out.
+      // No usable stored creds, or auto-connect disabled: still check the
+      // server singleton — another device may be logged in already (attach
+      // needs no password). connectSocket sends session:status first; idle
+      // stays idle when the server is logged out.
       shouldReconnect.current = true;
       connectSocket(null);
     }

@@ -74,7 +74,8 @@ const SearchRoomSchema = z.object({
 });
 const SearchWishlistSchema = z.object({
   type: z.literal("search:wishlist"),
-  searchId: z.string().min(1).max(64),
+  // Wishlist ids embed `wishlist:<ts>:<term>` so long terms can exceed 64 — WS-local key, no protocol limit.
+  searchId: z.string().min(1).max(320),
   query: z.string().min(1).max(255),
 });
 const SearchBuddiesSchema = z.object({
@@ -97,8 +98,11 @@ const BrowsePageSchema = z.object({
   type: z.literal("browse:page"),
   username: z.string().min(1).max(64),
   offset: z.number().int().min(0).max(100000),
-  limit: z.number().int().min(1).max(200),
+  limit: z.number().int().min(1).max(1000),
 });
+// Internal web<->bridge paging only — the peer always sends one full zlib blob
+// (SharedFileListRequest code 4, empty payload), so page size is wire-invisible.
+const BROWSE_PAGE_SIZE = 1000;
 const PingSchema = z.object({
   type: z.literal("ping"),
   ts: z.number().optional(),
@@ -119,15 +123,6 @@ const UserInfoMessageSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("get"), username: z.string().min(1).max(64) }),
   z.object({ action: z.literal("interests"), username: z.string().min(1).max(64) }),
   z.object({ action: z.literal("peerAddress"), username: z.string().min(1).max(64) }),
-  z.object({ action: z.literal("recommendations") }),
-  z.object({ action: z.literal("globalRecommendations") }),
-  z.object({ action: z.literal("similarUsers") }),
-  z.object({ action: z.literal("itemRecommendations"), item: z.string().min(1).max(255) }),
-  z.object({ action: z.literal("itemSimilarUsers"), item: z.string().min(1).max(255) }),
-  z.object({ action: z.literal("addLike"), thing: z.string().min(1).max(255) }),
-  z.object({ action: z.literal("removeLike"), thing: z.string().min(1).max(255) }),
-  z.object({ action: z.literal("addHate"), thing: z.string().min(1).max(255) }),
-  z.object({ action: z.literal("removeHate"), thing: z.string().min(1).max(255) }),
   z.object({ action: z.literal("givePrivileges"), username: z.string().min(1).max(64), days: z.number().int().min(1).max(3650) }),
   z.object({ action: z.literal("setStatus"), status: z.number().int().min(0).max(2) }),
   z.object({ action: z.literal("setProfile"), profile: ProfileSchema }),
@@ -205,9 +200,14 @@ const BanControlSchema = z.object({
   username: z.string().min(1).max(64),
 });
 
+const WishlistEntrySchema = z.object({
+  term: z.string().min(1).max(255),
+  auto: z.boolean(),
+});
 const WishlistUpdateSchema = z.object({
   type: z.literal("wishlist:update"),
   terms: z.array(z.string().min(1).max(255)).max(100),
+  entries: z.array(WishlistEntrySchema).max(100).optional(),
 });
 
 const StatsRequestSchema = z.object({
@@ -268,7 +268,7 @@ try { mkdirSync(join(CONFIG_DIR, "logs", "private"), { recursive: true }); } cat
 // One-time migration: copy config files from old DATA_DIR to new CONFIG_DIR if CONFIG_DIR is separate and empty
 try {
   if (CONFIG_DIR !== DATA_DIR) {
-    const cfgFiles = ["listen_port", "host.env", "upnp_enabled", "worker.json", "shares.json", "browse.cache", "downloads.json", "transfers.json", "statistics.json", "plugins.json", "diagnostics.log", "settings.json"];
+    const cfgFiles = ["listen_port", "host.env", "upnp_enabled", "worker.json", "shares.json", "browse.cache", "downloads.json", "transfers.json", "statistics.json", "plugins.json", "diagnostics.log", "settings.json", "wishlist.json"];
     for (const f of cfgFiles) {
       const src = join(DATA_DIR, f);
       const dst = join(CONFIG_DIR, f);
@@ -431,7 +431,7 @@ function createSharedTransfers(): TransferManager {
   });
   tm.setSessionGetter(() => sharedSession as unknown as never);
   const pt = PERSISTED_SETTINGS?.transfers ?? {};
-  const keys = ["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "groupdownloads", "groupuploads", "incomplete_strategy", "download_destination_template", "download_subdirectory"];
+  const keys = ["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "download_path_depth", "groupdownloads", "groupuploads", "incomplete_strategy", "download_destination_template", "download_subdirectory"];
   const init: Record<string, unknown> = {};
   for (const k of keys) if (pt[k] !== undefined) init[k] = pt[k];
   if (pt["incompleteStrategy"] !== undefined) init["incomplete_strategy"] = pt["incompleteStrategy"];
@@ -453,10 +453,21 @@ function sharedSessionCallbacks() {
     onFileChunk: (token: number, chunk: Buffer) => {
       try { (sharedTransfers as unknown as { handleFileChunk: (t: number, c: Buffer) => void })?.handleFileChunk(token, chunk); } catch {}
     },
+    onFileClosed: (token: number) => {
+      try { (sharedTransfers as unknown as { handleFileClosed: (t: number) => void })?.handleFileClosed(token); } catch {}
+    },
+    onUploadPierce: (username: string, socket: unknown) => {
+      try { (sharedTransfers as unknown as { handleUploadPierced: (u: string, s: unknown) => Promise<void> })?.handleUploadPierced(username, socket as unknown as never); } catch {}
+    },
     getQueuePlace: (file: string) => {
       try { return (sharedTransfers as unknown as { getQueuePlace: (f: string) => number })?.getQueuePlace(file) ?? 1; } catch { return 1; }
     },
-    onUserEvent: (event: { type: string; username?: string; status?: unknown; stats?: unknown; peerAddress?: unknown }) => {
+    filterWishlistTerm: (t: string): string | null => {
+      const out = pluginManager.outgoingWishlistSearchEvent(t);
+      if (out === null) return null;
+      return (out?.[0] as string) ?? t;
+    },
+    onUserEvent: (event: { type: string; username?: string; status?: unknown; stats?: unknown; peerAddress?: unknown; wishlistInterval?: number }) => {
       if (event.type === "user-status" && event.status) {
         const st = event.status as { username: string; status: number; privileged: boolean };
         pluginManager.userStatusNotification(st.username, st.status, st.privileged);
@@ -470,6 +481,9 @@ function sharedSessionCallbacks() {
       }
       logger.debug("server", "user event", { type: event.type, username: event.username });
       broadcastJson({ type: "userinfo:event", event });
+      if (event.type === "wishlist-interval" && typeof event.wishlistInterval === "number") {
+        broadcastJson({ type: "wishlist:interval", wishlistInterval: event.wishlistInterval });
+      }
     },
     onChatEvent: (event: { type: string; room?: string; username?: string; message?: string }) => {
       if (event.type === "private-message" && event.username && event.message) {
@@ -527,8 +541,8 @@ function sharedSessionCallbacks() {
             out.push(f);
           }
           try { browseCache.set(event.username.toLowerCase(), { folders: out as unknown[], ts: Date.now() }); } catch {}
-          const page = out.slice(0, 200);
-          const hasMore = out.length > 200;
+          const page = out.slice(0, BROWSE_PAGE_SIZE);
+          const hasMore = out.length > BROWSE_PAGE_SIZE;
           const lockedCount = Array.isArray(event.lockedFolders) ? event.lockedFolders.length : 0;
           // Stash the full result on every attached client so browse:page works per client.
           // NB: browse:page reads ws.data — stash there, not on the wrapper object.
@@ -560,7 +574,7 @@ function sharedSessionCallbacks() {
         broadcastJson({ type: "search:start", searchId: event.searchId, token: event.token });
       }
     },
-    onTransferEvent: (event: { type: string; username?: string; file?: string; token?: number; place?: number; reason?: string }) => {
+    onTransferEvent: (event: { type: string; username?: string; file?: string; token?: number; place?: number; reason?: string; direction?: number; size?: number | bigint; allowed?: boolean }) => {
       if (event.type === "queue-upload" && event.username && event.file) pluginManager.uploadQueuedNotification(event.username, event.file);
       else if (event.type === "transfer-response" && event.username && event.file) {
         pluginManager.uploadStartedNotification(event.username, event.file);
@@ -571,18 +585,21 @@ function sharedSessionCallbacks() {
       if (!tm) return;
       try {
         if (event.type === "place-in-queue" && event.file && event.place !== undefined) {
-          (tm as unknown as { handlePlaceInQueueResponse: (f: string, p: number) => void }).handlePlaceInQueueResponse(event.file, event.place);
+          (tm as unknown as { handlePlaceInQueueResponse: (f: string, p: number, u?: string) => void }).handlePlaceInQueueResponse(event.file, event.place, event.username);
         } else if (event.type === "transfer-request" && event.file && event.token !== undefined) {
-          (tm as unknown as { handleTransferRequest: (d: number, t: number, f: string) => void }).handleTransferRequest(1, event.token, event.file);
-        } else if (event.type === "transfer-response" && event.reason) {
-          const f = event.file || "";
-          (tm as unknown as { handleUploadDenied: (f: string, r: string) => void }).handleUploadDenied(f, event.reason);
+          (tm as unknown as { handleTransferRequest: (d: number, t: number, f: string, u?: string, s?: number | bigint) => void }).handleTransferRequest(event.direction ?? 1, event.token, event.file, event.username, event.size);
+        } else if (event.type === "transfer-response" && event.token !== undefined && event.username) {
+          if (event.allowed) {
+            (tm as unknown as { handleUploadGranted: (u: string, t: number) => void }).handleUploadGranted(event.username, event.token);
+          } else {
+            (tm as unknown as { handleUploadRejected: (u: string, t: number, r: string) => void }).handleUploadRejected(event.username, event.token, event.reason || "Cancelled");
+          }
         } else if (event.type === "queue-upload" && event.file && event.username) {
           (tm as unknown as { handleQueueUpload: (u: string, f: string) => void }).handleQueueUpload(event.username, event.file);
         } else if (event.type === "upload-denied" && event.file) {
-          (tm as unknown as { handleUploadDenied: (f: string, r: string) => void }).handleUploadDenied(event.file, event.reason || "Cancelled");
+          (tm as unknown as { handleUploadDenied: (f: string, r: string, u?: string) => void }).handleUploadDenied(event.file, event.reason || "Cancelled", event.username);
         } else if (event.type === "upload-failed" && event.file) {
-          (tm as unknown as { handleUploadFailed: (f: string) => void }).handleUploadFailed(event.file);
+          (tm as unknown as { handleUploadFailed: (f: string, u?: string) => void }).handleUploadFailed(event.file, event.username);
         }
       } catch {}
     },
@@ -1118,6 +1135,20 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (!Number.isFinite(token)) return new Response("Not found", { status: 404, headers: secHeaders });
       // Auth gate — mirrors /ws when token enabled; never leak files without valid token
       { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
+      // Exact first: live transfer dest via manager (nested user dirs, migrated
+      // layouts). Flat downloads.json lookup below stays as fallback.
+      try {
+        const mgrPath = sharedTransfers?.getFilePathForToken(token);
+        if (mgrPath) {
+          const { existsSync: es } = require("node:fs") as typeof import("node:fs");
+          const { basename: bn, resolve: res } = require("node:path") as typeof import("node:path");
+          const r = res(mgrPath);
+          const root = sharedTransfers?.downloadsRoot?.() ?? res(join(DATA_DIR, "downloads"));
+          if (es(r) && (r === root || r.startsWith(root + "/"))) {
+            return serveFileWithRanges(r, req, cors, sanitizeFileNameForHeader(bn(r)));
+          }
+        }
+      } catch {}
       try {
         const { existsSync, readFileSync } = require("node:fs") as typeof import("node:fs");
         const { join, basename, resolve } = require("node:path") as typeof import("node:path");
@@ -1173,7 +1204,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
               } catch {}
               return null;
             };
-            const hit = scan(DATA_DIR, safeName, 2) || scan(DATA_DIR, sanitizeFileNameForHeader(fileName), 2);
+            const hit = scan(DATA_DIR, safeName, 4) || scan(DATA_DIR, sanitizeFileNameForHeader(fileName), 4);
             if (hit && existsSync(hit)) filePath = hit;
           } catch {}
         }
@@ -1597,8 +1628,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           if (isSelf) {
             try {
               const all = foldersForBrowse as unknown[];
-              const page = all.slice(0, 200);
-              const hasMore = all.length > 200;
+              const page = all.slice(0, BROWSE_PAGE_SIZE);
+              const hasMore = all.length > BROWSE_PAGE_SIZE;
               logger.info("browse", "local self-shares", { username: result.data.username, dirs: all.length });
               try { browseCache.set(result.data.username.toLowerCase(), { folders: all as unknown[], ts: Date.now() }); } catch {}
               (ws.data as unknown as Record<string, unknown>)._browseFull = all;
@@ -1727,7 +1758,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             if (key === "downloadfilters" || key === "enablefilters") {
               tm?.setConfig?.({ [key]: value });
             }
-            if (["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "groupdownloads", "groupuploads", "incomplete_strategy", "incompleteStrategy", "download_destination_template", "downloadDestinationTemplate", "download_subdirectory", "downloadSubdirectory"].includes(key)) {
+            if (["uploadslots", "useupslots", "uploadlimit", "uploadlimitalt", "use_upload_speed_limit", "downloadlimit", "downloadlimitalt", "use_download_speed_limit", "fifoqueue", "limitby", "queuelimit", "filelimit", "friendsnolimits", "preferfriends", "autoclear_downloads", "autoclear_uploads", "usernamesubfolders", "download_path_depth", "groupdownloads", "groupuploads", "incomplete_strategy", "incompleteStrategy", "download_destination_template", "downloadDestinationTemplate", "download_subdirectory", "downloadSubdirectory"].includes(key)) {
               const norm: Record<string, unknown> = {};
               if (key === "incompleteStrategy") norm["incomplete_strategy"] = value;
               else if (key === "downloadDestinationTemplate") norm["download_destination_template"] = value;
@@ -1957,9 +1988,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const result = WishlistUpdateSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid wishlist:update")); return; }
         const session = requireLogin(); if (!session) return;
-        (session as unknown as { setWishlistTerms?: (t: string[]) => void }).setWishlistTerms?.(result.data.terms);
-        logger.info("search", "wishlist terms updated", { count: result.data.terms.length });
-        ws.send(JSON.stringify({ type: "wishlist:updated", count: result.data.terms.length }));
+        const entries = result.data.entries?.length ? result.data.entries : undefined;
+        const terms = entries ? entries.map((e) => e.term) : result.data.terms;
+        (session as unknown as { setWishlistTerms?: (t: string[], e?: Array<{ term: string; auto: boolean }>) => void }).setWishlistTerms?.(terms, entries);
+        logger.info("search", "wishlist terms updated", { count: terms.length });
+        ws.send(JSON.stringify({ type: "wishlist:updated", count: terms.length }));
         return;
       }
 
@@ -2063,15 +2096,6 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             break;
           }
           case "interests": session.requestUserInterests(msg.username); break;
-          case "recommendations": session.requestRecommendations(); break;
-          case "globalRecommendations": session.requestGlobalRecommendations(); break;
-          case "similarUsers": session.requestSimilarUsers(); break;
-          case "itemRecommendations": session.requestItemRecommendations(msg.item); break;
-          case "itemSimilarUsers": session.requestItemSimilarUsers(msg.item); break;
-          case "addLike": session.addThingILike(msg.thing); break;
-          case "removeLike": session.removeThingILike(msg.thing); break;
-          case "addHate": session.addThingIHate(msg.thing); break;
-          case "removeHate": session.removeThingIHate(msg.thing); break;
           case "givePrivileges": session.givePrivileges(msg.username, msg.days); break;
           case "setStatus": session.setStatus(msg.status); break;
           case "checkPrivileges": session.checkPrivileges(); break;

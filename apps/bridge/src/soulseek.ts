@@ -51,12 +51,6 @@ export const SERVER_MESSAGE_CODES = {
   uploadSlotsFull: 40,
   relogged: 41,
   userSearch: 42,
-  similarRecommendations: 50,
-  addThingILike: 51,
-  removeThingILike: 52,
-  recommendations: 54,
-  myRecommendations: 55,
-  globalRecommendations: 56,
   userInterests: 57,
   adminCommand: 58,
   placeInLineRequest: 59,
@@ -84,15 +78,10 @@ export const SERVER_MESSAGE_CODES = {
   possibleParents: 102,
   wishlistSearch: 103,
   wishlistInterval: 104,
-  similarUsers: 110,
-  itemRecommendations: 111,
-  itemSimilarUsers: 112,
   roomTickers: 113,
   roomTickerAdded: 114,
   roomTickerRemoved: 115,
   setRoomTicker: 116,
-  addThingIHate: 117,
-  removeThingIHate: 118,
   roomSearch: 120,
   sendUploadSpeed: 121,
   userPrivileged: 122,
@@ -122,7 +111,7 @@ export const SERVER_MESSAGE_CODES = {
   joinGlobalRoom: 150,
   leaveGlobalRoom: 151,
   globalRoomMessage: 152,
-  relatedSearch: 153, // intentionally not implemented — low-value spell-correct, no handler (see docs/porting-status.md)
+  relatedSearch: 153, // intentionally not implemented — low-value spell-correct, no handler
   excludedSearchPhrases: 160,
   cantConnectToPeer: 1001,
   cantCreateRoom: 1003,
@@ -419,8 +408,8 @@ export function tryParseMessage(buffer: Buffer, maxLen: number = MAX_INCOMING.se
 /** Per-connection max incoming — nicotine parity: 448M shares, 16M search, 1M generic, 16K distrib */
 export function maxIncomingForPeer(code: number): number {
   // Peer shares are huge (448M)
-  if (code === PEER_MESSAGE_CODES.sharedFileListResponse || code === PEER_MESSAGE_CODES.folderContentsResponse) return MAX_INCOMING.server448M;
-  if (code === PEER_MESSAGE_CODES.fileSearchResponse) return MAX_INCOMING.server16M;
+  if (code === PEER_MESSAGE_CODES.sharedFileListResponse || code === PEER_MESSAGE_CODES.userInfoResponse) return MAX_INCOMING.server448M;
+  if (code === PEER_MESSAGE_CODES.fileSearchResponse || code === PEER_MESSAGE_CODES.folderContentsResponse) return MAX_INCOMING.server16M;
   return MAX_INCOMING.server1M;
 }
 export function frameInitMessage(code: number, payload: Buffer): Buffer {
@@ -467,10 +456,6 @@ export function buildSetStatus(status: number): Buffer { return frameMessage(SER
 export function buildSharedFoldersFiles(dirs: number, files: number): Buffer {
   return frameMessage(SERVER_MESSAGE_CODES.sharedFoldersFiles, Buffer.concat([packUint32(dirs), packUint32(files)]));
 }
-export function buildAddThingILike(thing: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.addThingILike, packString(thing)); }
-export function buildRemoveThingILike(thing: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.removeThingILike, packString(thing)); }
-export function buildAddThingIHate(thing: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.addThingIHate, packString(thing)); }
-export function buildRemoveThingIHate(thing: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.removeThingIHate, packString(thing)); }
 export function buildGivePrivileges(username: string, days: number): Buffer {
   return frameMessage(SERVER_MESSAGE_CODES.givePrivileges, Buffer.concat([packString(username), packUint32(days)]));
 }
@@ -516,9 +501,6 @@ export function buildCancelRoomMembership(room: string): Buffer { return frameMe
 export function buildCancelRoomOwnership(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.cancelRoomOwnership, packString(room)); }
 export function buildAddRoomOperator(room: string, username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.addRoomOperator, Buffer.concat([packString(room), packString(username)])); }
 export function buildRemoveRoomOperator(room: string, username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.removeRoomOperator, Buffer.concat([packString(room), packString(username)])); }
-export function buildRecommendationsEmpty(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.recommendations, Buffer.alloc(0)); }
-export function buildGlobalRecommendationsEmpty(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.globalRecommendations, Buffer.alloc(0)); }
-export function buildSimilarUsersEmpty(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.similarUsers, Buffer.alloc(0)); }
 export function buildHaveNoParent(): Buffer { return frameMessage(SERVER_MESSAGE_CODES.haveNoParent, packBool(true)); }
 export function buildBranchLevel(level: number): Buffer { return frameMessage(SERVER_MESSAGE_CODES.branchLevel, packUint32(level >>> 0)); }
 export function buildBranchRoot(root: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.branchRoot, packString(root)); }
@@ -546,7 +528,9 @@ export function buildTransferRequest(direction: number, token: number, file: str
 }
 export function buildTransferResponse(token: number, allowed: boolean, sizeOrReason?: number | bigint | string): Buffer {
   const parts: Buffer[] = [packUint32(token >>> 0), packBool(allowed)];
-  if (allowed && typeof sizeOrReason !== "string") parts.push(packUint64((sizeOrReason as number | bigint) ?? 0));
+  // nicotine-plus parity: allowed reply carries no filesize unless explicitly
+  // given (extra u64 made some uploaders abort with UploadFailed).
+  if (allowed && (typeof sizeOrReason === "number" || typeof sizeOrReason === "bigint")) parts.push(packUint64(sizeOrReason));
   else if (!allowed && typeof sizeOrReason === "string") parts.push(packString(sizeOrReason));
   return frameMessage(PEER_MESSAGE_CODES.transferResponse, Buffer.concat(parts));
 }
@@ -763,30 +747,6 @@ export function parseUserInterests(payload: Buffer): UserInterestsMessage {
   const nHates = r.uint32(); for (let i = 0; i < nHates; i++) hates.push(r.string());
   return { username, likes, hates };
 }
-export interface Recommendation { thing: string; rating: number; }
-export function parseRecommendations(payload: Buffer): { recommendations: Recommendation[]; unrecommendations: Recommendation[] } {
-  const r = new SlskReader(payload);
-  const recommendations: Recommendation[] = []; const unrecommendations: Recommendation[] = [];
-  const nRecs = r.uint32(); for (let i = 0; i < nRecs; i++) { const thing = r.string(); const rating = r.int32(); recommendations.push({ thing, rating }); }
-  const nUnrecs = r.uint32(); for (let i = 0; i < nUnrecs; i++) { const thing = r.string(); const rating = r.int32(); unrecommendations.push({ thing, rating }); }
-  return { recommendations, unrecommendations };
-}
-export interface SimilarUser { username: string; rating: number; }
-export function parseSimilarUsers(payload: Buffer): SimilarUser[] {
-  const r = new SlskReader(payload); const count = r.uint32(); const users: SimilarUser[] = [];
-  for (let i = 0; i < count; i++) { const username = r.string(); const rating = r.uint32(); users.push({ username, rating }); }
-  return users;
-}
-export function parseItemRecommendations(payload: Buffer): { thing: string; recommendations: Recommendation[] } {
-  const r = new SlskReader(payload); const thing = r.string(); const recommendations: Recommendation[] = []; const n = r.uint32();
-  for (let i = 0; i < n; i++) { const recThing = r.string(); const rating = r.int32(); recommendations.push({ thing: recThing, rating }); }
-  return { thing, recommendations };
-}
-export function parseItemSimilarUsers(payload: Buffer): { thing: string; users: SimilarUser[] } {
-  const r = new SlskReader(payload); const thing = r.string(); const users: SimilarUser[] = []; const n = r.uint32();
-  for (let i = 0; i < n; i++) { const username = r.string(); const rating = r.uint32(); users.push({ username, rating }); }
-  return { thing, users };
-}
 export interface PeerAddress { username: string; ip: string; port: number; obfuscationType?: number; obfuscatedPort?: number; }
 export function parsePeerAddress(payload: Buffer): PeerAddress {
   const r = new SlskReader(payload);
@@ -995,7 +955,7 @@ export function parseSharedFileListResponse(payload: Buffer): { folders: BrowseF
   const ndirs = r.uint32();
   const folders: BrowseFolderEntry[] = [];
   for (let i = 0; i < ndirs; i++) {
-    const dirName = r.string();
+    const dirName = r.string().replace(/\//g, "\\");
     const nfiles = r.uint32();
     const files: BrowseFileEntry[] = [];
     for (let j = 0; j < nfiles; j++) files.push(parseBrowseFile(r));
@@ -1010,7 +970,7 @@ export function parseSharedFileListResponse(payload: Buffer): { folders: BrowseF
       if (r.remaining >= 4) {
         const npriv = r.uint32();
         for (let i = 0; i < npriv; i++) {
-          const dirName = r.string();
+          const dirName = r.string().replace(/\//g, "\\");
           const nfiles = r.uint32();
           const files: BrowseFileEntry[] = [];
           for (let j = 0; j < nfiles; j++) files.push(parseBrowseFile(r));

@@ -44,7 +44,25 @@ export async function workerFetch(path: string, init?: RequestInit): Promise<Res
   });
 }
 
-export interface ScrapeResult {
+export interface ScrapeTrack {
+  pos: string;
+  title: string;
+  artist: string;
+  duration: string;
+}
+
+export interface ScrapeMeta {
+  catalog_no?: string;
+  country?: string;
+  label?: string;
+  genre?: string[];
+  style?: string[];
+  media_type?: string;
+  release_id?: string | number;
+  cover_url?: string;
+}
+
+export interface ScrapeResult extends ScrapeMeta {
   artist: string;
   album: string;
   year: number | string | null;
@@ -53,6 +71,7 @@ export interface ScrapeResult {
   source: string;
   confidence: number;
   url: string;
+  tracklist?: ScrapeTrack[] | null;
 }
 
 export async function scrapeRelease(url: string): Promise<ScrapeResult> {
@@ -130,7 +149,7 @@ export async function writeTags(fileName: string, tags: Record<string, string | 
   return body as TagReadResult;
 }
 
-export interface TagScrapeResult {
+export interface TagScrapeResult extends ScrapeMeta {
   artist: string;
   album: string;
   year: number | string | null;
@@ -140,24 +159,40 @@ export interface TagScrapeResult {
   url: string;
   suggested: Record<string, string>;
   applied: boolean;
+  tracklist?: ScrapeTrack[] | null;
   tags?: Record<string, string>;
   info?: Record<string, unknown>;
   newPath?: string;
   rename?: { renamed?: boolean; skipped?: boolean; reason?: string; newPath?: string; suffixed?: boolean };
 }
 
-export async function scrapeTags(fileName: string, url: string, apply = false, rename?: { enabled: boolean; template: string }): Promise<TagScrapeResult> {
+export async function scrapeTags(fileName: string, url: string, apply = false, rename?: { enabled: boolean; template: string }, trackIndex?: number): Promise<TagScrapeResult> {
   if (process.env.NEXT_PUBLIC_DEMO === "true") {
     const backend = await import("@/lib/demo/workerBackend");
-    const r = backend.demoScrapeTags(fileName, url, apply);
+    const r = backend.demoScrapeTags(fileName, url, apply, trackIndex);
     if (r) return r;
   }
   const payload: Record<string, unknown> = { fileName, url, apply };
   if (rename) { payload.renameEnabled = rename.enabled; payload.renameTemplate = rename.template; }
+  if (trackIndex !== undefined) payload.trackIndex = trackIndex;
   const res = await workerFetch("/tag/scrape", { method: "POST", body: JSON.stringify(payload) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Scrape failed (${res.status})`);
   return body as TagScrapeResult;
+}
+
+export async function coverArt(fileName: string, url: string, opts?: { embed?: boolean; saveFile?: boolean }): Promise<{ embedded: boolean; folderJpg: boolean; size?: number }> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    const backend = await import("@/lib/demo/workerBackend") as unknown as { demoCoverArt?: (fileName: string, url: string, opts?: { embed?: boolean; saveFile?: boolean }) => { embedded: boolean; folderJpg: boolean; size?: number } | null | undefined | Promise<{ embedded: boolean; folderJpg: boolean; size?: number } | null | undefined> };
+    if (backend.demoCoverArt) {
+      const r = await backend.demoCoverArt(fileName, url, opts);
+      if (r) return r;
+    }
+  }
+  const res = await workerFetch("/tag/cover", { method: "POST", body: JSON.stringify({ fileName, url, embed: opts?.embed ?? true, saveFile: opts?.saveFile ?? true }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { detail?: string }).detail || `Cover failed (${res.status})`);
+  return body as { embedded: boolean; folderJpg: boolean; size?: number };
 }
 
 export async function bulkReadTags(files: string[]): Promise<{ results: Array<{ fileName: string; tags?: Record<string, string>; info?: Record<string, unknown>; coverArtApplied?: boolean; error?: string }> }> {
@@ -245,6 +280,16 @@ export async function renameFile(fileName: string, newName: string): Promise<{ o
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { detail?: string }).detail || `Rename failed (${res.status})`);
   return body as { ok: boolean; newPath: string; fileName: string; suffixed: boolean };
+}
+
+export async function renamePreview(files: string[], template: string): Promise<{ results: Array<{ file: string; newName: string | null; skipped?: string; suffixed?: boolean }> }> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    return { results: [] };
+  }
+  const res = await workerFetch("/tag/rename-preview", { method: "POST", body: JSON.stringify({ files, template }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { detail?: string }).detail || `Rename preview failed (${res.status})`);
+  return body as { results: Array<{ file: string; newName: string | null; skipped?: string; suffixed?: boolean }> };
 }
 
 export async function getMediainfo(fileName: string): Promise<MediainfoResult> {

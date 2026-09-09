@@ -565,7 +565,6 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
               <button onClick={() => router.push("/settings?tab=user-profile")} className="rounded-xl bg-surface-container-high px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest text-primary hover:bg-surface-container dark:text-primary dark:hover:bg-surface-variant">Edit Profile</button>
             )}
             <button onClick={() => refresh(tab.id)} className="rounded-xl bg-surface-container-high px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant hover:bg-surface-container dark:text-outline">Refresh</button>
-            <button onClick={() => router.push(`/interests`)} className="rounded-xl bg-surface-container-high px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest text-primary hover:bg-surface-container dark:text-primary dark:hover:bg-surface-variant">Similar Users</button>
           </div>
           {giftOpen ? (
             <div className="mt-6 rounded-xl bg-surface-container-high p-4">

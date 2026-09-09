@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useBrowseTabs } from "@/lib/browse-tabs";
 import type { BrowseTab } from "@/lib/browse-tabs";
@@ -9,10 +9,53 @@ import { isDemo } from "@/lib/demo";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { browseFolderMenu, browseFileMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
-import { useBulkSelection } from "@/lib/bulkSelection";
+import { useBulkSelection, useMarqueeSelection } from "@/lib/bulkSelection";
 import { usePaneWidth } from "@/lib/usePaneWidth";
 
 const PAGE_SIZE = 50;
+
+// Memoized folder row — prevents all 9k rows re-rendering on select/expand.
+// contentVisibility skips offscreen layout (browser-native virtualization).
+const FolderRow = memo(function FolderRow({ name, short, depth, hasChildren, isExpanded, isSelected, statsLine, onToggle, onSelect, onMenu }: {
+  name: string; short: string; depth: number; hasChildren: boolean; isExpanded: boolean; isSelected: boolean; statsLine: string;
+  onToggle: () => void; onSelect: () => void; onMenu: (x: number, y: number) => void;
+}) {
+  return (
+    <div
+      title={name}
+      role="treeitem"
+      data-folder-row={name}
+      aria-selected={isSelected}
+      aria-expanded={hasChildren ? isExpanded : undefined}
+      className={`flex w-full min-w-max items-center gap-1 rounded-lg text-left transition-colors ${isSelected ? "bg-primary-fixed/20 text-primary border border-primary/10" : "hover:bg-surface-container-low text-on-surface-variant"}`}
+      style={{ paddingLeft: `${8 + depth * 16}px`, paddingRight: "8px", paddingTop: "6px", paddingBottom: "6px", contentVisibility: "auto", containIntrinsicSize: "auto 57px" }}
+    >
+      {hasChildren ? (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onToggle(); }}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full hover:bg-surface-container-high"
+          aria-label={isExpanded ? "Collapse" : "Expand"}
+        >
+          <span className="material-symbols-outlined text-[18px]">{isExpanded ? "expand_more" : "chevron_right"}</span>
+        </button>
+      ) : (
+        <span className="w-7 shrink-0" aria-hidden />
+      )}
+      <button
+        onClick={onSelect}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onMenu(e.clientX, e.clientY); }}
+        className="flex flex-1 items-center gap-3 min-w-0 text-left"
+      >
+        <span className="material-symbols-outlined text-[20px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>{hasChildren ? (isExpanded ? "folder_open" : "folder") : "folder"}</span>
+        <div className="min-w-0 flex-1">
+          <p className="whitespace-nowrap font-body text-sm font-medium" title={name}>{short}</p>
+          <p className="truncate font-label text-[11px] text-on-surface-variant">{statsLine}</p>
+        </div>
+      </button>
+    </div>
+  );
+});
 
 function formatBytes(n: number): string {
   try {
@@ -33,15 +76,24 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const { setQuery, openFolder, retry } = useBrowseTabs();
   const { requestDownload } = useTransfers();
   const { settings } = useConfig();
-  const { username, loading, error, folders, currentFolder, currentFiles, query } = tab;
+  const { username, loading, error, folders, total, currentFolder, currentFiles, query } = tab;
 
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [fileQuery, setFileQuery] = useState("");
+  // Debounced folder search — typing must not re-filter 9k folders per keystroke.
+  const [folderInput, setFolderInput] = useState(query);
+  useEffect(() => { setFolderInput(query); }, [query, tab.id]);
+  useEffect(() => {
+    if (folderInput === query) return;
+    const t = setTimeout(() => setQuery(tab.id, folderInput), 200);
+    return () => clearTimeout(t);
+  }, [folderInput, query, tab.id, setQuery]);
   const [propsFile, setPropsFile] = useState<null | { name: string; size: number; ext: string; attrs: Array<[number, number]>; folder: string }>(null);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const bulk = useBulkSelection();
   const [selectMode, setSelectMode] = useState(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // auto-select first folder when folders load — respects userbrowse.expand_folders (nicotine parity)
   useEffect(() => {
@@ -70,13 +122,20 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
     return [...folders, ...extras].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
   }, [folders]);
 
+  // Lowercase index built once per folder batch — filter/sort never call toLowerCase in loops.
+  const folderIndex = useMemo(() => allFoldersWithParents.map((f) => ({
+    f,
+    nameLow: f.name.toLowerCase(),
+    fileLows: f.files.map((file) => file.name.toLowerCase()),
+  })), [allFoldersWithParents]);
+
   const filteredFolders = useMemo(() => {
     if (!query) return allFoldersWithParents;
     const q = query.toLowerCase();
-    const matches = allFoldersWithParents.filter((f) => f.name.toLowerCase().includes(q) || f.files.some((file) => file.name.toLowerCase().includes(q)));
-    const visible = new Set(matches.map((f) => f.name));
-    for (const m of matches) {
-      let cur = m.name;
+    const matches = folderIndex.filter((e) => e.nameLow.includes(q) || e.fileLows.some((n) => n.includes(q)));
+    const visible = new Set(matches.map((e) => e.f.name));
+    for (const e of matches) {
+      let cur = e.f.name;
       while (true) {
         const idx = cur.lastIndexOf("\\");
         if (idx < 0) break;
@@ -85,7 +144,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
       }
     }
     return allFoldersWithParents.filter((f) => visible.has(f.name));
-  }, [allFoldersWithParents, query]);
+  }, [allFoldersWithParents, folderIndex, query]);
 
   // reset selection when username changes (tab switch handled via new tab prop, but folders may change)
   // NB: match against allFoldersWithParents so selecting a synthetic parent isn't wiped
@@ -105,11 +164,21 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   }, [filteredFolders]);
 
   const folderMeta = useMemo(() => {
+    // Single pass: every folder registers its ancestors as "has children".
+    // Old code ran filteredFolders.some(startsWith) per folder = O(n²).
+    const parents = new Set<string>();
+    for (const f of filteredFolders) {
+      let cur = f.name;
+      while (true) {
+        const idx = cur.lastIndexOf("\\");
+        if (idx < 0) break;
+        cur = cur.slice(0, idx);
+        parents.add(cur);
+      }
+    }
     const map = new Map<string, { depth: number; hasChildren: boolean }>();
     for (const f of filteredFolders) {
-      const depth = f.name.split("\\").length - minDepth;
-      const hasChildren = filteredFolders.some((o) => o.name !== f.name && o.name.startsWith(f.name + "\\"));
-      map.set(f.name, { depth, hasChildren });
+      map.set(f.name, { depth: f.name.split("\\").length - minDepth, hasChildren: parents.has(f.name) });
     }
     return map;
   }, [filteredFolders, minDepth]);
@@ -140,13 +209,15 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   }, [tab.id]);
 
   const visibleTreeFolders = useMemo(() => {
+    // O(1) ancestor lookup via Set — old code ran filteredFolders.some per ancestor = O(n²).
+    const names = new Set(filteredFolders.map((f) => f.name));
     return filteredFolders.filter((f) => {
       const depth = folderMeta.get(f.name)?.depth ?? 0;
       if (depth === 0) return true;
       const parts = f.name.split("\\");
       for (let i = parts.length - 1; i > minDepth; i--) {
         const ancestor = parts.slice(0, i).join("\\");
-        if (filteredFolders.some((x) => x.name === ancestor) && !expandedPaths.has(ancestor)) return false;
+        if (names.has(ancestor) && !expandedPaths.has(ancestor)) return false;
       }
       return true;
     });
@@ -208,23 +279,36 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
     try { localStorage.setItem("nicotineHub.browse.sort", JSON.stringify({ key: sortKey, dir: sortDir })); } catch {}
   }, [sortKey, sortDir]);
 
+  // Audio attrs parsed once per file list — old code built new Map per compare (O(n log n) allocs).
+  const fileAttrCache = useMemo(() => {
+    const m = new Map<string, { br: number; len: number; low: string }>();
+    for (const f of visibleFiles) {
+      let br = 0, len = 0;
+      for (const [k, v] of f.attrs) { if (k === 0) br = v; else if (k === 1) len = v; }
+      m.set(f.name, { br, len, low: f.name.toLowerCase() });
+    }
+    return m;
+  }, [visibleFiles]);
+
   const sortedFiles = useMemo(() => {
     const arr = [...visibleFiles];
     arr.sort((a, b) => {
       let va: number | string = 0, vb: number | string = 0;
-      if (sortKey === "name") { va = a.name.toLowerCase(); vb = b.name.toLowerCase(); }
+      if (sortKey === "name") { va = fileAttrCache.get(a.name)?.low ?? ""; vb = fileAttrCache.get(b.name)?.low ?? ""; }
       else if (sortKey === "size") { va = a.size; vb = b.size; }
-      else if (sortKey === "bitrate") { va = new Map(a.attrs).get(0) || 0; vb = new Map(b.attrs).get(0) || 0; }
-      else if (sortKey === "length") { va = new Map(a.attrs).get(1) || 0; vb = new Map(b.attrs).get(1) || 0; }
+      else if (sortKey === "bitrate") { va = fileAttrCache.get(a.name)?.br ?? 0; vb = fileAttrCache.get(b.name)?.br ?? 0; }
+      else if (sortKey === "length") { va = fileAttrCache.get(a.name)?.len ?? 0; vb = fileAttrCache.get(b.name)?.len ?? 0; }
       if (va < vb) return sortDir === "asc" ? -1 : 1;
       if (va > vb) return sortDir === "asc" ? 1 : -1;
       return 0;
     });
     return arr;
-  }, [visibleFiles, sortKey, sortDir]);
+  }, [visibleFiles, fileAttrCache, sortKey, sortDir]);
 
   const pagedFolders = useMemo(() => visibleTreeFolders.slice(0, visibleFolderCount), [visibleTreeFolders, visibleFolderCount]);
   const pagedFiles = useMemo(() => sortedFiles.slice(0, visibleFileCount), [sortedFiles, visibleFileCount]);
+  const pagedFileIds = useMemo(() => pagedFiles.map((f) => f.name), [pagedFiles]);
+  const marquee = useMarqueeSelection(bulk.setSelection);
 
   // Keyboard tree nav: Up/Down move, Right expand/child, Left collapse/parent, Enter opens
   const folderListRef = useRef<HTMLDivElement | null>(null);
@@ -301,6 +385,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   };
   const downloadSelected = () => {
     if (isDemo || !bulk.selected.size) return;
+    if (bulk.selected.size > 1 && !window.confirm(`Download ${bulk.selected.size} selected files?`)) return;
     const filesByPath = new Map<string, typeof visibleFiles[0]>();
     for (const f of folders) for (const file of f.files) filesByPath.set(file.name, file);
     let i = 0;
@@ -313,8 +398,20 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
     }
   };
 
-  const totalSize = folders.reduce((acc, f) => acc + f.files.reduce((a, file) => a + (file.size || 0), 0), 0);
-  const totalFiles = folders.reduce((acc, f) => acc + f.files.length, 0);
+  // Header totals memoized — old code re-reduced all files every render.
+  const { totalSize, totalFiles } = useMemo(() => {
+    let size = 0, count = 0;
+    for (const f of folders) {
+      count += f.files.length;
+      for (const file of f.files) size += file.size || 0;
+    }
+    return { totalSize: size, totalFiles: count };
+  }, [folders]);
+
+  // Loading progress: folders.length vs authoritative total from bridge.
+  const loadProgress = loading && total && total > 0
+    ? Math.min(1, folders.length / total)
+    : null;
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
@@ -337,10 +434,17 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
         <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-end md:justify-between max-w-full overflow-hidden">
           <div className="min-w-0">
             <h1 className="font-headline text-2xl font-bold tracking-tight truncate max-w-full">{username}&apos;s Shares</h1>
-            <p className="mt-1 font-body text-xs text-on-surface-variant">
-              {loading ? "Loading…" : `${folders.length} folders • ${totalFiles} files • ${formatBytes(totalSize)}`}
+            <p className="mt-1 font-body text-xs text-on-surface-variant" aria-live="polite">
+              {loading
+                ? (total ? `Loading ${folders.length.toLocaleString()} / ${total.toLocaleString()} folders…` : folders.length ? `Loading ${folders.length.toLocaleString()} folders…` : "Loading…")
+                : `${folders.length} folders • ${totalFiles} files • ${formatBytes(totalSize)}`}
               {error ? ` • ${error}` : ""}
             </p>
+            {loadProgress !== null ? (
+              <div className="mt-2 h-1.5 w-full max-w-md overflow-hidden rounded-full bg-surface-container-high" role="progressbar" aria-valuenow={Math.round(loadProgress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Loading shares">
+                <div className="h-full rounded-full bg-primary transition-[width] duration-200" style={{ width: `${Math.round(loadProgress * 100)}%` }} />
+              </div>
+            ) : null}
           </div>
           <div className="flex gap-2 min-w-0 flex-wrap">
             <button
@@ -382,8 +486,8 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
             <div className="relative flex-1">
               <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-outline">search</span>
               <input
-                value={query}
-                onChange={(e) => setQuery(tab.id, e.target.value)}
+                value={folderInput}
+                onChange={(e) => setFolderInput(e.target.value)}
                 placeholder="Search folders..."
                 className="w-full rounded-full bg-surface-container-low py-2 pl-9 pr-4 font-body text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
               />
@@ -411,9 +515,14 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
               <span className="material-symbols-outlined text-[20px]">unfold_less</span>
             </button>
           </div>
-          <div ref={folderListRef} tabIndex={0} role="tree" aria-label={`${username} folders`} aria-activedescendant={selectedFolder ? `browse-folder-${Math.max(0, visibleTreeFolders.findIndex((f) => f.name === selectedFolder))}` : undefined} onKeyDown={handleFolderKeyDown} className="flex-1 overflow-y-auto overflow-x-auto overscroll-contain min-h-0 p-2 space-y-1" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
+          <div ref={folderListRef} tabIndex={0} role="tree" aria-label={`${username} folders`} onKeyDown={handleFolderKeyDown} className="flex-1 overflow-y-auto overflow-x-auto overscroll-contain min-h-0 p-2 space-y-1" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
             {loading && folders.length === 0 ? (
-              <div className="space-y-2 p-2">
+              <div className="space-y-2 p-2" aria-live="polite" aria-busy="true">
+                <div className="flex items-center gap-3 px-2 py-1">
+                  <div className="h-6 w-6 animate-spin rounded-full border-2 border-transparent border-t-primary" style={{ animationDuration: "0.8s" }} />
+                  <span className="font-label text-xs uppercase tracking-widest text-on-surface-variant animate-pulse">Fetching shares from {username}…</span>
+                </div>
+                <div className="h-10 animate-pulse rounded-lg bg-surface-container-high" />
                 <div className="h-10 animate-pulse rounded-lg bg-surface-container-high" />
                 <div className="h-10 animate-pulse rounded-lg bg-surface-container-high" />
               </div>
@@ -421,62 +530,32 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
               <p className="p-4 font-body text-sm text-outline">No folders found.</p>
             ) : (
               <>
-                {pagedFolders.map((f, rowIdx) => {
+                {loading && total && total > folders.length ? (
+                  <p className="px-4 py-2 font-label text-xs text-on-surface-variant animate-pulse" aria-live="polite">
+                    Loading {folders.length.toLocaleString()} / {total.toLocaleString()} folders…
+                  </p>
+                ) : null}
+                {pagedFolders.map((f) => {
                   const meta = folderMeta.get(f.name);
                   const depth = meta?.depth ?? 0;
                   const hasChildren = meta?.hasChildren ?? false;
-                  const isExpanded = expandedPaths.has(f.name);
-                  const isSelected = selectedFolder === f.name;
-                    return (
-                      <div
+                  const s = folderStats.get(f.name);
+                  const statsLine = !s ? `${f.files.length} files` : s.folders > 0 ? `${s.files.toLocaleString()} files · ${s.folders} folders` : `${s.files} files`;
+                  const short = f.name.split("\\").pop() || f.name;
+                  return (
+                    <FolderRow
                       key={f.name}
-                      title={f.name}
-                      role="treeitem"
-                      id={`browse-folder-${rowIdx}`}
-                      data-folder-row={f.name}
-                      aria-selected={isSelected}
-                      aria-expanded={hasChildren ? isExpanded : undefined}
-                      className={`flex w-full min-w-max items-center gap-1 rounded-lg text-left transition-colors ${isSelected ? "bg-primary-fixed/20 text-primary border border-primary/10" : "hover:bg-surface-container-low text-on-surface-variant"}`}
-                      style={{ paddingLeft: `${8 + depth * 16}px`, paddingRight: '8px', paddingTop: '6px', paddingBottom: '6px' }}
-                    >
-                      {hasChildren ? (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setExpandedPaths((prev) => {
-                              const n = new Set(prev);
-                              if (n.has(f.name)) n.delete(f.name);
-                              else n.add(f.name);
-                              return n;
-                            });
-                          }}
-                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full hover:bg-surface-container-high"
-                          aria-label={isExpanded ? "Collapse" : "Expand"}
-                        >
-                          <span className="material-symbols-outlined text-[18px]">{isExpanded ? "expand_more" : "chevron_right"}</span>
-                        </button>
-                      ) : (
-                        <span className="w-7 shrink-0" aria-hidden />
-                      )}
-                      <button
-                        onClick={() => {
-                          setSelectedFolder(f.name);
-                          openFolder(tab.id, f.name);
-                        }}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          setMenuAnchor({ x: e.clientX, y: e.clientY, items: browseFolderMenu(username, f.name, false, { onDownloadFolder: downloadFolder }) });
-                        }}
-                        className="flex flex-1 items-center gap-3 min-w-0 text-left"
-                      >
-                        <span className="material-symbols-outlined text-[20px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>{hasChildren ? (isExpanded ? "folder_open" : "folder") : "folder"}</span>
-                        <div className="min-w-0 flex-1">
-                          <p className="whitespace-nowrap font-body text-sm font-medium" title={f.name}>{f.name.split("\\").pop() || f.name}</p>
-                          {(() => { const s = folderStats.get(f.name); if (!s) return <p className="truncate font-label text-[11px] text-on-surface-variant">{f.files.length} files</p>; const hasDesc = s.folders > 0; return <p className="truncate font-label text-[11px] text-on-surface-variant">{hasDesc ? `${s.files.toLocaleString()} files · ${s.folders} folders` : `${s.files} files`}</p>; })()}
-                        </div>
-                      </button>
-                    </div>
+                      name={f.name}
+                      short={short}
+                      depth={depth}
+                      hasChildren={hasChildren}
+                      isExpanded={expandedPaths.has(f.name)}
+                      isSelected={selectedFolder === f.name}
+                      statsLine={statsLine}
+                      onToggle={() => toggleFolder(f.name, !expandedPaths.has(f.name))}
+                      onSelect={() => { setSelectedFolder(f.name); openFolder(tab.id, f.name); }}
+                      onMenu={(x, y) => setMenuAnchor({ x, y, items: browseFolderMenu(username, f.name, false, { onDownloadFolder: downloadFolder }) })}
+                    />
                   );
                 })}
                 {visibleFolderCount < visibleTreeFolders.length ? (
@@ -517,20 +596,30 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
               }}
               className="w-full rounded-lg bg-surface-container-low px-3 py-2.5 min-h-11 font-body text-sm"
             >
-              {visibleTreeFolders.map((f) => {
+              {selectedFolder && !pagedFolders.some((f) => f.name === selectedFolder) ? (
+                <option key={selectedFolder} value={selectedFolder}>{selectedFolder.split("\\").pop() || selectedFolder}</option>
+              ) : null}
+              {pagedFolders.map((f) => {
                 const depth = folderMeta.get(f.name)?.depth ?? 0;
-                const prefix = depth > 0 ? `${"— ".repeat(depth)}` : "";
+                const prefix = depth > 0 ? `${"— ".repeat(Math.min(depth, 6))}` : "";
                 const short = f.name.split("\\").pop() || f.name;
-                return <option key={f.name} value={f.name}>{prefix}{short} ({f.files.length}) — {f.name}</option>;
+                return <option key={f.name} value={f.name}>{prefix}{short} ({f.files.length})</option>;
               })}
             </select>
+            {visibleTreeFolders.length > pagedFolders.length ? (
+              <p className="mt-1 font-label text-[11px] text-outline">Showing {pagedFolders.length} of {visibleTreeFolders.length} — use search to narrow.</p>
+            ) : null}
           </div>
 
           {loading && !activeFolder ? (
             <div className="flex flex-1 items-center justify-center p-10">
               <div className="text-center">
                 <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                <p className="mt-3 font-body text-sm text-on-surface-variant">Fetching shares from {username}…</p>
+                <p className="mt-3 font-body text-sm text-on-surface-variant">
+                  {total && total > folders.length
+                    ? `Fetching shares from ${username}… ${folders.length.toLocaleString()} / ${total.toLocaleString()}`
+                    : `Fetching shares from ${username}…`}
+                </p>
                 <p className="mt-1 font-label text-xs text-outline">This can take up to 30s if the peer is behind NAT.</p>
               </div>
             </div>
@@ -589,16 +678,16 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                 <div className="flex items-center gap-3 px-4 py-2 bg-surface-container-low border-b border-surface-container-highest/20">
                   <input
                     type="checkbox"
-                    checked={visibleFiles.length > 0 && visibleFiles.every((f) => bulk.has(f.name))}
-                    ref={(el) => { if (el) (el as HTMLInputElement).indeterminate = bulk.size > 0 && !visibleFiles.every((f) => bulk.has(f.name)) && visibleFiles.some((f) => bulk.has(f.name)); }}
+                    checked={pagedFiles.length > 0 && pagedFiles.every((f) => bulk.has(f.name))}
+                    ref={(el) => { if (el) (el as HTMLInputElement).indeterminate = bulk.size > 0 && !pagedFiles.every((f) => bulk.has(f.name)) && pagedFiles.some((f) => bulk.has(f.name)); }}
                     onChange={() => {
-                      const all = visibleFiles.every((f) => bulk.has(f.name)) ? bulk.clear() : bulk.selectAll(visibleFiles.map((f) => f.name));
+                      const all = pagedFiles.every((f) => bulk.has(f.name)) ? bulk.clear() : bulk.selectAll(pagedFiles.map((f) => f.name));
                       void all;
                     }}
                     className="h-4 w-4 shrink-0 accent-primary"
                     aria-label="Select all"
                   />
-                  <span className="font-label text-xs">Select all displayed ({visibleFiles.length})</span>
+                  <span className="font-label text-xs">Select all displayed ({pagedFiles.length})</span>
                   <span className="ml-auto font-label text-[11px] text-on-surface-variant">{bulk.size} selected</span>
                   <button onClick={() => bulk.clear()} className="rounded-full bg-surface-container-high px-3 py-1 text-[11px]">Clear</button>
                 </div>
@@ -617,19 +706,36 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                         const isEven = idx % 2 === 0;
                         const checked = bulk.has(file.name);
                         return (
-                          <li
-                            key={file.name}
-                            onContextMenu={(e) => {
-                              e.preventDefault();
-                              const shortName2 = file.name.split(/[\\\/]/).pop() || file.name;
+                           <li
+                             key={file.name}
+                             {...marquee(file.name)}
+                             onClick={(e) => {
+                               marquee(file.name).onClick(e);
+                               if (e.defaultPrevented) return;
+                               if ((e.target as HTMLElement).closest("button,input")) return;
+                               if (selectMode || e.ctrlKey || e.metaKey || e.shiftKey) {
+                                 e.preventDefault();
+                                  if (e.shiftKey) bulk.toggleRange(file.name, pagedFileIds);
+                                 else bulk.toggle(file.name);
+                               }
+                             }}
+                             onPointerDown={(e) => {
+                               if (e.pointerType === "touch") longPressTimer.current = setTimeout(() => { setSelectMode(true); bulk.toggle(file.name); navigator.vibrate?.(10); }, 500);
+                             }}
+                             onPointerUp={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+                             onPointerCancel={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+                             onContextMenu={(e) => {
+                               e.preventDefault();
+                               e.stopPropagation();
+                               const shortName2 = file.name.split(/[\\\/]/).pop() || file.name;
                               const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : `${activeFolder!.name}\\${shortName2}`;
                               setMenuAnchor({
                                 x: e.clientX, y: e.clientY,
                                 items: browseFileMenu(username, { path: vp, filename: shortName2 }, false, {
                                   onDownload: () => requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName2 }),
                                   onDownloadFolder: downloadFolder,
-                                  selectedCount: bulk.size,
-                                  onDownloadSelected: downloadSelected,
+                                   selectedCount: bulk.has(file.name) ? bulk.size : 1,
+                                   onDownloadSelected: downloadSelected,
                                 }),
                               });
                             }}
@@ -643,7 +749,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                                 onClick={(ev) => {
                                   ev.stopPropagation();
                                   // Shift+click range like FileExplorer — ev has shiftKey
-                                  if ((ev as unknown as { shiftKey?: boolean }).shiftKey) bulk.toggleRange(file.name, visibleFiles.map((f) => f.name));
+                                   if ((ev as unknown as { shiftKey?: boolean }).shiftKey) bulk.toggleRange(file.name, pagedFileIds);
                                 }}
                                 className="h-4 w-4 shrink-0 accent-primary"
                               />

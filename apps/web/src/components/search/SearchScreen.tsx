@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import { buildInitialFilters, useSearches, type SearchMode } from "@/lib/search";
 import { applyFilters } from "@/lib/filter";
+import { sortSearchRows, type SearchSortMode } from "@/lib/sort";
 import { useTransfers } from "@/lib/transfers";
 import { type FilterState, type SearchRow } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
@@ -13,12 +14,14 @@ import { WishlistManager } from "@/components/WishlistManager";
 import { SearchBar } from "./SearchBar";
 import { SearchTabs } from "./SearchTabs";
 import { FilterBar } from "./FilterBar";
-import { ResultsList } from "./ResultsList";
+import { ResultsList, searchRowId } from "./ResultsList";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { searchResultMenu, searchTabMenu } from "@/lib/context-menu/menus";
 import { useContextMenu } from "@/lib/context-menu/useContextMenu";
 import { useWishlist } from "@/lib/wishlist";
 import { humanLength, humanQuality, humanSize } from "@/lib/format";
+import { useBulkSelection } from "@/lib/bulkSelection";
+import { useFinePointer } from "@/lib/useFinePointer";
 
 export function SearchScreen() {
   const { activeTab, activeId, tabs, setActive, closeTab, startSearch, stopSearch, retrySearch, setFilters, clearFilters } = useSearches();
@@ -36,7 +39,7 @@ export function SearchScreen() {
   // Keep draft publicOnly in line with the persisted default (e.g. header
   // toggle on a tab); no-op when already equal so typing never re-renders.
   useEffect(() => {
-    const next = settings.searches.defilter.publicFiles ?? false;
+    const next = settings.searches.defilter.publicFiles ?? true;
     setDraft((d) => (d.publicOnly === next ? d : { ...d, publicOnly: next }));
   }, [settings.searches.defilter.publicFiles]);
   // Refs keep the async SearchBar scrape path (resolves after render) on the
@@ -64,11 +67,17 @@ export function SearchScreen() {
   const ctxMenu = useContextMenu();
   const [menuRow, setMenuRow] = useState<SearchRow | null>(null);
   const [propsRow, setPropsRow] = useState<SearchRow | null>(null);
+  const [manualSelect, setManualSelect] = useState<boolean | null>(null);
+  const bulk = useBulkSelection();
+  const autoSelect = useFinePointer();
+  const selectMode = manualSelect ?? autoSelect;
   const [tabMenuAnchor, setTabMenuAnchor] = useState<{ x: number; y: number; tab: import("@/lib/search").SearchTab } | null>(null);
 
   const deferredRows = useDeferredValue(activeTab?.rows ?? []);
+  useEffect(() => { bulk.clear(); setManualSelect(null); }, [activeId, bulk.clear]);
   const deferredFilters = useDeferredValue(activeTab?.filters ?? null);
   // ponytail: inline filtering — useDeferredValue already de-janks 500+ rows, no worker/comlink needed
+  const [sortMode, setSortMode] = useState<SearchSortMode>("best");
 
   const visibleRows = useMemo(
     () => {
@@ -81,21 +90,14 @@ export function SearchScreen() {
         const ignored = getIgnored(activeTab.query);
         if (ignored.size) rows = rows.filter((r) => !ignored.has(r.user));
       }
-      return rows;
+      return sortSearchRows(rows, sortMode);
     },
-    [activeTab, deferredRows, deferredFilters, getIgnored],
+    [activeTab, deferredRows, deferredFilters, getIgnored, sortMode],
   );
+  const visibleUsers = useMemo(() => [...new Set(visibleRows.map((r) => r.user))], [visibleRows]);
+  const visibleIds = useMemo(() => visibleRows.map(searchRowId), [visibleRows]);
+  const selectedRows = useMemo(() => visibleRows.filter((row) => bulk.has(searchRowId(row))), [visibleRows, bulk]);
   const isStale = activeTab ? deferredRows !== activeTab.rows || deferredFilters !== activeTab.filters : false;
-
-  // wishlist: mark visible users as seen when tab becomes active/read
-  useEffect(() => {
-    if (!activeTab || activeTab.mode !== "wishlist") return;
-    if (visibleRows.length === 0) return;
-    const users = [...new Set(visibleRows.map((r) => r.user))];
-    // debounce seen marking 1s after visible
-    const id = setTimeout(() => markSeen(activeTab.query, users), 1000);
-    return () => clearTimeout(id);
-  }, [activeTab?.id, visibleRows, markSeen]);
 
   const activeFilterCount = useMemo(() => {
     const f = activeTab?.filters ?? draft;
@@ -128,6 +130,59 @@ export function SearchScreen() {
       flash(url);
     }
   };
+
+  const downloadRow = (row: SearchRow) => {
+    if (isDemo) {
+      flash("Demo — downloads are disabled on Vercel.");
+      return;
+    }
+    requestDownload({ username: row.user, virtualPath: row.path, size: row.size, fileName: row.filename });
+    flash(`Queued "${row.filename}" — see Downloads`);
+  };
+
+  // Client fan-out: queue every visible result sharing the row's user+folder,
+  // staggered like BrowseView downloadFolder to avoid hammering the peer.
+  const downloadFolderFor = (row: SearchRow) => {
+    if (isDemo) {
+      flash("Demo — downloads are disabled on Vercel.");
+      return;
+    }
+    const matches = visibleRows.filter((r) => r.user === row.user && r.folder === row.folder);
+    if (matches.length === 0) {
+      flash("No files in this folder");
+      return;
+    }
+    matches.forEach((m, idx) => {
+      setTimeout(() => requestDownload({ username: m.user, virtualPath: m.path, size: m.size, fileName: m.filename }), idx * 150);
+    });
+    flash(`Queued ${matches.length} file${matches.length === 1 ? "" : "s"} from "${row.folder || "(root)"}"`);
+  };
+
+  const downloadSelected = () => {
+    if (isDemo || !selectedRows.length) return;
+    if (selectedRows.length > 1 && !window.confirm(`Download ${selectedRows.length} selected files?`)) return;
+    selectedRows.forEach((row, idx) => setTimeout(() => requestDownload({ username: row.user, virtualPath: row.path, size: row.size, fileName: row.filename }), idx * 150));
+    flash(`Queued ${selectedRows.length} selected file${selectedRows.length === 1 ? "" : "s"}`);
+  };
+
+  const downloadSelectedFolders = () => {
+    const folders = new Map<string, SearchRow>();
+    for (const row of selectedRows) folders.set(`${row.user}:${row.folder}`, row);
+    if (selectedRows.length > 1 && !window.confirm(`Download ${selectedRows.length} selected files from ${folders.size} folder${folders.size === 1 ? "" : "s"}?`)) return;
+    for (const row of folders.values()) downloadFolderFor(row);
+  };
+
+  const searchForFile = (row: SearchRow) => {
+    const base = row.filename.replace(/\.[^.]+$/, "");
+    const ignored = new Set(["mp3", "flac", "wav", "ogg", "m4a", "aac", "opus", "mp4", "mkv", "avi", "vbr", "cbr", "kbps", "x264", "x265", "bluray", "web-dl"]);
+    const query = base.split(/[\s_.()[\]{}-]+/).map((token) => token.trim()).filter((token) => token && !ignored.has(token.toLowerCase()) && !/^\d{1,4}$/.test(token)).join(" ").trim() || base;
+    startSearch(query);
+    flash(`Searching for "${query}"`);
+  };
+
+  const toggleSelected = (row: SearchRow) => bulk.toggle(searchRowId(row));
+  const rangeSelected = (row: SearchRow) => bulk.toggleRange(searchRowId(row), visibleIds);
+  const longPressSelected = (row: SearchRow) => { setManualSelect(true); bulk.toggle(searchRowId(row)); };
 
   const searchSubtitle = activeTab
     ? `${visibleRows.length} of ${activeTab.total} results${activeTab.status === "searching" ? " · searching…" : ""}${activeTab.mode !== "global" ? ` · ${activeTab.mode}${activeTab.target ? `:${activeTab.target}` : ""}` : ""} • ${tabs.length} tabs`
@@ -184,6 +239,29 @@ export function SearchScreen() {
           <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
+              aria-pressed={selectMode}
+              title={selectMode ? "Exit selection — row tap opens details" : "Select rows — row tap toggles selection"}
+              onClick={() => { if (selectMode) bulk.clear(); setManualSelect((v) => !(v ?? autoSelect)); }}
+              className={`rounded-full min-h-11 px-3 py-2 text-xs font-semibold outline-none ${
+                selectMode
+                  ? "bg-primary text-on-primary"
+                  : "bg-surface-container-high text-on-surface-variant"
+              }`}
+            >
+              {selectMode ? `Selecting (${bulk.size}/50)` : "Select"}
+            </button>
+            {activeTab.mode === "wishlist" && visibleRows.length > 0 ? (
+              <button
+                type="button"
+                title="Mark visible users as seen"
+                onClick={() => markSeen(activeTab.query, visibleUsers)}
+                className="min-h-11 rounded-full bg-surface-container-high px-3 py-2 text-xs font-semibold text-on-surface-variant outline-none active:bg-surface-container-highest"
+              >
+                Dismiss new ({visibleRows.length})
+              </button>
+            ) : null}
+            <button
+              type="button"
               aria-pressed={activeTab.filters.publicOnly}
               title={activeTab.filters.publicOnly ? "Showing public files only — tap to show private results" : "Private results visible — tap to hide private shares"}
               onClick={() => {
@@ -192,7 +270,7 @@ export function SearchScreen() {
                 setFilters(activeId, { publicOnly: next });
                 setOption("searches", "defilter", { ...settings.searches.defilter, publicFiles: next });
               }}
-              className={`rounded-full px-2 py-1 text-[10px] font-semibold outline-none ${
+              className={`rounded-full min-h-11 px-3 py-2 text-xs font-semibold outline-none ${
                 activeTab.filters.publicOnly
                   ? "bg-primary text-on-primary"
                   : "bg-surface-container-high text-on-surface-variant"
@@ -201,12 +279,22 @@ export function SearchScreen() {
               {activeTab.filters.publicOnly ? "Public only" : "Hide private"}
             </button>
             <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as SearchSortMode)}
+              className="rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-semibold text-on-surface-variant outline-none"
+              title="Sort: Best = free slots, fastest first"
+            >
+              <option value="best">Best first</option>
+              <option value="speed">Fastest</option>
+              <option value="queue">Shortest queue</option>
+              <option value="arrival">Arrival order</option>
+            </select>
+            <select
               value={settings.searches.group_searches}
               onChange={(e) => setOption("searches", "group_searches", e.target.value)}
               className="rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-semibold text-on-surface-variant outline-none"
               title="Grouping"
             >
-              <option value="folder_grouping">By Folder</option>
               <option value="user_grouping">By User</option>
               <option value="ungrouped">Ungrouped</option>
             </select>
@@ -268,6 +356,10 @@ export function SearchScreen() {
               const rowEl = (e.target as HTMLElement).closest("[data-row-user]") as HTMLElement | null;
               if (rowEl?.dataset.rowUser) {
                 e.preventDefault();
+                // Claimed: keep the event from reaching document/window
+                // closers (GlobalContextMenu, stale ContextMenu) — the row
+                // menu owns this right-click.
+                e.stopPropagation();
                 const user = rowEl.dataset.rowUser;
                 const path = rowEl.dataset.rowPath || "";
                 // resolve full row from visibleRows to get mocked attributes/size
@@ -283,7 +375,19 @@ export function SearchScreen() {
               }
             }}
           >
-            <ResultsList rows={visibleRows} onRowTap={setSheetRow} grouping={settings.searches.group_searches} expand={settings.searches.expand_results} />
+            <ResultsList
+              rows={visibleRows}
+              onRowTap={setSheetRow}
+              onRowDoubleClick={downloadRow}
+              selectMode={selectMode}
+              selectedIds={bulk.selected}
+              onToggleSelect={toggleSelected}
+              onRangeSelect={rangeSelected}
+              onSelectIds={bulk.setSelection}
+              onLongPress={longPressSelected}
+              grouping={settings.searches.group_searches}
+              expand={settings.searches.expand_results}
+            />
           </div>
         )
       ) : (
@@ -317,14 +421,14 @@ export function SearchScreen() {
         </div>
       )}
 
-      {/* Action sheet */}
+      {/* Action sheet — z-[70] keeps it above Sidebar/TopBar/BottomNav */}
       {sheetRow ? (
         <div
-          className="fixed inset-0 z-30 flex items-end bg-black/40"
+          className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 md:items-center"
           onClick={() => setSheetRow(null)}
         >
           <div
-            className="w-full max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-surface-container p-3 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]"
+            className="w-full max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-surface-container p-3 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] md:max-w-md md:rounded-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-outline-variant" />
@@ -336,21 +440,18 @@ export function SearchScreen() {
                 {sheetRow.user} · {sheetRow.folder}
               </div>
             </div>
-            <SheetAction
+             <SheetAction
               icon="download"
               label={isDemo ? "Download (disabled in demo)" : "Download"}
               onClick={() => {
-                if (isDemo) {
-                  flash("Demo — downloads are disabled on Vercel.");
-                  setSheetRow(null);
-                  return;
-                }
-                if (sheetRow) {
-                  requestDownload({ username: sheetRow.user, virtualPath: sheetRow.path, size: sheetRow.size, fileName: sheetRow.filename });
-                  flash(`Queued "${sheetRow.filename}" — see Downloads`);
-                }
+                if (sheetRow) downloadRow(sheetRow);
                 setSheetRow(null);
               }}
+            />
+            <SheetAction
+              icon="folder_download"
+              label="Download Folder"
+              onClick={() => { if (sheetRow) downloadFolderFor(sheetRow); setSheetRow(null); }}
             />
             <SheetAction
               icon="link"
@@ -370,9 +471,9 @@ export function SearchScreen() {
             />
             <SheetAction
               icon="account_tree"
-              label="Browse user's files"
+              label="Browse Folder"
               onClick={() => {
-                if (sheetRow) router.push(`/browse/${encodeURIComponent(sheetRow.user)}`);
+                if (sheetRow) router.push(`/browse/${encodeURIComponent(sheetRow.user)}?folder=${encodeURIComponent(sheetRow.folder)}`);
                 setSheetRow(null);
               }}
             />
@@ -384,6 +485,8 @@ export function SearchScreen() {
                 setSheetRow(null);
               }}
             />
+            <SheetAction icon="chat_bubble" label="Message User" onClick={() => { if (sheetRow) router.push(`/private-chat?user=${encodeURIComponent(sheetRow.user)}`); setSheetRow(null); }} />
+            <SheetAction icon="search" label="Search for This File (Experimental)" onClick={() => { if (sheetRow) searchForFile(sheetRow); setSheetRow(null); }} />
             <SheetAction icon="close" label="Cancel" muted onClick={() => setSheetRow(null)} />
           </div>
         </div>
@@ -401,11 +504,25 @@ export function SearchScreen() {
           y={ctxMenu.anchor.y}
           items={searchResultMenu(menuRow, {
             onDownload: () => {
-              if (menuRow) {
-                requestDownload({ username: menuRow.user, virtualPath: menuRow.path, size: menuRow.size, fileName: menuRow.filename });
-                flash(`Queued "${menuRow.filename}"`);
-              }
+              if (menuRow && bulk.has(searchRowId(menuRow)) && selectedRows.length > 1) downloadSelected();
+              else if (menuRow) downloadRow(menuRow);
             },
+            onDownloadFolder: () => {
+              if (menuRow && bulk.has(searchRowId(menuRow)) && selectedRows.length > 1) downloadSelectedFolders();
+              else if (menuRow) downloadFolderFor(menuRow);
+             },
+             onDownloadSelected: downloadSelected,
+             selectedCount: selectedRows.length > 1 && menuRow && bulk.has(searchRowId(menuRow)) ? selectedRows.length : 1,
+             onBrowse: () => {
+               if (menuRow) router.push(`/browse/${encodeURIComponent(menuRow.user)}?folder=${encodeURIComponent(menuRow.folder)}`);
+            },
+            onProfile: () => {
+              if (menuRow) router.push(`/profile/${encodeURIComponent(menuRow.user)}`);
+            },
+             onMessage: () => {
+              if (menuRow) router.push(`/private-chat?user=${encodeURIComponent(menuRow.user)}`);
+             },
+             onSearchFile: () => { if (menuRow) searchForFile(menuRow); },
             onProps: () => {
               if (menuRow) setPropsRow(menuRow);
             },
@@ -414,7 +531,15 @@ export function SearchScreen() {
             ctxMenu.close();
             setMenuRow(null);
           }}
-        />
+         />
+       ) : null}
+      {bulk.size > 0 ? (
+        <div className="fixed bottom-[calc(64px+env(safe-area-inset-bottom,0px))] md:bottom-4 left-1/2 z-40 flex w-[min(94vw,560px)] -translate-x-1/2 items-center gap-2 rounded-2xl bg-surface-container-highest p-3 shadow-xl ghost-border">
+          <span className="flex-1 font-label text-xs font-bold">{bulk.size} selected</span>
+          <button onClick={downloadSelected} disabled={isDemo} className="rounded-full bg-primary px-3 py-2 font-label text-xs font-bold text-on-primary disabled:opacity-50">Download</button>
+          <button onClick={downloadSelectedFolders} disabled={isDemo} className="rounded-full bg-surface-container-high px-3 py-2 font-label text-xs">Folders</button>
+          <button onClick={() => bulk.clear()} className="rounded-full bg-surface-container-high px-3 py-2 font-label text-xs">Clear</button>
+        </div>
       ) : null}
       {propsRow ? (
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 p-4" onClick={() => setPropsRow(null)}>
@@ -438,10 +563,7 @@ export function SearchScreen() {
             <div className="mt-6 flex gap-2">
               <button
                 onClick={() => {
-                  if (propsRow) {
-                    if (isDemo) flash("Demo — downloads disabled");
-                    else { requestDownload({ username: propsRow.user, virtualPath: propsRow.path, size: propsRow.size, fileName: propsRow.filename }); flash(`Queued "${propsRow.filename}"`); }
-                  }
+                  if (propsRow) downloadRow(propsRow);
                   setPropsRow(null);
                 }}
                 className={`flex-1 rounded-xl py-3 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline" : "bg-primary text-on-primary hover:bg-primary-container"}`}

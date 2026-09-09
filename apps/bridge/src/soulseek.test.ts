@@ -33,18 +33,11 @@ import {
   parseUserStatus,
   parseUserStats,
   parseUserInterests,
-  parseRecommendations,
-  parseSimilarUsers,
-  parseItemRecommendations,
-  parseItemSimilarUsers,
   parsePeerAddress,
   parseConnectToPeer,
   parseCantConnectToPeer,
   buildCantConnectToPeer,
   buildSendUploadSpeed,
-  buildRecommendationsEmpty,
-  buildGlobalRecommendationsEmpty,
-  buildSimilarUsersEmpty,
   buildRoomListRequest,
   buildUserInfoResponse,
   parseUserInfoResponse,
@@ -75,6 +68,8 @@ import {
   parseFolderContentsResponse,
   packUint64,
   SlskReader,
+  parseSharedFileListResponse,
+  parseFolderContentsResponse,
 } from "./soulseek.ts";
 import { ShareDB, PermissionLevel } from "./shares.ts";
 
@@ -246,6 +241,7 @@ describe("buildPeerInit / parsePeerInit", () => {
   test("frames init code 1 as uint8 and round-trips user/type", () => {
     const raw = buildPeerInit("alice", "P");
     // [uint32 len][uint8 code=1][payload...]
+    expect(raw.readUInt32LE(0)).toBe(raw.length - 4);
     expect(raw[4]).toBe(1);
     const init = parsePeerInit(raw.subarray(5));
     expect(init.targetUser).toBe("alice");
@@ -288,6 +284,54 @@ describe("buildPeerInit / parsePeerInit", () => {
     const len = framed.readUInt32LE(0);
     expect(4 + len).toBe(framed.length);
     expect(framed[4]).toBe(3);
+  });
+});
+
+describe("browse response parsing", () => {
+  function file(name: string): Buffer {
+    return Buffer.concat([
+      Buffer.from([1]), packString(name), packUint64LE(42), packString(""), packUint32(0),
+    ]);
+  }
+
+  test("parses standard share-list unknown field and private block", () => {
+    const payload = Buffer.concat([
+      packUint32(1), packString("Music"), packUint32(1), file("Music\\song.mp3"),
+      packUint32(0),
+      packUint32(1), packString("Secret"), packUint32(1), file("Secret\\hidden.mp3"),
+    ]);
+    const parsed = parseSharedFileListResponse(deflateSync(payload));
+    expect(parsed.folders.map((folder) => folder.name)).toEqual(["Music"]);
+    expect(parsed.lockedFolders.map((folder) => folder.name)).toEqual(["Secret"]);
+    expect(parsed.lockedFolders[0].files[0].size).toBe(42);
+  });
+
+  test("parses standard folder response wrapper", () => {
+    const payload = Buffer.concat([
+      packUint32(9), packString("Music"), packUint32(1), packString("Music"), packUint32(1), file("song.mp3"),
+    ]);
+    const parsed = parseFolderContentsResponse(deflateSync(payload));
+    expect(parsed).toEqual({ token: 9, dir: "Music", folders: [{ name: "Music", files: [{ name: "song.mp3", size: 42, ext: "", attrs: [] }] }], files: [{ name: "song.mp3", size: 42, ext: "", attrs: [] }] });
+  });
+
+  test("parses share list with unknown 0 and no private block", () => {
+    const payload = Buffer.concat([
+      packUint32(1), packString("Music"), packUint32(1), file("Music\\song.mp3"),
+      packUint32(0),
+    ]);
+    const parsed = parseSharedFileListResponse(deflateSync(payload));
+    expect(parsed.folders.map((folder) => folder.name)).toEqual(["Music"]);
+  });
+
+  test("parses empty share list", () => {
+    const payload = Buffer.concat([packUint32(0), packUint32(0)]);
+    const parsed = parseSharedFileListResponse(deflateSync(payload));
+    expect(parsed.folders).toEqual([]);
+  });
+
+  test("parses empty folder response", () => {
+    const payload = Buffer.concat([packUint32(9), packString("Music"), packUint32(0)]);
+    expect(parseFolderContentsResponse(deflateSync(payload))).toEqual({ token: 9, dir: "Music", folders: [], files: [] });
   });
 });
 
@@ -431,40 +475,6 @@ describe("user info — server message parsers", () => {
     expect(i.hates).toEqual(["pop"]);
   });
 
-  test("parseRecommendations", () => {
-    const parts = [
-      packUint32(1),
-      packString("rock"),
-      Buffer.from([5, 0, 0, 0]), // int32 rating = 5 (little-endian)
-      packUint32(0),
-    ];
-    const { recommendations, unrecommendations } = parseRecommendations(Buffer.concat(parts));
-    expect(recommendations).toEqual([{ thing: "rock", rating: 5 }]);
-    expect(unrecommendations).toHaveLength(0);
-  });
-
-  test("parseSimilarUsers", () => {
-    const parts = [
-      packUint32(1),
-      packString("dave"),
-      packUint32(3), // rating
-    ];
-    const users = parseSimilarUsers(Buffer.concat(parts));
-    expect(users).toEqual([{ username: "dave", rating: 3 }]);
-  });
-
-  test("parseItemRecommendations and parseItemSimilarUsers", () => {
-    const recParts = [packString("rock"), packUint32(1), packString("alt"), packUint32(2)];
-    const rec = parseItemRecommendations(Buffer.concat(recParts));
-    expect(rec.thing).toBe("rock");
-    expect(rec.recommendations).toEqual([{ thing: "alt", rating: 2 }]);
-
-    const simParts = [packString("rock"), packUint32(1), packString("eve"), packUint32(4)];
-    const sim = parseItemSimilarUsers(Buffer.concat(simParts));
-    expect(sim.thing).toBe("rock");
-    expect(sim.users).toEqual([{ username: "eve", rating: 4 }]);
-  });
-
   test("parsePeerAddress", () => {
     const payload = Buffer.concat([
       packString("frank"),
@@ -517,25 +527,7 @@ describe("user info — peer UserInfoResponse", () => {
   });
 });
 
-describe("Phase 0 — recommendations empty + 1001 + 121", () => {
-  test("Recommendations 54 empty frame", () => {
-    const raw = buildRecommendationsEmpty();
-    const p = tryParseMessage(raw)!;
-    expect(p.code).toBe(SERVER_MESSAGE_CODES.recommendations);
-    expect(p.payload.length).toBe(0);
-  });
-  test("GlobalRecommendations 56 empty frame", () => {
-    const raw = buildGlobalRecommendationsEmpty();
-    const p = tryParseMessage(raw)!;
-    expect(p.code).toBe(SERVER_MESSAGE_CODES.globalRecommendations);
-    expect(p.payload.length).toBe(0);
-  });
-  test("SimilarUsers 110 empty frame", () => {
-    const raw = buildSimilarUsersEmpty();
-    const p = tryParseMessage(raw)!;
-    expect(p.code).toBe(SERVER_MESSAGE_CODES.similarUsers);
-    expect(p.payload.length).toBe(0);
-  });
+describe("Phase 0 — room list + 1001 + 121", () => {
   test("RoomList 64 request is code 64 with empty payload", () => {
     const raw = buildRoomListRequest();
     const p = tryParseMessage(raw)!;
@@ -645,6 +637,9 @@ describe("transfers — protocol shims (Phase 0)", () => {
     expect(parseTransferResponse(ok.payload)).toEqual({ token: 7, allowed: true, size: 2048 });
     const no = tryParseMessage(buildTransferResponse(7, false, "File not shared."))!;
     expect(parseTransferResponse(no.payload)).toEqual({ token: 7, allowed: false, reason: "File not shared." });
+    // nicotine-plus parity: bare allowed reply is token+bool only (no u64)
+    const bare = tryParseMessage(buildTransferResponse(9, true))!;
+    expect(bare.payload.length).toBe(5);
   });
 
   test("PlaceInQueue / UploadFailed / UploadDenied round-trip", () => {

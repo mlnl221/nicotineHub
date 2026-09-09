@@ -72,21 +72,23 @@ export function userMenu(username: string, tabName: string, opts?: { onBrowse?: 
   return items;
 }
 
-export function searchResultMenu(row: { user: string; path: string; filename: string; folder: string }, opts: { onDownload: () => void; onProps?: () => void }) : MenuItem[] {
+export function searchResultMenu(row: { user: string; path: string; filename: string; folder: string }, opts: { onDownload: () => void; onProps?: () => void; onDownloadFolder?: () => void; onDownloadSelected?: () => void; onBrowse?: () => void; onProfile?: () => void; onMessage?: () => void; onSearchFile?: () => void; selectedCount?: number }) : MenuItem[] {
   const fileUrl = `slsk://${encodeURIComponent(row.user)}/${row.path.replace(/\\/g, "/")}`;
   const folderPath = row.path.replace(/[^\\]*$/, "").replace(/\\$/, "");
   const folderUrl = `slsk://${encodeURIComponent(row.user)}/${folderPath.replace(/\\/g, "/")}`;
   return [
-    { id: "hdr", label: "1 File Selected", icon: "description", disabled: true },
+    { id: "hdr", label: `${opts.selectedCount ?? 1} File${(opts.selectedCount ?? 1) === 1 ? "" : "s"} Selected`, icon: "description", disabled: true },
     { id: "sep", label: "---", icon: "" },
-    { id: "download", label: "Download File", icon: "download", action: opts.onDownload },
+    { id: "download", label: opts.selectedCount && opts.selectedCount > 1 ? `Download ${opts.selectedCount} Files` : "Download File", icon: "download", action: opts.onDownload },
     { id: "download-to", label: "Download File To…", icon: "download", action: () => toast("Download To — folder picker unavailable") },
-    { id: "download-folder", label: "Download Folder…", icon: "folder", action: () => toast("Download folder — use Download File") },
+    { id: "download-folder", label: opts.selectedCount && opts.selectedCount > 1 ? "Download Folders" : "Download Folder", icon: "folder_download", action: opts.onDownloadFolder ?? (() => toast("Download folder — unavailable")) },
+    ...(opts.onDownloadSelected && opts.selectedCount && opts.selectedCount > 1 ? [{ id: "download-selected", label: `Download ${opts.selectedCount} Selected`, icon: "download", action: opts.onDownloadSelected } as MenuItem] : []),
     { id: "sep2", label: "---", icon: "" },
     { id: "props", label: "File Properties", icon: "info", action: opts.onProps ?? (() => toast(`${row.filename} • ${row.path}`)) },
     { id: "sep3", label: "---", icon: "" },
-    { id: "view-profile", label: "View User Profile", icon: "account_circle", action: () => navigate(`/profile/${encodeURIComponent(row.user)}`) },
-    { id: "browse-folder", label: "Browse Folder", icon: "folder_managed", action: () => navigate(`/browse/${encodeURIComponent(row.user)}`) },
+    { id: "view-profile", label: "View User Profile", icon: "account_circle", action: opts.onProfile ?? (() => navigate(`/profile/${encodeURIComponent(row.user)}`)) },
+    { id: "browse-folder", label: "Browse Folder", icon: "folder_managed", action: opts.onBrowse ?? (() => navigate(`/browse/${encodeURIComponent(row.user)}`)) },
+    { id: "send-message", label: "Send Message", icon: "chat_bubble", action: opts.onMessage ?? (() => navigate(`/private-chat?user=${encodeURIComponent(row.user)}`)) },
     { id: "sep4", label: "---", icon: "" },
     {
       id: "copy", label: "Copy", icon: "content_copy", submenu: [
@@ -101,6 +103,7 @@ export function searchResultMenu(row: { user: string; path: string; filename: st
         { id: "select-results", label: "Select User's Results", icon: "filter_alt", action: () => toast(`Filter to ${row.user}`) },
       ]
     },
+    { id: "search-file", label: "Search for This File (Experimental)", icon: "search", action: opts.onSearchFile ?? (() => toast("Search for this file — unavailable")) },
   ];
 }
 
@@ -115,21 +118,25 @@ export function searchTabMenu(tab: { query: string; id: string }, actions: { onC
   ];
 }
 
-export function transferMenu(t: { user: string; fileName: string; path?: string; virtualPath?: string }, isUpload: boolean, acts: { onResume?: () => void; onPause?: () => void; onRemove: () => void; onRetry?: () => void; onClear?: () => void; onAnalyzeSpectrum?: () => void; hasSpectrum?: boolean; onEditTags?: () => void; onPlay?: () => void }): MenuItem[] {
+export function transferMenu(t: { user: string; fileName: string; path?: string; virtualPath?: string }, isUpload: boolean, acts: { onResume?: () => void; onPause?: () => void; onRemove: () => void; onRetry?: () => void; onClear?: () => void; onAnalyzeSpectrum?: () => void; hasSpectrum?: boolean; onEditTags?: () => void; onPlay?: () => void; onScrape?: () => void; onVerify?: () => void; onAnalyze?: () => void; onMediainfo?: () => void }): MenuItem[] {
   const display = t.fileName;
   return [
     { id: "hdr", label: "1 File Selected", icon: "description", disabled: true },
     { id: "sep", label: "---", icon: "" },
+    ...(acts.onPlay ? [{ id: "play", label: "Play", icon: "play_arrow", action: acts.onPlay } as MenuItem] : []),
     ...(isUpload ? [] : [
       { id: "open", label: "Open File", icon: "open_in_new", disabled: true, action: () => toast("Open — browser cannot open local files") } as MenuItem,
       { id: "open-folder", label: "Open in File Manager", icon: "folder_open", disabled: true } as MenuItem,
     ]),
     { id: "props", label: "File Properties", icon: "info", action: () => toast(display) },
-    ...(acts.onPlay ? [{ id: "play", label: "Play", icon: "play_arrow", action: acts.onPlay } as MenuItem] : []),
     { id: "sep2", label: "---", icon: "" },
     ...(acts.onEditTags ? [{ id: "edit-tags", label: "Edit Tags", icon: "edit", action: acts.onEditTags } as MenuItem] : []),
+    ...(acts.onScrape ? [{ id: "scrape", label: "Scrape", icon: "auto_awesome", action: acts.onScrape } as MenuItem] : []),
+    ...(acts.onVerify ? [{ id: "verify", label: "Verify", icon: "verified", action: acts.onVerify } as MenuItem] : []),
+    ...(acts.onAnalyze ? [{ id: "analyze-file", label: "Analyze", icon: "analytics", action: acts.onAnalyze } as MenuItem] : []),
     ...(acts.onAnalyzeSpectrum ? [{ id: "analyze", label: acts.hasSpectrum ? "View Spectrum" : "Analyze Spectrum", icon: "graphic_eq", action: acts.onAnalyzeSpectrum } as MenuItem] : []),
-    ...(acts.onEditTags || acts.onAnalyzeSpectrum ? [{ id: "sep-analyze", label: "---", icon: "" } as MenuItem] : []),
+    ...(acts.onMediainfo ? [{ id: "mediainfo", label: "Get Mediainfo", icon: "perm_media", action: acts.onMediainfo } as MenuItem] : []),
+    ...(acts.onEditTags || acts.onScrape || acts.onVerify || acts.onAnalyze || acts.onAnalyzeSpectrum || acts.onMediainfo ? [{ id: "sep-analyze", label: "---", icon: "" } as MenuItem] : []),
     { id: "resume", label: isUpload ? "Retry" : "Resume", icon: "play_arrow", action: acts.onResume ?? acts.onRetry ?? (() => toast("Resume unavailable")) },
     { id: "pause", label: isUpload ? "Abort" : "Pause", icon: "pause", action: acts.onPause ?? acts.onRemove },
     { id: "remove", label: "Remove", icon: "delete", danger: true, action: acts.onRemove },
@@ -280,37 +287,6 @@ export function chatRoomMenu(room: string | null, view: "activity"|"chat", actio
     { id: "sep2", label: "---", icon: "" },
     { id: "clear", label: "Clear Message View", icon: "clear_all", action: actions.onClear },
     { id: "leave", label: "Leave Room", icon: "logout", danger: true, action: actions.onLeave },
-  ];
-}
-
-export function userInfoLikesMenu(thing: string, isLike: boolean, actions: { onToggleLike: () => void; onToggleDislike: () => void; onRecommend: () => void; onSearch: () => void }): MenuItem[] {
-  return [
-    { id: "like", label: "I Like This", icon: "favorite", checked: isLike, action: actions.onToggleLike },
-    { id: "dislike", label: "I Dislike This", icon: "heart_broken", checked: !isLike, action: actions.onToggleDislike },
-    { id: "sep", label: "---", icon: "" },
-    { id: "rec", label: "Recommendations for Item", icon: "auto_awesome", action: actions.onRecommend },
-    { id: "search", label: "Search for Item", icon: "search", action: actions.onSearch },
-  ];
-}
-
-export function interestsMenu(thing: string, actions: { onRecommend: () => void; onSearch: () => void; onRemove: () => void; onWishlist?: () => void }): MenuItem[] {
-  return [
-    { id: "rec", label: "Recommendations for Item", icon: "auto_awesome", action: actions.onRecommend },
-    { id: "search", label: "Search for Item", icon: "search", action: actions.onSearch },
-    ...(actions.onWishlist ? [{ id: "wishlist", label: "Add to Wishlist", icon: "favorite", action: actions.onWishlist } as MenuItem] : []),
-    { id: "sep", label: "---", icon: "" },
-    { id: "remove", label: "Remove", icon: "delete", danger: true, action: actions.onRemove },
-  ];
-}
-
-export function interestsRecMenu(thing: string, isLiked: boolean, isDisliked: boolean, actions: { onLike: () => void; onDislike: () => void; onRecommend: () => void; onSearch: () => void; onWishlist?: () => void }): MenuItem[] {
-  return [
-    { id: "like", label: "I Like This", icon: "favorite", checked: isLiked, action: actions.onLike },
-    { id: "dislike", label: "I Dislike This", icon: "heart_broken", checked: isDisliked, action: actions.onDislike },
-    { id: "sep", label: "---", icon: "" },
-    { id: "rec", label: "Recommendations for Item", icon: "auto_awesome", action: actions.onRecommend },
-    { id: "search", label: "Search for Item", icon: "search", action: actions.onSearch },
-    ...(actions.onWishlist ? [{ id: "wishlist", label: "Add to Wishlist", icon: "favorite", action: actions.onWishlist } as MenuItem] : []),
   ];
 }
 

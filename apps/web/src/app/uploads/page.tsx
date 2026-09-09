@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { RequireAuth } from "@/components/RequireAuth";
 import { Sidebar } from "@/components/Sidebar";
@@ -20,8 +20,8 @@ import { isDemo } from "@/lib/demo";
 import { TagEditor } from "@/components/tag/TagEditor";
 import { BulkBar } from "@/components/tag/BulkBar";
 import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
-import { BulkScrapeModal } from "@/components/tag/BulkScrapeModal";
-import { useBulkSelection } from "@/lib/bulkSelection";
+import { AdjustTagsModal } from "@/components/tag/AdjustTagsModal";
+import { useBulkSelection, useMarqueeSelection } from "@/lib/bulkSelection";
 import { bulkVerify, bulkAnalyze, bulkRequestSpectrum } from "@/lib/worker";
 import { useSpectrum } from "@/lib/spectrum";
 
@@ -46,6 +46,7 @@ function UploadsInner() {
   const [tagFile, setTagFile] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const bulk = useBulkSelection();
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [bulkEditor, setBulkEditor] = useState(false);
   const [bulkScrape, setBulkScrape] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ title: string; rows: Array<Record<string, unknown>> } | null>(null);
@@ -67,7 +68,15 @@ function UploadsInner() {
     uploads.forEach((t) => { const k = groupMode === "user_grouping" ? t.username : getFolder(t.virtualPath); const arr = map.get(k); if (arr) arr.push(t); else map.set(k, [t]); });
     return [...map.entries()];
   })();
-  const audioIds = uploads.filter((u) => !isDemo && ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus"].includes(u.fileName.toLowerCase().split(".").pop() ?? "")).map((u) => u.id);
+  const transferIds = uploads.map((u) => u.id);
+  const marquee = useMarqueeSelection(bulk.setSelection);
+  // Drop picks for uploads that vanished so the count bar never counts ghosts.
+  const liveIds = uploads.map((u) => u.id).join("|");
+  useEffect(() => {
+    if (!bulk.size) return;
+    const live = new Set(uploads.map((u) => u.id));
+    if ([...bulk.selected].some((id) => !live.has(id))) bulk.setSelection([...bulk.selected].filter((id) => live.has(id)));
+  }, [liveIds]);
   const selectedFileNames = Array.from(bulk.selected).map((id) => uploads.find((u) => u.id === id)?.fileName).filter(Boolean) as string[];
   const handleBulkVerify = async () => {
     const files = selectedFileNames;
@@ -91,12 +100,19 @@ function UploadsInner() {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const dir = e.key === "ArrowDown" ? 1 : -1;
-      const next = Math.max(0, Math.min(audioIds.length - 1, focusedIdx + dir));
-      setFocusedIdx(next);
-      const id = audioIds[next];
-      if (e.shiftKey && id) bulk.toggleRange(id, audioIds);
-      else if (id && !e.shiftKey) bulk.toggle(id);
+       const next = Math.max(0, Math.min(transferIds.length - 1, focusedIdx + dir));
+       setFocusedIdx(next);
+       const id = transferIds[next];
+       if (e.shiftKey && id) bulk.toggleRange(id, transferIds);
+       else if (id && !e.shiftKey) bulk.toggle(id);
     }
+  };
+
+  const selectedTransfers = uploads.filter((t) => bulk.has(t.id));
+  const bulkRemove = () => {
+    if (selectedTransfers.length > 1 && !window.confirm(`Remove ${selectedTransfers.length} selected uploads?`)) return;
+    selectedTransfers.forEach((t) => clearTransfer(t.id, true));
+    bulk.clear();
   };
 
   const handleDoubleClick = (t: import("@/lib/protocol").Transfer) => {
@@ -151,9 +167,9 @@ function UploadsInner() {
                     <span className="material-symbols-outlined text-[14px]">{selectMode ? "check_box" : "check_box_outline_blank"}</span> {selectMode ? `Selecting (${bulk.size}/50)` : "Select"}
                   </button>
                 ) : null}
-                {selectMode && audioIds.length ? (
+                   {selectMode && transferIds.length ? (
                   <>
-                    <button onClick={() => bulk.selectAll(audioIds)} className="hidden sm:inline-flex rounded-full bg-surface-container-high px-2 py-1 text-[10px]">All</button>
+                     <button onClick={() => bulk.selectAll(transferIds)} className="hidden sm:inline-flex rounded-full bg-surface-container-high px-2 py-1 text-[10px]">All</button>
                     <button onClick={() => bulk.clear()} className="hidden sm:inline-flex rounded-full bg-surface-container-high px-2 py-1 text-[10px]">Clear</button>
                   </>
                 ) : null}
@@ -198,15 +214,14 @@ function UploadsInner() {
                       {!isCollapsed ? (
                         <div onKeyDown={handleKeyDown} tabIndex={selectMode ? 0 : -1} className="space-y-3 outline-none">
                           {items.map((t) => {
-                            const isAudio = ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus"].includes(t.fileName.toLowerCase().split(".").pop() ?? "");
-                            const checked = bulk.has(t.id);
-                            return (
-                            <div key={t.id} className={`flex items-center gap-2 rounded-xl ${checked ? "ring-1 ring-primary bg-primary-fixed/10" : ""} ${selectMode && isAudio && focusedIdx === audioIds.indexOf(t.id) ? "ring-1 ring-primary" : ""}`} onDoubleClick={() => !selectMode && handleDoubleClick(t)} onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenuAnchor({ x: e.clientX, y: e.clientY, transfer: t }); }}>
-                              {selectMode && isAudio ? (
-                                <input type="checkbox" checked={checked} onChange={() => bulk.toggle(t.id)} onClick={(e) => { e.stopPropagation(); if ((e as unknown as { shiftKey: boolean }).shiftKey) bulk.toggleRange(t.id, audioIds); }} className="ml-2 h-4 w-4 shrink-0 accent-primary" />
+                             const checked = bulk.has(t.id);
+                             return (
+                              <div key={t.id} {...marquee(t.id)} className={`flex items-center gap-2 rounded-xl ${checked ? "ring-1 ring-primary bg-primary-fixed/10" : ""} ${selectMode && focusedIdx === transferIds.indexOf(t.id) ? "ring-1 ring-primary" : ""}`} onDoubleClick={() => !selectMode && handleDoubleClick(t)} onClick={(e) => { marquee(t.id).onClick(e); if (e.defaultPrevented || (e.target as HTMLElement).closest("button,input")) return; if (selectMode || e.ctrlKey || e.metaKey || e.shiftKey) { e.preventDefault(); if (e.shiftKey) bulk.toggleRange(t.id, transferIds); else bulk.toggle(t.id); } }} onPointerDown={(e) => { if (e.pointerType === "touch") longPressTimer.current = setTimeout(() => { setSelectMode(true); bulk.toggle(t.id); navigator.vibrate?.(10); }, 500); }} onPointerUp={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }} onPointerCancel={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }} onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); e.stopPropagation(); setMenuAnchor({ x: e.clientX, y: e.clientY, transfer: t }); }}>
+                               {selectMode ? (
+                                 <input type="checkbox" checked={checked} onChange={() => bulk.toggle(t.id)} onClick={(e) => { e.stopPropagation(); if (e.shiftKey) bulk.toggleRange(t.id, transferIds); }} className="ml-2 h-4 w-4 shrink-0 accent-primary" />
                               ) : null}
-                              <div className="flex-1 min-w-0" onClick={() => { if (selectMode && isAudio) bulk.toggle(t.id); }}>
-                                <TransferCard transfer={t} onCancel={() => clearTransfer(t.id, true)} onClear={() => clearTransfer(t.id, true)} />
+                               <div className="flex-1 min-w-0">
+                                <TransferCard transfer={t} onCancel={() => clearTransfer(t.id, true)} onClear={() => clearTransfer(t.id, true)} onMenu={(x, y) => setMenuAnchor({ x, y, transfer: t })} />
                               </div>
                             </div>
                           );})}
@@ -236,9 +251,9 @@ function UploadsInner() {
         />
       ) : null}
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} /> : null}
-      <BulkBar count={bulk.size} onClear={bulk.clear} onEdit={() => setBulkEditor(true)} onScrape={() => setBulkScrape(true)} onVerify={handleBulkVerify} onAnalyze={handleBulkAnalyze} onSpectrum={handleBulkSpectrum} />
+       <BulkBar count={bulk.size} onClear={bulk.clear} onEdit={() => setBulkEditor(true)} onScrape={() => setBulkScrape(true)} onVerify={handleBulkVerify} onAnalyze={handleBulkAnalyze} onSpectrum={handleBulkSpectrum} onRemove={bulkRemove} />
       {bulkEditor ? <BulkTagEditor open={bulkEditor} files={selectedFileNames} onClose={() => setBulkEditor(false)} onSaved={() => bulk.clear()} /> : null}
-      {bulkScrape ? <BulkScrapeModal open={bulkScrape} files={selectedFileNames} onClose={() => setBulkScrape(false)} /> : null}
+      {bulkScrape ? <AdjustTagsModal open={bulkScrape} files={selectedFileNames} onClose={() => setBulkScrape(false)} /> : null}
       {bulkResult ? (
         <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
           <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col overflow-hidden rounded-t-2xl md:rounded-2xl bg-surface-container-lowest shadow-xl ghost-border" onClick={(e) => e.stopPropagation()}>

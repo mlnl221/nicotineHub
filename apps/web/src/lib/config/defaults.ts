@@ -132,6 +132,7 @@ export interface Settings {
     download_doubleclick: number;
     upload_doubleclick: number;
     usernamesubfolders: boolean;
+    download_path_depth: "full" | "0" | "1" | "2" | "3";
     groupdownloads: string;
     groupuploads: string;
     expand_downloads: string;
@@ -184,15 +185,6 @@ export interface Settings {
   };
   privatechat: {
     store: boolean;
-  };
-  players: {
-    npplayer: string;
-    npformat: string;
-    npothercommand: string;
-    npformatlist: string[];
-  };
-  urls: {
-    protocols: Record<string, string>;
   };
   plugins: {
     enable: boolean;
@@ -256,10 +248,9 @@ export const defaults: Settings = {
       chat: false,
       privateChat: true,
       buddies: false,
-      interests: false,
       profile: true,
     },
-    modes_order: ["search", "browse", "downloads", "uploads", "files", "chat", "privateChat", "buddies", "interests", "profile"],
+    modes_order: ["search", "browse", "downloads", "uploads", "files", "chat", "privateChat", "buddies", "profile"],
     width: 800,
     height: 600,
     xposition: -1,
@@ -293,7 +284,7 @@ export const defaults: Settings = {
       country: "",
       fileType: "",
       length: "",
-      publicFiles: false,
+      publicFiles: true,
       quality: "",
     },
     enable_history: true,
@@ -302,7 +293,7 @@ export const defaults: Settings = {
     private_search_results: false,
     filters_visible: false,
     expand_results: "all",
-    group_searches: "folder_grouping",
+    group_searches: "user_grouping",
   },
   transfers: {
     shared: [],
@@ -350,6 +341,7 @@ export const defaults: Settings = {
     download_doubleclick: 2,
     upload_doubleclick: 2,
     usernamesubfolders: false,
+    download_path_depth: "full",
     groupdownloads: "folder_grouping",
     groupuploads: "folder_grouping",
     expand_downloads: "all",
@@ -410,15 +402,6 @@ export const defaults: Settings = {
   },
   privatechat: {
     store: true,
-  },
-  players: {
-    npplayer: "mpris",
-    npformat: "",
-    npothercommand: "",
-    npformatlist: [],
-  },
-  urls: {
-    protocols: {},
   },
   plugins: {
     enable: true,

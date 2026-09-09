@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SearchRow } from "@/lib/protocol";
-import { humanLength, humanQuality, humanSize } from "@/lib/format";
+import { humanLength, humanQuality, humanSize, humanSpeed } from "@/lib/format";
 
 const PAGE_SIZE = 50;
 
@@ -47,13 +47,141 @@ function qualityBadge(row: SearchRow): { label: string; cls: string } | null {
 interface ResultsListProps {
   rows: SearchRow[];
   onRowTap: (row: SearchRow) => void;
+  onRowDoubleClick?: (row: SearchRow) => void;
+  selectMode?: boolean;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (row: SearchRow) => void;
+  onRangeSelect?: (row: SearchRow) => void;
+  onSelectIds?: (ids: string[]) => void;
+  onLongPress?: (row: SearchRow) => void;
   grouping?: string;
   expand?: string;
 }
 
-export function ResultsList({ rows, onRowTap, grouping = "folder_grouping", expand = "all" }: ResultsListProps) {
+export function searchRowId(row: SearchRow): string {
+  return `${row.user}:${row.path}`;
+}
+
+// Peer health pills shown right after the username: velocity first, then
+// slot state. Neutral surface pills; archival gold reserved for `free`.
+function PeerPills({ row }: { row: SearchRow }) {
+  const speed = humanSpeed(row.speed);
+  return (
+    <>
+      {speed ? (
+        <span className="inline-flex items-center gap-0.5 rounded-full bg-surface-container-high px-1.5 py-0.5 font-semibold text-on-surface-variant">
+          <span className="material-symbols-outlined text-[12px]">bolt</span>
+          {speed}
+        </span>
+      ) : null}
+      {row.slotFree ? (
+        <span className="rounded-full bg-tertiary-container px-1.5 py-0.5 font-semibold text-on-tertiary-container">free</span>
+      ) : (
+        <span className="inline-flex items-center gap-0.5 rounded-full bg-surface-container-high px-1.5 py-0.5 text-outline">
+          <span className="material-symbols-outlined text-[12px]">hourglass_top</span>q:{row.inQueue}
+        </span>
+      )}
+    </>
+  );
+}
+
+// Aggregate peer health for a group header is rendered with PeerPills on the
+// group's best row (rows arrive pre-sorted, so items[0] leads).
+
+export function ResultsList({ rows, onRowTap, onRowDoubleClick, selectMode = false, selectedIds = new Set(), onToggleSelect, onRangeSelect, onSelectIds, onLongPress, grouping = "user_grouping", expand = "all" }: ResultsListProps) {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  // Single-tap timer: delays the sheet so a double-click can download instead.
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressed = useRef(false);
+  const suppressClick = useRef(false);
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const drag = useRef<{ x: number; y: number; active: boolean } | null>(null);
+  useEffect(() => () => { if (tapTimer.current) clearTimeout(tapTimer.current); }, []);
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      const start = drag.current;
+      if (!start) return;
+      if (!start.active && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 6) return;
+      start.active = true;
+      const left = Math.min(start.x, e.clientX);
+      const right = Math.max(start.x, e.clientX);
+      const top = Math.min(start.y, e.clientY);
+      const bottom = Math.max(start.y, e.clientY);
+      const ids: string[] = [];
+      rowRefs.current.forEach((el, id) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.right >= left && rect.left <= right && rect.bottom >= top && rect.top <= bottom) ids.push(id);
+      });
+      onSelectIds?.(ids);
+      document.body.style.userSelect = "none";
+    };
+    const up = () => {
+      if (drag.current?.active) {
+        suppressClick.current = true;
+        setTimeout(() => { suppressClick.current = false; }, 0);
+      }
+      drag.current = null;
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      document.body.style.userSelect = "";
+    };
+  }, [onSelectIds]);
+  const handleTap = (row: SearchRow) => {
+    if (!onRowDoubleClick) {
+      onRowTap(row);
+      return;
+    }
+    if (tapTimer.current) clearTimeout(tapTimer.current);
+    tapTimer.current = setTimeout(() => onRowTap(row), 250);
+  };
+  const handleDouble = (row: SearchRow) => {
+    if (tapTimer.current) clearTimeout(tapTimer.current);
+    tapTimer.current = null;
+    onRowDoubleClick?.(row);
+  };
+
+  const handleClick = (e: React.MouseEvent, row: SearchRow) => {
+    if (suppressClick.current) {
+      e.preventDefault();
+      suppressClick.current = false;
+      return;
+    }
+    if (longPressed.current) {
+      e.preventDefault();
+      longPressed.current = false;
+      return;
+    }
+    if (selectMode || e.ctrlKey || e.metaKey || e.shiftKey) {
+      e.preventDefault();
+      if (e.shiftKey) onRangeSelect?.(row);
+      else onToggleSelect?.(row);
+      return;
+    }
+    handleTap(row);
+  };
+
+  const rowEvents = (row: SearchRow) => ({
+    onMouseDown: (e: React.MouseEvent) => {
+      if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) drag.current = { x: e.clientX, y: e.clientY, active: false };
+    },
+    onPointerDown: (e: React.PointerEvent) => {
+      if (e.pointerType !== "touch") return;
+      longPressTimer.current = setTimeout(() => {
+        longPressed.current = true;
+        onLongPress?.(row);
+        if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate?.(10);
+      }, 500);
+    },
+    onPointerUp: () => { if (longPressTimer.current) clearTimeout(longPressTimer.current); },
+    onPointerCancel: () => { if (longPressTimer.current) clearTimeout(longPressTimer.current); },
+  });
 
   // reset when filter/query changes (rows identity)
   useEffect(() => {
@@ -79,19 +207,23 @@ export function ResultsList({ rows, onRowTap, grouping = "folder_grouping", expa
 
   const sliced = useMemo(() => rows.slice(0, visibleCount), [rows, visibleCount]);
 
+  const groupedByUser = grouping !== "ungrouped";
+
   const groups = useMemo(() => {
-    if (grouping === "ungrouped") {
+    if (!groupedByUser) {
       return [["ungrouped", sliced] as [string, SearchRow[]]];
     }
+    // Groups are keyed by user only — one owner per group, so the header
+    // carries username + peer health once and rows stay slim.
     const map = new Map<string, SearchRow[]>();
     for (const row of sliced) {
-      const key = grouping === "user_grouping" ? row.user : row.folder || "(root)";
+      const key = row.user;
       const list = map.get(key);
       if (list) list.push(row);
       else map.set(key, [row]);
     }
     return [...map.entries()];
-  }, [sliced, grouping]);
+  }, [sliced, groupedByUser]);
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // sync collapsed to expand setting
@@ -104,7 +236,7 @@ export function ResultsList({ rows, onRowTap, grouping = "folder_grouping", expa
     if (expand === "all") setCollapsed(new Set());
     else if (expand === "none") setCollapsed(new Set(keys));
     else if (expand === "partial") {
-      // partial: expand first half, collapse rest (mimics folder_grouping expand_root)
+      // partial: expand first half, collapse rest
       const half = Math.floor(keys.length / 2);
       setCollapsed(new Set(keys.slice(half)));
     }
@@ -123,7 +255,12 @@ export function ResultsList({ rows, onRowTap, grouping = "folder_grouping", expa
   const isUngrouped = grouping === "ungrouped";
 
   return (
-    <div className="flex-1 px-3 py-2 max-w-full overflow-hidden">
+    <div
+      className="flex-1 px-3 py-2 max-w-full overflow-hidden"
+      onMouseDown={(e) => {
+        if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) drag.current = { x: e.clientX, y: e.clientY, active: false };
+      }}
+    >
       {groups.map(([folder, items]) => {
         const isCollapsed = isUngrouped ? false : collapsed.has(folder);
         if (isUngrouped) {
@@ -140,19 +277,23 @@ export function ResultsList({ rows, onRowTap, grouping = "folder_grouping", expa
                       data-row-filename={row.filename}
                       data-row-folder={row.folder}
                       data-row-size={String(row.size)}
-                      onClick={() => onRowTap(row)}
-                      className="flex w-full items-center gap-3 border-t border-outline-variant/15 px-4 py-2.5 text-left transition-colors active:bg-surface-container max-w-full overflow-hidden first:border-t-0"
+                      ref={(el) => { if (el) rowRefs.current.set(searchRowId(row), el); else rowRefs.current.delete(searchRowId(row)); }}
+                      {...rowEvents(row)}
+                      onClick={(e) => handleClick(e, row)}
+                      onDoubleClick={() => !selectMode && handleDouble(row)}
+                      className={`flex w-full items-center gap-3 border-t border-outline-variant/15 px-4 py-2.5 text-left transition-colors active:bg-surface-container max-w-full overflow-hidden first:border-t-0 ${selectedIds.has(searchRowId(row)) ? "bg-primary-fixed/15" : ""}`}
                     >
+                      {selectMode ? <input type="checkbox" tabIndex={-1} checked={selectedIds.has(searchRowId(row))} readOnly className="h-4 w-4 shrink-0 accent-primary" /> : null}
                       <span className="material-symbols-outlined text-[22px] text-primary-container shrink-0">{fileTypeIcon(row.fileType)}</span>
                       <div className="min-w-0 flex-1 overflow-hidden">
                         <div className="truncate font-body text-sm font-medium text-on-surface max-w-full">{row.filename}</div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-label text-[11px] text-on-surface-variant max-w-full overflow-hidden">
                           <span className="inline-flex items-center gap-1 min-w-0 max-w-[35vw] truncate"><span className="material-symbols-outlined text-[13px] shrink-0">person</span><span className="truncate">{row.user}</span></span>
+                          <PeerPills row={row} />
                           <span>{humanSize(row.size)}</span>
                           {humanQuality(row.attributes) ? <span>{humanQuality(row.attributes)}</span> : null}
                           {(() => { const qb = qualityBadge(row); return qb ? <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${qb.cls}`}>{qb.label}</span> : null; })()}
                           {humanLength(row.length) ? <span>{humanLength(row.length)}</span> : null}
-                          {row.slotFree ? <span className="rounded-full bg-tertiary-container px-1.5 py-0.5 font-semibold text-on-tertiary-container">free</span> : <span className="text-outline">q:{row.inQueue}</span>}
                           {row.private ? <span className="rounded-full bg-surface-container-highest px-1.5 py-0.5 text-on-surface-variant">private</span> : null}
                         </div>
                       </div>
@@ -175,15 +316,20 @@ export function ResultsList({ rows, onRowTap, grouping = "folder_grouping", expa
                   return next;
                 })
               }
-              className="flex w-full min-h-11 items-center gap-2 px-4 py-3 text-left"
+              className="w-full min-h-11 px-4 py-3 text-left"
             >
-              <span className="material-symbols-outlined text-[18px] text-on-surface-variant shrink-0">
-                {isCollapsed ? "chevron_right" : "expand_more"}
+              <span className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px] text-on-surface-variant shrink-0">
+                  {isCollapsed ? "chevron_right" : "expand_more"}
+                </span>
+                <span className="flex-1 min-w-0 truncate font-label text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
+                  {folder}
+                </span>
+                <span className="font-label text-xs text-outline shrink-0">{items.length}</span>
               </span>
-              <span className="flex-1 min-w-0 truncate font-label text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
-                {folder}
+              <span className="mt-1 flex items-center gap-1.5 pl-[26px] font-label text-[11px] text-on-surface-variant">
+                <PeerPills row={items[0]} />
               </span>
-              <span className="font-label text-xs text-outline shrink-0">{items.length}</span>
             </button>
 
             {!isCollapsed ? (
@@ -197,32 +343,27 @@ export function ResultsList({ rows, onRowTap, grouping = "folder_grouping", expa
                       data-row-filename={row.filename}
                       data-row-folder={row.folder}
                       data-row-size={String(row.size)}
-                      onClick={() => onRowTap(row)}
-                      className="flex w-full items-center gap-3 border-t border-outline-variant/15 px-4 py-2.5 text-left transition-colors active:bg-surface-container max-w-full overflow-hidden"
+                      ref={(el) => { if (el) rowRefs.current.set(searchRowId(row), el); else rowRefs.current.delete(searchRowId(row)); }}
+                      {...rowEvents(row)}
+                      onClick={(e) => handleClick(e, row)}
+                      onDoubleClick={() => !selectMode && handleDouble(row)}
+                      className={`flex w-full items-center gap-3 border-t border-outline-variant/15 px-4 py-2.5 text-left transition-colors active:bg-surface-container max-w-full overflow-hidden ${selectedIds.has(searchRowId(row)) ? "bg-primary-fixed/15" : ""}`}
                     >
+                      {selectMode ? <input type="checkbox" tabIndex={-1} checked={selectedIds.has(searchRowId(row))} readOnly className="h-4 w-4 shrink-0 accent-primary" /> : null}
                       <span className="material-symbols-outlined text-[22px] text-primary-container shrink-0">
                         {fileTypeIcon(row.fileType)}
                       </span>
                       <div className="min-w-0 flex-1 overflow-hidden">
-                        <div className="truncate font-body text-sm font-medium text-on-surface max-w-full">
-                          {row.filename}
+                        <div className="truncate font-body text-sm text-on-surface max-w-full">
+                          <span className="font-semibold">{humanSize(row.size)}</span>
+                          <span className="text-outline"> · </span>
+                          <span className="font-medium">{row.filename}</span>
                         </div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-label text-[11px] text-on-surface-variant max-w-full overflow-hidden">
-                          <span className="inline-flex items-center gap-1 min-w-0 max-w-[35vw] truncate">
-                            <span className="material-symbols-outlined text-[13px] shrink-0">person</span>
-                            <span className="truncate">{row.user}</span>
-                          </span>
-                          <span>{humanSize(row.size)}</span>
+                          <span className="min-w-0 max-w-[45vw] truncate">{row.folder || "(root)"}</span>
                           {humanQuality(row.attributes) ? <span>{humanQuality(row.attributes)}</span> : null}
                           {(() => { const qb = qualityBadge(row); return qb ? <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${qb.cls}`}>{qb.label}</span> : null; })()}
                           {humanLength(row.length) ? <span>{humanLength(row.length)}</span> : null}
-                          {row.slotFree ? (
-                            <span className="rounded-full bg-tertiary-container px-1.5 py-0.5 font-semibold text-on-tertiary-container">
-                              free
-                            </span>
-                          ) : (
-                            <span className="text-outline">q:{row.inQueue}</span>
-                          )}
                           {row.private ? (
                             <span className="rounded-full bg-surface-container-highest px-1.5 py-0.5 text-on-surface-variant">
                               private

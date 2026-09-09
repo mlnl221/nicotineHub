@@ -50,7 +50,7 @@ All captures from a local demo build (`NEXT_PUBLIC_DEMO=true`, mocked data) — 
 
 | Search | More sheet | Downloads | Private chat |
 |---|---|---|---|
-| [![Mobile search with bottom nav (dark mode)](docs/screenshots/m1-search.png)](docs/screenshots/m1-search.png) | [![Mobile More sheet — browse, buddies, uploads, rooms, profiles, interests, settings](docs/screenshots/m2-more-sheet.png)](docs/screenshots/m2-more-sheet.png) | [![Mobile downloads](docs/screenshots/m3-downloads.png)](docs/screenshots/m3-downloads.png) | [![Mobile private chat](docs/screenshots/m4-chat.png)](docs/screenshots/m4-chat.png) |
+| [![Mobile search with bottom nav (dark mode)](docs/screenshots/m1-search.png)](docs/screenshots/m1-search.png) | [![Mobile More sheet — browse, buddies, uploads, rooms, profiles, settings](docs/screenshots/m2-more-sheet.png)](docs/screenshots/m2-more-sheet.png) | [![Mobile downloads](docs/screenshots/m3-downloads.png)](docs/screenshots/m3-downloads.png) | [![Mobile private chat](docs/screenshots/m4-chat.png)](docs/screenshots/m4-chat.png) |
 
 This is an almost 1:1 port of [nicotine-plus](https://nicotine-plus.org/) ([GitHub](https://github.com/nicotine-plus/nicotine-plus)) to a modern Next.js web app. Built on `doc/SLSKPROTOCOL.md`.
 
@@ -71,12 +71,12 @@ The browser can't open raw TCP sockets, so the bridge translates JSON over WebSo
 
 ## Features
 
-- **Search** — global, user, room, wishlist & buddies; tabs + live filters (size/bitrate/length/type/slot/country); paste a Discogs/Bandcamp/Apple/Qobuz/Tidal/MusicBrainz/Deezer/Beatport link to auto-identify the release (worker `POST /scrape`)
+- **Search** — global, user, room, wishlist & buddies; tabs + live filters (size/bitrate/length/type/slot/country); paste a Discogs/Bandcamp/Apple/Qobuz/Tidal/MusicBrainz/Deezer link to auto-identify the release (worker `POST /scrape`)
 - **Transfers** — queue, resume (`INCOMPLETE<md5>`), `GET /files/:token`, throttled streaming; **Analyze Spectrum** (see below) for finished audio via worker `sox` Full 2000×513 + Zoom 500×1025 (`oxipng`, shared `/tmp` cache)
 - **Worker (scrape/spectrum/tag)** — separate Python FastAPI service for CPU/IO-heavy ops (same-origin `/api/worker`; `:8789` internal only); bridge stays SLSK-only
 - **Browse** — shares & folders via peers
 - **Chat** — rooms + private, tickers, owned/member lists
-- **Social** — buddies, interests/recommendations/similar users
+- **Social** — buddies
 - **Profiles** — description, picture, stats, privileges
 - **Mobile shell** — `TopBar`/`BottomNav`, safe-area, PWA, diagnostics live tail
 
@@ -174,17 +174,10 @@ Open `http://localhost:3000` → Settings → Network check `LISTEN_PORT`, login
 
 ---
 
-## Porting status
-
-Stage `5c65ea9`+ — almost 1:1, mobile-friendly. See **[docs/porting-status.md](docs/porting-status.md)** for the full domain-by-domain matrix (settings port Phases A–N done, `leech_detector` ported; `youtube_info` + fonts/colors/lastfm intentionally omitted, English-only).
-
----
-
 ## Docs
 
 - `docs/architecture.md` — bridge, worker, search & protocol, transfers + spectrum, WS JSON, `LISTEN_PORT`/`PortMapper`, env, tests
 - `docs/spectrum.md` — Analyze Spectrum pipeline (worker `sox` + `oxipng`, HTTP, caching, UI)
-- `docs/porting-status.md` — matrix vs nicotine-plus 3.3.x
 - `docs/deployment.md` — Docker & GHCR images, `TAG` pinning, promotion workflow (`stage` → `main`)
 - `docs/DESIGN.md` — UI tokens
 - `docs/proposals/` — future backlog (r/Soulseek improvements not yet built)

@@ -9,7 +9,6 @@ import { ConfigBridgeSync } from "@/lib/config/sync";
 import { WishlistProvider } from "@/lib/wishlist";
 import { StatisticsProvider } from "@/lib/statistics";
 import { ToastHost } from "@/components/ToastHost";
-import { NowPlayingSync } from "@/components/NowPlayingSync";
 import { WebVitals } from "@/components/WebVitals";
 import { GlobalContextMenu } from "@/components/ui/GlobalContextMenu";
 import { SidebarProvider } from "@/components/SidebarContext";
@@ -21,6 +20,7 @@ import { BrowseProvider } from "@/lib/browse-tabs";
 import { ProfileProvider } from "@/lib/profile-tabs";
 import { RoomsProvider } from "@/lib/rooms";
 import { PrivateChatProvider } from "@/lib/privateChat";
+import { UnreadProvider } from "@/lib/unread";
 import { ReconnectBanner } from "@/components/ReconnectBanner";
 import { PlayerProvider } from "@/lib/player/store";
 import { MiniPlayer } from "@/components/player/MiniPlayer";
@@ -87,6 +87,7 @@ export default function RootLayout({
         <ThemeProvider>
           <ConfigProvider>
             <SessionProvider>
+              <UnreadProvider>
               <ReconnectBanner />
               <RoomsProvider>
                 <PrivateChatProvider>
@@ -100,7 +101,6 @@ export default function RootLayout({
                                 <ConfigBridgeSync />
                                 <ExitDialogHandler />
                                 <WindowGeometrySync />
-                                <NowPlayingSync />
                                 <PlayerProvider>
                                 {children}
                                 <MiniPlayer />
@@ -116,6 +116,7 @@ export default function RootLayout({
                   </SearchProvider>
                 </PrivateChatProvider>
               </RoomsProvider>
+              </UnreadProvider>
             </SessionProvider>
           </ConfigProvider>
         </ThemeProvider>

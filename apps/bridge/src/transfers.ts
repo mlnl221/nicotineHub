@@ -16,10 +16,11 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, statSync, writeFileSync, readFileSync, unlinkSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, renameSync, rmdirSync, statSync, writeFileSync, readFileSync, unlinkSync, readdirSync } from "node:fs";
+import { join, dirname, resolve, sep, relative } from "node:path";
 import type { Socket } from "bun";
 import {
+  buildFileTransferInit,
   buildPlaceInQueueRequest,
   buildQueueUpload,
   packUint64,
@@ -93,19 +94,82 @@ export type TransferQueueCb = (id: string, place: number) => void;
 export type TransferFinishedCb = (id: string, fileName: string, size: number, downloadUrl: string) => void;
 
 function fileNameOf(virtualPath: string): string {
-  const parts = virtualPath.split("\\");
+  const parts = virtualPath.split(/[\\/]/);
   return parts[parts.length - 1] || virtualPath;
 }
 
 // ponytail: single sink for peer-controlled names; per-user dirs if stricter mapping needed
 function safeUsername(username: string): string {
-  const s = username.replace(/[/\\]/g, "_").replace(/\.\./g, "_");
+  const s = username.replace(/[/\\]+/g, "_").replace(/[\x00-\x1f\x7f]/g, "").replace(/\.\./g, "_").trim().slice(0, 64);
   return s === "" || s === "." ? "_" : s;
 }
 
 function safeBasename(virtualPath: string): string {
-  const b = fileNameOf(virtualPath).replace(/[/\\]/g, "_") || "file";
-  return b === "." || b === ".." ? "file" : b;
+  return safeSegment(fileNameOf(virtualPath), "file");
+}
+
+// Windows reserved device names (case-insensitive, extension ignored)
+const RESERVED_BASENAMES = new Set([
+  "CON", "PRN", "AUX", "NUL",
+  ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`),
+  ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`),
+]);
+
+function safeSegment(raw: string, fallback: string): string {
+  let s = raw.replace(/[/\\]+/g, "_").replace(/[\x00-\x1f\x7f]/g, "");
+  s = s.replace(/\s+/g, " ").trim();
+  s = s.replace(/[. ]+$/, "");
+  if (s === "" || s === "." || s === "..") return fallback;
+  const dot = s.indexOf(".");
+  const stem = dot >= 0 ? s.slice(0, dot) : s;
+  const out = RESERVED_BASENAMES.has(stem.toUpperCase()) ? `_${s}` : s;
+  return out.slice(0, 100) || fallback;
+}
+
+// Split remote virtual path on \ (also tolerates /); drops [0] share alias.
+function splitVirtual(virtualPath: string): { dirs: string[]; base: string } {
+  const parts = virtualPath.split(/[\\/]/);
+  const rest = parts.length > 1 ? parts.slice(1) : parts.slice();
+  const base = safeSegment(rest.pop() ?? "", "file");
+  const dirs: string[] = [];
+  for (const p of rest) {
+    if (p === "") continue;
+    dirs.push(safeSegment(p, "dir"));
+  }
+  return { dirs, base };
+}
+
+function joinUnique(dir: string, base: string): string {
+  let candidate = join(dir, base);
+  let counter = 1;
+  while (existsSync(candidate)) {
+    const dot = base.lastIndexOf(".");
+    const name = dot >= 0 ? base.slice(0, dot) : base;
+    const ext = dot >= 0 ? base.slice(dot) : "";
+    candidate = join(dir, `${name} (${counter})${ext}`);
+    counter++;
+    if (counter > 1000) break;
+  }
+  return candidate;
+}
+
+// Shrink longest segments until measure fits budget (total path ~200 chars).
+function shrinkSegments(segs: string[], overBy: () => number): void {
+  let guard = 0;
+  while (overBy() > 0 && guard++ < 64) {
+    let idx = -1;
+    for (let i = 0; i < segs.length; i++) {
+      if (segs[i].length > 1 && (idx < 0 || segs[i].length > segs[idx].length)) idx = i;
+    }
+    if (idx < 0) return;
+    segs[idx] = segs[idx].slice(0, Math.max(1, segs[idx].length - overBy()));
+  }
+}
+
+function containedPath(dest: string, downloadsDir: string): string | null {
+  const root = resolve(downloadsDir);
+  const r = resolve(dest);
+  return r === root || r.startsWith(root + sep) ? dest : null;
 }
 
 function getIncompletePath(virtualPath: string, username: string, incompleteDir: string): string {
@@ -119,26 +183,38 @@ function getIncompletePath(virtualPath: string, username: string, incompleteDir:
   return join(incompleteDir, prefix + safeBase);
 }
 
-function getFinishedPath(virtualPath: string, downloadsDir: string, username?: string, usernamesubfolders?: boolean): string {
-  let dir = downloadsDir;
-  if (usernamesubfolders && username) {
-    dir = join(downloadsDir, safeUsername(username));
+function getFinishedPath(virtualPath: string, downloadsDir: string, username?: string, _usernamesubfolders?: boolean, depth?: string): string {
+  // Layout: <downloads>/<user>/<subdirs...>/<base>. Alias dropped, username always
+  // included; _usernamesubfolders kept as no-op for config compat.
+  // depth trims remote dirs: "full" (default) keeps all, "N" keeps last N.
+  const user = username ? safeUsername(username) : "";
+  const { dirs, base } = splitVirtual(virtualPath);
+  const remote = (() => {
+    if (!depth || depth === "full") return dirs;
+    const n = Number(depth);
+    if (!Number.isFinite(n) || n < 0) return dirs;
+    return n === 0 ? [] : dirs.slice(-n);
+  })();
+  const flatBase = (): string => {
+    const dir = user ? join(downloadsDir, user) : downloadsDir;
     try { mkdirSync(dir, { recursive: true }); } catch {}
+    return joinUnique(dir, base);
+  };
+  if (!user || remote.length === 0) return flatBase();
+  const segs = remote.slice();
+  shrinkSegments(segs, () => join(downloadsDir, user, ...segs, base).length - 200);
+  let outBase = base;
+  if (join(downloadsDir, user, ...segs, outBase).length > 200) {
+    // ponytail: middle segments already at floor; trim base stem, keep extension
+    const dot = outBase.lastIndexOf(".");
+    const stem = dot > 0 ? outBase.slice(0, dot) : outBase;
+    const ext = dot > 0 ? outBase.slice(dot) : "";
+    outBase = stem.slice(0, Math.max(1, 200 - join(downloadsDir, user, ...segs, ext).length)) + ext;
   }
-  const base = safeBasename(virtualPath);
-  let dest = join(dir, base);
-  // avoid conflict "(1)" loop
-  let counter = 1;
-  let candidate = dest;
-  while (existsSync(candidate)) {
-    const dot = base.lastIndexOf(".");
-    const name = dot >= 0 ? base.slice(0, dot) : base;
-    const ext = dot >= 0 ? base.slice(dot) : "";
-    candidate = join(dir, `${name} (${counter})${ext}`);
-    counter++;
-    if (counter > 1000) break;
-  }
-  return candidate;
+  const dir = join(downloadsDir, user, ...segs);
+  if (!containedPath(join(dir, outBase), downloadsDir)) return flatBase();
+  try { mkdirSync(dir, { recursive: true }); } catch {}
+  return joinUnique(dir, outBase);
 }
 
 export class TransferManager {
@@ -153,9 +229,10 @@ export class TransferManager {
   private configDir: string;
   private incompleteDir: string;
   private downloadsDir: string;
-  private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; sendUploadDenied?: (u: string, f: string, reason?: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
+  private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; sendUploadDenied?: (u: string, f: string, reason?: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; sendTransferResponse?: (u: string, t: number, allowed: boolean, sizeOrReason?: number | bigint | string) => void; dialFileUpload?: (u: string, t: number) => Promise<Socket>; markFileUploadSocket?: (s: Socket, t: number, u: string) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
   private onBanlistUpdated?: (banlist: string[], byUser: string) => void;
   private tokenCounter = Math.floor(Math.random() * 900000) + 10000;
+  private tokenIndex = new Map<number, string>();
   private statsManager: StatsManager;
   private userUpdateCounter = new Map<string, number>();
   private globalUpdateCounter = 0;
@@ -184,7 +261,8 @@ export class TransferManager {
     preferfriends: false,
     autoclear_downloads: false,
     autoclear_uploads: false,
-    usernamesubfolders: false,
+    usernamesubfolders: true, // always-true layout <downloads>/<user>/...; kept for config compat, forced in setConfig
+    download_path_depth: "full" as "full" | "0" | "1" | "2" | "3", // remote dirs kept under <downloads>/<user>; "full" preserves whole tree
     incomplete_strategy: "resume" as "resume" | "overwrite",
     download_destination_template: null as string | null, // slskd DeriveDestination tokens e.g. "${SOURCE_DIRECTORY}/${SOURCE_USERNAME}"
     download_subdirectory: null as string | null, // legacy alias
@@ -232,6 +310,8 @@ export class TransferManager {
         if (!existsSync(p)) mkdirSync(p, { recursive: true });
       }
       this.loadFromDisk();
+      try { this.migrateFlatDownloads(); } catch {}
+      try { this.migrateTrimmedDownloads(); } catch {}
     } catch {}
 
     // Keep demo uploads for UI unless real transfers exist — only when explicitly enabled to avoid masking empty state in docker prod
@@ -253,6 +333,12 @@ export class TransferManager {
 
   setConfig(partial: Partial<typeof this.config>) {
     Object.assign(this.config, partial);
+    // no-op compat: folder layout always includes <downloads>/<user>/...
+    this.config.usernamesubfolders = true;
+    // Normalize depth: unknown values fall back to full tree (never silent user-only).
+    if (!["full", "0", "1", "2", "3"].includes(this.config.download_path_depth)) {
+      this.config.download_path_depth = "full";
+    }
     try { const ul = this.getUploadLimit(); if (ul) this.uploadBucket.configure(ul); const dl = this.getDownloadLimit(); if (dl) this.downloadBucket.configure(dl); } catch {}
   }
 
@@ -322,6 +408,7 @@ export class TransferManager {
       toDelete.push(id);
     }
     for (const id of toDelete) {
+      this.forgetTokensFor(id);
       this.transfers.delete(id);
       this.onRemoved(id);
     }
@@ -410,6 +497,108 @@ export class TransferManager {
     } catch {}
   }
 
+  migrateTrimmedDownloads(): { moved: number; skipped: number } {
+    // Move finished files deeper than download_path_depth into the trimmed
+    // layout (username + last N remote dirs). Token/_downloadUrl stay valid:
+    // only _incompletePath changes and /files/:token resolves via manager.
+    let moved = 0;
+    let skipped = 0;
+    const depth = this.config.download_path_depth;
+    if (!depth || depth === "full") return { moved, skipped };
+    // Template owners manage their own layout; trim applies to the default tree only.
+    if (this.config.download_destination_template || this.config.download_subdirectory) return { moved, skipped };
+    const n = Number(depth);
+    if (!Number.isFinite(n) || n < 0) return { moved, skipped };
+    try {
+      const root = resolve(this.downloadsDir);
+      for (const t of this.transfers.values()) {
+        try {
+          if (t.isUpload || t.status !== "Finished") { skipped++; continue; }
+          if (!t.virtualPath || typeof t.virtualPath !== "string") { skipped++; continue; }
+          const stored = (t as unknown as { _incompletePath?: unknown })._incompletePath;
+          if (!stored || typeof stored !== "string") continue;
+          const sRes = resolve(stored);
+          if (sRes !== root && !sRes.startsWith(root + sep)) continue;
+          if (!existsSync(sRes)) continue;
+          // Cheap check before deriveDestination (it mkdirs as a side effect)
+          const { dirs, base } = splitVirtual(t.virtualPath);
+          const keep = n === 0 ? [] : dirs.slice(-n);
+          const ideal = join(this.downloadsDir, safeUsername(t.username), ...keep, base);
+          if (resolve(ideal) === sRes) continue;
+          if (existsSync(ideal)) { skipped++; continue; }
+          const expected = this.deriveDestination(t.virtualPath, t.username);
+          const eRes = resolve(expected);
+          if (eRes === sRes) continue;
+          if (eRes !== root && !eRes.startsWith(root + sep)) { skipped++; continue; }
+          if (existsSync(eRes)) { skipped++; continue; }
+          try { mkdirSync(dirname(eRes), { recursive: true }); } catch {}
+          renameSync(sRes, eRes);
+          (t as unknown as { _incompletePath?: string })._incompletePath = eRes;
+          this.pruneEmptyDirs(sRes, root);
+          moved++;
+        } catch { skipped++; continue; }
+      }
+    } catch {}
+    if (moved > 0) { try { this.persist(); } catch {} }
+    try { logger.info("transfer", "migrated trimmed downloads", { moved, skipped }); } catch {}
+    return { moved, skipped };
+  }
+
+  // Remove dirs left empty by a migration move, bottom-up. Stops at the
+  // downloads root and never removes the per-user dir itself.
+  private pruneEmptyDirs(movedFrom: string, root: string) {
+    let dir = dirname(movedFrom);
+    for (let i = 0; i < 32; i++) {
+      const r = resolve(dir);
+      if (r === root || !r.startsWith(root + sep)) return;
+      if (dirname(r) === root) return;
+      try { rmdirSync(r); } catch { return; }
+      dir = dirname(dir);
+    }
+  }
+
+  migrateFlatDownloads(): { moved: number; skipped: number } {
+    let moved = 0;
+    let skipped = 0;
+    try {
+      const root = resolve(this.downloadsDir);
+      for (const t of this.transfers.values()) {
+        try {
+          if (t.isUpload) continue;
+          if (!t.virtualPath || typeof t.virtualPath !== "string") { skipped++; continue; }
+          const stored = (t as unknown as { _incompletePath?: unknown })._incompletePath;
+          if (!stored || typeof stored !== "string") continue;
+          const sRes = resolve(stored);
+          if (sRes !== root && !sRes.startsWith(root + sep)) continue;
+          const parent = dirname(sRes);
+          let userDir = root;
+          try { userDir = resolve(join(this.downloadsDir, safeUsername(t.username))); } catch {}
+          if (parent !== root && parent !== userDir) continue;
+          if (!existsSync(sRes)) continue;
+          // cheap skips before deriveDestination (it mkdirs as a side effect)
+          const { dirs, base } = splitVirtual(t.virtualPath);
+          if (dirs.length === 0) { skipped++; continue; }
+          const ideal = join(this.downloadsDir, safeUsername(t.username), ...dirs, base);
+          const iRes = resolve(ideal);
+          if (iRes === sRes) continue;
+          if (relative(root, iRes).split(sep).filter(Boolean).length < 3 || iRes !== root && !iRes.startsWith(root + sep)) { skipped++; continue; }
+          if (existsSync(ideal)) { skipped++; continue; }
+          const expected = this.deriveDestination(t.virtualPath, t.username);
+          const eRes = resolve(expected);
+          if (eRes === sRes) continue;
+          if (existsSync(eRes)) { skipped++; continue; }
+          try { mkdirSync(dirname(eRes), { recursive: true }); } catch {}
+          renameSync(sRes, eRes);
+          (t as unknown as { _incompletePath?: string })._incompletePath = eRes;
+          moved++;
+        } catch { skipped++; continue; }
+      }
+    } catch {}
+    if (moved > 0) { try { this.persist(); } catch {} }
+    try { logger.info("transfer", "migrated flat downloads", { moved, skipped }); } catch {}
+    return { moved, skipped };
+  }
+
   private seedDemoUploads() {
     const demo: BridgeTransfer[] = [
       {
@@ -478,21 +667,34 @@ export class TransferManager {
 
   getByToken(token: number): BridgeTransfer | undefined {
     for (const t of this.transfers.values()) if (t.token === token) return t;
+    // Repeat grants carry new tokens while an older F may still be in flight —
+    // fall back to any token this transfer was granted (see handleTransferRequest).
+    const id = this.tokenIndex.get(token >>> 0);
+    if (id !== undefined) return this.transfers.get(id);
     return undefined;
   }
 
+  private forgetTokensFor(id: string) {
+    for (const [tok, mapped] of this.tokenIndex) if (mapped === id) this.tokenIndex.delete(tok);
+  }
+
+  // Downloads root for containment checks (honors DOWNLOADS_DIR override).
+  downloadsRoot(): string {
+    return resolve(this.downloadsDir);
+  }
+
   // For GET /files/:token — tolerant fallback so spectrum works on legacy stubs + subfolders + WSL share dirs
-  getFilePathForToken(token: number): string | null {
-    const t = this.getByToken(token);
+  getFilePathForToken(token: number): string | null {    const t = this.getByToken(token);
     if (!t || t.status !== "Finished") return null;
     // Try stored path first (may be downloads dest or copied shared file)
     const stored = (t as unknown as { _incompletePath?: string })._incompletePath;
     if (stored && existsSync(stored)) return stored;
     // Also allow _downloadUrl missing for legacy entries — still try to locate file
-    const byName = join(this.downloadsDir, t.fileName);
+    const bareName = t.fileName.replace(/[/\\]+/g, "_") || "file";
+    const byName = join(this.downloadsDir, bareName);
     if (existsSync(byName)) return byName;
     if (this.config.usernamesubfolders && t.username) {
-      const sub = join(this.downloadsDir, safeUsername(t.username), t.fileName);
+      const sub = join(this.downloadsDir, safeUsername(t.username), bareName);
       if (existsSync(sub)) return sub;
     }
     // Derive via template (same as finishDownload)
@@ -513,19 +715,22 @@ export class TransferManager {
     } catch {}
     // Fallback: scan DATA_DIR recursively (WSL share copy e.g. DATA_DIR/DJSplash/file.m4a) — ponytail: handles legacy stubs where dest never written
     try {
-      const scan = (dir: string, target: string, depth = 2): string | null => {
+      // sanitize: scan target must be a bare name, never a path (fileName arrives via WS)
+      const target = t.fileName.replace(/[/\\]+/g, "_").replace(/[\x00-\x1f\x7f]/g, "").slice(0, 255) || "file";
+      const dataRoot = resolve(this.dataDir);
+      const scan = (dir: string, depth = 2): string | null => {
         try {
-          const cand = join(dir, target);
-          if (existsSync(cand)) return cand;
+          const cand = resolve(join(dir, target));
+          if ((cand === dataRoot || cand.startsWith(dataRoot + sep)) && existsSync(cand)) return cand;
           if (depth <= 0 || !existsSync(dir)) return null;
           for (const ent of readdirSync(dir)) {
-            const p = join(dir, ent);
-            try { if (statSync(p).isDirectory()) { const r = scan(p, target, depth - 1); if (r) return r; } } catch {}
+            const p = resolve(join(dir, ent));
+            try { if (!p.startsWith(dataRoot + sep)) continue; if (statSync(p).isDirectory()) { const r = scan(p, depth - 1); if (r) return r; } } catch {}
           }
         } catch {}
         return null;
       };
-      const hit = scan(this.dataDir, t.fileName, 2);
+      const hit = scan(this.dataDir, 4);
       if (hit) return hit;
     } catch {}
     return null;
@@ -590,52 +795,16 @@ export class TransferManager {
     // Send QueueUpload via P
     this.sendQueueUpload(t);
 
-    // Simulate fallback timers if no real peer (stub path for demo)
-    setTimeout(() => {
+    // Honest timeout only: stay Queued until a real peer event (queue grant,
+    // deny, place). No fake Getting/Transferring — those hid dial stalls.
+    const reqTimer = setTimeout(() => {
       const cur = this.transfers.get(id);
       if (!cur || cur.status !== "Queued") return;
-      // If we still haven't gotten TransferRequest, simulate Getting status (only if not already)
-      if (cur.status === "Queued") {
-        cur.status = "Getting status";
-        this.emit(cur);
-        // 45 s timeout → Connection timeout
-        cur._statusTimer = setTimeout(() => {
-          const c = this.transfers.get(id);
-          if (!c || c.status !== "Getting status") return;
-          c.status = "Connection timeout";
-          this.emit(c);
-          this.scheduleRetry(id, 180_000);
-        }, 45_000);
-      }
-    }, 350);
-
-    // For stub/demo without real peer, simulate Transferring after 1200 ms (as before) only if no F
-    setTimeout(() => {
-      const cur = this.transfers.get(id);
-      if (!cur || cur.status !== "Getting status") return;
-      // If we haven't received real TransferRequest, we simulate Transferring for demo
-      // Check if we have a real F pending — if token is registered, don't simulate
-      if (this.session && cur.token && this.transfers.has(id)) {
-        // Real path would have been activated via handleTransferRequest; if not, keep stub simulation
-        if (cur.status === "Getting status") {
-          cur.status = "Transferring";
-          cur._startTime = Date.now();
-          cur._transferredAtStart = 0;
-          if (cur._statusTimer) clearTimeout(cur._statusTimer);
-          this.startProgressStub(id);
-          this.emit(cur);
-          this.emitStats();
-        }
-      } else {
-        cur.status = "Transferring";
-        cur._startTime = Date.now();
-        cur._transferredAtStart = 0;
-        if (cur._statusTimer) clearTimeout(cur._statusTimer);
-        this.startProgressStub(id);
-        this.emit(cur);
-        this.emitStats();
-      }
-    }, 1200);
+      cur.status = "Connection timeout";
+      this.emit(cur);
+      this.scheduleRetry(id, 180_000);
+    }, 45_000);
+    t._statusTimer = reqTimer;
 
     return t;
   }
@@ -1007,21 +1176,40 @@ export class TransferManager {
     this.statsManager.recordUploadStarted();
     const token = this.tokenCounter++ >>> 0;
     candidate.token = token;
+    this.tokenIndex.set(token >>> 0, candidate.id);
+    // Stat the real file first so the request advertises a true size.
+    const resolved = this.resolveSharedFile(candidate.virtualPath, candidate.fileName);
+    if (!resolved) {
+      candidate.status = "File not shared.";
+      this.emit(candidate);
+      this.emitStats();
+      this.persist();
+      setTimeout(() => this.checkUploadQueue(), 100);
+      return;
+    }
+    if (resolved.size > 0) candidate.size = resolved.size;
     try { (this.session as any)?.transferRequest?.(candidate.username, 1, token, candidate.virtualPath, BigInt(candidate.size || 0)); } catch {}
   }
 
-  handlePlaceInQueueResponse(file: string, place: number) {
-    for (const t of this.transfers.values()) {
-      if (t.virtualPath === file) {
-        t.queuePosition = place;
-        this.emit(t);
-        this.emitQueue(t.id, place);
-        break;
+  handlePlaceInQueueResponse(file: string, place: number, username?: string) {
+    let hit: BridgeTransfer | undefined;
+    if (username) hit = this.transfers.get(`${username}::${file}`);
+    if (!hit) {
+      for (const t of this.transfers.values()) {
+        if (t.virtualPath === file && (!username || t.username === username)) {
+          hit = t;
+          break;
+        }
       }
+    }
+    if (hit) {
+      hit.queuePosition = place;
+      this.emit(hit);
+      this.emitQueue(hit.id, place);
     }
   }
 
-  handleTransferRequest(direction: number, token: number, file: string, size?: number | bigint) {
+  handleTransferRequest(direction: number, token: number, file: string, username?: string, size?: number | bigint) {
     // Legacy direction 0 = download from peer (slskd/Museek) — treat as QueueUpload
     if (direction === 0) {
       // find or create queued upload? For interop, treat as queue-upload request from peer that wants our file
@@ -1030,25 +1218,70 @@ export class TransferManager {
       // Simplest: if we are the uploader (peer wants file), handle as queue upload
       // Check if any transfer with this file is queued as upload? fallback to ignore but try to handle
       // We treat direction 0 with file as peer wanting to download -> queue upload
-      try { this.handleQueueUpload("unknown", file); } catch {}
+      try { this.handleQueueUpload(typeof username === "string" ? username : "unknown", file); } catch {}
       return;
     }
     if (direction !== 1) return;
-    // Find queued transfer by file
+    // Find queued transfer by owner + file (ids are username::path; never bind
+    // one user's grant to another user's same path).
+    const owner = typeof username === "string" ? username : undefined;
     let target: BridgeTransfer | undefined;
-    for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) target = t;
+    if (owner) target = this.transfers.get(`${owner}::${file}`);
+    if (!target && owner) {
+      for (const t of this.transfers.values()) {
+        if (t.isUpload || t.username !== owner) continue;
+        if (t.virtualPath === file || file.endsWith(t.fileName)) { target = t; break; }
+      }
+    }
     if (!target) {
-      // Maybe file path with \ vs / — try basename match
-      for (const t of this.transfers.values()) if (file.endsWith(t.fileName) && !t.isUpload) target = t;
+      // Legacy: grant without username — exact path only, no basename guessing.
+      for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) { target = t; break; }
     }
     if (!target) return;
+    // Repeat grant while already streaming: keep the live F, just map + ack.
+    if (target.status === "Transferring" && (target as unknown as { _hadRealF?: boolean })._hadRealF) {
+      this.tokenIndex.set(token >>> 0, target.id);
+      try { this.session?.registerFileToken(token); } catch {}
+      const peer = owner || target.username;
+      try { if (peer && this.session?.sendTransferResponse) this.session.sendTransferResponse(peer, token, true, target.size); } catch {}
+      return;
+    }
     // Activate
     target.token = token;
+    // Keep every granted token mapped: repeat grants race in-flight F conns.
+    this.tokenIndex.set(token >>> 0, target.id);
+    // Uploader authoritative size wins (nicotine-plus downloads.py _transfer_request_downloads).
+    // Guard: ignore non-finite/huge values instead of corrupting arithmetic.
+    if (typeof size === "number" || typeof size === "bigint") {
+      const n = typeof size === "bigint"
+        ? (size >= 0 && size <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(size) : NaN)
+        : size;
+      if (Number.isFinite(n) && (n as number) > 0 && (n as number) !== target.size) {
+        // Partial bytes belong to different content — restart (nicotine size_changed).
+        try {
+          const { statSync: ss } = require("node:fs") as typeof import("node:fs");
+          const partial = getIncompletePath(target.virtualPath, target.username, this.incompleteDir);
+          if (ss(partial).size > 0) {
+            const { unlinkSync: ul } = require("node:fs") as typeof import("node:fs");
+            try { ul(partial); } catch {}
+            logger.info("transfer", "size changed, partial discarded", { id: target.id });
+          }
+        } catch {}
+        target.size = n as number;
+        target.current = 0;
+      }
+    }
     target.status = "Getting status";
     if (target._statusTimer) clearTimeout(target._statusTimer);
     this.emit(target);
     // Register file token for F demux
     try { this.session?.registerFileToken(token); } catch {}
+    // SLSKPROTOCOL: TransferResponse allowed carries u64 filesize — echo the
+    // uploader's own size (bare replies made SoulseekQt abort with UploadFailed).
+    try {
+      const peer = username || target.username;
+      if (peer && this.session?.sendTransferResponse) this.session.sendTransferResponse(peer, token, true, target.size);
+    } catch {}
     // 45 s timer to timeout if F doesn't arrive
     target._statusTimer = setTimeout(() => {
       const cur = this.get(target!.id);
@@ -1060,22 +1293,93 @@ export class TransferManager {
     }, 45_000);
   }
 
-  handleUploadDenied(file: string, reason: string) {
-    for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) {
-      t.status = reason as TransferStatus;
+  // Permanent denials never succeed on retry (nicotine-plus denial categories).
+  private static readonly terminalDenials = new Set(["Banned", "File not shared.", "Filtered"]);
+
+  /** Downloader rejected our upload request. */
+  handleUploadRejected(username: string, token: number, reason: string) {
+    const t = this.getByToken(token);
+    if (!t || !t.isUpload || t.username !== username) return;
+    if (t.status === "Finished" || t.status === "Cancelled") return;
+    t.status = (TransferManager.terminalDenials.has(reason) ? reason : "Cancelled") as TransferStatus;
+    this.emit(t);
+    this.emitStats();
+    this.persist();
+    setTimeout(() => this.checkUploadQueue(), 100);
+  }
+
+  /** Downloader allowed our upload: dial F and start serving (nicotine uploads.py). */
+  async handleUploadGranted(username: string, token: number) {
+    const t = this.getByToken(token);
+    if (!t || !t.isUpload || t.status === "Finished" || t.status === "Cancelled") return;
+    if ((t as unknown as { _uploadSocket?: unknown })._uploadSocket) return; // already serving
+    const sess = this.sessionGetter?.() as unknown as {
+      dialFileUpload?: (u: string, t: number) => Promise<Socket>;
+    } | undefined;
+    if (!sess?.dialFileUpload) return;
+    try {
+      const sock = await sess.dialFileUpload(username, token);
+      await this.handleFileConnection(token, sock);
+    } catch {
+      t.status = "Connection timeout";
       this.emit(t);
       this.scheduleRetry(t.id, 180_000);
-      break;
     }
   }
 
-  handleUploadFailed(file: string) {
-    for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) {
-      t.status = "Connection closed";
+  /** Firewalled downloader pierced to us: serve oldest queued upload for them. */
+  async handleUploadPierced(username: string, socket: Socket) {
+    const t = [...this.transfers.values()].find((x) => x.isUpload && x.username === username && x.status === "Queued");
+    if (!t) { try { socket.end(); } catch {} return; }
+    if (t.token === undefined) { try { socket.end(); } catch {} return; }
+    const sess = this.sessionGetter?.() as unknown as { markFileUploadSocket?: (s: Socket, t: number, u: string) => void } | undefined;
+    try { sess?.markFileUploadSocket?.(socket, t.token, username); } catch {}
+    try { (socket as unknown as { write: (b: Buffer) => void }).write(buildFileTransferInit(t.token)); } catch {}
+    await this.handleFileConnection(t.token, socket);
+  }
+
+  /** F socket died mid-transfer: fail fast instead of waiting out the 60s stall. */
+  handleFileClosed(token: number) {
+    const t = this.getByToken(token);
+    if (!t || t.status !== "Transferring") return;
+    t.status = "Connection closed";
+    this.emit(t);
+    try { this.session?.unregisterFileToken(token); } catch {}
+    this.scheduleRetry(t.id, 180_000);
+  }
+
+  handleUploadDenied(file: string, reason: string, username?: string) {
+    let hit: BridgeTransfer | undefined;
+    if (username) hit = this.transfers.get(`${username}::${file}`);
+    if (!hit && username) {
+      for (const t of this.transfers.values()) {
+        if (t.isUpload || t.username !== username) continue;
+        if (t.virtualPath === file || file.endsWith(t.fileName)) { hit = t; break; }
+      }
+    }
+    if (!hit) for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) { hit = t; break; }
+    if (hit) {
+      hit.status = reason as TransferStatus;
+      this.emit(hit);
+      if (!TransferManager.terminalDenials.has(reason)) this.scheduleRetry(hit.id, 180_000);
+    }
+  }
+
+  handleUploadFailed(file: string, username?: string) {
+    let hit: BridgeTransfer | undefined;
+    if (username) hit = this.transfers.get(`${username}::${file}`);
+    if (!hit && username) {
+      for (const t of this.transfers.values()) {
+        if (t.isUpload || t.username !== username) continue;
+        if (t.virtualPath === file || file.endsWith(t.fileName)) { hit = t; break; }
+      }
+    }
+    if (!hit) for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) { hit = t; break; }
+    if (hit) {
+      hit.status = "Connection closed";
       this.statsManager.recordDownloadFailed();
-      this.emit(t);
-      this.scheduleRetry(t.id, 180_000);
-      break;
+      this.emit(hit);
+      this.scheduleRetry(hit.id, 180_000);
     }
   }
 
@@ -1200,6 +1504,18 @@ export class TransferManager {
   async handleFileConnection(token: number, socket: Socket) {
     const t = this.getByToken(token);
     if (!t) {
+      logger.debug("transfer", "F connection unknown token, closing", { token });
+      try { socket.end(); } catch {}
+      return;
+    }
+    // Adopt the live F token (may be an older grant racing a newer request).
+    t.token = token;
+    this.tokenIndex.set(token >>> 0, t.id);
+    // Second F dial for a transfer that already streams: close the spare so
+    // two sockets never share _onFileData/left accounting. Timed-out or
+    // retried transfers (status != Transferring) still accept a fresh F.
+    if (!t.isUpload && t.status === "Transferring" && (t as unknown as { _hadRealF?: boolean })._hadRealF && (t as unknown as { _onFileData?: unknown })._onFileData) {
+      logger.debug("transfer", "duplicate F ignored", { id: t.id, token });
       try { socket.end(); } catch {}
       return;
     }
@@ -1228,17 +1544,29 @@ export class TransferManager {
     }
     if (t._statusTimer) { clearTimeout(t._statusTimer); t._statusTimer = undefined; }
     if (t._timer) { clearInterval(t._timer); t._timer = undefined; }
-    // Real F owns progress from here — the pre-F progress stub stands down (see startProgressStub).
+    // Real F drove progress from here (no fake progress exists anymore).
     (t as unknown as { _hadRealF?: boolean })._hadRealF = true;
+    (t as unknown as { _hadRealF?: boolean })._hadRealF = true;
+    (t as unknown as { _fileSocket?: Socket })._fileSocket = socket;
     t.status = "Transferring";
     t._startTime = Date.now();
     const startOffset = await this.prepareIncompleteFile(t);
     t.current = startOffset;
     this.emit(t);
     this.emitStats();
+    // Already whole: nothing to fetch (nicotine-plus downloads.py parity).
+    if (t.size > 0 && startOffset >= t.size) {
+      logger.debug("transfer", "already complete, finishing", { id: t.id });
+      this.finishDownload(t, socket);
+      return;
+    }
+    logger.debug("transfer", "F accepted, FileOffset sent", { id: t.id, token, startOffset });
 
     // Send FileOffset (uint64 LE)
-    try { socket.write(packUint64(startOffset)); } catch {}
+    try {
+      const n = socket.write(packUint64(startOffset));
+      logger.debug("transfer", "FileOffset write result", { id: t.id, token, startOffset, wrote: typeof n === "number" ? n : String(n) });
+    } catch (e) { logger.debug("transfer", "FileOffset write failed", { id: t.id, err: String(e).slice(0, 120) }); }
     try { this.session?.unregisterFileToken(token); } catch {}
 
     // Stream raw bytes → file
@@ -1249,6 +1577,7 @@ export class TransferManager {
       return;
     }
     const onData = async (chunk: Buffer) => {
+      if (t.status === "Cancelled" || t.status === "Paused" || t.status === "Finished") return;
       if (left <= 0) return;
       const toWrite = chunk.subarray(0, Math.min(chunk.length, left));
       const dlLimit = this.getEffectiveDownloadLimit();
@@ -1304,6 +1633,12 @@ export class TransferManager {
     // We'll monkey-patch socket data via session's pending — simpler: rely on session to call this method with buffered data
     // This stub will be driven by session's file chunk forwarding
     (t as unknown as { _onFileData?: (c: Buffer) => void })._onFileData = onData;
+    // Drain bytes that arrived during async file preparation, in order.
+    const early = (t as unknown as { _earlyChunks?: Buffer[] })._earlyChunks;
+    if (early?.length) {
+      (t as unknown as { _earlyChunks?: Buffer[] })._earlyChunks = [];
+      for (const c of early) { try { await onData(c); } catch {} }
+    }
 
     // If socket already has buffered data, process it
     // Timeout for stalled transfer
@@ -1349,16 +1684,18 @@ export class TransferManager {
       return;
     }
     const cb = (t as unknown as { _onFileData?: (c: Buffer) => void })._onFileData;
-    if (cb) cb(chunk);
+    if (cb) { cb(chunk); return; }
+    // Handler installs after async file prep — stash early bytes (cap 1MB).
+    const early = ((t as unknown as { _earlyChunks?: Buffer[] })._earlyChunks ??= []);
+    const buffered = early.reduce((n, c) => n + c.length, 0);
+    if (buffered + chunk.length <= 1024 * 1024) early.push(chunk);
+    else logger.debug("transfer", "F early buffer full, dropping", { id: t.id, token });
   }
 
-  private startUploadStream(t: BridgeTransfer, offset: number, _initialTail?: Buffer) {
-    const socket = (t as unknown as { _uploadSocket?: Socket })._uploadSocket as Socket | undefined;
-    if (!socket) return;
-    // Resolve real file path: ShareDB virtual2real first (any mounted path),
-    // then Shared dirs -> DATA_DIR/shared -> uploads basename fallback.
+  /** Resolve a shared virtual path to a real readable file + size. */
+  private resolveSharedFile(virtualPath: string, fileName: string): { path: string; size: number } | null {
     let realPath: string | null = null;
-    let fileSize = t.size || 0;
+    let fileSize = 0;
     try {
       const { existsSync: es, statSync: ss } = require("node:fs") as typeof import("node:fs");
       const { join: jp } = require("node:path") as typeof import("node:path");
@@ -1371,10 +1708,10 @@ export class TransferManager {
         const sess: any = this.session;
         const sdb = sess?.shareDBInstance ?? (this.sessionGetter?.() as any)?.shareDBInstance ?? (sess as any)?.shareDB ?? null;
         if (sdb && typeof sdb.getVirtual2Real === "function") {
-          const exact = sdb.getVirtual2Real(t.virtualPath) as string | undefined;
+          const exact = sdb.getVirtual2Real(virtualPath) as string | undefined;
           if (!exact || !use(exact)) {
             // longest mapped folder prefix + remainder (e.g. "M\Orpheus" + "song.flac")
-            const parts = t.virtualPath.split("\\");
+            const parts = virtualPath.split("\\");
             for (let i = parts.length - 1; i > 0 && !realPath; i--) {
               const folderReal = sdb.getVirtual2Real(parts.slice(0, i).join("\\")) as string | undefined;
               if (folderReal) use(jp(folderReal, ...parts.slice(i)));
@@ -1387,7 +1724,7 @@ export class TransferManager {
       const sharedEnv = process.env.SHARED_DIRS || process.env.SHARES_DIR || "";
       if (sharedEnv) candidates.push(...sharedEnv.split(":").map((s) => s.trim()).filter(Boolean));
       candidates.push(jp(this.dataDir, "shared"), jp(this.dataDir, "shares"), jp(this.dataDir, "uploads"), this.dataDir);
-      const base = t.fileName;
+      const base = fileName;
       for (const dir of candidates) {
         const cand = jp(dir, base);
         if (es(cand)) { realPath = cand; try { fileSize = ss(cand).size; } catch {} break; }
@@ -1406,6 +1743,18 @@ export class TransferManager {
       }
       }
     } catch {}
+    if (!realPath) return null;
+    return { path: realPath, size: fileSize };
+  }
+
+  private startUploadStream(t: BridgeTransfer, offset: number, _initialTail?: Buffer) {
+    const socket = (t as unknown as { _uploadSocket?: Socket })._uploadSocket as Socket | undefined;
+    if (!socket) return;
+    // Resolve real file path: ShareDB virtual2real first (any mounted path),
+    // then Shared dirs -> DATA_DIR/shared -> uploads basename fallback.
+    const resolved = this.resolveSharedFile(t.virtualPath, t.fileName);
+    let realPath = resolved?.path ?? null;
+    let fileSize = resolved?.size ?? t.size ?? 0;
     if (!realPath) {
       // No real file on disk — deny (do not stream dummy zeros). Previously was demo fallback.
       t.status = "File not shared.";
@@ -1458,6 +1807,7 @@ export class TransferManager {
         if (this.config.autoclear_uploads) {
           setTimeout(() => {
             if (this.transfers.has(t.id) && t.status === "Finished") {
+              this.forgetTokensFor(t.id);
               this.transfers.delete(t.id);
               this.onRemoved(t.id);
               this.emitStats();
@@ -1513,33 +1863,37 @@ export class TransferManager {
     }
   }
   private deriveDestination(virtualPath: string, username: string): string {
+    const { dirs, base } = splitVirtual(virtualPath);
     const tmpl = this.config.download_destination_template || this.config.download_subdirectory || null;
-    if (!tmpl) return getFinishedPath(virtualPath, this.downloadsDir, username, this.config.usernamesubfolders);
+    if (!tmpl) return getFinishedPath(virtualPath, this.downloadsDir, username, this.config.usernamesubfolders, this.config.download_path_depth);
     // Simple token replacement like slskd: ${SOURCE_USERNAME}, ${SOURCE_DIRECTORY}, ${SOURCE_PATH}, ${BATCH_ID}
-    const sourcePath = virtualPath;
-    const sourceDir = virtualPath.includes("\\") ? virtualPath.slice(0, virtualPath.lastIndexOf("\\")) : "";
     const sourceUsername = username.replace(/[/\\]/g, "_");
     const clean = (s: string) => s.replace(/[/\\]/g, "_").replace(/\.\./g, "_");
     let expanded = tmpl
       .replace(/\$\{SOURCE_USERNAME\}/g, clean(sourceUsername))
-      .replace(/\$\{SOURCE_DIRECTORY\}/g, clean(sourceDir.split("\\")[0] || ""))
-      .replace(/\$\{SOURCE_PATH\}/g, clean(sourcePath))
+      .replace(/\$\{SOURCE_DIRECTORY\}/g, clean(dirs[0] || ""))
+      .replace(/\$\{SOURCE_PATH\}/g, clean(virtualPath))
       .replace(/\$\{BATCH_ID\}/g, "batch");
     // guard traversal
     expanded = expanded.replace(/\.\./g, "_").replace(/^[/\\]+/, "");
-    let dir = join(this.downloadsDir, expanded);
-    try { mkdirSync(dir, { recursive: true }); } catch {}
-    const base = safeBasename(virtualPath);
-    let dest = join(dir, base);
-    let counter = 1; let candidate = dest;
-    while (existsSync(candidate)) {
-      const dot = base.lastIndexOf(".");
-      const name = dot >= 0 ? base.slice(0, dot) : base;
-      const ext = dot >= 0 ? base.slice(dot) : "";
-      candidate = join(dir, `${name} (${counter})${ext}`);
-      counter++; if (counter > 1000) break;
+    // Append preserved subpath past what the template already ends with:
+    // longest prefix of dirs matching the template suffix continues from there.
+    const expSegs = expanded.split(/[\\/]/).filter((s) => s !== "");
+    let k = 0;
+    for (let n = Math.min(dirs.length, expSegs.length); n > 0; n--) {
+      if (expSegs.slice(-n).every((s, i) => s === dirs[i])) { k = n; break; }
     }
-    return candidate;
+    const tail = dirs.slice(k);
+    shrinkSegments(tail, () => join(this.downloadsDir, expanded, ...tail, base).length - 200);
+    const flatDir = join(this.downloadsDir, expanded);
+    const flatBase = safeBasename(virtualPath);
+    if (!containedPath(join(this.downloadsDir, expanded, ...tail, base), this.downloadsDir)) {
+      try { mkdirSync(flatDir, { recursive: true }); } catch {}
+      return joinUnique(flatDir, flatBase);
+    }
+    const dir = join(this.downloadsDir, expanded, ...tail);
+    try { mkdirSync(dir, { recursive: true }); } catch {}
+    return joinUnique(dir, base);
   }
 
   private finishDownload(t: BridgeTransfer, socket: Socket) {
@@ -1549,6 +1903,7 @@ export class TransferManager {
     // Move to downloads dir with collision handling + templating (slskd DeriveDestination)
     try {
       const dest = this.deriveDestination(t.virtualPath, t.username);
+      try { mkdirSync(dirname(dest), { recursive: true }); } catch {}
       renameSync(t._incompletePath!, dest);
       t._downloadUrl = `/files/${t.token}`;
       t._incompletePath = dest;
@@ -1563,6 +1918,10 @@ export class TransferManager {
     t.speed = 0;
     t.timeLeft = null;
     t.queuePosition = null;
+    // Live token stays on t.token for /files/ lookup; drop historic grants so
+    // a stale token can never reopen a finished transfer.
+    this.forgetTokensFor(t.id);
+    this.tokenIndex.set(t.token >>> 0, t.id);
     try { this.session?.sendUploadSpeed(t.avgSpeed || 0); } catch {}
     this.statsManager.recordDownloadCompleted(t.size);
     this.emit(t);
@@ -1573,6 +1932,7 @@ export class TransferManager {
     if (this.config.autoclear_downloads) {
       setTimeout(() => {
         if (this.transfers.has(t.id) && t.status === "Finished") {
+          this.forgetTokensFor(t.id);
           this.transfers.delete(t.id);
           this.onRemoved(t.id);
           this.emitStats();
@@ -1584,36 +1944,14 @@ export class TransferManager {
     if (t._pollTimer) { clearInterval(t._pollTimer); t._pollTimer = undefined; }
   }
 
-  private startProgressStub(id: string) {
-    const t = this.transfers.get(id);
-    if (!t) return;
-    if (t._timer) clearInterval(t._timer);
-    t._timer = setInterval(() => {
-      const cur = this.transfers.get(id);
-      if (!cur || cur.status !== "Transferring") {
-        if (cur?._timer) clearInterval(cur._timer);
-        return;
-      }
-      // Real F connection owns progress once bytes flow — never fake those.
-      if ((cur as unknown as { _hadRealF?: boolean })._hadRealF) {
-        if (cur._timer) { clearInterval(cur._timer); cur._timer = undefined; }
-        return;
-      }
-      const chunk = 2_000_000 + Math.random() * 3_000_000;
-      // Never complete or touch size: stub is pre-F eye-candy only (rebased when F arrives).
-      const step = Math.min(chunk * 0.5, Math.max(0, cur.size - cur.current - 1));
-      cur.current += step;
-      const elapsed = (Date.now() - (cur._startTime ?? Date.now())) / 1000;
-      const dlLimit = this.getDownloadLimit();
-      cur.speed = dlLimit ? Math.min(step * 2, dlLimit) : step * 2;
-      cur.avgSpeed = elapsed > 0 ? cur.current / elapsed : cur.speed;
-      cur.timeLeft = cur.speed > 0 ? Math.ceil((cur.size - cur.current) / cur.speed) : null;
-      // NOTE: the stub never completes transfers. Only real F bytes via
-      // finishDownload() may mark Finished — a stub finish once shipped a
-      // synth sine tone as the user's download (data loss). See mistakes.md.
-      this.emit(cur);
-      this.emitStats();
-    }, 500);
+  /** End live F/upload sockets and detach chunk handlers. */
+  private closeTransferSockets(t: BridgeTransfer) {
+    try { (t as unknown as { _fileSocket?: Socket })._fileSocket?.end?.(); } catch {}
+    try { (t as unknown as { _uploadSocket?: Socket })._uploadSocket?.end?.(); } catch {}
+    (t as unknown as { _fileSocket?: Socket })._fileSocket = undefined;
+    (t as unknown as { _uploadSocket?: Socket })._uploadSocket = undefined;
+    (t as unknown as { _onFileData?: unknown })._onFileData = undefined;
+    (t as unknown as { _earlyChunks?: Buffer[] })._earlyChunks = [];
   }
 
   controlDownload(id: string, action: "cancel" | "pause" | "resume" | "retry" | "clear") {
@@ -1624,6 +1962,7 @@ export class TransferManager {
       case "cancel":
         if (t.status !== "Finished" && t.status !== "Cancelled") this.statsManager.recordDownloadCancelled();
         t.status = "Cancelled";
+        this.closeTransferSockets(t);
         if (t._timer) clearInterval(t._timer);
         if (t._statusTimer) clearTimeout(t._statusTimer);
         if (t._pollTimer) clearInterval(t._pollTimer);
@@ -1634,6 +1973,7 @@ export class TransferManager {
       case "pause":
         if (t.status === "Transferring" && t._timer) clearInterval(t._timer);
         t.status = "Paused";
+        this.closeTransferSockets(t);
         t.speed = 0;
         this.emit(t);
         this.emitStats();
@@ -1643,22 +1983,18 @@ export class TransferManager {
         if (t._retryTimer) clearTimeout(t._retryTimer);
         t.status = "Queued";
         t.queuePosition = 1;
+        t.current = 0;
         this.emit(t);
         this.sendQueueUpload(t);
+        // Honest timeout only: no fake Getting/Transferring. Real peer
+        // events (queue/grant/deny) drive status from here.
         setTimeout(() => {
           const cur = this.transfers.get(id);
           if (!cur || cur.status !== "Queued") return;
-          cur.status = "Getting status";
+          cur.status = "Connection timeout";
           this.emit(cur);
-        }, 300);
-        setTimeout(() => {
-          const cur = this.transfers.get(id);
-          if (!cur || cur.status !== "Getting status") return;
-          cur.status = "Transferring";
-          cur._startTime = Date.now() - (cur.current / (cur.avgSpeed || 1_000_000)) * 1000;
-          this.startProgressStub(id);
-          this.emit(cur);
-        }, 900);
+          this.scheduleRetry(id, 180_000);
+        }, 45_000);
         break;
       case "clear":
         if (t._timer) clearInterval(t._timer);
@@ -1666,6 +2002,8 @@ export class TransferManager {
         if (t._pollTimer) clearInterval(t._pollTimer);
         if (t._retryTimer) clearTimeout(t._retryTimer);
         if (t._fileHandle !== undefined) try { const { closeSync } = require("node:fs"); closeSync(t._fileHandle); } catch {}
+        this.closeTransferSockets(t);
+        this.forgetTokensFor(id);
         this.transfers.delete(id);
         this.onRemoved(id);
         this.emitStats();
@@ -1684,6 +2022,7 @@ export class TransferManager {
       this.emitStats();
       this.persist();
     } else if (action === "clear") {
+      this.forgetTokensFor(id);
       this.transfers.delete(id);
       this.onRemoved(id);
       this.emitStats();
@@ -1701,6 +2040,7 @@ export class TransferManager {
     if (t._pollTimer) clearInterval(t._pollTimer);
     if (t._retryTimer) clearTimeout(t._retryTimer);
     if (t._fileHandle !== undefined) try { const { closeSync } = require("node:fs"); closeSync(t._fileHandle); } catch {}
+    this.forgetTokensFor(id);
     this.transfers.delete(id);
     this.onRemoved(id);
     this.emitStats();

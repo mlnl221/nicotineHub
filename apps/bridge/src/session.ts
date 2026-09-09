@@ -17,8 +17,6 @@ import { isUserBanned, shouldBlockUser, shouldIgnoreUser, getCountryCode, setCou
 import { PortMapper } from "./portmapper.ts";
 import {
   buildAcceptChildren,
-  buildAddThingIHate,
-  buildAddThingILike,
   buildBranchLevel,
   buildBranchRoot,
   buildCantConnectToPeer,
@@ -40,12 +38,11 @@ import {
   buildMessageAcked,
   buildMessageUser,
   buildPeerInit,
+  buildFileTransferInit,
   buildPierceFireWall,
   buildPlaceInQueueRequest,
   buildPlaceInQueueResponse,
   buildQueueUpload,
-  buildRemoveThingIHate,
-  buildRemoveThingILike,
   buildRoomListRequest,
   buildRoomSearch,
   buildSayChatroom,
@@ -61,6 +58,7 @@ import {
   buildSharedFileListRequest,
   buildSharedFoldersFiles,
   buildTransferRequest,
+  buildTransferResponse,
   buildUploadDenied,
   buildUnwatchUser,
   buildUserInfoRequest,
@@ -71,6 +69,7 @@ import {
   buildWishlistSearch,
   frameMessage,
   MAX_INCOMING,
+  maxIncomingForPeer,
   packString,
   packUint32,
   parseBranchLevel,
@@ -83,8 +82,6 @@ import {
   parseFileSearchResponse,
   parseFolderContentsResponse,
   parseGlobalRoomMessage,
-  parseItemRecommendations,
-  parseItemSimilarUsers,
   parseJoinRoom,
   parseLoginResponse,
   parseMessageUser,
@@ -97,7 +94,8 @@ import {
   parsePrivileges,
   parsePrivilegedUsers,
   parseQueueUpload,
-  parseRecommendations,
+  parseUploadDenied,
+  parseUploadFailed,
   parseSharedFileListResponse,
   SlskReader,
   parseRoomList,
@@ -107,7 +105,6 @@ import {
   parseRoomTickers,
   parseRoomTickerEvent,
   parseSayChatroom,
-  parseSimilarUsers,
   parseTransferRequest,
   parseTransferResponse,
   parseUserInterests,
@@ -115,6 +112,7 @@ import {
   parseUserInfoResponse,
   parseUserStatus,
   parseWatchUser,
+  parseWishlistInterval,
   tryParseMessage,
   PEER_MESSAGE_CODES,
   SERVER_MESSAGE_CODES,
@@ -125,8 +123,6 @@ import {
   type LoginResponse,
   type PeerAddress,
   type SearchFile,
-  type Recommendation,
-  type SimilarUser,
   type UserInterestsMessage,
   type UserStatsMessage,
   type UserStatusMessage,
@@ -156,6 +152,40 @@ export interface BrowseEvent {
   files?: import("./soulseek.ts").BrowseFileEntry[];
   error?: string;
 }
+export interface WishlistEntry { term: string; auto: boolean; timeAdded?: number }
+
+export function buildWishlistSearchId(term: string, now = Date.now()): string {
+  return `wishlist:${now}:${term}`;
+}
+
+export function parseWishlistSearchId(searchId: string): { term: string; timestamp: number } | null {
+  const prefix = "wishlist:";
+  if (!searchId.startsWith(prefix)) return null;
+  const rest = searchId.slice(prefix.length);
+  // New format wishlist:<ts>:<term> — timestamp first so colons in term survive
+  const firstColon = rest.indexOf(":");
+  if (firstColon > 0) {
+    const ts = Number(rest.slice(0, firstColon));
+    if (Number.isInteger(ts) && ts > 0) return { timestamp: ts, term: rest.slice(firstColon + 1) };
+  }
+  // Legacy wishlist:<term>:<ts>
+  const lastColon = rest.lastIndexOf(":");
+  if (lastColon > 0) {
+    const ts = Number(rest.slice(lastColon + 1));
+    if (Number.isInteger(ts) && ts > 0) return { timestamp: ts, term: rest.slice(0, lastColon) };
+  }
+  return null;
+}
+
+export function getAutoTerms(terms: string[], autoByTerm?: Map<string, boolean> | Record<string, boolean>): string[] {
+  if (!autoByTerm) return terms.slice();
+  const isAuto = (t: string): boolean => {
+    const v = autoByTerm instanceof Map ? autoByTerm.get(t) : (autoByTerm as Record<string, boolean>)[t];
+    return v !== false;
+  };
+  return terms.filter(isAuto);
+}
+
 export interface SessionOptions {
   username: string; password: string; host?: string; port?: number; listenPort: number;
   profile: UserInfoResponseMessage; dataDir?: string; onUserEvent?: (event: UserInfoEvent) => void;
@@ -163,19 +193,21 @@ export interface SessionOptions {
   onTransferEvent?: (event: TransferEvent) => void; onBrowseEvent?: (event: BrowseEvent) => void;
   onServerEvent?: (event: ServerEvent) => void; signal?: AbortSignal;
   onWishlistEvent?: (event: { type: "result" | "end"; searchId: string; token: number; rows?: SearchRow[]; reason?: string }) => void;
+  filterWishlistTerm?: (term: string) => string | null;
   // F-stream wiring to TransferManager (Phase 4)
   onFileConnection?: (token: number, socket: Socket) => void;
   onFileChunk?: (token: number, chunk: Buffer) => void;
+  onFileClosed?: (token: number) => void;
+  onUploadPierce?: (username: string, socket: Socket) => void;
   getQueuePlace?: (file: string) => number;
 }
 export interface UserInfoEvent {
-  type: "user-status" | "user-stats" | "user-interests" | "recommendations" | "global-recommendations"
-    | "similar-users" | "item-recommendations" | "item-similar-users" | "peer-address"
+  type: "user-status" | "user-stats" | "user-interests" | "peer-address"
     | "user-info-response" | "user-info-failed" | "privileged-users" | "check-privileges"
     | "excluded-search-phrases" | "wishlist-interval" | "watch-user" | "admin-message"
     | "privilege-time";
   username?: string; status?: UserStatusMessage; stats?: UserStatsMessage;
-  interests?: UserInterestsMessage; recommendations?: Recommendation[]; similarUsers?: SimilarUser[];
+  interests?: UserInterestsMessage;
   peerAddress?: PeerAddress; info?: UserInfoResponseMessage; privilegedUsers?: string[];
   checkPrivileges?: number; excludedPhrases?: string[]; wishlistInterval?: number;
   watchUser?: ReturnType<typeof parseWatchUser>; adminMessage?: string;
@@ -195,7 +227,7 @@ export interface RoomEvent {
 }
 export interface TransferEvent {
   type: "transfer-request" | "transfer-response" | "queue-upload" | "place-in-queue" | "upload-failed" | "upload-denied";
-  username?: string; file?: string; token?: number; place?: number; reason?: string;
+  username?: string; file?: string; token?: number; place?: number; reason?: string; direction?: number; size?: number | bigint; allowed?: boolean;
 }
 
 const DEFAULT_SEARCH_TIMEOUT_MS = 20_000; // kept for reference — not used (nicotine parity: searches live until explicit stop, no timeout)
@@ -276,6 +308,9 @@ export class SoulseekSession {
   private shareDB: ShareDB;
   private wishlistInterval = 12 * 60; // seconds, server 12 min default (2 min privileged)
   private wishlistTerms: string[] = [];
+  private wishlistAuto = new Map<string, boolean>();
+  private wishlistTokens = new Map<string, number>();
+  private wishlistTimeAdded = new Map<string, number>();
   private wishlistIndex = 0;
   // ban/ignore/geo config — updated via server WS
   private banlist: string[] = [];
@@ -293,6 +328,11 @@ export class SoulseekSession {
   private pendingBrowseShares = new Map<string, { timer: ReturnType<typeof setTimeout>; createdAt: number }>();
   private pendingBrowseFolder = new Map<number, { username: string; folder: string; timer: ReturnType<typeof setTimeout>; retryCount: number }>();
   private pendingPeerMessages = new Map<string, Array<{ connType: string; msg: Buffer }>>();
+  // inbound pierce parked when the peer dials before our ConnectToPeer copy
+  // arrives (remote got the relay first). Adopted on ConnectToPeer match.
+  private parkedPierce = new Map<number, { sock: unknown; at: number }>();
+  // Sockets observed closed: processPeer must not re-add state for them.
+  private closedPeers = new WeakSet<object>();
   // user status cache for offline check (P1 hardening)
   private userStatusCache = new Map<string, { status: number; privileged: boolean; updated: number }>();
   // allowed peer responses gating (nicotine allowed_message_responses) — prevent unsolicited 448M
@@ -558,9 +598,30 @@ export class SoulseekSession {
     return this.shareDB.previewWithExclusions(exclusions);
   }
 
-  setWishlistTerms(terms: string[]) {
-    this.wishlistTerms = terms.slice();
+  setWishlistTerms(terms: string[], entries?: Array<{ term: string; auto: boolean }>) {
+    if (entries && entries.length) {
+      this.wishlistTerms = entries.map((e) => e.term);
+      this.wishlistAuto.clear();
+      for (const e of entries) this.wishlistAuto.set(e.term, e.auto !== false);
+      // Prune token/time state for removed terms
+      for (const k of [...this.wishlistTokens.keys()]) {
+        if (!this.wishlistTerms.includes(k)) {
+          const t = this.wishlistTokens.get(k);
+          if (t !== undefined) this.allowedSearchTokens.delete(t);
+          this.wishlistTokens.delete(k);
+        }
+      }
+    } else {
+      this.wishlistTerms = terms.slice();
+      for (const t of this.wishlistTerms) if (!this.wishlistAuto.has(t)) this.wishlistAuto.set(t, true);
+      // Drop flags for removed terms
+      for (const k of [...this.wishlistAuto.keys()]) if (!this.wishlistTerms.includes(k)) this.wishlistAuto.delete(k);
+    }
+    const now = Date.now();
+    for (const t of this.wishlistTerms) if (!this.wishlistTimeAdded.has(t)) this.wishlistTimeAdded.set(t, now);
+    for (const k of [...this.wishlistTimeAdded.keys()]) if (!this.wishlistTerms.includes(k)) this.wishlistTimeAdded.delete(k);
     this.wishlistIndex = 0;
+    this.saveWishlistToDisk();
     this.restartWishlistTimer();
   }
 
@@ -773,7 +834,11 @@ export class SoulseekSession {
     const list = this.pendingPeerMessages.get(key);
     if (!list || list.length === 0) return;
     const sock = this.getPeerSocket(username, connType);
-    if (!sock) return;
+    if (!sock) {
+      const states = [...this.peerStates.values()].filter((s) => s.username?.toLowerCase() === key).map((s) => ({ t: s.connType, init: s.initDone }));
+      logger.debug("peer", "flush miss, no socket", { username, connType, queued: list.length, states });
+      return;
+    }
     const remaining: Array<{ connType: string; msg: Buffer }> = [];
     for (const item of list) {
       if (item.connType !== connType) { remaining.push(item); continue; }
@@ -795,20 +860,30 @@ export class SoulseekSession {
 
   private restartWishlistTimer() {
     if (this.wishlistTimer) { clearInterval(this.wishlistTimer); this.wishlistTimer = undefined; }
-    if (!this.wishlistTerms.length || !this.loggedIn) return;
+    const autoTerms = getAutoTerms(this.wishlistTerms, this.wishlistAuto);
+    if (!autoTerms.length || !this.loggedIn) return;
     const intervalMs = Math.max(30_000, this.wishlistInterval * 1000);
     this.wishlistTimer = setInterval(() => {
-      if (!this.loggedIn || !this.serverSocket || !this.wishlistTerms.length) return;
-      const rawTerm = this.wishlistTerms[this.wishlistIndex % this.wishlistTerms.length];
+      if (!this.loggedIn || !this.serverSocket) return;
+      const auto = getAutoTerms(this.wishlistTerms, this.wishlistAuto);
+      if (!auto.length) return;
+      const rawTerm = auto[this.wishlistIndex % auto.length];
       this.wishlistIndex++;
       const clean = sanitizeSearchTerm(rawTerm);
-      const term = clean.transmitted || clean.sanitized || rawTerm;
+      let term = clean.transmitted || clean.sanitized || rawTerm;
       if (!term) return;
       try {
-        const token = this.tokenCounter++;
-        if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
-        this.allowedSearchTokens.add(token);
-        const searchId = `wishlist:${term}:${Date.now()}`;
+        const filtered = this.opts.filterWishlistTerm?.(term);
+        if (filtered === null) return;
+        if (typeof filtered === "string") {
+          if (!filtered) return;
+          term = filtered;
+        }
+      } catch { return; }
+      if (!term) return;
+      try {
+        const token = this.allocWishlistToken(term);
+        const searchId = buildWishlistSearchId(term);
         const handlers: SearchHandlers = {
           onResult: (p) => this.opts.onWishlistEvent?.({ type: "result", searchId: p.searchId, token: p.token, rows: p.rows }),
           onEnd: (p) => this.opts.onWishlistEvent?.({ type: "end", searchId: p.searchId, token, reason: p.reason }),
@@ -1033,6 +1108,70 @@ export class SoulseekSession {
     this.profile = opts.profile;
     this._listenPort = opts.listenPort;
     this.shareDB = new ShareDB({ dataDir: opts.dataDir || process.env.DATA_DIR || "/data" });
+    this.loadWishlistFromDisk();
+  }
+
+  private wishlistFilePath(): string {
+    try {
+      const { join } = require("node:path") as typeof import("node:path");
+      const dir = process.env.CONFIG_DIR || "/config";
+      return join(dir, "wishlist.json");
+    } catch { return "/config/wishlist.json"; }
+  }
+
+  private loadWishlistFromDisk(): void {
+    try {
+      const { existsSync, mkdirSync, readFileSync } = require("node:fs") as typeof import("node:fs");
+      const { dirname } = require("node:path") as typeof import("node:path");
+      const p = this.wishlistFilePath();
+      try { mkdirSync(dirname(p), { recursive: true }); } catch {}
+      if (!existsSync(p)) return;
+      const raw = JSON.parse(readFileSync(p, "utf8")) as unknown;
+      if (!Array.isArray(raw)) return;
+      const terms: string[] = [];
+      for (const e of raw) {
+        const term = typeof e === "string" ? e : (e as { term?: unknown }).term;
+        if (typeof term !== "string" || !term) continue;
+        const auto = (e as { auto?: unknown }).auto;
+        const timeAdded = (e as { timeAdded?: unknown }).timeAdded;
+        terms.push(term);
+        this.wishlistAuto.set(term, auto !== false);
+        if (typeof timeAdded === "number" && Number.isFinite(timeAdded)) this.wishlistTimeAdded.set(term, timeAdded);
+        else this.wishlistTimeAdded.set(term, Date.now());
+      }
+      if (terms.length) this.wishlistTerms = terms;
+    } catch {}
+  }
+
+  private saveWishlistToDisk(): void {
+    try {
+      const { mkdirSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
+      const { dirname } = require("node:path") as typeof import("node:path");
+      const p = this.wishlistFilePath();
+      try { mkdirSync(dirname(p), { recursive: true }); } catch {}
+      const now = Date.now();
+      const out = this.wishlistTerms.map((term) => ({
+        term,
+        auto: this.wishlistAuto.get(term) !== false,
+        timeAdded: this.wishlistTimeAdded.get(term) ?? now,
+      }));
+      writeFileSync(p, JSON.stringify(out));
+    } catch {}
+  }
+
+  private allocWishlistToken(term: string): number {
+    const existing = this.wishlistTokens.get(term);
+    // Reuse stable token only when no search currently holds it — otherwise
+    // a concurrent search for the same term would orphan the prior handlers.
+    if (existing !== undefined && !this.searches.has(existing)) {
+      this.allowedSearchTokens.add(existing);
+      return existing;
+    }
+    const token = this.tokenCounter++ >>> 0;
+    if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
+    this.allowedSearchTokens.add(token);
+    this.wishlistTokens.set(term, token);
+    return token;
   }
 
   /**
@@ -1436,26 +1575,6 @@ export class SoulseekSession {
       try { const interests = parseUserInterests(payload); this.emit({ type: "user-interests", username: interests.username, interests }); } catch {}
       return;
     }
-    if (code === SERVER_MESSAGE_CODES.recommendations) {
-      try { this.emit({ type: "recommendations", recommendations: parseRecommendations(payload).recommendations }); } catch {}
-      return;
-    }
-    if (code === SERVER_MESSAGE_CODES.globalRecommendations) {
-      try { this.emit({ type: "global-recommendations", recommendations: parseRecommendations(payload).recommendations }); } catch {}
-      return;
-    }
-    if (code === SERVER_MESSAGE_CODES.similarUsers) {
-      try { this.emit({ type: "similar-users", similarUsers: parseSimilarUsers(payload) }); } catch {}
-      return;
-    }
-    if (code === SERVER_MESSAGE_CODES.itemRecommendations) {
-      try { this.emit({ type: "item-recommendations", recommendations: parseItemRecommendations(payload).recommendations }); } catch {}
-      return;
-    }
-    if (code === SERVER_MESSAGE_CODES.itemSimilarUsers) {
-      try { this.emit({ type: "item-similar-users", similarUsers: parseItemSimilarUsers(payload).users }); } catch {}
-      return;
-    }
     if (code === SERVER_MESSAGE_CODES.getPeerAddress) {
       try {
         const addr = parsePeerAddress(payload);
@@ -1563,7 +1682,7 @@ export class SoulseekSession {
       return;
     }
     if (code === SERVER_MESSAGE_CODES.wishlistInterval) {
-      try { const secs = payload.readUInt32LE(0); this.wishlistInterval = secs; this.restartWishlistTimer(); this.emit({ type: "wishlist-interval", wishlistInterval: secs }); } catch {}
+      try { const secs = parseWishlistInterval(payload); this.wishlistInterval = secs; this.restartWishlistTimer(); this.emit({ type: "wishlist-interval", wishlistInterval: secs }); } catch {}
       return;
     }
     if (code === SERVER_MESSAGE_CODES.roomTickers) {
@@ -1939,6 +2058,9 @@ export class SoulseekSession {
                 this.pendingFileTokens.delete(token);
                 logger.debug("transfer", "inbound F demux via token", { token });
                 this.peerStates.set(peer as Socket, st);
+                // Wire the transfer now: processPeer below only sees post-token
+                // bytes and would never call onFileConnection for this path.
+                try { this.opts.onFileConnection?.(token, peer); } catch {}
                 this.processPeer(peer as Socket, buf.subarray(4), true);
                 return;
               }
@@ -1953,7 +2075,11 @@ export class SoulseekSession {
           const st = this.peerStates.get(peer as Socket);
           logger.debug("server", "peer inbound close", { username: st?.username, connType: st?.connType, remote: (peer as unknown as { remoteAddress?: string }).remoteAddress });
           this.peerStates.delete(peer as Socket);
+          this.closedPeers.add(peer as Socket);
           if (st?.username && st.connType === "D") this._removeChildPeerConnection(st.username);
+          if ((st?.isFileConn || st?.connType === "F") && st?.fileToken !== undefined) {
+            try { this.opts.onFileClosed?.(st.fileToken); } catch {}
+          }
           this.dequeuePendingSockets();
         },
       },
@@ -1963,15 +2089,18 @@ export class SoulseekSession {
   private startIdleSweep() {
     this.idleTimer = setInterval(() => {
       const now = Date.now();
+      const parkedSocks = new Set([...this.parkedPierce.values()].map((p) => p.sock));
       for (const [sock, st] of this.peerStates) {
         const idle = now - st.lastActive;
         const initTimeout = !st.initDone && (now - st.createdAt) > CONNECTION_INIT_TIMEOUT_MS;
-        const ghost = !st.username && idle > GHOST_IDLE_MS;
+        // Parked pierce has no username yet by design — exempt from ghost kill.
+        const ghost = !st.username && idle > GHOST_IDLE_MS && !parkedSocks.has(sock as unknown as object);
         const dead = idle > CONNECTION_MAX_IDLE_MS;
         if (initTimeout || ghost || dead) {
           logger.debug("peer", "idle sweep close", { username: st.username, connType: st.connType, initDone: st.initDone, bytes: (st as unknown as { bytesReceived?: number }).bytesReceived ?? st.buf.length, msgs: (st as unknown as { msgsParsed?: number }).msgsParsed ?? 0, reason: initTimeout ? "initTimeout" : ghost ? "ghost" : "dead" });
           try { sock.end(); } catch {}
           this.peerStates.delete(sock);
+          this.closedPeers.add(sock as Socket);
           if (st.username && st.connType === "D") this._removeChildPeerConnection(st.username);
           this.dequeuePendingSockets();
         }
@@ -1979,6 +2108,7 @@ export class SoulseekSession {
         if (!st.initDone && st.buf.length > 0 && (now - st.createdAt) > CONNECTION_INIT_TIMEOUT_MS) {
           try { sock.end(); } catch {}
           this.peerStates.delete(sock);
+          this.closedPeers.add(sock as Socket);
           this.dequeuePendingSockets();
         }
       }
@@ -1993,6 +2123,12 @@ export class SoulseekSession {
           clearTimeout(pending.timer);
           this.peerAddressRequests.delete(user);
           try { this.pendingPeerMessages.delete(user.toLowerCase()); } catch {}
+        }
+      }
+      for (const [token, parked] of this.parkedPierce) {
+        if (now - parked.at > 60_000) {
+          try { (parked.sock as unknown as { end?: () => void })?.end?.(); } catch {}
+          this.parkedPierce.delete(token);
         }
       }
       // pendingConnects timeout is handled per-token (45 s), but sweep stale just in case
@@ -2050,6 +2186,30 @@ export class SoulseekSession {
 
   private connectToPeer(ctp: ReturnType<typeof parseConnectToPeer>) {
     if (ctp.connType !== "P" && ctp.connType !== "F" && ctp.connType !== "D") return;
+    // Adopt a parked inbound pierce: peer dialed before our relay copy arrived.
+    // Dialing out too would leave the uploader waiting on a dead socket.
+    const parked = this.parkedPierce.get(ctp.token >>> 0);
+    if (parked) {
+      this.parkedPierce.delete(ctp.token >>> 0);
+      const sock = parked.sock as unknown as Socket;
+      const st = this.peerStates.get(sock);
+      if (st) {
+        st.username = ctp.username;
+        st.connType = ctp.connType;
+        st.initDone = true;
+        st.lastActive = Date.now();
+        logger.debug("peer", "adopted parked pierce", { username: ctp.username, connType: ctp.connType });
+        setTimeout(() => this.flushPendingPeerMessages(ctp.username, ctp.connType), 10);
+        this.dequeuePendingSockets();
+        // Firewalled downloader pierced to us: serve our oldest queued upload
+        // for them over this socket (they will send FileOffset next).
+        if (ctp.connType === "F") {
+          try { this.opts.onUploadPierce?.(ctp.username, sock as Socket); } catch {}
+        }
+        return;
+      }
+      // parked socket already gone — fall through to dial
+    }
     // If this token matches a pending outbound connectPeer, resolve it
     const pending = this.pendingConnects.get(ctp.token);
     if (pending) {
@@ -2203,7 +2363,7 @@ export class SoulseekSession {
           // After init, peek peer message code (framed as [len][code][payload])
           // Need at least 8 bytes (len+code) buffered; otherwise conservatively allow append
           if (state.buf.length < 8) return maxForState;
-          try { const c = state.buf.readUInt32LE(4); return c === PEER_MESSAGE_CODES.sharedFileListResponse || c === PEER_MESSAGE_CODES.folderContentsResponse ? MAX_INCOMING.server448M : c === PEER_MESSAGE_CODES.fileSearchResponse ? MAX_INCOMING.server16M : MAX_INCOMING.server1M; } catch { return maxForState; }
+          try { return maxIncomingForPeer(state.buf.readUInt32LE(4)); } catch { return maxForState; }
         })();
         if (declared > hintedMax || state.buf.length + bytes.length > hintedMax) {
           logger.warn("peer", "cap kill (declared-length gated)", { declared, hintedMax, buf: state.buf.length, incoming: bytes.length, connType: state.connType, username: state.username, isFileConn: state.isFileConn });
@@ -2228,12 +2388,17 @@ export class SoulseekSession {
             state.initDone = true;
             state.connType = "F";
             state.buf = state.buf.subarray(4);
+            // Same wiring as the framed path below: TransferManager prepares
+            // the file and replies FileOffset. Without this the uploader gets
+            // no offset and aborts with UploadFailed.
+            try { this.opts.onFileConnection?.(peekToken, peer); } catch {}
             continue;
           }
         }
         if (state.buf.length < 5) break;
         const len = state.buf.readUInt32LE(0);
-        if (len > 1024 * 1024) { try { peer.end(); } catch {} break; }
+        if (len < 1 || len > 1024 * 1024) { logger.debug("peer", "inbound init oversize, closing", { len }); try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
+        // Init length includes its one-byte code; full frame is 4 + len.
         const total = 4 + len;
         if (state.buf.length < total) break;
         const code = state.buf[4];
@@ -2243,6 +2408,7 @@ export class SoulseekSession {
             const pi = parsePeerInit(initPayload);
             // validation: username size + printable
             if (pi.targetUser.length === 0 || pi.targetUser.length > 256 || pi.targetUser === "server") {
+              logger.debug("peer", "inbound PeerInit rejected", { user: pi.targetUser.slice(0, 40), connType: pi.connType });
               try { peer.end(); } catch {}
               break;
             }
@@ -2250,7 +2416,7 @@ export class SoulseekSession {
             state.connType = pi.connType;
             // File conn detection: type F has no further peer messages — token follows as raw
             if (pi.connType === "F") state.isFileConn = true;
-          } catch {}
+          } catch { logger.debug("peer", "inbound PeerInit parse failed", { bytes: initPayload.length }); }
         } else if (code === 0) {
           try {
             const pf = parsePierceFireWall(initPayload);
@@ -2261,8 +2427,19 @@ export class SoulseekSession {
               state.username = pending.username;
               state.connType = pending.connType;
               setTimeout(() => this.flushPendingPeerMessages(pending.username, pending.connType), 10);
+            } else {
+              logger.debug("peer", "inbound PierceFireWall unknown token, parking", { token: pf.token });
+              try {
+                if (this.parkedPierce.size > 64) {
+                  const oldest = [...this.parkedPierce.entries()].sort((a, b) => a[1].at - b[1].at)[0]?.[0];
+                  if (oldest !== undefined) { try { (this.parkedPierce.get(oldest)?.sock as unknown as { end?: () => void })?.end?.(); } catch {} this.parkedPierce.delete(oldest); }
+                }
+                this.parkedPierce.set(pf.token >>> 0, { sock: peer, at: Date.now() });
+              } catch {}
             }
-          } catch {}
+          } catch { logger.debug("peer", "inbound PierceFireWall parse failed"); }
+        } else {
+          logger.debug("peer", "inbound init unknown code", { code });
         }
         state.initDone = true;
         if (state.username && state.connType) {
@@ -2286,9 +2463,21 @@ export class SoulseekSession {
         state.buf = state.buf.subarray(total);
         continue;
       }
+      // FileInit on a pierced F socket (inbound-adopted or outbound): raw token
+      // with no PeerInit framing. Same wiring as the pre-init demux above.
+      if (state.connType === "F" && !state.isFileConn && state.fileToken === undefined && state.buf.length >= 4) {
+        const fileInitToken = state.buf.readUInt32LE(0);
+        if (this.pendingFileTokens.has(fileInitToken)) {
+          logger.debug("transfer", "F FileInit on pierced socket", { token: fileInitToken });
+          state.isFileConn = true;
+          state.fileToken = fileInitToken;
+          state.buf = state.buf.subarray(4);
+          try { this.opts.onFileConnection?.(fileInitToken, peer); } catch {}
+          continue;
+        }
+      }
       // File connection: raw [uint32 token] + [uint64 offset] + bytes (nicotine downloads.py FileTransferInit+FileOffset)
-      if (state.isFileConn) {
-        if (state.fileToken === undefined) {
+      if (state.isFileConn) {        if (state.fileToken === undefined) {
           if (state.buf.length < 4) break;
           state.fileToken = state.buf.readUInt32LE(0);
           state.buf = state.buf.subarray(4);
@@ -2309,7 +2498,7 @@ export class SoulseekSession {
       if (state.connType === "D") {
         if (state.buf.length < 5) break;
         const len = state.buf.readUInt32LE(0);
-        if (len > MAX_INCOMING.server16K) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+        if (len > MAX_INCOMING.server16K) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
         const total = 4 + len; if (state.buf.length < total) break;
         const code = state.buf[4];
         const payload = state.buf.subarray(5, total);
@@ -2338,7 +2527,7 @@ export class SoulseekSession {
               // adoption if no parent yet
               if (this.parent === null) this._adoptParent(ds.username);
               const status = this._verifyParentStatus(peer, "DistribSearch");
-              if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+              if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
               if (status === ParentStatus.ACCEPTED) {
                 this._sendMessageToChildPeers(payload, 3);
                 if (this._searchEnabled) {
@@ -2360,7 +2549,7 @@ export class SoulseekSession {
         } else if (code === 4) {
           try {
             const level = payload.readUInt32LE(0);
-            if (level > 1000) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+            if (level > 1000) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
             const status = this._verifyParentStatus(peer, "DistribBranchLevel");
             if (status === ParentStatus.ACCEPTED) {
               this.branchLevel = (level + 1) >>> 0;
@@ -2371,12 +2560,12 @@ export class SoulseekSession {
               const lower = (state.username || "").toLowerCase();
               const cand = this.potentialParents.get(lower);
               if (cand) { cand.conn = peer; cand.branchLevel = level; if (level === 0) cand.branchRoot = cand.username; if (cand.branchLevel !== null && cand.branchRoot) this._adoptParent(cand.username); }
-            } else if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+            } else if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
           } catch {}
         } else if (code === 5) {
           try {
             const root = new SlskReader(payload).string();
-            if (!root) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+            if (!root) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
             const status = this._verifyParentStatus(peer, "DistribBranchRoot");
             if (status === ParentStatus.ACCEPTED) {
               this.branchRoot = root;
@@ -2387,7 +2576,7 @@ export class SoulseekSession {
               const lower = (state.username || "").toLowerCase();
               const cand = this.potentialParents.get(lower);
               if (cand) { cand.conn = peer; cand.branchRoot = root; if (cand.branchLevel !== null && cand.branchRoot) this._adoptParent(cand.username); }
-            } else if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+            } else if (status === ParentStatus.REJECTED) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
           } catch {}
         } else if (code === 7) {
           // childDepth obsolete — ignore, but propagate if needed
@@ -2441,21 +2630,20 @@ export class SoulseekSession {
       if (state.buf.length >= 4) {
         const peekLen = state.buf.readUInt32LE(0);
         // Quick overflow check against max generic; detailed per-code check after parse
-        if (peekLen > MAX_INCOMING.server448M) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+        if (peekLen > MAX_INCOMING.server448M) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
       }
       // Use appropriate max for tryParse (shares need 448M)
       const msg = tryParseMessage(state.buf, MAX_INCOMING.server448M);
       if (!msg) {
         if (state.buf.length >= 4) {
           const len = state.buf.readUInt32LE(0);
-          if (len > MAX_INCOMING.server448M) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+          if (len > MAX_INCOMING.server448M) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
         }
         break;
       }
       // Per-code enforcement: close on overflow for non-shares
-      const maxForCode = (msg.code === PEER_MESSAGE_CODES.sharedFileListResponse || msg.code === PEER_MESSAGE_CODES.folderContentsResponse) ? MAX_INCOMING.server448M
-        : (msg.code === PEER_MESSAGE_CODES.fileSearchResponse ? MAX_INCOMING.server16M : MAX_INCOMING.server1M);
-      if (msg.payload.length > maxForCode) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
+      const maxForCode = maxIncomingForPeer(msg.code);
+      if (msg.payload.length > maxForCode) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
       state.buf = state.buf.subarray(8 + msg.payload.length);
       if (msg.code === 9) {
         // Gate on allowed token to prevent zlib bomb from unsolicited peers
@@ -2551,8 +2739,9 @@ export class SoulseekSession {
         }
       } else if (msg.code === PEER_MESSAGE_CODES.sharedFileListRequest) {
         const peerName = state.username || "unknown";
-        logger.info("browse", "sharedFileListRequest recv inbound", { username: peerName, throttled: this.shareDB.shouldThrottle(peerName) });
-        if (this.shareDB.shouldThrottle(peerName)) {
+        const throttled = this.shareDB.shouldThrottle(peerName); // single call: check records timestamp
+        logger.info("browse", "sharedFileListRequest recv inbound", { username: peerName, throttled });
+        if (throttled) {
           logger.warn("browse", "throttled SharedFileListRequest", { username: peerName });
           break;
         }
@@ -2577,9 +2766,9 @@ export class SoulseekSession {
           } catch {}
         }
       } else if (msg.code === PEER_MESSAGE_CODES.transferRequest) {
-        try { const tr = parseTransferRequest(msg.payload); this.emitTransfer({ type: "transfer-request", username: state.username, token: tr.token, file: tr.file }); } catch {}
+        try { const tr = parseTransferRequest(msg.payload); this.emitTransfer({ type: "transfer-request", username: state.username, token: tr.token, file: tr.file, direction: tr.direction, size: tr.size }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.transferResponse) {
-        try { const tr = parseTransferResponse(msg.payload); this.emitTransfer({ type: "transfer-response", username: state.username, token: tr.token, reason: tr.reason }); } catch {}
+        try { const tr = parseTransferResponse(msg.payload); this.emitTransfer({ type: "transfer-response", username: state.username, token: tr.token, reason: tr.reason, allowed: tr.allowed, size: (tr as unknown as { size?: number | bigint }).size }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.queueUpload) {
         try { const q = parseQueueUpload(msg.payload); const file = typeof q === "string" ? q : (q as { file: string }).file; this.emitTransfer({ type: "queue-upload", username: state.username, file }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.placeInQueueRequest) {
@@ -2595,16 +2784,21 @@ export class SoulseekSession {
       } else if (msg.code === PEER_MESSAGE_CODES.placeInQueueResponse) {
         try { const p = parsePlaceInQueueResponse(msg.payload); this.emitTransfer({ type: "place-in-queue", username: state.username, file: p.file, place: p.place }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.uploadFailed || msg.code === PEER_MESSAGE_CODES.uploadDenied) {
-        try { this.emitTransfer({ type: msg.code === PEER_MESSAGE_CODES.uploadFailed ? "upload-failed" : "upload-denied", username: state.username, file: msg.payload.toString("utf8").slice(0, 256) }); } catch {}
+        try {
+          if (msg.code === PEER_MESSAGE_CODES.uploadDenied) {
+            const d = parseUploadDenied(msg.payload);
+            this.emitTransfer({ type: "upload-denied", username: state.username, file: d.file, reason: d.reason });
+          } else {
+            const f = parseUploadFailed(msg.payload);
+            this.emitTransfer({ type: "upload-failed", username: state.username, file: f.file });
+          }
+        } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.placeholdUpload || msg.code === PEER_MESSAGE_CODES.uploadQueueNotification) {
         // Obsolete/deprecated 42/52 — no-op to silence unknown-peer warnings (nicotine keeps but never handles)
       }
     }
-    if (state.buf.length === 0) {
-      this.peerStates.delete(peer);
-      if (state.username && state.connType === "D") this._removeChildPeerConnection(state.username);
-      this.dequeuePendingSockets();
-    } else this.peerStates.set(peer, state);
+    // Keep state for life of conn (drain-delete forgets init); never resurrect closed sockets.
+    if (!this.closedPeers.has(peer as Socket)) this.peerStates.set(peer, state);
   }
 
   private routeResult(resp: { token: number; username: string; freeUploadSlots: boolean; inQueue: number; uploadSpeed: number; results: SearchFile[] }) {
@@ -2735,9 +2929,7 @@ export class SoulseekSession {
     const clean = sanitizeSearchTerm(query);
     const outQuery = clean.transmitted || clean.sanitized || query.trim();
     if (!outQuery) { handlers.onEnd({ searchId, reason: "error" }); return 0; }
-    const token = this.tokenCounter++ >>> 0;
-    if (this.tokenCounter >= 0xffffffff) this.tokenCounter = 1;
-    this.allowedSearchTokens.add(token);
+    const token = this.allocWishlistToken(outQuery);
     const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
     this.serverSocket.write(buildWishlistSearch(token, outQuery));
@@ -2764,21 +2956,12 @@ export class SoulseekSession {
     this.serverSocket?.write(buildGetPeerAddress(username));
   }
   requestUserInterests(username: string) { this.serverSocket?.write(buildUserInterests(username)); }
-  requestRecommendations() { this.serverSocket?.write(frameMessage(SERVER_MESSAGE_CODES.recommendations, Buffer.alloc(0))); }
-  requestGlobalRecommendations() { this.serverSocket?.write(frameMessage(SERVER_MESSAGE_CODES.globalRecommendations, Buffer.alloc(0))); }
-  requestSimilarUsers() { this.serverSocket?.write(frameMessage(SERVER_MESSAGE_CODES.similarUsers, Buffer.alloc(0))); }
-  requestItemRecommendations(item: string) { this.serverSocket?.write(buildItemRec(item)); }
-  requestItemSimilarUsers(item: string) { this.serverSocket?.write(buildItemSim(item)); }
   setStatus(status: number) {
     this.away = status === 1;
     if (!this.away) this._lastActivity = Date.now();
     this.serverSocket?.write(buildSetStatus(status));
   }
   reportShares(folders: number, files: number) { this.serverSocket?.write(buildSharedFoldersFiles(folders, files)); }
-  addThingILike(thing: string) { this.serverSocket?.write(buildAddThingILike(thing)); }
-  removeThingILike(thing: string) { this.serverSocket?.write(buildRemoveThingILike(thing)); }
-  addThingIHate(thing: string) { this.serverSocket?.write(buildAddThingIHate(thing)); }
-  removeThingIHate(thing: string) { this.serverSocket?.write(buildRemoveThingIHate(thing)); }
   givePrivileges(username: string, days: number) { this.serverSocket?.write(buildGivePrivileges(username, days)); }
   sendUploadSpeed(speed: number) { this.serverSocket?.write(buildSendUploadSpeed(speed)); }
   changePassword(password: string) { this.serverSocket?.write(buildChangePassword(password)); }
@@ -2800,6 +2983,10 @@ export class SoulseekSession {
   // File ops via peer
   requestSharedFileList(username: string) {
     logger.info("browse", "requestSharedFileList", { username, pending: this.pendingBrowseShares.has(username.toLowerCase()) });
+    if (!this.loggedIn) {
+      this.emitBrowse({ type: "browse-error", username, error: "Not logged in." });
+      return;
+    }
     // timeout 20s indirect + 10s grace = 30s (nicotine INDIRECT_REQUEST_TIMEOUT 20s + local 10s)
     const key = username.toLowerCase();
     // Fast-fail if we know user is offline from recent status cache
@@ -2834,6 +3021,10 @@ export class SoulseekSession {
     this.ensurePeerAndSend(username, "P", buildSharedFileListRequest());
   }
   requestFolderContents(username: string, dir: string, token: number) {
+    if (!this.loggedIn) {
+      this.emitBrowse({ type: "browse-error", username, token, folder: dir, error: "Not logged in." });
+      return;
+    }
     const doTimeout = (tok: number) => {
       const entry = this.pendingBrowseFolder.get(tok);
       if (!entry) return;
@@ -2862,6 +3053,27 @@ export class SoulseekSession {
   transferRequest(username: string, direction: number, token: number, file: string, size?: bigint) {
     this.ensurePeerAndSend(username, "P", buildTransferRequest(direction, token, file, size));
   }
+  sendTransferResponse(username: string, token: number, allowed: boolean, sizeOrReason?: number | bigint | string) {
+    this.ensurePeerAndSend(username, "P", buildTransferResponse(token, allowed, sizeOrReason));
+  }
+  /** Upload side: dial F to the downloader and send raw FileInit (nicotine slskproto F flow). */
+  async dialFileUpload(username: string, token: number): Promise<Socket> {
+    const sock = await this.connectPeer(username, "F");
+    try {
+      (sock as Socket).write(buildPeerInit(this.username, "F"));
+      (sock as Socket).write(buildFileTransferInit(token));
+    } catch (e) { throw e; }
+    const st = this.peerStates.get(sock as Socket);
+    if (st) { st.isFileConn = true; st.fileToken = token >>> 0; }
+    else this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: true, isFileConn: true, fileToken: token >>> 0, username, outbound: true, connType: "F", lastActive: Date.now(), createdAt: Date.now() } as never);
+    return sock as Socket;
+  }
+  /** Mark an adopted/pierced inbound socket as an upload F channel. */
+  markFileUploadSocket(socket: Socket, token: number, username: string) {
+    const st = this.peerStates.get(socket as Socket);
+    if (st) { st.isFileConn = true; st.fileToken = token >>> 0; st.initDone = true; st.username = username; st.connType = "F"; st.lastActive = Date.now(); }
+    else this.peerStates.set(socket as Socket, { buf: Buffer.alloc(0), initDone: true, isFileConn: true, fileToken: token >>> 0, username, outbound: false, connType: "F", lastActive: Date.now(), createdAt: Date.now() } as never);
+  }
 
   private ensurePeerAndSend(username: string, connType: string, msg: Buffer) {
     const hasPending = this.peerAddressRequests.has(username);
@@ -2873,7 +3085,9 @@ export class SoulseekSession {
     const pendingReq = this.peerAddressRequests.get(username);
     const isLivePending = !!pendingReq && (now - (pendingReq.createdAt ?? 0) < PEER_ADDRESS_TIMEOUT_MS);
     const hasLiveSocketForUser = !!(cachedCheck && now - cachedCheck.updated < USER_ADDRESS_TTL_MS && (() => {
-      for (const [, st] of this.peerStates) if (st.username?.toLowerCase() === keyLower && st.connType === connType) return true;
+      // Only fully-initialized sockets count: coalescing behind a half-open
+      // dial strands the message when the sweep kills it (initTimeout).
+      for (const [, st] of this.peerStates) if (st.username?.toLowerCase() === keyLower && st.connType === connType && st.initDone) return true;
       return false;
     })());
     // Only coalesce if there's a live GetPeerAddress in flight or a live socket for this exact user+type.
@@ -3040,7 +3254,7 @@ export class SoulseekSession {
     // Portmapper: remove mapping on quit (like nicotine _server_disconnect portmapper.remove)
     try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}
     for (const token of [...this.searches.keys()]) { const s = this.searches.get(token); if (s?.timer) clearTimeout(s.timer); if (s) s.onEnd({ searchId: s.searchId, reason: "error" }); this.searches.delete(token); }
-    this.searchIds.clear(); this.allowedSearchTokens.clear();
+    this.searchIds.clear(); this.allowedSearchTokens.clear(); this.wishlistTokens.clear();
     for (const { timer } of this.peerAddressRequests.values()) clearTimeout(timer);
     for (const { timer } of this.pendingConnects.values()) clearTimeout(timer);
     for (const { timer } of this.pendingBrowseShares.values()) clearTimeout(timer);
@@ -3072,12 +3286,6 @@ function toRow(username: string, freeUploadSlots: boolean, inQueue: number, uplo
   const name = file.name; const idx = name.lastIndexOf("\\"); const folder = idx >= 0 ? name.slice(0, idx) : ""; const filename = idx >= 0 ? name.slice(idx + 1) : name;
   const dot = filename.lastIndexOf("."); const fileType = dot >= 0 ? filename.slice(dot + 1).toLowerCase() : "";
   return { user: username, folder, filename, path: name, size: file.size, fileType, slotFree: freeUploadSlots, speed: uploadSpeed, inQueue, quality: file.attrs.bitrate ?? 0, length: file.attrs.length ?? 0, private: file.private, attributes: file.attrs };
-}
-function buildItemRec(item: string): Buffer {
-  return frameMessage(SERVER_MESSAGE_CODES.itemRecommendations, packString(item));
-}
-function buildItemSim(item: string): Buffer {
-  return frameMessage(SERVER_MESSAGE_CODES.itemSimilarUsers, packString(item));
 }
 function inflateProbeToken(payload: Buffer): number | null {
   try {

@@ -12,15 +12,29 @@ import {
 } from "react";
 import { defaults, migrateLogDir, migrateLoggingDirsToConfig, type Settings } from "@/lib/config/defaults";
 import { deepMerge } from "@/lib/config/merge";
-import { getLocal } from "@/lib/storage";
+import { getLocal, setLocal } from "@/lib/storage";
 
 const STORAGE_KEY = "nicotineHub.settings";
+// One-time flip: publicFiles default was false, now true. Stored false is
+// indistinguishable from explicit opt-out, so migrate once (marker) and let
+// later opt-outs stick.
+const PUBLIC_ONLY_MIGRATION_KEY = "nicotineHub.settingsMigrated.publicOnlyDefault";
+export function migratePublicOnlyDefault<S extends { searches?: { defilter?: { publicFiles?: boolean } } }>(
+  merged: S,
+  alreadyMigrated: boolean,
+): S {
+  if (alreadyMigrated || merged.searches?.defilter?.publicFiles !== false) return merged;
+  return { ...merged, searches: { ...merged.searches, defilter: { ...merged.searches.defilter, publicFiles: true } } };
+}
 function readStored(): Settings {
   if (typeof window === "undefined") return defaults;
   try {
     const raw = getLocal(STORAGE_KEY);
     if (!raw) return defaults;
-    return migrateLoggingDirsToConfig(deepMerge(defaults, JSON.parse(raw)));
+    const merged = migrateLoggingDirsToConfig(deepMerge(defaults, JSON.parse(raw)));
+    const out = migratePublicOnlyDefault(merged, getLocal(PUBLIC_ONLY_MIGRATION_KEY) !== null);
+    setLocal(PUBLIC_ONLY_MIGRATION_KEY, "1");
+    return out;
   } catch {
     return defaults;
   }

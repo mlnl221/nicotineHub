@@ -238,7 +238,7 @@ export function emptyFilters(): FilterState {
     country: "",
     quality: "",
     freeSlot: false,
-    publicOnly: false,
+    publicOnly: true,
   };
 }
 
@@ -530,26 +530,11 @@ export interface UserInfoProfile {
   uploadallowed: number;
 }
 
-export interface Recommendation {
-  thing: string;
-  rating: number;
-}
-
-export interface SimilarUser {
-  username: string;
-  rating: number;
-}
-
 export interface UserInfoEvent {
   type:
     | "user-status"
     | "user-stats"
     | "user-interests"
-    | "recommendations"
-    | "global-recommendations"
-    | "similar-users"
-    | "item-recommendations"
-    | "item-similar-users"
     | "peer-address"
     | "watch-user"
     | "privileged-users"
@@ -560,8 +545,6 @@ export interface UserInfoEvent {
   status?: UserInfoStatus;
   stats?: UserInfoStats;
   interests?: UserInfoInterests;
-  recommendations?: Recommendation[];
-  similarUsers?: SimilarUser[];
   info?: UserInfoProfile;
   watchUser?: {
     exists: boolean;
@@ -599,9 +582,7 @@ export interface UserInfoFailedOutbound {
 
 export type UserinfoRequestMessage =
   | { type: "userinfo"; action: "watch" | "unwatch" | "get" | "interests" | "peerAddress"; username: string }
-  | { type: "userinfo"; action: "recommendations" | "globalRecommendations" | "similarUsers" | "checkPrivileges" }
-  | { type: "userinfo"; action: "itemRecommendations" | "itemSimilarUsers"; item: string }
-  | { type: "userinfo"; action: "addLike" | "removeLike" | "addHate" | "removeHate"; thing: string }
+  | { type: "userinfo"; action: "checkPrivileges" }
   | { type: "userinfo"; action: "givePrivileges"; username: string; days: number }
   | { type: "userinfo"; action: "setStatus"; status: number }
   | { type: "userinfo"; action: "changePassword"; password: string }

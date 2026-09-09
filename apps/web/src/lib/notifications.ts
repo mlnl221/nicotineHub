@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useConfig } from "@/lib/config/provider";
 import { useSession } from "@/lib/session";
+import { parseWishlistTerm } from "@/lib/wishlist";
 
 /**
  * Browser notifications + in-app toasts for search wishlist/PM/chat.
@@ -83,10 +84,21 @@ export function useNotifications() {
         // Search result wishlist notification handled via search:end + wishlist terms
       }
       if (m.type === "search:result") {
-        // wishlist popup if query matches wishlist term
-        const sr = m as unknown as { searchId: string; rows: unknown[] };
-        if (sr.searchId.startsWith("wishlist:") && (sr.rows as unknown[]).length) {
-          maybeNotify("Wishlist results", `${(sr.rows as unknown[]).length} new results`, settings.notifications.notification_popup_wish);
+        // wishlist popup if query matches wishlist term — only for unseen users
+        const sr = m as unknown as { searchId?: string; rows?: Array<{ user?: string }> };
+        if (typeof sr.searchId === "string" && sr.searchId.startsWith("wishlist:") && Array.isArray(sr.rows) && sr.rows.length) {
+          const term = parseWishlistTerm(sr.searchId);
+          let ignored = new Set<string>();
+          try {
+            const raw = localStorage.getItem("nicotineHub.wishlist") ?? localStorage.getItem("nicotine.wishlist");
+            if (raw) {
+              const arr = JSON.parse(raw) as Array<{ term?: string; ignoredUsers?: string[] } | string>;
+              const entry = Array.isArray(arr) ? arr.find((e) => (typeof e === "string" ? e === term : e?.term === term)) : undefined;
+              if (entry && typeof entry !== "string" && Array.isArray(entry.ignoredUsers)) ignored = new Set(entry.ignoredUsers);
+            }
+          } catch {}
+          const newCount = sr.rows.filter((r) => !r?.user || !ignored.has(r.user)).length;
+          if (newCount > 0) maybeNotify("Wishlist results", `${newCount} new results`, settings.notifications.notification_popup_wish);
         }
       }
     });
