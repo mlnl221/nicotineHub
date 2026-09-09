@@ -50,7 +50,7 @@ All captures from a local demo build (`NEXT_PUBLIC_DEMO=true`, mocked data) — 
 
 | Search | More sheet | Downloads | Private chat |
 |---|---|---|---|
-| [![Mobile search with bottom nav (dark mode)](docs/screenshots/m1-search.png)](docs/screenshots/m1-search.png) | [![Mobile More sheet — browse, buddies, uploads, rooms, profiles, interests, settings](docs/screenshots/m2-more-sheet.png)](docs/screenshots/m2-more-sheet.png) | [![Mobile downloads](docs/screenshots/m3-downloads.png)](docs/screenshots/m3-downloads.png) | [![Mobile private chat](docs/screenshots/m4-chat.png)](docs/screenshots/m4-chat.png) |
+| [![Mobile search with bottom nav (dark mode)](docs/screenshots/m1-search.png)](docs/screenshots/m1-search.png) | [![Mobile More sheet — browse, buddies, uploads, rooms, profiles, settings](docs/screenshots/m2-more-sheet.png)](docs/screenshots/m2-more-sheet.png) | [![Mobile downloads](docs/screenshots/m3-downloads.png)](docs/screenshots/m3-downloads.png) | [![Mobile private chat](docs/screenshots/m4-chat.png)](docs/screenshots/m4-chat.png) |
 
 This is an almost 1:1 port of [nicotine-plus](https://nicotine-plus.org/) ([GitHub](https://github.com/nicotine-plus/nicotine-plus)) to a modern Next.js web app. Built on `doc/SLSKPROTOCOL.md`.
 
@@ -76,7 +76,7 @@ The browser can't open raw TCP sockets, so the bridge translates JSON over WebSo
 - **Worker (scrape/spectrum/tag)** — separate Python FastAPI service for CPU/IO-heavy ops (same-origin `/api/worker`; `:8789` internal only); bridge stays SLSK-only
 - **Browse** — shares & folders via peers
 - **Chat** — rooms + private, tickers, owned/member lists
-- **Social** — buddies, interests/recommendations/similar users
+- **Social** — buddies
 - **Profiles** — description, picture, stats, privileges
 - **Mobile shell** — `TopBar`/`BottomNav`, safe-area, PWA, diagnostics live tail
 

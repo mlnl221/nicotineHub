@@ -4,8 +4,6 @@
 const LOCAL_STORAGE_KEYS: Array<[string, string]> = [
   ["nicotine.settings", "nicotineHub.settings"],
   ["nicotine.buddies", "nicotineHub.buddies"],
-  ["nicotine.likes", "nicotineHub.likes"],
-  ["nicotine.hates", "nicotineHub.hates"],
   ["nicotine.transfers.mock", "nicotineHub.transfers.mock"],
   ["nicotine.privatechats", "nicotineHub.privatechats"],
   ["nicotine.pendingPrivate", "nicotineHub.pendingPrivate"],

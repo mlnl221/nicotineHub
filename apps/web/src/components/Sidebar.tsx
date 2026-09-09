@@ -21,7 +21,6 @@ const NAV = [
   { icon: "account_circle", label: "User Profiles", href: "/profile", key: "profile" },
   { icon: "group", label: "Buddies", href: "/buddies", key: "buddies" },
   { icon: "groups", label: "Chat Rooms", href: "/chat", key: "chat" },
-  { icon: "interests", label: "Interests", href: "/interests", key: "interests" },
 ];
 
 const HREF_UNREAD: Record<string, UnreadKey> = {

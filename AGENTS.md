@@ -9,7 +9,7 @@ This file is for AI coding agents working in this repo. See https://agents.md fo
 Mobile-first / browser-first Soulseek web client (beyond MVP — full 1:1 bridge). Monorepo with Bun workspaces.
 
 - `apps/bridge` — Bun: Soulseek 1:1 bridge over raw TCP (`server.slsknet.org:2242`, P/F/D leaf) + WebSocket via web same-origin `/ws` (piped to internal `bridge:8787`; direct `ws://host:8787/ws` only in bare dev / direct mode) + `/health` + `/files/:token` + volumes `CONFIG_DIR` (`/config`, autobrr parity) + `DATA_DIR` (`/data`)
-- `apps/web` — Next.js 15 (App Router) + Tailwind v4 PWA, mobile shell `TopBar`/`BottomNav`, pages for search (multi-mode), downloads/uploads (F streaming), browse, chat, buddies, interests, profiles
+- `apps/web` — Next.js 15 (App Router) + Tailwind v4 PWA, mobile shell `TopBar`/`BottomNav`, pages for search (multi-mode), downloads/uploads (F streaming), browse, chat, buddies, profiles
 - `compose.yaml` — `web:3000` is the sole browser entrypoint (same-origin `/ws` + `/api/bridge/*` + `/api/worker/*` proxied to internal `bridge:8787`/`worker:8789`, neither published) + peer `LISTEN_PORT` (default 60754, editable in Settings → Network)
 
 Reference protocol: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plus/nicotine-plus) and `apps/bridge/src/soulseek.ts` (framing: `[uint32 len][uint32 code][payload]`).

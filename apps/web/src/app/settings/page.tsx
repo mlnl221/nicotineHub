@@ -19,12 +19,10 @@ const DownloadsSection = dynamic(() => import("@/components/settings/DownloadsSe
 const UploadsSection = dynamic(() => import("@/components/settings/UploadsSection").then((m) => m.UploadsSection), { loading: () => <SectionLoader /> });
 const UserProfileSection = dynamic(() => import("@/components/settings/UserProfileSection").then((m) => m.UserProfileSection), { loading: () => <SectionLoader /> });
 const ChatsSection = dynamic(() => import("@/components/settings/ChatsSection").then((m) => m.ChatsSection), { loading: () => <SectionLoader /> });
-const NowPlayingSection = dynamic(() => import("@/components/settings/NowPlayingSection").then((m) => m.NowPlayingSection), { loading: () => <SectionLoader /> });
 const LoggingSection = dynamic(() => import("@/components/settings/LoggingSection").then((m) => m.LoggingSection), { loading: () => <SectionLoader /> });
 const BannedUsersSection = dynamic(() => import("@/components/settings/BannedUsersSection").then((m) => m.BannedUsersSection), { loading: () => <SectionLoader /> });
 const IgnoredUsersSection = dynamic(() => import("@/components/settings/IgnoredUsersSection").then((m) => m.IgnoredUsersSection), { loading: () => <SectionLoader /> });
 const LeecherSection = dynamic(() => import("@/components/settings/LeecherSection").then((m) => m.LeecherSection), { loading: () => <SectionLoader /> });
-const UrlHandlersSection = dynamic(() => import("@/components/settings/UrlHandlersSection").then((m) => m.UrlHandlersSection), { loading: () => <SectionLoader /> });
 const PluginsSection = dynamic(() => import("@/components/settings/PluginsSection").then((m) => m.PluginsSection), { loading: () => <SectionLoader /> });
 const WorkerSection = dynamic(() => import("@/components/settings/WorkerSection").then((m) => m.WorkerSection), { loading: () => <SectionLoader /> });
 const AboutSection = dynamic(() => import("@/components/settings/AboutSection").then((m) => m.AboutSection), { loading: () => <SectionLoader /> });
@@ -38,12 +36,10 @@ type TabId =
   | "searches"
   | "user-profile"
   | "chats"
-  | "now-playing"
   | "logging"
   | "banned-users"
   | "ignored-users"
   | "leecher"
-  | "url-handlers"
   | "plugins"
   | "worker"
   | "notifications"
@@ -58,13 +54,11 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "searches", label: "Searches", icon: "search" },
   { id: "user-profile", label: "User Profile", icon: "person" },
   { id: "chats", label: "Chats", icon: "chat" },
-  { id: "now-playing", label: "Now Playing", icon: "music_note" },
   { id: "logging", label: "Logging", icon: "article" },
   { id: "banned-users", label: "Banned Users", icon: "block" },
   { id: "about", label: "About", icon: "info" },
   { id: "ignored-users", label: "Ignored Users", icon: "person_off" },
   { id: "leecher", label: "Leecher", icon: "shield" },
-  { id: "url-handlers", label: "URL Handlers", icon: "link" },
   { id: "plugins", label: "Plugins", icon: "extension" },
   { id: "worker", label: "Worker", icon: "memory" },
   { id: "notifications", label: "Notifications", icon: "notifications" },
@@ -77,8 +71,8 @@ const TAB_GROUPS: TabGroup[] = [
   { label: "Interface", tabs: ["appearance", "notifications"] },
   { label: "Transfers", tabs: ["shares", "downloads", "uploads"] },
   { label: "Search & Users", tabs: ["searches", "user-profile", "banned-users", "ignored-users", "leecher"] },
-  { label: "Chat & Playback", tabs: ["chats", "now-playing"] },
-  { label: "System", tabs: ["logging", "url-handlers", "plugins", "worker", "about"] },
+  { label: "Chat", tabs: ["chats"] },
+  { label: "System", tabs: ["logging", "plugins", "worker", "about"] },
 ];
 
 const TAB_MAP = new Map(TABS.map((t) => [t.id, t] as const));
@@ -267,8 +261,6 @@ export default function SettingsPage() {
                   <UserProfileSection />
                 ) : tab === "chats" ? (
                   <ChatsSection />
-                ) : tab === "now-playing" ? (
-                  <NowPlayingSection />
                 ) : tab === "logging" ? (
                   <LoggingSection />
                 ) : tab === "banned-users" ? (
@@ -277,8 +269,6 @@ export default function SettingsPage() {
                   <IgnoredUsersSection />
                 ) : tab === "leecher" ? (
                   <LeecherSection />
-                ) : tab === "url-handlers" ? (
-                  <UrlHandlersSection />
                 ) : tab === "plugins" ? (
                   <PluginsSection />
                 ) : tab === "worker" ? (

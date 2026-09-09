@@ -33,18 +33,11 @@ import {
   parseUserStatus,
   parseUserStats,
   parseUserInterests,
-  parseRecommendations,
-  parseSimilarUsers,
-  parseItemRecommendations,
-  parseItemSimilarUsers,
   parsePeerAddress,
   parseConnectToPeer,
   parseCantConnectToPeer,
   buildCantConnectToPeer,
   buildSendUploadSpeed,
-  buildRecommendationsEmpty,
-  buildGlobalRecommendationsEmpty,
-  buildSimilarUsersEmpty,
   buildRoomListRequest,
   buildUserInfoResponse,
   parseUserInfoResponse,
@@ -482,40 +475,6 @@ describe("user info — server message parsers", () => {
     expect(i.hates).toEqual(["pop"]);
   });
 
-  test("parseRecommendations", () => {
-    const parts = [
-      packUint32(1),
-      packString("rock"),
-      Buffer.from([5, 0, 0, 0]), // int32 rating = 5 (little-endian)
-      packUint32(0),
-    ];
-    const { recommendations, unrecommendations } = parseRecommendations(Buffer.concat(parts));
-    expect(recommendations).toEqual([{ thing: "rock", rating: 5 }]);
-    expect(unrecommendations).toHaveLength(0);
-  });
-
-  test("parseSimilarUsers", () => {
-    const parts = [
-      packUint32(1),
-      packString("dave"),
-      packUint32(3), // rating
-    ];
-    const users = parseSimilarUsers(Buffer.concat(parts));
-    expect(users).toEqual([{ username: "dave", rating: 3 }]);
-  });
-
-  test("parseItemRecommendations and parseItemSimilarUsers", () => {
-    const recParts = [packString("rock"), packUint32(1), packString("alt"), packUint32(2)];
-    const rec = parseItemRecommendations(Buffer.concat(recParts));
-    expect(rec.thing).toBe("rock");
-    expect(rec.recommendations).toEqual([{ thing: "alt", rating: 2 }]);
-
-    const simParts = [packString("rock"), packUint32(1), packString("eve"), packUint32(4)];
-    const sim = parseItemSimilarUsers(Buffer.concat(simParts));
-    expect(sim.thing).toBe("rock");
-    expect(sim.users).toEqual([{ username: "eve", rating: 4 }]);
-  });
-
   test("parsePeerAddress", () => {
     const payload = Buffer.concat([
       packString("frank"),
@@ -568,25 +527,7 @@ describe("user info — peer UserInfoResponse", () => {
   });
 });
 
-describe("Phase 0 — recommendations empty + 1001 + 121", () => {
-  test("Recommendations 54 empty frame", () => {
-    const raw = buildRecommendationsEmpty();
-    const p = tryParseMessage(raw)!;
-    expect(p.code).toBe(SERVER_MESSAGE_CODES.recommendations);
-    expect(p.payload.length).toBe(0);
-  });
-  test("GlobalRecommendations 56 empty frame", () => {
-    const raw = buildGlobalRecommendationsEmpty();
-    const p = tryParseMessage(raw)!;
-    expect(p.code).toBe(SERVER_MESSAGE_CODES.globalRecommendations);
-    expect(p.payload.length).toBe(0);
-  });
-  test("SimilarUsers 110 empty frame", () => {
-    const raw = buildSimilarUsersEmpty();
-    const p = tryParseMessage(raw)!;
-    expect(p.code).toBe(SERVER_MESSAGE_CODES.similarUsers);
-    expect(p.payload.length).toBe(0);
-  });
+describe("Phase 0 — room list + 1001 + 121", () => {
   test("RoomList 64 request is code 64 with empty payload", () => {
     const raw = buildRoomListRequest();
     const p = tryParseMessage(raw)!;

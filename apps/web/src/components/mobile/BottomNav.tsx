@@ -23,7 +23,6 @@ const MORE: NavItem[] = [
   { icon: "group", label: "Buddies", href: "/buddies" },
   { icon: "groups", label: "Chat Rooms", href: "/chat" },
   { icon: "account_circle", label: "Profiles", href: "/profile" },
-  { icon: "interests", label: "Interests", href: "/interests" },
   { icon: "settings", label: "Settings", href: "/settings" },
   { icon: "monitoring", label: "Diagnostics", href: "/diagnostics" },
   { icon: "bar_chart", label: "Statistics", href: "/statistics" },
@@ -40,7 +39,6 @@ function isActive(pathname: string, href: string) {
   if (href === "/private-chat" && pathname.startsWith("/private-chat")) return true;
   if (href === "/chat" && pathname.startsWith("/chat")) return true;
   if (href === "/profile" && pathname.startsWith("/profile")) return true;
-  if (href === "/interests" && pathname.startsWith("/interests")) return true;
   return pathname.startsWith(href);
 }
 
@@ -64,7 +62,7 @@ export function BottomNav() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const visibleMap = settings.ui.modes_visible || {};
-  const hrefToKey: Record<string, string> = { "/search": "search", "/downloads": "downloads", "/uploads": "uploads", "/files": "files", "/private-chat": "privateChat", "/browse": "browse", "/buddies": "buddies", "/chat": "chat", "/profile": "profile", "/interests": "interests", "/diagnostics": "diagnostics", "/statistics": "statistics", "/settings": "settings" };
+  const hrefToKey: Record<string, string> = { "/search": "search", "/downloads": "downloads", "/uploads": "uploads", "/files": "files", "/private-chat": "privateChat", "/browse": "browse", "/buddies": "buddies", "/chat": "chat", "/profile": "profile", "/diagnostics": "diagnostics", "/statistics": "statistics", "/settings": "settings" };
   const primaryFiltered = mounted ? PRIMARY.filter((i) => visibleMap[hrefToKey[i.href]] !== false) : PRIMARY;
   const moreFiltered = mounted ? MORE.filter((i) => visibleMap[hrefToKey[i.href]] !== false) : MORE;
   const moreActive = mounted && moreFiltered.some((i) => isActive(pathname, i.href));

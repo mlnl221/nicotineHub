@@ -48,20 +48,6 @@ export class Plugin extends BasePlugin {
           return true;
         },
       },
-      now: {
-        description: "Announce now playing (mediaSession)",
-        group: "Chat",
-        disable: ["cli"],
-        callback: () => {
-          try {
-            const title = (navigator as unknown as { mediaSession?: { metadata?: { title?: string; artist?: string } } })?.mediaSession?.metadata?.title || "Unknown";
-            const artist = (navigator as unknown as { mediaSession?: { metadata?: { artist?: string } } })?.mediaSession?.metadata?.artist || "";
-            const out = artist ? `${artist} - ${title}` : title;
-            this.send_message(out);
-          } catch { this.output("No media playing"); }
-          return true;
-        },
-      },
       // ChatRooms
       join: {
         aliases: ["j"],

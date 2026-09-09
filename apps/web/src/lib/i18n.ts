@@ -14,7 +14,6 @@ const STRINGS: Record<string, Record<Locale, string>> = {
   "User Profiles": { "": "User Profiles", en: "User Profiles", de: "Benutzerprofile", fr: "Profils", es: "Perfiles", pt: "Perfis" },
   Buddies: { "": "Buddies", en: "Buddies", de: "Buddies", fr: "Amis", es: "Amigos", pt: "Amigos" },
   "Chat Rooms": { "": "Chat Rooms", en: "Chat Rooms", de: "Chatrooms", fr: "Salons", es: "Salas de chat", pt: "Salas" },
-  Interests: { "": "Interests", en: "Interests", de: "Interessen", fr: "Centres d’intérêt", es: "Intereses", pt: "Interesses" },
   Settings: { "": "Settings", en: "Settings", de: "Einstellungen", fr: "Paramètres", es: "Ajustes", pt: "Definições" },
   Diagnostics: { "": "Diagnostics", en: "Diagnostics", de: "Diagnose", fr: "Diagnostics", es: "Diagnóstico", pt: "Diagnóstico" },
   Statistics: { "": "Statistics", en: "Statistics", de: "Statistiken", fr: "Statistiques", es: "Estadísticas", pt: "Estatísticas" },

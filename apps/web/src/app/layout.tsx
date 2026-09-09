@@ -9,7 +9,6 @@ import { ConfigBridgeSync } from "@/lib/config/sync";
 import { WishlistProvider } from "@/lib/wishlist";
 import { StatisticsProvider } from "@/lib/statistics";
 import { ToastHost } from "@/components/ToastHost";
-import { NowPlayingSync } from "@/components/NowPlayingSync";
 import { WebVitals } from "@/components/WebVitals";
 import { GlobalContextMenu } from "@/components/ui/GlobalContextMenu";
 import { SidebarProvider } from "@/components/SidebarContext";
@@ -102,7 +101,6 @@ export default function RootLayout({
                                 <ConfigBridgeSync />
                                 <ExitDialogHandler />
                                 <WindowGeometrySync />
-                                <NowPlayingSync />
                                 <PlayerProvider>
                                 {children}
                                 <MiniPlayer />
