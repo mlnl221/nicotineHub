@@ -321,6 +321,7 @@ function DownloadsInner() {
                                   onRetry={() => retryDownload(t.id)}
                                   onClear={() => clearTransfer(t.id, false)}
                                   onPlay={canPlay(t) ? () => handlePlay(t) : undefined}
+                                  onMenu={(x, y) => setMenuAnchor({ x, y, transfer: t, isUpload: false })}
                                 />
                               );
                               const wrapped = isFinished && isAudio ? (

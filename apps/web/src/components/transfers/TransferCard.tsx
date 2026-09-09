@@ -28,6 +28,7 @@ export function TransferCard({
   onRetry,
   onClear,
   onPlay,
+  onMenu,
 }: {
   transfer: Transfer;
   onPause?: () => void;
@@ -36,6 +37,7 @@ export function TransferCard({
   onRetry?: () => void;
   onClear?: () => void;
   onPlay?: () => void;
+  onMenu?: (x: number, y: number) => void;
 }) {
   const { settings } = useConfig();
   const reverse = settings.ui.reverse_file_paths ?? true;
@@ -193,6 +195,21 @@ export function TransferCard({
             <span className="material-symbols-outlined text-[18px]">close</span>
           </button>
         )}
+        {onMenu ? (
+          <button
+            aria-label={`More actions for ${transfer.fileName}`}
+            aria-haspopup="menu"
+            onClick={(e) => {
+              e.stopPropagation();
+              const r = e.currentTarget.getBoundingClientRect();
+              onMenu(r.left, r.bottom + 4);
+            }}
+            className="p-2 min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-primary transition-colors"
+            title="More actions"
+          >
+            <span className="material-symbols-outlined text-[18px]">more_vert</span>
+          </button>
+        ) : null}
       </div>
     </div>
   );
