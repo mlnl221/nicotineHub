@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useTransfers } from "@/lib/transfers";
+import { useUnread, type UnreadKey } from "@/lib/unread";
 import { useConfig } from "@/lib/config/provider";
 import { useI18n } from "@/lib/i18n";
 
@@ -43,10 +44,21 @@ function isActive(pathname: string, href: string) {
   return pathname.startsWith(href);
 }
 
+// BottomNav href -> unread dot key. Tabs without a key never show a dot.
+const HREF_UNREAD: Record<string, UnreadKey> = {
+  "/search": "search",
+  "/downloads": "downloads",
+  "/private-chat": "privateChat",
+  "/browse": "browse",
+  "/chat": "chat",
+  "/profile": "profile",
+};
+
 export function BottomNav() {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
   const { downloads, uploads } = useTransfers();
+  const { unread } = useUnread();
   const { settings } = useConfig();
   const { t } = useI18n();
   const [mounted, setMounted] = useState(false);
@@ -56,6 +68,10 @@ export function BottomNav() {
   const primaryFiltered = mounted ? PRIMARY.filter((i) => visibleMap[hrefToKey[i.href]] !== false) : PRIMARY;
   const moreFiltered = mounted ? MORE.filter((i) => visibleMap[hrefToKey[i.href]] !== false) : MORE;
   const moreActive = mounted && moreFiltered.some((i) => isActive(pathname, i.href));
+  const moreUnread = mounted && moreFiltered.some((i) => {
+    const k = HREF_UNREAD[i.href];
+    return k ? unread[k] : false;
+  });
 
   return (
     <>
@@ -76,17 +92,20 @@ export function BottomNav() {
           <div className="grid grid-cols-3 gap-2 p-2">
             {moreFiltered.map((item) => {
               const active = mounted ? isActive(pathname, item.href) : false;
+              const dotKey = HREF_UNREAD[item.href];
+              const dot = mounted && dotKey ? unread[dotKey] : false;
               return (
                 <Link
                   key={item.href}
                   href={item.href}
                   onClick={() => setMoreOpen(false)}
-                  className={`flex flex-col items-center gap-1 rounded-xl px-2 py-4 text-center transition-colors ${active ? "bg-primary-fixed/20 text-primary dark:bg-primary-container/20 dark:text-inverse-primary" : "text-on-surface-variant hover:bg-surface-container-low"}`}
+                  className={`relative flex flex-col items-center gap-1 rounded-xl px-2 py-4 text-center transition-colors ${active ? "bg-primary-fixed/20 text-primary dark:bg-primary-container/20 dark:text-inverse-primary" : "text-on-surface-variant hover:bg-surface-container-low"}`}
                 >
                   <span className="material-symbols-outlined text-[22px]" style={active ? ({ fontVariationSettings: "'FILL' 1" } as React.CSSProperties) : undefined}>
                     {item.icon}
                   </span>
                   <span className="font-label text-[10px] uppercase tracking-widest leading-tight">{t(item.label)}</span>
+                  {dot ? <span aria-hidden="true" className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-primary" /> : null}
                 </Link>
               );
             })}
@@ -102,6 +121,8 @@ export function BottomNav() {
             const showUploadsBadge = item.href === "/uploads" && mounted && uploads.length > 0;
             const badgeCount = item.href === "/downloads" ? downloads.length : item.href === "/uploads" ? uploads.length : 0;
             const showBadge = showDownloadsBadge || showUploadsBadge;
+            const dotKey = HREF_UNREAD[item.href];
+            const dot = mounted && dotKey ? unread[dotKey] : false;
             return (
               <Link
                 key={item.href}
@@ -117,6 +138,7 @@ export function BottomNav() {
                   {item.icon}
                 </span>
                 <span className={`font-label text-[8px] uppercase tracking-widest mt-0.5 leading-none truncate w-full ${active ? "font-bold" : ""}`}>{t(item.label)}</span>
+                {dot ? <span aria-hidden="true" className="absolute left-[calc(50%+4px)] top-1.5 h-2 w-2 rounded-full bg-primary" /> : null}
                 {showBadge && (
                   <span className="absolute -top-0.5 right-0.5 min-w-[16px] h-4 rounded-full bg-tertiary px-1 text-[10px] leading-4 text-center text-on-tertiary font-bold">
                     {badgeCount > 99 ? "99+" : badgeCount}
@@ -128,10 +150,11 @@ export function BottomNav() {
           <button
             onClick={() => setMoreOpen((v) => !v)}
             aria-label="More navigation"
-            className={`flex flex-1 min-w-0 flex-col items-center justify-center rounded-full px-1 py-2 min-h-11 text-center transition-all active:scale-90 ${moreActive || moreOpen ? "bg-primary-container/20 text-primary dark:bg-primary-fixed-dim/20 dark:text-primary-fixed-dim" : "text-on-surface-variant opacity-70"}`}
+            className={`relative flex flex-1 min-w-0 flex-col items-center justify-center rounded-full px-1 py-2 min-h-11 text-center transition-all active:scale-90 ${moreActive || moreOpen ? "bg-primary-container/20 text-primary dark:bg-primary-fixed-dim/20 dark:text-primary-fixed-dim" : "text-on-surface-variant opacity-70"}`}
           >
             <span className="material-symbols-outlined text-[22px] leading-none shrink-0">{moreOpen ? "close" : "more_horiz"}</span>
             <span className={`font-label text-[8px] uppercase tracking-widest mt-0.5 leading-none truncate w-full ${moreActive ? "font-bold" : ""}`}>More</span>
+            {moreUnread ? <span aria-hidden="true" className="absolute left-[calc(50%+4px)] top-1.5 h-2 w-2 rounded-full bg-primary" /> : null}
           </button>
         </div>
       </nav>
