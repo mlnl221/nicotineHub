@@ -77,6 +77,7 @@ export interface BridgeTransfer {
   _fileHandle?: number; // fd
   _incompletePath?: string;
   _downloadUrl?: string;
+  _realRequest?: boolean; // true once a real TransferRequest arrived (suppresses pre-F progress stub)
 }
 
 export type TransferUpdateCb = (t: BridgeTransfer) => void;
@@ -153,9 +154,10 @@ export class TransferManager {
   private configDir: string;
   private incompleteDir: string;
   private downloadsDir: string;
-  private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; sendUploadDenied?: (u: string, f: string, reason?: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
+  private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; sendUploadDenied?: (u: string, f: string, reason?: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; sendTransferResponse?: (u: string, t: number, allowed: boolean, sizeOrReason?: number | bigint | string) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
   private onBanlistUpdated?: (banlist: string[], byUser: string) => void;
   private tokenCounter = Math.floor(Math.random() * 900000) + 10000;
+  private tokenIndex = new Map<number, string>();
   private statsManager: StatsManager;
   private userUpdateCounter = new Map<string, number>();
   private globalUpdateCounter = 0;
@@ -322,6 +324,7 @@ export class TransferManager {
       toDelete.push(id);
     }
     for (const id of toDelete) {
+      this.forgetTokensFor(id);
       this.transfers.delete(id);
       this.onRemoved(id);
     }
@@ -478,7 +481,15 @@ export class TransferManager {
 
   getByToken(token: number): BridgeTransfer | undefined {
     for (const t of this.transfers.values()) if (t.token === token) return t;
+    // Repeat grants carry new tokens while an older F may still be in flight —
+    // fall back to any token this transfer was granted (see handleTransferRequest).
+    const id = this.tokenIndex.get(token >>> 0);
+    if (id !== undefined) return this.transfers.get(id);
     return undefined;
+  }
+
+  private forgetTokensFor(id: string) {
+    for (const [tok, mapped] of this.tokenIndex) if (mapped === id) this.tokenIndex.delete(tok);
   }
 
   // For GET /files/:token — tolerant fallback so spectrum works on legacy stubs + subfolders + WSL share dirs
@@ -613,6 +624,7 @@ export class TransferManager {
     setTimeout(() => {
       const cur = this.transfers.get(id);
       if (!cur || cur.status !== "Getting status") return;
+      if (cur._realRequest) return; // real TransferRequest arrived — wait for F, never fake
       // If we haven't received real TransferRequest, we simulate Transferring for demo
       // Check if we have a real F pending — if token is registered, don't simulate
       if (this.session && cur.token && this.transfers.has(id)) {
@@ -1021,7 +1033,7 @@ export class TransferManager {
     }
   }
 
-  handleTransferRequest(direction: number, token: number, file: string, size?: number | bigint) {
+  handleTransferRequest(direction: number, token: number, file: string, username?: string, size?: number | bigint) {
     // Legacy direction 0 = download from peer (slskd/Museek) — treat as QueueUpload
     if (direction === 0) {
       // find or create queued upload? For interop, treat as queue-upload request from peer that wants our file
@@ -1030,7 +1042,7 @@ export class TransferManager {
       // Simplest: if we are the uploader (peer wants file), handle as queue upload
       // Check if any transfer with this file is queued as upload? fallback to ignore but try to handle
       // We treat direction 0 with file as peer wanting to download -> queue upload
-      try { this.handleQueueUpload("unknown", file); } catch {}
+      try { this.handleQueueUpload(typeof username === "string" ? username : "unknown", file); } catch {}
       return;
     }
     if (direction !== 1) return;
@@ -1044,11 +1056,26 @@ export class TransferManager {
     if (!target) return;
     // Activate
     target.token = token;
+    target._realRequest = true;
+    // Keep every granted token mapped: repeat grants race in-flight F conns.
+    this.tokenIndex.set(token >>> 0, target.id);
+    // Uploader authoritative size wins (nicotine-plus downloads.py _transfer_request_downloads)
+    if (typeof size === "number" || typeof size === "bigint") {
+      const n = typeof size === "bigint" ? (size <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(size) : size) : size;
+      if (typeof n === "number" && n > 0) target.size = n;
+      else if (typeof n === "bigint") target.size = n as unknown as number;
+    }
     target.status = "Getting status";
     if (target._statusTimer) clearTimeout(target._statusTimer);
     this.emit(target);
     // Register file token for F demux
     try { this.session?.registerFileToken(token); } catch {}
+    // SLSKPROTOCOL: TransferResponse allowed carries u64 filesize — echo the
+    // uploader's own size (bare replies made SoulseekQt abort with UploadFailed).
+    try {
+      const peer = username || target.username;
+      if (peer && this.session?.sendTransferResponse) this.session.sendTransferResponse(peer, token, true, target.size);
+    } catch {}
     // 45 s timer to timeout if F doesn't arrive
     target._statusTimer = setTimeout(() => {
       const cur = this.get(target!.id);
@@ -1061,21 +1088,25 @@ export class TransferManager {
   }
 
   handleUploadDenied(file: string, reason: string) {
-    for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) {
-      t.status = reason as TransferStatus;
-      this.emit(t);
-      this.scheduleRetry(t.id, 180_000);
-      break;
+    let hit: BridgeTransfer | undefined;
+    for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) { hit = t; break; }
+    if (!hit) for (const t of this.transfers.values()) if (!t.isUpload && (file.endsWith(t.fileName) || t.virtualPath.endsWith(file))) { hit = t; break; }
+    if (hit) {
+      hit.status = reason as TransferStatus;
+      this.emit(hit);
+      this.scheduleRetry(hit.id, 180_000);
     }
   }
 
   handleUploadFailed(file: string) {
-    for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) {
-      t.status = "Connection closed";
+    let hit: BridgeTransfer | undefined;
+    for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) { hit = t; break; }
+    if (!hit) for (const t of this.transfers.values()) if (!t.isUpload && (file.endsWith(t.fileName) || t.virtualPath.endsWith(file))) { hit = t; break; }
+    if (hit) {
+      hit.status = "Connection closed";
       this.statsManager.recordDownloadFailed();
-      this.emit(t);
-      this.scheduleRetry(t.id, 180_000);
-      break;
+      this.emit(hit);
+      this.scheduleRetry(hit.id, 180_000);
     }
   }
 
@@ -1200,6 +1231,18 @@ export class TransferManager {
   async handleFileConnection(token: number, socket: Socket) {
     const t = this.getByToken(token);
     if (!t) {
+      logger.debug("transfer", "F connection unknown token, closing", { token });
+      try { socket.end(); } catch {}
+      return;
+    }
+    // Adopt the live F token (may be an older grant racing a newer request).
+    t.token = token;
+    this.tokenIndex.set(token >>> 0, t.id);
+    // Second F dial for a transfer that already streams: close the spare so
+    // two sockets never share _onFileData/left accounting. Timed-out or
+    // retried transfers (status != Transferring) still accept a fresh F.
+    if (!t.isUpload && t.status === "Transferring" && (t as unknown as { _hadRealF?: boolean })._hadRealF && (t as unknown as { _onFileData?: unknown })._onFileData) {
+      logger.debug("transfer", "duplicate F ignored", { id: t.id, token });
       try { socket.end(); } catch {}
       return;
     }
@@ -1236,9 +1279,13 @@ export class TransferManager {
     t.current = startOffset;
     this.emit(t);
     this.emitStats();
+    logger.debug("transfer", "F accepted, FileOffset sent", { id: t.id, token, startOffset });
 
     // Send FileOffset (uint64 LE)
-    try { socket.write(packUint64(startOffset)); } catch {}
+    try {
+      const n = socket.write(packUint64(startOffset));
+      logger.debug("transfer", "FileOffset write result", { id: t.id, token, startOffset, wrote: typeof n === "number" ? n : String(n) });
+    } catch (e) { logger.debug("transfer", "FileOffset write failed", { id: t.id, err: String(e).slice(0, 120) }); }
     try { this.session?.unregisterFileToken(token); } catch {}
 
     // Stream raw bytes → file
@@ -1350,6 +1397,7 @@ export class TransferManager {
     }
     const cb = (t as unknown as { _onFileData?: (c: Buffer) => void })._onFileData;
     if (cb) cb(chunk);
+    else logger.debug("transfer", "F chunk dropped, no handler yet", { id: t.id, token, bytes: chunk.length });
   }
 
   private startUploadStream(t: BridgeTransfer, offset: number, _initialTail?: Buffer) {
@@ -1458,6 +1506,7 @@ export class TransferManager {
         if (this.config.autoclear_uploads) {
           setTimeout(() => {
             if (this.transfers.has(t.id) && t.status === "Finished") {
+              this.forgetTokensFor(t.id);
               this.transfers.delete(t.id);
               this.onRemoved(t.id);
               this.emitStats();
@@ -1573,6 +1622,7 @@ export class TransferManager {
     if (this.config.autoclear_downloads) {
       setTimeout(() => {
         if (this.transfers.has(t.id) && t.status === "Finished") {
+          this.forgetTokensFor(t.id);
           this.transfers.delete(t.id);
           this.onRemoved(t.id);
           this.emitStats();
@@ -1654,6 +1704,7 @@ export class TransferManager {
         setTimeout(() => {
           const cur = this.transfers.get(id);
           if (!cur || cur.status !== "Getting status") return;
+          if (cur._realRequest) return; // granted path waits for F, never fake
           cur.status = "Transferring";
           cur._startTime = Date.now() - (cur.current / (cur.avgSpeed || 1_000_000)) * 1000;
           this.startProgressStub(id);
@@ -1666,6 +1717,7 @@ export class TransferManager {
         if (t._pollTimer) clearInterval(t._pollTimer);
         if (t._retryTimer) clearTimeout(t._retryTimer);
         if (t._fileHandle !== undefined) try { const { closeSync } = require("node:fs"); closeSync(t._fileHandle); } catch {}
+        this.forgetTokensFor(id);
         this.transfers.delete(id);
         this.onRemoved(id);
         this.emitStats();
@@ -1684,6 +1736,7 @@ export class TransferManager {
       this.emitStats();
       this.persist();
     } else if (action === "clear") {
+      this.forgetTokensFor(id);
       this.transfers.delete(id);
       this.onRemoved(id);
       this.emitStats();
@@ -1701,6 +1754,7 @@ export class TransferManager {
     if (t._pollTimer) clearInterval(t._pollTimer);
     if (t._retryTimer) clearTimeout(t._retryTimer);
     if (t._fileHandle !== undefined) try { const { closeSync } = require("node:fs"); closeSync(t._fileHandle); } catch {}
+    this.forgetTokensFor(id);
     this.transfers.delete(id);
     this.onRemoved(id);
     this.emitStats();

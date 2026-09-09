@@ -684,16 +684,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try {
       if (sessionStorage.getItem("__mockLoggedIn")) return;
     } catch {}
-    // Respect server.auto_connect_startup=false (settings-audit P0)
+    // Respect server.auto_connect_startup=false (settings-audit P0) for
+    // credentialed auto-login only. Singleton attach below needs no password
+    // and must still run — otherwise a logged-in server is unreachable after
+    // every reload when the flag is off.
+    let autoConnectAllowed = true;
     try {
       const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
       if (raw) {
         const parsed = JSON.parse(raw) as { server?: { auto_connect_startup?: boolean } };
-        if (parsed?.server?.auto_connect_startup === false) return;
+        if (parsed?.server?.auto_connect_startup === false) autoConnectAllowed = false;
       }
     } catch {}
     const creds = loadCreds();
-    if (creds?.username && creds?.password) {
+    if (creds?.username && creds?.password && autoConnectAllowed) {
       // Optimistic shell: skip the login screen straight to the app (e.g. /search
       // redirects on `connected`). ReconnectBanner covers `reconnecting`. The real
       // login:result below either confirms (reconnecting:false) or bounces to

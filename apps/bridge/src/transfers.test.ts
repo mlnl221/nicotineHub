@@ -67,19 +67,40 @@ describe("transfers — download engine (Phase 2)", () => {
 
   test("handleTransferRequest sets Getting status and registers token", () => {
     let registered: number | undefined;
+    let responded: { u: string; t: number; allowed: boolean; size?: unknown } | undefined;
     const mockSession = {
       registerFileToken: (tok: number) => { registered = tok; },
       unregisterFileToken: () => {},
       queueUpload: () => {},
       placeInQueueRequest: () => {},
+      sendTransferResponse: (u: string, t: number, allowed: boolean, s?: unknown) => { responded = { u, t, allowed, size: s }; },
     };
     const { mgr } = makeManager(tmp, mockSession);
     mgr.requestDownload("alice", "Music\\song.mp3", 5000);
-    mgr.handleTransferRequest(1, 12345, "Music\\song.mp3");
+    mgr.handleTransferRequest(1, 12345, "Music\\song.mp3", "alice", 5000);
     const t = mgr.get("alice::Music\\song.mp3");
     expect(t?.status).toBe("Getting status");
     expect(t?.token).toBe(12345);
     expect(registered).toBe(12345);
+    expect(responded).toEqual({ u: "alice", t: 12345, allowed: true, size: 5000 });
+    mgr.close();
+  });
+
+  test("repeat grant keeps old token usable for in-flight F", () => {
+    const mockSession = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendTransferResponse: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    mgr.requestDownload("alice", "Music\\song.mp3", 5000);
+    mgr.handleTransferRequest(1, 111, "Music\\song.mp3", "alice", 5000);
+    mgr.handleTransferRequest(1, 222, "Music\\song.mp3", "alice", 5000);
+    // F arrives late with the first grant's token — must still resolve
+    expect(mgr.getByToken(111)?.username).toBe("alice");
+    expect(mgr.getByToken(222)?.username).toBe("alice");
     mgr.close();
   });
 

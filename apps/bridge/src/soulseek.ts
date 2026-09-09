@@ -546,7 +546,9 @@ export function buildTransferRequest(direction: number, token: number, file: str
 }
 export function buildTransferResponse(token: number, allowed: boolean, sizeOrReason?: number | bigint | string): Buffer {
   const parts: Buffer[] = [packUint32(token >>> 0), packBool(allowed)];
-  if (allowed && typeof sizeOrReason !== "string") parts.push(packUint64((sizeOrReason as number | bigint) ?? 0));
+  // nicotine-plus parity: allowed reply carries no filesize unless explicitly
+  // given (extra u64 made some uploaders abort with UploadFailed).
+  if (allowed && (typeof sizeOrReason === "number" || typeof sizeOrReason === "bigint")) parts.push(packUint64(sizeOrReason));
   else if (!allowed && typeof sizeOrReason === "string") parts.push(packString(sizeOrReason));
   return frameMessage(PEER_MESSAGE_CODES.transferResponse, Buffer.concat(parts));
 }
