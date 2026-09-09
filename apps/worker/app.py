@@ -18,6 +18,7 @@ import subprocess
 import time
 import urllib.parse
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -658,6 +659,58 @@ async def rename_file(body: RenameIn):
     except OSError as e:
         return JSONResponse({"detail": str(e)[:300]}, status_code=500)
     return {"ok": True, "newPath": str(dest), "fileName": dest.name, "suffixed": dest.name != sanitized}
+
+
+class TagRenamePreviewIn(BaseModel):
+    files: list[Annotated[str, Field(min_length=1, max_length=1024)]] = Field(min_length=1, max_length=50)
+    template: str = Field(min_length=1, max_length=256)
+
+
+@app.post("/tag/rename-preview", dependencies=[Depends(require_auth)])
+async def tag_rename_preview(body: TagRenamePreviewIn):
+    import re
+    tmpl = body.template.strip()
+    found_tokens = set(re.findall(r"\{(\w+)\}", tmpl))
+    if not found_tokens:
+        return JSONResponse({"detail": "rename template must contain at least one of {track} {artist} {title}"}, status_code=422)
+    if not found_tokens.issubset(_RENAME_TEMPLATE_TOKENS):
+        return JSONResponse({"detail": f"unknown template token — allowed: {sorted(_RENAME_TEMPLATE_TOKENS)}"}, status_code=422)
+    out: list[dict] = []
+    for fname in body.files[:50]:
+        path = _resolve_or_404(fname)
+        if isinstance(path, JSONResponse):
+            reason = "file not found"
+            out.append({"file": fname, "newName": None, "skipped": reason, "reason": reason, "error": reason})
+            continue
+        if path.is_dir():
+            reason = "directories cannot be renamed"
+            out.append({"file": fname, "newName": None, "skipped": reason, "reason": reason, "error": reason})
+            continue
+        try:
+            new_tags, _, _ = _read_tags_and_info(path)
+        except Exception as e:
+            reason = f"tag read failed: {e}"[:200]
+            out.append({"file": fname, "newName": None, "skipped": reason, "reason": reason, "error": reason})
+            continue
+        tnum = new_tags.get("tracknumber") or new_tags.get("track") or ""
+        art = new_tags.get("artist") or new_tags.get("albumartist") or ""
+        tit = new_tags.get("title") or ""
+        desired = _render_rename_template(tmpl, tnum, art, tit)
+        if desired is None:
+            reason = "missing track/artist/title tag for template"
+            out.append({"file": fname, "newName": None, "skipped": reason, "reason": reason, "error": reason})
+            continue
+        ext = path.suffix
+        if ext and not desired.lower().endswith(ext.lower()):
+            desired = desired + ext
+        sanitized = _sanitize_filename(desired)
+        if not sanitized:
+            reason = "invalid filename from template"
+            out.append({"file": fname, "newName": None, "skipped": reason, "reason": reason, "error": reason})
+            continue
+        dest = _unique_dest(path.parent, sanitized)
+        out.append({"file": fname, "newName": dest.name, "newPath": str(dest), "suffixed": dest.name != sanitized})
+    return {"results": out, "template": body.template}
 
 
 @app.post("/tag/scrape", dependencies=[Depends(require_auth)])

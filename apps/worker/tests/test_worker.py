@@ -587,3 +587,40 @@ def test_ident_coercion_and_deezer_tag_key(client, tmp_path, monkeypatch):
     r = client.post("/tag/scrape", json={"fileName": "dz.mp3", "url": "https://www.deezer.com/us/album/98765", "apply": False})
     assert r.status_code == 200, r.text
     assert r.json()["suggested"]["deezer_release_id"] == "98765"
+
+
+def _make_flac(path, seconds=2):
+    wav = path.with_suffix(".wav")
+    _make_wav(wav, seconds=seconds)
+    r = subprocess.run(["flac", "-s", "-f", "-o", str(path), str(wav)], capture_output=True, timeout=60)
+    assert r.returncode == 0, "flac encode failed"
+
+
+def test_tag_rename_preview_renders(client, tmp_path):
+    p = tmp_path / "data" / "downloads" / "song.flac"
+    _make_flac(p)
+    w = client.post("/tag/write", json={"fileName": "song.flac", "tags": {"title": "Speak to Me", "artist": "Pink Floyd", "tracknumber": "3"}})
+    assert w.status_code == 200, w.text
+    r = client.post("/tag/rename-preview", json={"files": ["song.flac"], "template": "{track}. {artist} - {title}"})
+    assert r.status_code == 200, r.text
+    row = r.json()["results"][0]
+    assert row["newName"] == "03. Pink Floyd - Speak to Me.flac"
+
+
+def test_tag_rename_preview_skips_missing_title(client, tmp_path):
+    p = tmp_path / "data" / "downloads" / "notitle.flac"
+    _make_flac(p)
+    w = client.post("/tag/write", json={"fileName": "notitle.flac", "tags": {"artist": "A", "tracknumber": "1"}})
+    assert w.status_code == 200, w.text
+    r = client.post("/tag/rename-preview", json={"files": ["notitle.flac"], "template": "{track}. {artist} - {title}"})
+    assert r.status_code == 200, r.text
+    row = r.json()["results"][0]
+    assert row["newName"] is None
+    assert "missing" in str(row.get("skipped") or row.get("reason") or "").lower()
+
+
+def test_tag_rename_preview_invalid(client):
+    r = client.post("/tag/rename-preview", json={"files": ["song.mp3"], "template": "{foo}"})
+    assert r.status_code == 422
+    r = client.post("/tag/rename-preview", json={"files": [], "template": "{title}"})
+    assert r.status_code == 422

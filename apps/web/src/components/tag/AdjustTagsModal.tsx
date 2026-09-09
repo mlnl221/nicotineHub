@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { bulkReadTags, coverArt, scrapeTags, type TagScrapeResult } from "@/lib/worker";
+import { bulkReadTags, coverArt, renameFile, renamePreview, scrapeTags, type TagScrapeResult } from "@/lib/worker";
 import { useConfig } from "@/lib/config/provider";
 
 type Props = {
@@ -88,6 +88,11 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
   const [selected, setSelected] = useState(0);
   const [durations, setDurations] = useState<Record<string, string>>({});
   const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [appliedOk, setAppliedOk] = useState(0);
+  const [renameRows, setRenameRows] = useState<Array<{ file: string; newName: string | null; skipped?: string; suffixed?: boolean }> | null>(null);
+  const [renameLoading, setRenameLoading] = useState(false);
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameDone, setRenameDone] = useState<string | null>(null);
   const { settings } = useConfig();
   const autoRenameEnabled = !!(settings as unknown as { transfers?: { auto_rename_enabled?: boolean } }).transfers?.auto_rename_enabled;
   const renameTemplate = (settings as unknown as { transfers?: { rename_template?: string } }).transfers?.rename_template || "{track}. {artist} - {title}";
@@ -97,6 +102,9 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
     setOrder(naturalSortFiles(files.slice(0, 50)));
     setSelected(0);
     setDragIdx(null);
+    setAppliedOk(0);
+    setRenameRows(null);
+    setRenameDone(null);
   }, [open, files]);
 
   useEffect(() => {
@@ -155,6 +163,9 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
     setError(null);
     setPreview(null);
     setDone(null);
+    setAppliedOk(0);
+    setRenameRows(null);
+    setRenameDone(null);
     try {
       const r = await scrapeTags(files[0], u, false);
       setPreview(r);
@@ -165,6 +176,21 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
     }
   };
 
+  const applyPathUpdates = (updates: Array<{ from: string; to: string }>) => {
+    if (updates.length === 0) return;
+    const map = new Map(updates.map((x) => [x.from, x.to]));
+    setOrder((prev) => prev.map((p) => map.get(p) ?? p));
+    setDurations((prev) => {
+      const next = { ...prev };
+      for (const x of updates) {
+        if (x.from in next) next[x.to] = next[x.from];
+        delete next[x.from];
+      }
+      return next;
+    });
+    setSelected((s) => Math.max(0, Math.min(s, Math.max(0, capped.length - 1))));
+  };
+
   const handleApply = async () => {
     const u = url.trim();
     if (!u) { setError("Enter URL"); return; }
@@ -173,12 +199,23 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
     setApplying(true);
     setError(null);
     setDone(null);
+    setRenameRows(null);
+    setRenameDone(null);
+    setAppliedOk(0);
     try {
       let ok = 0;
       let coverFailed = 0;
       const newPaths: string[] = [];
+      const pathUpdates: Array<{ from: string; to: string }> = [];
       const renameOpt = autoRenameEnabled ? { enabled: true, template: renameTemplate } : undefined;
       const hasCover = !!(saveCover && preview.cover_url);
+      const collectRename = (f: string, r: TagScrapeResult) => {
+        if (!r.rename?.renamed) return;
+        const np = r.newPath ?? r.rename.newPath;
+        if (!np) return;
+        newPaths.push(np);
+        pathUpdates.push({ from: f, to: np });
+      };
       if (tracks.length === 0) {
         for (const f of capped) {
           const r = await scrapeTags(f, u, true, renameOpt, undefined);
@@ -186,12 +223,11 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
           if (hasCover) {
             try { await coverArt(f, u); } catch { coverFailed++; }
           }
-          if (r.rename?.renamed) {
-            if (r.newPath) newPaths.push(r.newPath);
-            else if (r.rename.newPath) newPaths.push(r.rename.newPath);
-          }
+          collectRename(f, r);
         }
         setDone(`Applied ${ok}, skipped 0 unmapped. No per-track data for this source — album tags only${coverFailed > 0 ? `, cover failed ${coverFailed}` : ""}`);
+        applyPathUpdates(pathUpdates);
+        setAppliedOk(ok);
         if (newPaths.length && onRenamed) onRenamed(newPaths);
         return;
       }
@@ -202,18 +238,58 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
         if (hasCover) {
           try { await coverArt(f, u); } catch { coverFailed++; }
         }
-        if (r.rename?.renamed) {
-          if (r.newPath) newPaths.push(r.newPath);
-          else if (r.rename.newPath) newPaths.push(r.rename.newPath);
-        }
+        collectRename(f, r);
       }
       const skipped = Math.abs(capped.length - tracks.length);
       setDone(`Applied ${ok}, skipped ${skipped} unmapped${coverFailed > 0 ? `, cover failed ${coverFailed}` : ""}`);
+      applyPathUpdates(pathUpdates);
+      setAppliedOk(ok);
       if (newPaths.length && onRenamed) onRenamed(newPaths);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setApplying(false);
+    }
+  };
+
+  const handleRenamePreview = async () => {
+    setRenameLoading(true);
+    setError(null);
+    setRenameDone(null);
+    setRenameRows(null);
+    try {
+      const r = await renamePreview(order, renameTemplate);
+      setRenameRows(r.results);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRenameLoading(false);
+    }
+  };
+
+  const handleRenameConfirm = async () => {
+    if (!renameRows) return;
+    setRenameBusy(true);
+    setError(null);
+    try {
+      let n = 0;
+      let m = 0;
+      const updates: Array<{ from: string; to: string }> = [];
+      for (const row of renameRows) {
+        if (!row.newName) { m++; continue; }
+        try {
+          const r = await renameFile(row.file, row.newName);
+          n++;
+          updates.push({ from: row.file, to: r.newPath });
+        } catch { m++; }
+      }
+      setRenameDone(`Renamed ${n}, skipped ${m}`);
+      applyPathUpdates(updates);
+      if (updates.length && onRenamed) onRenamed(updates.map((x) => x.to));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRenameBusy(false);
     }
   };
 
@@ -363,9 +439,39 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
               </div>
             </>
           ) : null}
+          {renameLoading || renameRows !== null || renameDone ? (
+            <div className="rounded-xl bg-surface-container-low p-3 ghost-border space-y-2">
+              <h4 className="font-label text-xs font-semibold uppercase tracking-widest">Rename preview <span className="font-mono normal-case">{renameTemplate}</span></h4>
+              {renameLoading ? <div className="font-body text-xs text-outline">Loading preview…</div> : null}
+              {renameRows ? (
+                <div className="max-h-[24vh] overflow-auto space-y-1 pr-1">
+                  {renameRows.map((r) => (
+                    <div key={r.file} className="flex items-center gap-2 rounded-xl bg-surface-container-lowest px-3 py-2 min-h-9">
+                      <span className="font-mono text-xs truncate flex-1" title={r.file}>{basename(r.file)}</span>
+                      <span className="font-mono text-[10px] text-outline shrink-0">→</span>
+                      {r.newName ? (
+                        <span className="font-mono text-xs truncate flex-1" title={r.newName}>{r.newName}{r.suffixed ? " (suffixed)" : ""}</span>
+                      ) : (
+                        <span className="font-body text-xs text-outline flex-1">skipped{r.skipped ? `: ${r.skipped}` : ""}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {renameDone ? <div className="rounded-xl bg-green-100 dark:bg-green-900/30 px-3 py-2 font-body text-xs text-green-800 dark:text-green-200">{renameDone}</div> : null}
+              {renameRows && !renameDone ? (
+                <button disabled={renameBusy || !renameRows.some((r) => r.newName)} onClick={handleRenameConfirm} className="w-full rounded-xl bg-surface-container-high px-4 py-2 min-h-9 font-label text-xs font-semibold disabled:opacity-40">{renameBusy ? "Renaming…" : "Confirm rename"}</button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <div className="px-6 py-4 border-t border-outline-variant/10 bg-surface-container-low/60 flex justify-between gap-3 shrink-0">
-          <button onClick={onClose} className="rounded-full bg-surface-container-high px-5 py-2.5 min-h-9 font-label text-xs font-semibold">Cancel</button>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="rounded-full bg-surface-container-high px-5 py-2.5 min-h-9 font-label text-xs font-semibold">Cancel</button>
+            {appliedOk > 0 && !autoRenameEnabled ? (
+              <button disabled={renameLoading} onClick={handleRenamePreview} title={renameTemplate} className="rounded-xl bg-surface-container-high px-4 py-2.5 min-h-9 font-label text-xs font-semibold ghost-border disabled:opacity-40">{renameLoading ? "Loading…" : "Rename files…"}</button>
+            ) : null}
+          </div>
           <button disabled={loading || applying || !preview || capped.length === 0} onClick={handleApply} className="rounded-full bg-primary px-5 py-2.5 min-h-9 font-label text-xs font-bold text-on-primary disabled:opacity-40">{applying ? "Applying…" : "OK"}</button>
         </div>
       </div>

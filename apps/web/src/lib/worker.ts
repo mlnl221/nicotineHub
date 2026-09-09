@@ -282,6 +282,16 @@ export async function renameFile(fileName: string, newName: string): Promise<{ o
   return body as { ok: boolean; newPath: string; fileName: string; suffixed: boolean };
 }
 
+export async function renamePreview(files: string[], template: string): Promise<{ results: Array<{ file: string; newName: string | null; skipped?: string; suffixed?: boolean }> }> {
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    return { results: [] };
+  }
+  const res = await workerFetch("/tag/rename-preview", { method: "POST", body: JSON.stringify({ files, template }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { detail?: string }).detail || `Rename preview failed (${res.status})`);
+  return body as { results: Array<{ file: string; newName: string | null; skipped?: string; suffixed?: boolean }> };
+}
+
 export async function getMediainfo(fileName: string): Promise<MediainfoResult> {
   if (process.env.NEXT_PUBLIC_DEMO === "true") {
     const backend = await import("@/lib/demo/workerBackend");
