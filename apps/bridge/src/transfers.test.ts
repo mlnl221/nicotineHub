@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { TransferManager } from "./transfers.ts";
@@ -187,7 +187,7 @@ describe("transfers — download engine (Phase 2)", () => {
     await (mgr as any).handleFileConnection(999, sock);
     expect(mgr.get(t.id)?.status).toBe("Finished");
     expect(finished.length).toBe(1);
-    expect(existsSync(join(tmp, "downloads", "whole.mp3"))).toBe(true);
+    expect(existsSync(join(tmp, "downloads", "alice", "whole.mp3"))).toBe(true);
     mgr.close();
   });
 
@@ -275,6 +275,143 @@ describe("transfers — download engine (Phase 2)", () => {
     await finishOne("..", "Music\\evil.mp3", "evil.mp3", 16);
     expect(existsSync(join(tmp, "downloads", "_", "evil.mp3"))).toBe(true);
     expect(existsSync(join(tmp, "evil.mp3"))).toBe(false);
+    mgr.close();
+  });
+
+  test("preserves remote folder structure, drops alias, always includes user", async () => {
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    (mgr as any).transfers.clear();
+    const finishOne = async (user: string, virtual: string, size: number) => {
+      const t = mgr.requestDownload(user, virtual, size);
+      mgr.handleTransferRequest(1, t.token!, virtual);
+      const mockSocket: any = { write: () => {}, end: () => {} };
+      await (mgr as any).handleFileConnection(t.token!, mockSocket);
+      (mgr as any).handleFileChunk(t.token!, Buffer.alloc(size, 0x41));
+      return t;
+    };
+    // alias dropped, subdirs kept, user always present (no setConfig needed)
+    await finishOne("alice", "Music\\Album\\Disc 1\\song.mp3", 64);
+    expect(existsSync(join(tmp, "downloads", "alice", "Album", "Disc 1", "song.mp3"))).toBe(true);
+    expect(existsSync(join(tmp, "downloads", "Music"))).toBe(false);
+    // traversal neutralized (.. -> dir), stays inside downloads dir
+    await finishOne("bob", "Share\\..\\..\\evil.mp3", 16);
+    const bobDir = join(tmp, "downloads", "bob");
+    expect(existsSync(join(tmp, "evil.mp3"))).toBe(false);
+    expect(existsSync(join(bobDir, "dir", "dir", "evil.mp3"))).toBe(true);
+    // reserved device name prefixed
+    await finishOne("carol", "Share\\Docs\\CON", 16);
+    expect(existsSync(join(tmp, "downloads", "carol", "Docs", "_CON"))).toBe(true);
+    // forward-slash virtuals tolerated
+    await finishOne("dave", "Share/Sub/file.mp3", 16);
+    expect(existsSync(join(tmp, "downloads", "dave", "Sub", "file.mp3"))).toBe(true);
+    // template path: SOURCE_DIRECTORY is first real dir (alias dropped), subpath continues past it
+    mgr.setConfig({ download_destination_template: "byuser/${SOURCE_USERNAME}/${SOURCE_DIRECTORY}" });
+    await finishOne("erin", "Share\\RealDir\\Sub\\t.mp3", 16);
+    expect(existsSync(join(tmp, "downloads", "byuser", "erin", "RealDir", "Sub", "t.mp3"))).toBe(true);
+    // template already ending with full subpath: no duplication
+    mgr.setConfig({ download_destination_template: "templ/${SOURCE_DIRECTORY}/Sub" });
+    await finishOne("fred", "Share\\RealDir\\Sub\\u.mp3", 16);
+    expect(existsSync(join(tmp, "downloads", "templ", "RealDir", "Sub", "u.mp3"))).toBe(true);
+    mgr.close();
+  });
+
+  test("traversal virtualPath stays contained under downloadsDir", async () => {
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    (mgr as any).transfers.clear();
+    const t = mgr.requestDownload("bob", "Share\\..\\..\\evil.mp3", 16);
+    mgr.handleTransferRequest(1, t.token!, "Share\\..\\..\\evil.mp3");
+    await (mgr as any).handleFileConnection(t.token!, { write: () => {}, end: () => {} });
+    (mgr as any).handleFileChunk(t.token!, Buffer.alloc(16, 0x41));
+    const got = (mgr.get(t.id) as any)?._incompletePath as string;
+    const root = resolve(join(tmp, "downloads"));
+    expect(resolve(got).startsWith(root + sep)).toBe(true);
+    expect(existsSync(join(tmp, "evil.mp3"))).toBe(false);
+    expect(existsSync(got)).toBe(true);
+    mgr.close();
+  });
+
+  test("reserved device name sanitized", async () => {
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    (mgr as any).transfers.clear();
+    const t = mgr.requestDownload("carol", "Share\\Docs\\CON", 16);
+    mgr.handleTransferRequest(1, t.token!, "Share\\Docs\\CON");
+    await (mgr as any).handleFileConnection(t.token!, { write: () => {}, end: () => {} });
+    (mgr as any).handleFileChunk(t.token!, Buffer.alloc(16, 0x41));
+    expect(existsSync(join(tmp, "downloads", "carol", "Docs", "_CON"))).toBe(true);
+    expect(existsSync(join(tmp, "downloads", "carol", "Docs", "CON"))).toBe(false);
+    mgr.close();
+  });
+
+  test("share alias dropped, user subdir kept", async () => {
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    (mgr as any).transfers.clear();
+    // safeUsername preserves case/space, so "Donald Trump" stays as-is
+    const t = mgr.requestDownload("Donald Trump", "Music\\Album 1\\01 Flak.mp3", 16);
+    mgr.handleTransferRequest(1, t.token!, "Music\\Album 1\\01 Flak.mp3");
+    await (mgr as any).handleFileConnection(t.token!, { write: () => {}, end: () => {} });
+    (mgr as any).handleFileChunk(t.token!, Buffer.alloc(16, 0x41));
+    expect(existsSync(join(tmp, "downloads", "Donald Trump", "Album 1", "01 Flak.mp3"))).toBe(true);
+    expect(existsSync(join(tmp, "downloads", "Music"))).toBe(false);
+    mgr.close();
+  });
+
+  test("migration moves flat entries to nested, idempotent", () => {
+    const { mgr } = makeManager(tmp);
+    (mgr as any).transfers.clear();
+    const flatDir = join(tmp, "downloads", "alice");
+    mkdirSync(flatDir, { recursive: true });
+    const flatFile = join(flatDir, "song.mp3");
+    writeFileSync(flatFile, "flat-bytes");
+    const entry: any = {
+      id: "alice::Music\\Album\\song.mp3",
+      username: "alice",
+      virtualPath: "Music\\Album\\song.mp3",
+      fileName: "song.mp3",
+      size: 10, current: 10, speed: 0, avgSpeed: 0, timeLeft: null,
+      status: "Finished", queuePosition: null, isUpload: false,
+      token: 424242, _incompletePath: flatFile, _downloadUrl: "/files/424242",
+    };
+    (mgr as any).transfers.set(entry.id, entry);
+    const first = mgr.migrateFlatDownloads();
+    expect(first.moved).toBe(1);
+    const nested = join(tmp, "downloads", "alice", "Album", "song.mp3");
+    expect(existsSync(nested)).toBe(true);
+    expect(existsSync(flatFile)).toBe(false);
+    expect((mgr.get(entry.id) as any)?._incompletePath).toBe(nested);
+    const raw = JSON.parse(readFileSync(join(tmp, "downloads.json"), "utf8")) as any[];
+    expect(raw.find((r) => r.id === entry.id)?._incompletePath).toBe(nested);
+    const second = mgr.migrateFlatDownloads();
+    expect(second.moved).toBe(0);
+    expect(existsSync(nested)).toBe(true);
+    expect(existsSync(join(tmp, "downloads", "alice", "Album", "song (1).mp3"))).toBe(false);
     mgr.close();
   });
 });
@@ -373,7 +510,7 @@ describe("transfers — file streaming (Phase 4 - download & upload)", () => {
     expect(finished.length).toBe(1);
     expect(finished[0].id).toBe(t.id);
     // file on disk
-    const dlPath = join(tmp, "downloads", "stream.mp3");
+    const dlPath = join(tmp, "downloads", "alice", "stream.mp3");
     expect(existsSync(dlPath)).toBe(true);
     const content = readFileSync(dlPath);
     expect(content.length).toBe(4096);
@@ -417,7 +554,7 @@ describe("transfers — file streaming (Phase 4 - download & upload)", () => {
     // send remaining 2048
     (mgr2 as any).handleFileChunk(token, Buffer.alloc(2048, 0x43));
     expect(mgr2.get(t2.id)?.status).toBe("Finished");
-    expect(readFileSync(join(tmp, "downloads", "resume.mp3")).length).toBe(4096);
+    expect(readFileSync(join(tmp, "downloads", "alice", "resume.mp3")).length).toBe(4096);
     mgr2.close();
   });
 
