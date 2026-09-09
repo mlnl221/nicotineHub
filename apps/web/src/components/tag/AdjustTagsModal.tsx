@@ -72,6 +72,10 @@ function extractSeconds(info?: Record<string, unknown>, tags?: Record<string, st
   return null;
 }
 
+function cap(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
 export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -126,18 +130,21 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
   const selFile = capped[selected] ?? null;
   const selTrack = selFile !== null && selected < tracks.length ? tracks[selected] : null;
 
+  const src = (preview as unknown as { source?: string } | null)?.source;
+  const toList = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : v === null || v === undefined || v === "" ? [] : [String(v)]);
+  const yearStr = preview?.year === null || preview?.year === undefined ? "" : (String(preview.year).match(/^\d{4}/)?.[0] ?? String(preview.year));
   const albumRows: Array<[string, string]> = preview ? [
     ["ALBUM", preview.album || ""],
     ["ARTIST", preview.artist || ""],
     ["CATALOGNUMBER", preview.catalog_no || ""],
     ["COUNTRY", preview.country || ""],
-    ["RELEASE_ID", preview.release_id === undefined || preview.release_id === null ? "" : String(preview.release_id)],
-    ["GENRE", (preview.genre ?? []).join(", ")],
+    [src ? `${src.toUpperCase()}_RELEASE_ID` : "RELEASE_ID", preview.release_id === undefined || preview.release_id === null ? "" : String(preview.release_id)],
+    ["GENRE", toList((preview as unknown as { genre?: unknown }).genre).join(", ")],
     ["MEDIATYPE", preview.media_type || ""],
     ["PUBLISHER", preview.label || ""],
-    ["STYLE", (preview.style ?? []).join(", ")],
+    ["STYLE", toList((preview as unknown as { style?: unknown }).style).join(", ")],
     ["WWW", preview.url || ""],
-    ["YEAR", preview.year === null || preview.year === undefined ? "" : String(preview.year)],
+    ["YEAR", yearStr],
   ].filter((r): r is [string, string] => !!r[1]) : [];
 
   const handlePreview = async () => {
@@ -161,21 +168,39 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
   const handleApply = async () => {
     const u = url.trim();
     if (!u) { setError("Enter URL"); return; }
-    if (!preview || tracks.length === 0) { setError("Preview first"); return; }
+    if (!preview) { setError("Preview first"); return; }
+    if (tracks.length > 0 && mappedCount === 0) { setError("Preview first"); return; }
     setApplying(true);
     setError(null);
     setDone(null);
     try {
       let ok = 0;
+      let coverFailed = 0;
       const newPaths: string[] = [];
       const renameOpt = autoRenameEnabled ? { enabled: true, template: renameTemplate } : undefined;
       const hasCover = !!(saveCover && preview.cover_url);
+      if (tracks.length === 0) {
+        for (const f of capped) {
+          const r = await scrapeTags(f, u, true, renameOpt, undefined);
+          if (r.applied) ok++;
+          if (hasCover) {
+            try { await coverArt(f, u); } catch { coverFailed++; }
+          }
+          if (r.rename?.renamed) {
+            if (r.newPath) newPaths.push(r.newPath);
+            else if (r.rename.newPath) newPaths.push(r.rename.newPath);
+          }
+        }
+        setDone(`Applied ${ok}, skipped 0 unmapped. No per-track data for this source — album tags only${coverFailed > 0 ? `, cover failed ${coverFailed}` : ""}`);
+        if (newPaths.length && onRenamed) onRenamed(newPaths);
+        return;
+      }
       for (let i = 0; i < mappedCount; i++) {
         const f = capped[i];
         const r = await scrapeTags(f, u, true, renameOpt, i);
         if (r.applied) ok++;
         if (hasCover) {
-          try { await coverArt(f, u); } catch { /* best-effort */ }
+          try { await coverArt(f, u); } catch { coverFailed++; }
         }
         if (r.rename?.renamed) {
           if (r.newPath) newPaths.push(r.newPath);
@@ -183,7 +208,7 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
         }
       }
       const skipped = Math.abs(capped.length - tracks.length);
-      setDone(`Applied ${ok}, skipped ${skipped} unmapped`);
+      setDone(`Applied ${ok}, skipped ${skipped} unmapped${coverFailed > 0 ? `, cover failed ${coverFailed}` : ""}`);
       if (newPaths.length && onRenamed) onRenamed(newPaths);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -257,7 +282,7 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
                       <div><span className="font-mono text-[10px] text-outline">TRACK </span>{selTrack.pos || "—"}</div>
                       <div><span className="font-mono text-[10px] text-outline">TITLE </span>{selTrack.title || "—"}</div>
                       <div><span className="font-mono text-[10px] text-outline">ARTIST </span>{selTrack.artist || "—"}</div>
-                      <div><span className="font-mono text-[10px] text-outline">LENGTH </span>{selTrack.duration || "—"}</div>
+                      <div><span className="font-mono text-[10px] text-outline">LENGTH </span>{selTrack.duration ? formatDur(extractSeconds({ duration: selTrack.duration })) : "—"}</div>
                     </div>
                   ) : <div className="font-body text-xs text-outline">— no file —</div>}
                 </div>
@@ -284,7 +309,7 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="rounded-xl bg-surface-container-low p-3 ghost-border space-y-2">
-                  <h4 className="font-label text-xs font-semibold uppercase tracking-widest">Discogs tracks</h4>
+                  <h4 className="font-label text-xs font-semibold uppercase tracking-widest">{src ? cap(src) : "Release"} tracks</h4>
                   <div className="max-h-[30vh] overflow-auto space-y-1 pr-1">
                     {tracks.map((t, i) => (
                       <div key={i} className="flex items-center gap-2 rounded-lg bg-surface-container-lowest px-3 py-2 min-h-9">
@@ -341,7 +366,7 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
         </div>
         <div className="px-6 py-4 border-t border-outline-variant/10 bg-surface-container-low/60 flex justify-between gap-3 shrink-0">
           <button onClick={onClose} className="rounded-full bg-surface-container-high px-5 py-2.5 min-h-9 font-label text-xs font-semibold">Cancel</button>
-          <button disabled={loading || applying || !preview || mappedCount === 0} onClick={handleApply} className="rounded-full bg-primary px-5 py-2.5 min-h-9 font-label text-xs font-bold text-on-primary disabled:opacity-40">{applying ? "Applying…" : "OK"}</button>
+          <button disabled={loading || applying || !preview || capped.length === 0} onClick={handleApply} className="rounded-full bg-primary px-5 py-2.5 min-h-9 font-label text-xs font-bold text-on-primary disabled:opacity-40">{applying ? "Applying…" : "OK"}</button>
         </div>
       </div>
     </div>

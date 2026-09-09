@@ -696,13 +696,15 @@ async def tag_scrape(body: TagScrapeIn):
     if found.country:
         suggested["country"] = found.country
     if found.genre:
-        suggested["genre"] = ", ".join(found.genre)
+        _g = found.genre if isinstance(found.genre, list) else [found.genre]
+        suggested["genre"] = ", ".join(_g)
     if found.style:
-        suggested["style"] = ", ".join(found.style)
+        _s = found.style if isinstance(found.style, list) else [found.style]
+        suggested["style"] = ", ".join(_s)
     if found.media_type:
         suggested["mediatype"] = found.media_type
     if found.release_id:
-        suggested["discogs_release_id"] = found.release_id
+        suggested[f"{found.source}_release_id"] = found.release_id
     if url:
         suggested["www"] = url
     if body.trackIndex is not None:
@@ -835,7 +837,7 @@ async def tag_cover(body: TagCoverIn):
     try:
         timeout = aiohttp.ClientTimeout(total=15)
         async with aiohttp.ClientSession(timeout=timeout) as sess:
-            async with sess.get(cover_url) as resp:
+            async with sess.get(cover_url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"}) as resp:
                 if resp.status != 200:
                     return JSONResponse({"detail": f"cover download failed: HTTP {resp.status}"}, status_code=422)
                 ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()

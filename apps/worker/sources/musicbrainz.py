@@ -11,6 +11,46 @@ class MusicBrainzScraper(BaseScraper):
     source = "musicbrainz"
     url_patterns = [re.compile(r"musicbrainz\.org/(release(?:-group)?)/([a-f0-9-]{36})", re.I)]
 
+    def _release_data(self, data: dict, mbid: str) -> IdentData:
+        tracklist = []
+        idx = 0
+        for med in data.get("media", []):
+            for t in med.get("tracks", []):
+                idx += 1
+                rec = t.get("recording") or {}
+                ac = t.get("artist-credit") or rec.get("artist-credit") or []
+                if isinstance(ac, list):
+                    artist = "".join(a.get("name", "") for a in ac if isinstance(a, dict))
+                else:
+                    artist = str(ac or "")
+                length = t.get("length") or rec.get("length")
+                try:
+                    duration: object = int(length) if length else ""
+                except (TypeError, ValueError):
+                    duration = ""
+                tracklist.append(
+                    {
+                        "pos": str(t.get("number") or t.get("position") or idx),
+                        "title": str(t.get("title") or rec.get("title") or ""),
+                        "artist": artist,
+                        "duration": duration,
+                    }
+                )
+        label_info = data.get("label-info") or []
+        label = ((label_info[0].get("label") or {}) if label_info else {}).get("name")
+        return IdentData(
+            artist=data.get("artist-credit-phrase") or "Unknown",
+            album=str(data.get("title", "")),
+            year=str(data.get("date", ""))[:4] or None,
+            track_count=len(tracklist) or None,
+            source=self.source,
+            tracklist=tracklist or None,
+            label=label,
+            country=data.get("country"),
+            release_id=mbid,
+            cover_url=f"https://coverartarchive.org/release/{mbid}/front",
+        )
+
     async def scrape(self, url: str) -> IdentData:
         m = self.match(url)
         if not m:
@@ -22,24 +62,26 @@ class MusicBrainzScraper(BaseScraper):
                 f"https://musicbrainz.org/ws/2/release-group/{mbid}?fmt=json&inc=artists+releases", headers=ua
             )
             releases = data.get("releases") or []
-            first = releases[0] if releases else {}
-            tracks = (first.get("media") or [{}])[0].get("track-count")
-            year = str(data.get("first-release-date", ""))[:4] or None
-            return IdentData(
-                artist=data.get("artist-credit-phrase") or "Unknown",
-                album=str(data.get("title", "")),
-                year=year,
-                track_count=tracks,
-                source=self.source,
+            rid = releases[0].get("id") if releases else None
+            if not rid:
+                tracks = (releases[0].get("media") or [{}])[0].get("track-count") if releases else None
+                year = str(data.get("first-release-date", ""))[:4] or None
+                return IdentData(
+                    artist=data.get("artist-credit-phrase") or "Unknown",
+                    album=str(data.get("title", "")),
+                    year=year,
+                    track_count=tracks,
+                    source=self.source,
+                    release_id=None,
+                    cover_url=None,
+                )
+            data = await self.get_json(
+                f"https://musicbrainz.org/ws/2/release/{rid}?fmt=json&inc=artists+media+recordings",
+                headers=ua,
             )
+            return self._release_data(data, rid)
         data = await self.get_json(
-            f"https://musicbrainz.org/ws/2/release/{mbid}?fmt=json&inc=artists+recordings", headers=ua
+            f"https://musicbrainz.org/ws/2/release/{mbid}?fmt=json&inc=artists+media+recordings",
+            headers=ua,
         )
-        tracks = sum(len(med.get("tracks", [])) for med in data.get("media", [])) or None
-        return IdentData(
-            artist=data.get("artist-credit-phrase") or "Unknown",
-            album=str(data.get("title", "")),
-            year=str(data.get("date", ""))[:4] or None,
-            track_count=tracks,
-            source=self.source,
-        )
+        return self._release_data(data, mbid)

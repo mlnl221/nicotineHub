@@ -43,6 +43,47 @@ class IdentData:
     release_id: str | None = None
     cover_url: str | None = None
 
+    def __post_init__(self):
+        if isinstance(self.genre, str):
+            object.__setattr__(self, "genre", [self.genre])
+        if isinstance(self.style, str):
+            object.__setattr__(self, "style", [self.style])
+        if isinstance(self.year, str):
+            m = re.match(r"\d{4}", self.year)
+            if m:
+                object.__setattr__(self, "year", m.group(0))
+        if isinstance(self.tracklist, list):
+            out = []
+            for t in self.tracklist:
+                try:
+                    if not isinstance(t, dict) or "duration" not in t:
+                        out.append(t)
+                        continue
+                    v = t["duration"]
+                    if isinstance(v, str):
+                        # ISO 8601 durations (Bandcamp PT4M5S / P00H04M43S)
+                        iso = re.match(
+                            r"^P(?:T)?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$", v.strip().upper()
+                        )
+                        if iso and any(iso.groups()):
+                            h, mi, s = iso.groups()
+                            v = int(h or 0) * 3600 + int(mi or 0) * 60 + float(s or 0)
+                    if isinstance(v, (int, float)):
+                        d = dict(t)
+                        # millis (iTunes/MB, >10000) vs seconds
+                        s = v / 1000 if v > 10000 else v
+                        d["duration"] = f"{int(s // 60)}:{int(s % 60):02d}"
+                        out.append(d)
+                    elif v is None:
+                        d = dict(t)
+                        d["duration"] = ""
+                        out.append(d)
+                    else:
+                        out.append(t)
+                except Exception:
+                    out.append(t)
+            object.__setattr__(self, "tracklist", out)
+
 
 def assert_public_url(url: str) -> str:
     """Reject non-http(s) URLs and hosts resolving to private IPs (SSRF guard)."""
@@ -92,7 +133,8 @@ class BaseScraper:
                 if resp.status != 200:
                     raise ScrapeError(f"{self.source}: HTTP {resp.status}")
                 try:
-                    data = await resp.json()
+                    # content_type=None: some APIs (iTunes) serve JSON as text/javascript
+                    data = await resp.json(content_type=None)
                 except Exception as e:
                     raise ScrapeError(f"{self.source}: not JSON") from e
                 return data if isinstance(data, dict) else {"items": data}

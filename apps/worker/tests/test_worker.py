@@ -433,3 +433,174 @@ def test_tag_cover_no_cover_422(client, tmp_path, monkeypatch):
     assert r.status_code == 422, r.text
     r = client.post("/tag/cover", json={"fileName": "ghost.mp3", "url": url})
     assert r.status_code == 404, r.text
+
+
+import asyncio
+
+
+def test_scrape_apple_canonical(monkeypatch):
+    from sources.apple_music import AppleMusicScraper
+
+    async def _fake(self, url, params=None, headers=None):
+        return {"results": [
+            {"wrapperType": "collection", "artistName": "Apple Artist", "collectionName": "Apple Album", "releaseDate": "2008-07-01T07:00:00Z", "trackCount": 2, "artworkUrl100": "https://example.com/art/100x100bb.jpg", "primaryGenreName": "Rock", "copyright": "Test", "collectionId": 123456789},
+            {"wrapperType": "track", "trackNumber": 1, "trackName": "Song One", "artistName": "Apple Artist", "trackTimeMillis": 125000},
+            {"wrapperType": "track", "trackNumber": 2, "trackName": "Song Two", "artistName": "Apple Artist", "trackTimeMillis": 61000},
+        ]}
+
+    monkeypatch.setattr(AppleMusicScraper, "get_json", _fake)
+    found = asyncio.run(AppleMusicScraper().scrape("https://music.apple.com/us/album/test-album/123456789"))
+    assert found.artist == "Apple Artist"
+    assert found.album == "Apple Album"
+    assert found.year == "2008"
+    assert found.tracklist[0]["pos"] == "1"
+    assert found.tracklist[0]["title"] == "Song One"
+    assert ":" in found.tracklist[0]["duration"]
+    assert found.cover_url == "https://example.com/art/600x600bb.jpg"
+    assert found.genre == ["Rock"]
+    assert found.release_id == "123456789"
+
+
+def test_scrape_bandcamp_canonical(monkeypatch):
+    from sources.bandcamp import BandcampScraper
+
+    async def _fake(self, url):
+        from bs4 import BeautifulSoup
+        html = '<html><head><meta property="og:image" content="https://example.com/bc-og.jpg"/></head><body><script type="application/ld+json">{"@type": "MusicAlbum", "name": "BC Album", "byArtist": {"name": "BC Artist"}, "datePublished": "2015-03-10", "numTracks": 2, "image": "https://example.com/bc-cover.jpg", "recordLabel": {"name": "BC Label"}, "genre": "Electronic", "track": {"itemListElement": [{"position": 1, "item": {"name": "BC One", "byArtist": {"name": "BC Artist"}, "duration": "PT4M5S"}}, {"position": 2, "item": {"name": "BC Two", "byArtist": {"name": "BC Artist"}, "duration": ""}}]}}</script></body></html>'
+        return BeautifulSoup(html, "lxml")
+
+    monkeypatch.setattr(BandcampScraper, "fetch_page", _fake)
+    found = asyncio.run(BandcampScraper().scrape("https://artist.bandcamp.com/album/test-album"))
+    assert found.artist == "BC Artist"
+    assert found.album == "BC Album"
+    assert found.year == "2015"
+    assert found.tracklist[0]["pos"] == "1"
+    assert found.tracklist[0]["title"] == "BC One"
+    assert found.tracklist[0]["duration"] == "4:05"
+    assert found.cover_url == "https://example.com/bc-cover.jpg"
+    assert found.label == "BC Label"
+    assert found.genre == ["Electronic"]
+
+
+def test_scrape_deezer_canonical(monkeypatch):
+    from sources.deezer import DeezerScraper
+
+    async def _fake(self, url, params=None, headers=None):
+        return {"id": 98765, "title": "Deezer Album", "release_date": "2010-05-17", "nb_tracks": 2, "artist": {"name": "Deezer Artist"}, "tracks": {"data": [{"track_position": 1, "title": "DZ One", "artist": {"name": "DZ Artist"}, "duration": 245}, {"track_position": 2, "title": "DZ Two", "artist": {"name": "DZ Artist"}, "duration": 61}]}, "cover_xl": "https://example.com/dz.jpg", "label": "DZ Label", "genres": {"data": [{"name": "Pop"}]}}
+
+    monkeypatch.setattr(DeezerScraper, "get_json", _fake)
+    found = asyncio.run(DeezerScraper().scrape("https://www.deezer.com/us/album/98765"))
+    assert found.artist == "Deezer Artist"
+    assert found.album == "Deezer Album"
+    assert found.year == "2010"
+    assert found.tracklist[0]["pos"] == "1"
+    assert found.tracklist[0]["title"] == "DZ One"
+    assert found.tracklist[0]["duration"] == "4:05"
+    assert found.tracklist[1]["duration"] == "1:01"
+    assert found.cover_url == "https://example.com/dz.jpg"
+    assert found.genre == ["Pop"]
+    assert found.release_id == "98765"
+
+
+def test_scrape_beatport_canonical(monkeypatch):
+    from sources.beatport import BeatportScraper
+
+    async def _fake(self, url):
+        from bs4 import BeautifulSoup
+        html = '<html><body><script id="__NEXT_DATA__">{"props": {"pageProps": {"release": {"name": "BP Album", "artists": [{"name": "BP Artist"}], "release_date": "2019-11-01", "track_count": 2, "tracks": [{"track_number": 1, "name": "BP One", "artists": [{"name": "BP Artist"}], "length": "6:12"}, {"track_number": 2, "name": "BP Two", "artists": [{"name": "BP Artist"}], "length": ""}], "image": {"url": "https://example.com/bp.jpg"}, "label": {"name": "BP Label"}, "genres": [{"name": "Techno"}], "id": 555}}}}</script></body></html>'
+        return BeautifulSoup(html, "lxml")
+
+    monkeypatch.setattr(BeatportScraper, "fetch_page", _fake)
+    found = asyncio.run(BeatportScraper().scrape("https://www.beatport.com/release/test-release/555"))
+    assert found.artist == "BP Artist"
+    assert found.album == "BP Album"
+    assert found.year == "2019"
+    assert found.tracklist[0]["pos"] == "1"
+    assert found.tracklist[0]["title"] == "BP One"
+    assert found.tracklist[0]["duration"] == "6:12"
+    assert found.cover_url == "https://example.com/bp.jpg"
+    assert found.label == "BP Label"
+    assert found.genre == ["Techno"]
+    assert found.release_id == "555"
+
+
+def test_scrape_musicbrainz_canonical(monkeypatch):
+    from sources.musicbrainz import MusicBrainzScraper
+
+    async def _fake(self, url, params=None, headers=None):
+        return {"title": "MB Album", "artist-credit-phrase": "MB Artist", "date": "2008-07-01", "country": "US", "media": [{"tracks": [{"number": "1", "title": "MB One", "artist-credit": [{"name": "MB Artist"}], "length": 185000}, {"number": "2", "title": "MB Two", "artist-credit": [{"name": "MB Artist"}], "length": 60000}]}], "label-info": [{"label": {"name": "MB Label"}}]}
+
+    monkeypatch.setattr(MusicBrainzScraper, "get_json", _fake)
+    found = asyncio.run(MusicBrainzScraper().scrape("https://musicbrainz.org/release/11111111-2222-3333-4444-555555555555"))
+    assert found.artist == "MB Artist"
+    assert found.album == "MB Album"
+    assert found.year == "2008"
+    assert found.tracklist[0]["pos"] == "1"
+    assert found.tracklist[0]["title"] == "MB One"
+    assert ":" in found.tracklist[0]["duration"]
+    assert found.cover_url == "https://coverartarchive.org/release/11111111-2222-3333-4444-555555555555/front"
+    assert found.label == "MB Label"
+    assert found.release_id == "11111111-2222-3333-4444-555555555555"
+
+
+def test_scrape_qobuz_canonical(monkeypatch):
+    from sources.qobuz import QobuzScraper
+
+    monkeypatch.setenv("QOBUZ_APP_ID", "test-app")
+
+    async def _fake(self, url, params=None, headers=None):
+        return {"id": "qobuz123", "title": "Qobuz Album", "release_date_original": "2008-07-01", "tracks_count": 2, "artist": {"name": "Qobuz Artist"}, "tracks": {"items": [{"track_number": 1, "title": "Q One", "performer": {"name": "Q Artist"}, "duration": 245}, {"track_number": 2, "title": "Q Two", "performer": {"name": "Q Artist"}, "duration": 61}]}, "image": {"large": "https://example.com/qob.jpg"}, "label": {"name": "Q Label"}, "genres": {"list": [{"name": "Jazz"}]}}
+
+    monkeypatch.setattr(QobuzScraper, "get_json", _fake)
+    found = asyncio.run(QobuzScraper().scrape("https://www.qobuz.com/us-en/album/qobuz-album/qobuz123"))
+    assert found.artist == "Qobuz Artist"
+    assert found.album == "Qobuz Album"
+    assert found.year == "2008"
+    assert found.tracklist[0]["pos"] == "1"
+    assert found.tracklist[0]["title"] == "Q One"
+    assert found.tracklist[0]["duration"] == "4:05"
+    assert found.cover_url == "https://example.com/qob.jpg"
+    assert found.genre == ["Jazz"]
+    assert found.release_id == "qobuz123"
+
+
+def test_scrape_tidal_canonical(monkeypatch):
+    from sources.tidal import TidalScraper
+
+    monkeypatch.setenv("TIDAL_TOKEN", "test-token")
+
+    async def _fake(self, url, params=None, headers=None):
+        if "/tracks" in url:
+            return {"items": [{"trackNumber": 1, "title": "T One", "artists": [{"name": "T Artist"}], "duration": 245}, {"trackNumber": 2, "title": "T Two", "artists": [{"name": "T Artist"}], "duration": 61}]}
+        return {"id": 11223, "title": "Tidal Album", "releaseDate": "2020-01-02", "numberOfTracks": 2, "artists": [{"name": "Tidal Artist"}], "cover": "abcdef12-3456-7890-abcd-ef1234567890", "recordLabel": "Tidal Label", "genre": "Hip Hop"}
+
+    monkeypatch.setattr(TidalScraper, "get_json", _fake)
+    found = asyncio.run(TidalScraper().scrape("https://listen.tidal.com/album/11223"))
+    assert found.artist == "Tidal Artist"
+    assert found.album == "Tidal Album"
+    assert found.year == "2020"
+    assert found.tracklist[0]["pos"] == "1"
+    assert found.tracklist[0]["title"] == "T One"
+    assert found.tracklist[0]["duration"] == "4:05"
+    assert found.cover_url.startswith("https://resources.tidal.com/images/")
+    assert found.genre == ["Hip Hop"]
+    assert found.release_id == "11223"
+
+
+def test_ident_coercion_and_deezer_tag_key(client, tmp_path, monkeypatch):
+    from sources.base import IdentData
+    from sources.deezer import DeezerScraper
+
+    coerced = IdentData(artist="A", album="B", year="2008-07-01", track_count=1, source="x", genre="Rock", cover_url="https://example.com/c.jpg", tracklist=[{"pos": "1", "title": "T", "artist": "", "duration": 125}])
+    assert coerced.genre == ["Rock"]
+    assert coerced.year == "2008"
+    assert coerced.tracklist[0]["duration"] == "2:05"
+
+    async def _fake(self, url):
+        return IdentData(artist="DZ Artist", album="DZ Album", year=2010, track_count=1, source="deezer", tracklist=[{"pos": "1", "title": "DZ Track", "artist": "", "duration": ""}], release_id="98765", cover_url="https://example.com/dz.jpg")
+
+    monkeypatch.setattr(DeezerScraper, "scrape", _fake)
+    (tmp_path / "data" / "downloads" / "dz.mp3").write_bytes(b"x")
+    r = client.post("/tag/scrape", json={"fileName": "dz.mp3", "url": "https://www.deezer.com/us/album/98765", "apply": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["suggested"]["deezer_release_id"] == "98765"
