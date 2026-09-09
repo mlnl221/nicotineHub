@@ -108,6 +108,8 @@ export function FileExplorer({
 
   const currentRef = useRef(current);
   useEffect(() => { currentRef.current = current; }, [current]);
+  // Selection keys are absolute paths — drop stale picks on dir change.
+  useEffect(() => { bulk.clear(); }, [current]);
 
   const fetchDir = useCallback(async (path: string, opts?: { push?: boolean }) => {
     if (isDemo) {
@@ -664,7 +666,7 @@ export function FileExplorer({
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-container-high text-on-surface-variant dark:bg-surface-variant dark:text-outline">
                   <span className="material-symbols-outlined text-[18px]">{isImage ? "image" : isAudio ? "audio_file" : "description"}</span>
                 </span>
-                <div className="min-w-0 flex-1" onClick={() => selectMode && isAudio && bulk.toggle(e.path)}>
+                <div className="min-w-0 flex-1">
                   <div className="truncate font-body text-sm text-on-surface dark:text-inverse-on-surface flex items-center gap-1.5">
                     <span className="truncate">{e.name}</span>
                     {isAudio && hasSpectrum ? (

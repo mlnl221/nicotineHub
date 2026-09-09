@@ -2,6 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+export function rangeSlice(allIds: string[], anchor: string | null, target: string, cap = 50): string[] {
+  if (!anchor || !allIds.includes(anchor) || !allIds.includes(target)) return [target];
+  const a = allIds.indexOf(anchor);
+  const b = allIds.indexOf(target);
+  const [lo, hi] = a < b ? [a, b] : [b, a];
+  return allIds.slice(lo, hi + 1);
+}
+
 export function useBulkSelection() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [lastAnchor, setLastAnchor] = useState<string | null>(null);
@@ -27,10 +35,7 @@ export function useBulkSelection() {
       toggle(id);
       return;
     }
-    const a = allIds.indexOf(lastAnchor);
-    const b = allIds.indexOf(id);
-    const [lo, hi] = a < b ? [a, b] : [b, a];
-    const slice = allIds.slice(lo, hi + 1);
+    const slice = rangeSlice(allIds, lastAnchor, id);
     setSelected((prev) => {
       const next = new Set(prev);
       let added = 0;

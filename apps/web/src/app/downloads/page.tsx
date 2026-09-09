@@ -103,6 +103,14 @@ function DownloadsInner() {
 
   const transferIds = downloads.map((d) => d.id);
   const marquee = useMarqueeSelection(bulk.setSelection);
+  // Drop picks for transfers that vanished (cleared/finished-removed) so
+  // the count bar never counts ghosts. Guarded: no setState when clean.
+  const liveIds = downloads.map((d) => d.id).join("|");
+  useEffect(() => {
+    if (!bulk.size) return;
+    const live = new Set(downloads.map((d) => d.id));
+    if ([...bulk.selected].some((id) => !live.has(id))) bulk.setSelection([...bulk.selected].filter((id) => live.has(id)));
+  }, [liveIds]);
   const selectedFileNames = Array.from(bulk.selected).map((id) => downloads.find((d) => d.id === id)?.fileName).filter(Boolean) as string[];
   const handleBulkVerify = async () => {
     const ids = Array.from(bulk.selected);
@@ -288,11 +296,11 @@ function DownloadsInner() {
                                 <SpectrumHoverCard transferId={t.id} fileName={t.fileName}>{card}</SpectrumHoverCard>
                               ) : card;
                              return (
-                             <div key={t.id} {...marquee(t.id)} className={`flex items-center gap-2 rounded-xl ${checked ? "ring-1 ring-primary bg-primary-fixed/10" : ""} ${selectMode && focusedIdx === transferIds.indexOf(t.id) ? "ring-1 ring-primary" : ""}`} onDoubleClick={() => !selectMode && handleDoubleClick(t, false)} onClick={(e) => { marquee(t.id).onClick(e); if (e.defaultPrevented || (e.target as HTMLElement).closest("button,input")) return; if (selectMode || e.ctrlKey || e.metaKey || e.shiftKey) { e.preventDefault(); if (e.shiftKey) bulk.toggleRange(t.id, transferIds); else bulk.toggle(t.id); } }} onPointerDown={(e) => { if (e.pointerType === "touch") longPressTimer.current = setTimeout(() => { setSelectMode(true); bulk.toggle(t.id); navigator.vibrate?.(10); }, 500); }} onPointerUp={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }} onPointerCancel={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }} onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenuAnchor({ x: e.clientX, y: e.clientY, transfer: t, isUpload: false }); }}>
+                             <div key={t.id} {...marquee(t.id)} className={`flex items-center gap-2 rounded-xl ${checked ? "ring-1 ring-primary bg-primary-fixed/10" : ""} ${selectMode && focusedIdx === transferIds.indexOf(t.id) ? "ring-1 ring-primary" : ""}`} onDoubleClick={() => !selectMode && handleDoubleClick(t, false)} onClick={(e) => { marquee(t.id).onClick(e); if (e.defaultPrevented || (e.target as HTMLElement).closest("button,input")) return; if (selectMode || e.ctrlKey || e.metaKey || e.shiftKey) { e.preventDefault(); if (e.shiftKey) bulk.toggleRange(t.id, transferIds); else bulk.toggle(t.id); } }} onPointerDown={(e) => { if (e.pointerType === "touch") longPressTimer.current = setTimeout(() => { setSelectMode(true); bulk.toggle(t.id); navigator.vibrate?.(10); }, 500); }} onPointerUp={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }} onPointerCancel={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }} onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); e.stopPropagation(); setMenuAnchor({ x: e.clientX, y: e.clientY, transfer: t, isUpload: false }); }}>
                                    {selectMode ? (
                                      <input type="checkbox" checked={checked} onChange={() => bulk.toggle(t.id)} onClick={(e) => { e.stopPropagation(); if (e.shiftKey) bulk.toggleRange(t.id, transferIds); }} className="ml-2 h-4 w-4 shrink-0 accent-primary" />
                                   ) : null}
-                                  <div className="flex-1 min-w-0" onClick={() => { if (selectMode && isAudio && isFinished) { const cb = bulk.has(t.id); if (cb) bulk.remove(t.id); else bulk.toggle(t.id); } }}>
+                                  <div className="flex-1 min-w-0">
                                     {wrapped}
                                   </div>
                                 </div>

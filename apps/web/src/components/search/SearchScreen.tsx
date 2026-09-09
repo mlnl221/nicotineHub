@@ -21,6 +21,7 @@ import { useContextMenu } from "@/lib/context-menu/useContextMenu";
 import { useWishlist } from "@/lib/wishlist";
 import { humanLength, humanQuality, humanSize } from "@/lib/format";
 import { useBulkSelection } from "@/lib/bulkSelection";
+import { useFinePointer } from "@/lib/useFinePointer";
 
 export function SearchScreen() {
   const { activeTab, activeId, tabs, setActive, closeTab, startSearch, stopSearch, retrySearch, setFilters, clearFilters } = useSearches();
@@ -66,12 +67,14 @@ export function SearchScreen() {
   const ctxMenu = useContextMenu();
   const [menuRow, setMenuRow] = useState<SearchRow | null>(null);
   const [propsRow, setPropsRow] = useState<SearchRow | null>(null);
-  const [selectMode, setSelectMode] = useState(false);
+  const [manualSelect, setManualSelect] = useState<boolean | null>(null);
   const bulk = useBulkSelection();
+  const autoSelect = useFinePointer();
+  const selectMode = manualSelect ?? autoSelect;
   const [tabMenuAnchor, setTabMenuAnchor] = useState<{ x: number; y: number; tab: import("@/lib/search").SearchTab } | null>(null);
 
   const deferredRows = useDeferredValue(activeTab?.rows ?? []);
-  useEffect(() => { bulk.clear(); setSelectMode(false); }, [activeId, bulk.clear]);
+  useEffect(() => { bulk.clear(); setManualSelect(null); }, [activeId, bulk.clear]);
   const deferredFilters = useDeferredValue(activeTab?.filters ?? null);
   // ponytail: inline filtering — useDeferredValue already de-janks 500+ rows, no worker/comlink needed
   const [sortMode, setSortMode] = useState<SearchSortMode>("best");
@@ -179,7 +182,7 @@ export function SearchScreen() {
 
   const toggleSelected = (row: SearchRow) => bulk.toggle(searchRowId(row));
   const rangeSelected = (row: SearchRow) => bulk.toggleRange(searchRowId(row), visibleIds);
-  const longPressSelected = (row: SearchRow) => { setSelectMode(true); bulk.toggle(searchRowId(row)); };
+  const longPressSelected = (row: SearchRow) => { setManualSelect(true); bulk.toggle(searchRowId(row)); };
 
   const searchSubtitle = activeTab
     ? `${visibleRows.length} of ${activeTab.total} results${activeTab.status === "searching" ? " · searching…" : ""}${activeTab.mode !== "global" ? ` · ${activeTab.mode}${activeTab.target ? `:${activeTab.target}` : ""}` : ""} • ${tabs.length} tabs`
@@ -234,6 +237,19 @@ export function SearchScreen() {
             {visibleRows.length !== activeTab.total ? ` • showing ${visibleRows.length}` : ""}
           </span>
           <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              aria-pressed={selectMode}
+              title={selectMode ? "Exit selection — row tap opens details" : "Select rows — row tap toggles selection"}
+              onClick={() => { if (selectMode) bulk.clear(); setManualSelect((v) => !(v ?? autoSelect)); }}
+              className={`rounded-full min-h-11 px-3 py-2 text-xs font-semibold outline-none ${
+                selectMode
+                  ? "bg-primary text-on-primary"
+                  : "bg-surface-container-high text-on-surface-variant"
+              }`}
+            >
+              {selectMode ? `Selecting (${bulk.size}/50)` : "Select"}
+            </button>
             {activeTab.mode === "wishlist" && visibleRows.length > 0 ? (
               <button
                 type="button"
@@ -254,7 +270,7 @@ export function SearchScreen() {
                 setFilters(activeId, { publicOnly: next });
                 setOption("searches", "defilter", { ...settings.searches.defilter, publicFiles: next });
               }}
-              className={`rounded-full px-2 py-1 text-[10px] font-semibold outline-none ${
+              className={`rounded-full min-h-11 px-3 py-2 text-xs font-semibold outline-none ${
                 activeTab.filters.publicOnly
                   ? "bg-primary text-on-primary"
                   : "bg-surface-container-high text-on-surface-variant"
@@ -340,6 +356,10 @@ export function SearchScreen() {
               const rowEl = (e.target as HTMLElement).closest("[data-row-user]") as HTMLElement | null;
               if (rowEl?.dataset.rowUser) {
                 e.preventDefault();
+                // Claimed: keep the event from reaching document/window
+                // closers (GlobalContextMenu, stale ContextMenu) — the row
+                // menu owns this right-click.
+                e.stopPropagation();
                 const user = rowEl.dataset.rowUser;
                 const path = rowEl.dataset.rowPath || "";
                 // resolve full row from visibleRows to get mocked attributes/size
@@ -355,19 +375,19 @@ export function SearchScreen() {
               }
             }}
           >
-                 <ResultsList
-                   rows={visibleRows}
-                   onRowTap={setSheetRow}
-                   onRowDoubleClick={downloadRow}
-                   selectMode={selectMode}
-                   selectedIds={bulk.selected}
-                   onToggleSelect={toggleSelected}
-                   onRangeSelect={rangeSelected}
-                   onSelectIds={bulk.setSelection}
-                   onLongPress={longPressSelected}
-                   grouping={settings.searches.group_searches}
-                   expand={settings.searches.expand_results}
-                 />
+            <ResultsList
+              rows={visibleRows}
+              onRowTap={setSheetRow}
+              onRowDoubleClick={downloadRow}
+              selectMode={selectMode}
+              selectedIds={bulk.selected}
+              onToggleSelect={toggleSelected}
+              onRangeSelect={rangeSelected}
+              onSelectIds={bulk.setSelection}
+              onLongPress={longPressSelected}
+              grouping={settings.searches.group_searches}
+              expand={settings.searches.expand_results}
+            />
           </div>
         )
       ) : (
