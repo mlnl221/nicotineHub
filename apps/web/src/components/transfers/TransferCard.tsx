@@ -27,6 +27,8 @@ export function TransferCard({
   onResume,
   onRetry,
   onClear,
+  onPlay,
+  onMenu,
 }: {
   transfer: Transfer;
   onPause?: () => void;
@@ -34,6 +36,8 @@ export function TransferCard({
   onResume?: () => void;
   onRetry?: () => void;
   onClear?: () => void;
+  onPlay?: () => void;
+  onMenu?: (x: number, y: number) => void;
 }) {
   const { settings } = useConfig();
   const reverse = settings.ui.reverse_file_paths ?? true;
@@ -56,9 +60,21 @@ export function TransferCard({
     transfer.status === "Too many files" ||
     transfer.status === "Too many megabytes";
   const isTransferring = transfer.status === "Transferring" || transfer.status === "Getting status";
-  const basename = (transfer.virtualPath.split("\\").pop() ?? transfer.fileName).replace(/[/\\]/g, "_");
+  const basename = (transfer.virtualPath.split(/[\\/]/).pop() ?? transfer.fileName).replace(/[/\\]/g, "_");
   const safeUser = transfer.username.replace(/[/\\]/g, "_").replace(/\.\./g, "_");
-  const savePath = `downloads/${settings.transfers.usernamesubfolders ? `${safeUser}/` : ""}${basename}`;
+  const depth = settings.transfers.download_path_depth ?? "full";
+  const remoteDirs = transfer.virtualPath
+    .split(/[\\/]/)
+    .slice(1, -1)
+    .map((s) => s.replace(/[/\\]/g, "_"))
+    .filter(Boolean);
+  const keptDirs = (() => {
+    if (depth === "full") return remoteDirs;
+    const n = Number(depth);
+    if (!Number.isFinite(n) || n < 0) return remoteDirs;
+    return n === 0 ? [] : remoteDirs.slice(-n);
+  })();
+  const savePath = `downloads/${safeUser}/${[...keptDirs, basename].join("/")}`;
 
   const barColor = transfer.isUpload
     ? isQueued
@@ -122,6 +138,17 @@ export function TransferCard({
       </div>
 
       <div className="flex justify-end gap-2">
+        {onPlay ? (
+          <button
+            aria-label="Play"
+            onClick={onPlay}
+            className="inline-flex items-center gap-1.5 px-4 min-h-11 rounded-full bg-primary text-on-primary font-label text-xs font-bold hover:opacity-90 transition-opacity"
+            title="Play"
+          >
+            <span className="material-symbols-outlined text-[18px]">play_arrow</span>
+            Play
+          </button>
+        ) : null}
         {isFailed || isCancelled ? (
           <button
             aria-label="Retry"
@@ -180,6 +207,21 @@ export function TransferCard({
             <span className="material-symbols-outlined text-[18px]">close</span>
           </button>
         )}
+        {onMenu ? (
+          <button
+            aria-label={`More actions for ${transfer.fileName}`}
+            aria-haspopup="menu"
+            onClick={(e) => {
+              e.stopPropagation();
+              const r = e.currentTarget.getBoundingClientRect();
+              onMenu(r.left, r.bottom + 4);
+            }}
+            className="p-2 min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-primary transition-colors"
+            title="More actions"
+          >
+            <span className="material-symbols-outlined text-[18px]">more_vert</span>
+          </button>
+        ) : null}
       </div>
     </div>
   );

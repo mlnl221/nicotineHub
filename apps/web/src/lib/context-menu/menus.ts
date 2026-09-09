@@ -118,21 +118,25 @@ export function searchTabMenu(tab: { query: string; id: string }, actions: { onC
   ];
 }
 
-export function transferMenu(t: { user: string; fileName: string; path?: string; virtualPath?: string }, isUpload: boolean, acts: { onResume?: () => void; onPause?: () => void; onRemove: () => void; onRetry?: () => void; onClear?: () => void; onAnalyzeSpectrum?: () => void; hasSpectrum?: boolean; onEditTags?: () => void; onPlay?: () => void }): MenuItem[] {
+export function transferMenu(t: { user: string; fileName: string; path?: string; virtualPath?: string }, isUpload: boolean, acts: { onResume?: () => void; onPause?: () => void; onRemove: () => void; onRetry?: () => void; onClear?: () => void; onAnalyzeSpectrum?: () => void; hasSpectrum?: boolean; onEditTags?: () => void; onPlay?: () => void; onScrape?: () => void; onVerify?: () => void; onAnalyze?: () => void; onMediainfo?: () => void }): MenuItem[] {
   const display = t.fileName;
   return [
     { id: "hdr", label: "1 File Selected", icon: "description", disabled: true },
     { id: "sep", label: "---", icon: "" },
+    ...(acts.onPlay ? [{ id: "play", label: "Play", icon: "play_arrow", action: acts.onPlay } as MenuItem] : []),
     ...(isUpload ? [] : [
       { id: "open", label: "Open File", icon: "open_in_new", disabled: true, action: () => toast("Open — browser cannot open local files") } as MenuItem,
       { id: "open-folder", label: "Open in File Manager", icon: "folder_open", disabled: true } as MenuItem,
     ]),
     { id: "props", label: "File Properties", icon: "info", action: () => toast(display) },
-    ...(acts.onPlay ? [{ id: "play", label: "Play", icon: "play_arrow", action: acts.onPlay } as MenuItem] : []),
     { id: "sep2", label: "---", icon: "" },
     ...(acts.onEditTags ? [{ id: "edit-tags", label: "Edit Tags", icon: "edit", action: acts.onEditTags } as MenuItem] : []),
+    ...(acts.onScrape ? [{ id: "scrape", label: "Scrape", icon: "auto_awesome", action: acts.onScrape } as MenuItem] : []),
+    ...(acts.onVerify ? [{ id: "verify", label: "Verify", icon: "verified", action: acts.onVerify } as MenuItem] : []),
+    ...(acts.onAnalyze ? [{ id: "analyze-file", label: "Analyze", icon: "analytics", action: acts.onAnalyze } as MenuItem] : []),
     ...(acts.onAnalyzeSpectrum ? [{ id: "analyze", label: acts.hasSpectrum ? "View Spectrum" : "Analyze Spectrum", icon: "graphic_eq", action: acts.onAnalyzeSpectrum } as MenuItem] : []),
-    ...(acts.onEditTags || acts.onAnalyzeSpectrum ? [{ id: "sep-analyze", label: "---", icon: "" } as MenuItem] : []),
+    ...(acts.onMediainfo ? [{ id: "mediainfo", label: "Get Mediainfo", icon: "perm_media", action: acts.onMediainfo } as MenuItem] : []),
+    ...(acts.onEditTags || acts.onScrape || acts.onVerify || acts.onAnalyze || acts.onAnalyzeSpectrum || acts.onMediainfo ? [{ id: "sep-analyze", label: "---", icon: "" } as MenuItem] : []),
     { id: "resume", label: isUpload ? "Retry" : "Resume", icon: "play_arrow", action: acts.onResume ?? acts.onRetry ?? (() => toast("Resume unavailable")) },
     { id: "pause", label: isUpload ? "Abort" : "Pause", icon: "pause", action: acts.onPause ?? acts.onRemove },
     { id: "remove", label: "Remove", icon: "delete", danger: true, action: acts.onRemove },

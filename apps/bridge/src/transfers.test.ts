@@ -414,6 +414,124 @@ describe("transfers — download engine (Phase 2)", () => {
     expect(existsSync(join(tmp, "downloads", "alice", "Album", "song (1).mp3"))).toBe(false);
     mgr.close();
   });
+
+  test("download_path_depth trims to last N remote dirs under user", async () => {
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    (mgr as any).transfers.clear();
+    const finishOne = async (user: string, virtual: string, size: number) => {
+      const t = mgr.requestDownload(user, virtual, size);
+      mgr.handleTransferRequest(1, t.token!, virtual);
+      const mockSocket: any = { write: () => {}, end: () => {} };
+      await (mgr as any).handleFileConnection(t.token!, mockSocket);
+      (mgr as any).handleFileChunk(t.token!, Buffer.alloc(size, 0x41));
+      return t;
+    };
+    mgr.setConfig({ download_path_depth: "3" });
+    await finishOne("yoblin", "Share\\Despot\\Gorillas\\DeSide 2007\\Disk 2\\track.mp3", 32);
+    expect(existsSync(join(tmp, "downloads", "yoblin", "Gorillas", "DeSide 2007", "Disk 2", "track.mp3"))).toBe(true);
+    expect(existsSync(join(tmp, "downloads", "yoblin", "Despot"))).toBe(false);
+    mgr.setConfig({ download_path_depth: "1" });
+    await finishOne("yoblin", "Share\\A\\B\\one.mp3", 16);
+    expect(existsSync(join(tmp, "downloads", "yoblin", "B", "one.mp3"))).toBe(true);
+    mgr.setConfig({ download_path_depth: "0" });
+    await finishOne("yoblin", "Share\\A\\B\\flat.mp3", 16);
+    expect(existsSync(join(tmp, "downloads", "yoblin", "flat.mp3"))).toBe(true);
+    // invalid value falls back to full tree
+    mgr.setConfig({ download_path_depth: "bogus" as any });
+    await finishOne("yoblin", "Share\\A\\B\\full.mp3", 16);
+    expect(existsSync(join(tmp, "downloads", "yoblin", "A", "B", "full.mp3"))).toBe(true);
+    mgr.close();
+  });
+
+  test("getFilePathForToken resolves stored nested dest (Play fix)", async () => {
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    (mgr as any).transfers.clear();
+    const t = mgr.requestDownload("alice", "Music\\Album\\Disc 1\\song.mp3", 64);
+    mgr.handleTransferRequest(1, t.token!, "Music\\Album\\Disc 1\\song.mp3");
+    await (mgr as any).handleFileConnection(t.token!, { write: () => {}, end: () => {} });
+    (mgr as any).handleFileChunk(t.token!, Buffer.alloc(64, 0x41));
+    const dest = join(tmp, "downloads", "alice", "Album", "Disc 1", "song.mp3");
+    expect(existsSync(dest)).toBe(true);
+    expect(mgr.getFilePathForToken(t.token!)).toBe(dest);
+    mgr.close();
+  });
+
+  test("migration trims deep entries, prunes emptied dirs, idempotent", () => {
+    const { mgr } = makeManager(tmp);
+    (mgr as any).transfers.clear();
+    mgr.setConfig({ download_path_depth: "2" });
+    const deepDir = join(tmp, "downloads", "alice", "A", "B", "C");
+    mkdirSync(deepDir, { recursive: true });
+    const deepFile = join(deepDir, "song.mp3");
+    writeFileSync(deepFile, "deep-bytes");
+    const entry: any = {
+      id: "alice::Share\\A\\B\\C\\song.mp3",
+      username: "alice",
+      virtualPath: "Share\\A\\B\\C\\song.mp3",
+      fileName: "song.mp3",
+      size: 10, current: 10, speed: 0, avgSpeed: 0, timeLeft: null,
+      status: "Finished", queuePosition: null, isUpload: false,
+      token: 434343, _incompletePath: deepFile, _downloadUrl: "/files/434343",
+    };
+    (mgr as any).transfers.set(entry.id, entry);
+    const first = mgr.migrateTrimmedDownloads();
+    expect(first.moved).toBe(1);
+    const trimmed = join(tmp, "downloads", "alice", "B", "C", "song.mp3");
+    expect(existsSync(trimmed)).toBe(true);
+    expect(existsSync(deepFile)).toBe(false);
+    // emptied leading dir pruned, user dir kept
+    expect(existsSync(join(tmp, "downloads", "alice", "A"))).toBe(false);
+    expect(existsSync(join(tmp, "downloads", "alice"))).toBe(true);
+    expect((mgr.get(entry.id) as any)?._incompletePath).toBe(trimmed);
+    expect((mgr.get(entry.id) as any)?._downloadUrl).toBe("/files/434343");
+    expect(mgr.getFilePathForToken(434343)).toBe(trimmed);
+    const second = mgr.migrateTrimmedDownloads();
+    expect(second.moved).toBe(0);
+    // collision at dest: file stays put
+    const deepDir2 = join(tmp, "downloads", "bob", "X", "Y", "Z");
+    mkdirSync(deepDir2, { recursive: true });
+    const deepFile2 = join(deepDir2, "hit.mp3");
+    writeFileSync(deepFile2, "deep");
+    mkdirSync(join(tmp, "downloads", "bob", "Y", "Z"), { recursive: true });
+    writeFileSync(join(tmp, "downloads", "bob", "Y", "Z", "hit.mp3"), "taken");
+    const entry2: any = {
+      id: "bob::Share\\X\\Y\\Z\\hit.mp3",
+      username: "bob",
+      virtualPath: "Share\\X\\Y\\Z\\hit.mp3",
+      fileName: "hit.mp3",
+      size: 4, current: 4, speed: 0, avgSpeed: 0, timeLeft: null,
+      status: "Finished", queuePosition: null, isUpload: false,
+      token: 454545, _incompletePath: deepFile2, _downloadUrl: "/files/454545",
+    };
+    (mgr as any).transfers.set(entry2.id, entry2);
+    const third = mgr.migrateTrimmedDownloads();
+    expect(third.moved).toBe(0);
+    expect(existsSync(deepFile2)).toBe(true);
+    // template set: trim migration stands down (template owners manage layout)
+    mgr.setConfig({ download_destination_template: "byuser/${SOURCE_USERNAME}" });
+    const fourth = mgr.migrateTrimmedDownloads();
+    expect(fourth.moved).toBe(0);
+    expect(existsSync(deepFile)).toBe(false); // earlier move already applied
+    mgr.setConfig({ download_destination_template: null });
+    // unknown depth normalizes to full (no-op migration)
+    mgr.setConfig({ download_path_depth: "bogus" as any });
+    expect((mgr as any).config.download_path_depth).toBe("full");
+    mgr.close();
+  });
 });
 
 describe("transfers — upload serving (Phase 4)", () => {

@@ -221,7 +221,7 @@ function UploadsInner() {
                                  <input type="checkbox" checked={checked} onChange={() => bulk.toggle(t.id)} onClick={(e) => { e.stopPropagation(); if (e.shiftKey) bulk.toggleRange(t.id, transferIds); }} className="ml-2 h-4 w-4 shrink-0 accent-primary" />
                               ) : null}
                                <div className="flex-1 min-w-0">
-                                <TransferCard transfer={t} onCancel={() => clearTransfer(t.id, true)} onClear={() => clearTransfer(t.id, true)} />
+                                <TransferCard transfer={t} onCancel={() => clearTransfer(t.id, true)} onClear={() => clearTransfer(t.id, true)} onMenu={(x, y) => setMenuAnchor({ x, y, transfer: t })} />
                               </div>
                             </div>
                           );})}

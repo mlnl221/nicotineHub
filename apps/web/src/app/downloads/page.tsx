@@ -23,11 +23,12 @@ import { usePlayer } from "@/lib/player/store";
 import { downloadPlayUrl, formatLabelOf, splitArtistTitle } from "@/lib/player/urls";
 import { SpectrumHoverCard } from "@/components/transfers/SpectrumHoverCard";
 import { TagEditor } from "@/components/tag/TagEditor";
+import { MediainfoModal } from "@/components/files/MediainfoModal";
 import { BulkBar } from "@/components/tag/BulkBar";
 import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
 import { AdjustTagsModal } from "@/components/tag/AdjustTagsModal";
 import { useBulkSelection, useMarqueeSelection } from "@/lib/bulkSelection";
-import { bulkVerify, bulkAnalyze, bulkRequestSpectrum } from "@/lib/worker";
+import { bulkVerify, bulkAnalyze, bulkRequestSpectrum, verifyFile, analyzeFile } from "@/lib/worker";
 import { bridgeFetchUrl } from "@/lib/bridgeHttp";
 import { humanSize, humanSpeed as _humanSpeed } from "@/lib/format";
 
@@ -55,6 +56,8 @@ function DownloadsInner() {
   const { play } = usePlayer();
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; transfer: import("@/lib/protocol").Transfer; isUpload: boolean } | null>(null);
   const [tagFile, setTagFile] = useState<string | null>(null);
+  const [scrapeFile, setScrapeFile] = useState<string | null>(null);
+  const [mediainfoFile, setMediainfoFile] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const bulk = useBulkSelection();
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -161,6 +164,33 @@ function DownloadsInner() {
     if (!target) return;
     const { artist, title } = splitArtistTitle(t.fileName);
     play({ title, artist, src: target.url, formatLabel: formatLabelOf(t.fileName), transcoding: target.viaWorker, fileKey: t.fileName, size: t.size });
+  };
+
+  const canPlay = (t: import("@/lib/protocol").Transfer): boolean => {
+    if (isDemo || t.status !== "Finished") return false;
+    const dl = (t as unknown as { downloadUrl?: string }).downloadUrl;
+    if (!dl) return false;
+    return !!downloadPlayUrl(dl, t.fileName);
+  };
+
+  const isFinishedAudio = (t: import("@/lib/protocol").Transfer): boolean =>
+    !isDemo && t.status === "Finished" && isAudioForSpectrum(t.fileName);
+
+  const handleSingleVerify = async (fileName: string) => {
+    try {
+      const r = await verifyFile(fileName);
+      setBulkResult({ title: `Verify — ${fileName.split("/").pop()}`, rows: [{ fileName, ...(r as Record<string, unknown>) }] });
+    } catch (e) {
+      setBulkResult({ title: "Verify error", rows: [{ fileName, error: e instanceof Error ? e.message : String(e) }] });
+    }
+  };
+  const handleSingleAnalyze = async (fileName: string) => {
+    try {
+      const r = await analyzeFile(fileName);
+      setBulkResult({ title: `Analyze — ${fileName.split("/").pop()}`, rows: [{ fileName, ...(r as Record<string, unknown>) }] });
+    } catch (e) {
+      setBulkResult({ title: "Analyze error", rows: [{ fileName, error: e instanceof Error ? e.message : String(e) }] });
+    }
   };
 
   const handleDoubleClick = (t: import("@/lib/protocol").Transfer, isUpload: boolean) => {
@@ -290,6 +320,8 @@ function DownloadsInner() {
                                   onResume={() => resumeDownload(t.id)}
                                   onRetry={() => retryDownload(t.id)}
                                   onClear={() => clearTransfer(t.id, false)}
+                                  onPlay={canPlay(t) ? () => handlePlay(t) : undefined}
+                                  onMenu={(x, y) => setMenuAnchor({ x, y, transfer: t, isUpload: false })}
                                 />
                               );
                               const wrapped = isFinished && isAudio ? (
@@ -341,12 +373,22 @@ function DownloadsInner() {
                     })
                   : undefined,
               hasSpectrum: !!getEntry(menuAnchor.transfer.id) && getEntry(menuAnchor.transfer.id)?.status === "done",
-              onEditTags: !isDemo && isAudioForSpectrum(menuAnchor.transfer.fileName) && menuAnchor.transfer.status === "Finished"
+              onEditTags: isFinishedAudio(menuAnchor.transfer)
                 ? () => setTagFile(menuAnchor.transfer.fileName)
                 : undefined,
-              onPlay: !isDemo && !menuAnchor.isUpload && menuAnchor.transfer.status === "Finished" &&
-                !!(menuAnchor.transfer as unknown as { downloadUrl?: string }).downloadUrl &&
-                !!downloadPlayUrl((menuAnchor.transfer as unknown as { downloadUrl: string }).downloadUrl, menuAnchor.transfer.fileName)
+              onScrape: isFinishedAudio(menuAnchor.transfer)
+                ? () => setScrapeFile(menuAnchor.transfer.fileName)
+                : undefined,
+              onVerify: isFinishedAudio(menuAnchor.transfer)
+                ? () => handleSingleVerify(menuAnchor.transfer.fileName)
+                : undefined,
+              onAnalyze: isFinishedAudio(menuAnchor.transfer)
+                ? () => handleSingleAnalyze(menuAnchor.transfer.fileName)
+                : undefined,
+              onMediainfo: !isDemo && !menuAnchor.isUpload && menuAnchor.transfer.status === "Finished"
+                ? () => setMediainfoFile(menuAnchor.transfer.fileName)
+                : undefined,
+              onPlay: !menuAnchor.isUpload && canPlay(menuAnchor.transfer)
                 ? () => handlePlay(menuAnchor.transfer)
                 : undefined,
             }
@@ -355,6 +397,8 @@ function DownloadsInner() {
         />
       ) : null}
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} /> : null}
+      {scrapeFile ? <AdjustTagsModal open={!!scrapeFile} files={[scrapeFile]} onClose={() => setScrapeFile(null)} /> : null}
+      {mediainfoFile ? <MediainfoModal filePath={mediainfoFile} onClose={() => setMediainfoFile(null)} /> : null}
        <BulkBar count={bulk.size} onClear={bulk.clear} onEdit={() => setBulkEditor(true)} onScrape={() => setBulkScrape(true)} onVerify={handleBulkVerify} onAnalyze={handleBulkAnalyze} onSpectrum={handleBulkSpectrum} onPause={bulkPause} onResume={bulkResume} onRemove={bulkRemove} />
       {bulkEditor ? <BulkTagEditor open={bulkEditor} files={selectedFileNames} onClose={() => setBulkEditor(false)} onSaved={() => bulk.clear()} /> : null}
       {bulkScrape ? <AdjustTagsModal open={bulkScrape} files={selectedFileNames} onClose={() => setBulkScrape(false)} /> : null}
