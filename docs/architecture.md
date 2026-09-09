@@ -116,7 +116,7 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 
 Keeps CPU/IO-heavy work off the SLSK event loop. Own code throughout (scraper *pattern* only guided by smoked-salmon `BaseScraper`).
 
-- `GET /health` (open) → `{ok, ts, uptime, version, sources:[discogs,bandcamp,apple,qobuz,tidal,musicbrainz,deezer,beatport], queueDepth}`
+- `GET /health` (open) → `{ok, ts, uptime, version, sources:[discogs,bandcamp,apple,qobuz,tidal,musicbrainz,deezer], queueDepth}`
 - `POST /scrape {url}` → `{artist, album, year, track_count, query, source, confidence, url}` (`422` no-scraper/unreachable, SSRF private-IP reject, 10 s timeout, random UA, Qobuz/Tidal need env tokens). Web `SearchBar` paste-link calls this, then `search:global` on `query`.
 - `POST /spectrum/request {fileName, size?, token?}` → `{etag, hash, urls:{full,zoom}, fromCache}`; `GET /spectrum/{stem}/full|zoom` (PNG, `ETag`, `If-None-Match` → 304); `GET /spectrum/{stem}` (JSON). Reads `bridge-data:/data` RO, writes ephemeral `/tmp/spectrals` (no volume). See `docs/spectrum.md`.
 - `POST /tag {fileName}` → `{tags, coverArtApplied, tracklist}` (mutagen read, full TinyTag parity: artist/album/title/track/disc/genre/year/composer/albumartist + audio props). `POST /tag/write {fileName, tags, coverArt?}` edits via mutagen; `POST /tag/scrape {fileName, url}` scrapes then writes; `POST /tag/bulk {files[]}` for own-file browser.

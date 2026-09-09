@@ -230,7 +230,7 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
               {/* Scrape */}
               <div className="rounded-xl bg-surface-container-low p-4 ghost-border space-y-3">
                 <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Scrape tags</h4>
-                <p className="font-body text-xs text-outline">Paste a release URL (Discogs / Bandcamp / MusicBrainz / Deezer / Beatport / Apple / Qobuz / Tidal) to fill artist/album/year.</p>
+                <p className="font-body text-xs text-outline">Paste a release URL (Discogs / Bandcamp / MusicBrainz / Deezer / Apple / Qobuz / Tidal) to fill artist/album/year.</p>
                 {isDemo && isDemoFile ? (
                   <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 px-3 py-2.5 space-y-1.5 ghost-border">
                     <div className="font-label text-[11px] font-semibold text-amber-900 dark:text-amber-200">Demo — try this Discogs URL for this track</div>

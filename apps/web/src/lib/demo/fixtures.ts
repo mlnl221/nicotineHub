@@ -394,10 +394,10 @@ export function demoReleaseScrape(url: string): import("@/lib/worker").ScrapeRes
   const id = matchDemoReleaseId(url);
   if (!id) throw new Error("Demo link-paste supports the two Discogs releases from the demo tracks — running a raw search instead.");
   const meta = DEMO_RELEASE_META[id];
-  return { artist: meta.artist, album: meta.album, year: meta.year, track_count: meta.track_count, query: `${meta.artist} - ${meta.album}`, source: "discogs", confidence: 0.95, url: meta.url };
+  return { artist: meta.artist, album: meta.album, year: meta.year, track_count: meta.track_count, query: `${meta.artist} - ${meta.album}`, source: "discogs", confidence: 0.95, url: meta.url, tracklist: [{ pos: meta.tracknumber, title: meta.title, artist: meta.artist, duration: "" }], catalog_no: "88697 19512 1", country: "US", label: "Columbia", genre: ["Electronic", "Rock"], style: ["Synth-pop", "Indie Rock"], media_type: "Vinyl (LP, Album, Stereo)", release_id: "1304590", cover_url: null as unknown as string };
 }
 
-export function demoScrapeResult(fileName: string, url: string, apply: boolean): import("@/lib/worker").TagScrapeResult | null {
+export function demoScrapeResult(fileName: string, url: string, apply: boolean, _trackIndex?: number): import("@/lib/worker").TagScrapeResult | null {
   const fileId = matchDemoReleaseFile(fileName);
   if (!fileId) return null;
   const urlId = matchDemoReleaseId(url);
@@ -429,6 +429,8 @@ export function demoScrapeResult(fileName: string, url: string, apply: boolean):
     source: "discogs",
     confidence: 0.95,
     url: meta.url,
+    // Demo mock exposes only its own track (offline fixture, not the full release).
+    tracklist: [{ pos: meta.tracknumber, title: meta.title, artist: meta.artist, duration: "" }],
     suggested,
     applied: apply,
     tags: apply ? new_tags : undefined,
