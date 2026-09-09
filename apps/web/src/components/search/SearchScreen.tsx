@@ -36,7 +36,7 @@ export function SearchScreen() {
   // Keep draft publicOnly in line with the persisted default (e.g. header
   // toggle on a tab); no-op when already equal so typing never re-renders.
   useEffect(() => {
-    const next = settings.searches.defilter.publicFiles ?? false;
+    const next = settings.searches.defilter.publicFiles ?? true;
     setDraft((d) => (d.publicOnly === next ? d : { ...d, publicOnly: next }));
   }, [settings.searches.defilter.publicFiles]);
   // Refs keep the async SearchBar scrape path (resolves after render) on the

@@ -116,7 +116,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         reason: "max_results",
         rows,
         total: rows.length,
-        filters: { ...emptyFilters(), publicOnly: settings.searches.defilter.publicFiles ?? false },
+        filters: { ...emptyFilters(), publicOnly: settings.searches.defilter.publicFiles ?? true },
       };
     });
     setTabs(newTabs);
@@ -175,7 +175,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
             // Auto-create wishlist tab on interval hit (needs UI tab for wishlist:*)
             const term = parseWishlistTerm(searchId);
             const capped = cap > 0 ? rows.slice(0, cap) : rows;
-            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [...capped], total: capped.length, filters: { ...emptyFilters(), publicOnly: settings.searches.defilter.publicFiles ?? false } };
+            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [...capped], total: capped.length, filters: { ...emptyFilters(), publicOnly: settings.searches.defilter.publicFiles ?? true } };
             setActiveId(searchId);
             return [...prev, wlTab];
           }
@@ -201,7 +201,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
           setTabs((prev) => {
             if (prev.some((t) => t.id === searchId)) return prev;
             const term = parseWishlistTerm(searchId);
-            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [], total: 0, filters: { ...emptyFilters(), publicOnly: settings.searches.defilter.publicFiles ?? false } };
+            const wlTab: SearchTab = { id: searchId, query: term, mode: "wishlist", status: "searching", rows: [], total: 0, filters: { ...emptyFilters(), publicOnly: settings.searches.defilter.publicFiles ?? true } };
             setActiveId(searchId);
             return [...prev, wlTab];
           });
