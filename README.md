@@ -174,17 +174,10 @@ Open `http://localhost:3000` → Settings → Network check `LISTEN_PORT`, login
 
 ---
 
-## Porting status
-
-Stage `5c65ea9`+ — almost 1:1, mobile-friendly. See **[docs/porting-status.md](docs/porting-status.md)** for the full domain-by-domain matrix (settings port Phases A–N done, `leech_detector` ported; `youtube_info` + fonts/colors/lastfm intentionally omitted, English-only).
-
----
-
 ## Docs
 
 - `docs/architecture.md` — bridge, worker, search & protocol, transfers + spectrum, WS JSON, `LISTEN_PORT`/`PortMapper`, env, tests
 - `docs/spectrum.md` — Analyze Spectrum pipeline (worker `sox` + `oxipng`, HTTP, caching, UI)
-- `docs/porting-status.md` — matrix vs nicotine-plus 3.3.x
 - `docs/deployment.md` — Docker & GHCR images, `TAG` pinning, promotion workflow (`stage` → `main`)
 - `docs/DESIGN.md` — UI tokens
 - `docs/proposals/` — future backlog (r/Soulseek improvements not yet built)

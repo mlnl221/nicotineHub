@@ -93,7 +93,6 @@ export function SearchesSection() {
           onChange={(v) => setOption("searches", "group_searches", v)}
           options={[
             { value: "ungrouped", label: "Ungrouped" },
-            { value: "folder_grouping", label: "By folder" },
             { value: "user_grouping", label: "By user" },
           ]}
         />

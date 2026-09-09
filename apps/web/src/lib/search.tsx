@@ -161,7 +161,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         let rows = (msg as { rows: SearchRow[] }).rows || [];
         // Respect searches.max_displayed_results (nicotine-plus parity) — cap before append
         const cap = settings.searches.max_displayed_results ?? 2500;
-        // Eager country fetch: trigger GetPeerAddress for responders to populate SearchRow.country via bridge cache + future peer-address country (porting-status country eager parity)
+        // Eager country fetch: trigger GetPeerAddress for responders to populate SearchRow.country via bridge cache
         if (rows.length) {
           const uniq = Array.from(new Set(rows.map((r) => r.user).filter(Boolean))).slice(0, 20);
           for (const u of uniq) {

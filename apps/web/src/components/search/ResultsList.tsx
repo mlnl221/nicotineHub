@@ -75,32 +75,10 @@ function PeerPills({ row }: { row: SearchRow }) {
   );
 }
 
-// Aggregate peer health for a group header: fastest peer + free count.
-function GroupMeta({ items }: { items: SearchRow[] }) {
-  const users = new Set(items.map((i) => i.user)).size;
-  const fastest = items.reduce((m, i) => Math.max(m, i.speed), 0);
-  const free = items.filter((i) => i.slotFree).length;
-  const speed = humanSpeed(fastest);
-  return (
-    <span className="flex shrink-0 items-center gap-1 font-label text-xs text-outline">
-      {users > 1 ? <span>{users} users</span> : null}
-      {speed ? (
-        <span className="inline-flex items-center gap-0.5 rounded-full bg-surface-container-high px-1.5 py-0.5 text-[10px] font-semibold text-on-surface-variant">
-          <span className="material-symbols-outlined text-[12px]">bolt</span>
-          {speed}
-        </span>
-      ) : null}
-      {free ? (
-        <span className="rounded-full bg-tertiary-container px-1.5 py-0.5 text-[10px] font-semibold text-on-tertiary-container">
-          {free} free
-        </span>
-      ) : null}
-      <span>{items.length}</span>
-    </span>
-  );
-}
+// Aggregate peer health for a group header is rendered with PeerPills on the
+// group's best row (rows arrive pre-sorted, so items[0] leads).
 
-export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "folder_grouping", expand = "all" }: ResultsListProps) {
+export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "user_grouping", expand = "all" }: ResultsListProps) {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   // Single-tap timer: delays the sheet so a double-click can download instead.
@@ -144,19 +122,23 @@ export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "fold
 
   const sliced = useMemo(() => rows.slice(0, visibleCount), [rows, visibleCount]);
 
+  const groupedByUser = grouping !== "ungrouped";
+
   const groups = useMemo(() => {
-    if (grouping === "ungrouped") {
+    if (!groupedByUser) {
       return [["ungrouped", sliced] as [string, SearchRow[]]];
     }
+    // Groups are keyed by user only — one owner per group, so the header
+    // carries username + peer health once and rows stay slim.
     const map = new Map<string, SearchRow[]>();
     for (const row of sliced) {
-      const key = grouping === "user_grouping" ? row.user : row.folder || "(root)";
+      const key = row.user;
       const list = map.get(key);
       if (list) list.push(row);
       else map.set(key, [row]);
     }
     return [...map.entries()];
-  }, [sliced, grouping]);
+  }, [sliced, groupedByUser]);
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // sync collapsed to expand setting
@@ -169,7 +151,7 @@ export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "fold
     if (expand === "all") setCollapsed(new Set());
     else if (expand === "none") setCollapsed(new Set(keys));
     else if (expand === "partial") {
-      // partial: expand first half, collapse rest (mimics folder_grouping expand_root)
+      // partial: expand first half, collapse rest
       const half = Math.floor(keys.length / 2);
       setCollapsed(new Set(keys.slice(half)));
     }
@@ -241,15 +223,20 @@ export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "fold
                   return next;
                 })
               }
-              className="flex w-full min-h-11 items-center gap-2 px-4 py-3 text-left"
+              className="w-full min-h-11 px-4 py-3 text-left"
             >
-              <span className="material-symbols-outlined text-[18px] text-on-surface-variant shrink-0">
-                {isCollapsed ? "chevron_right" : "expand_more"}
+              <span className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px] text-on-surface-variant shrink-0">
+                  {isCollapsed ? "chevron_right" : "expand_more"}
+                </span>
+                <span className="flex-1 min-w-0 truncate font-label text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
+                  {folder}
+                </span>
+                <span className="font-label text-xs text-outline shrink-0">{items.length}</span>
               </span>
-              <span className="flex-1 min-w-0 truncate font-label text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
-                {folder}
+              <span className="mt-1 flex items-center gap-1.5 pl-[26px] font-label text-[11px] text-on-surface-variant">
+                <PeerPills row={items[0]} />
               </span>
-              <GroupMeta items={items} />
             </button>
 
             {!isCollapsed ? (
@@ -271,16 +258,13 @@ export function ResultsList({ rows, onRowTap, onRowDoubleClick, grouping = "fold
                         {fileTypeIcon(row.fileType)}
                       </span>
                       <div className="min-w-0 flex-1 overflow-hidden">
-                        <div className="truncate font-body text-sm font-medium text-on-surface max-w-full">
-                          {row.filename}
+                        <div className="truncate font-body text-sm text-on-surface max-w-full">
+                          <span className="font-semibold">{humanSize(row.size)}</span>
+                          <span className="text-outline"> · </span>
+                          <span className="font-medium">{row.filename}</span>
                         </div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-label text-[11px] text-on-surface-variant max-w-full overflow-hidden">
-                          <span className="inline-flex items-center gap-1 min-w-0 max-w-[35vw] truncate">
-                            <span className="material-symbols-outlined text-[13px] shrink-0">person</span>
-                            <span className="truncate">{row.user}</span>
-                          </span>
-                          <PeerPills row={row} />
-                          <span>{humanSize(row.size)}</span>
+                          <span className="min-w-0 max-w-[45vw] truncate">{row.folder || "(root)"}</span>
                           {humanQuality(row.attributes) ? <span>{humanQuality(row.attributes)}</span> : null}
                           {(() => { const qb = qualityBadge(row); return qb ? <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${qb.cls}`}>{qb.label}</span> : null; })()}
                           {humanLength(row.length) ? <span>{humanLength(row.length)}</span> : null}

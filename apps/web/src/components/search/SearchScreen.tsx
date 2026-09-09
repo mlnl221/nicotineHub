@@ -247,7 +247,6 @@ export function SearchScreen() {
               className="rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-semibold text-on-surface-variant outline-none"
               title="Grouping"
             >
-              <option value="folder_grouping">By Folder</option>
               <option value="user_grouping">By User</option>
               <option value="ungrouped">Ungrouped</option>
             </select>

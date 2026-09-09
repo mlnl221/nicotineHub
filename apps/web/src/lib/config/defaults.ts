@@ -302,7 +302,7 @@ export const defaults: Settings = {
     private_search_results: false,
     filters_visible: false,
     expand_results: "all",
-    group_searches: "folder_grouping",
+    group_searches: "user_grouping",
   },
   transfers: {
     shared: [],
