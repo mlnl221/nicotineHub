@@ -307,7 +307,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
 
   const pagedFolders = useMemo(() => visibleTreeFolders.slice(0, visibleFolderCount), [visibleTreeFolders, visibleFolderCount]);
   const pagedFiles = useMemo(() => sortedFiles.slice(0, visibleFileCount), [sortedFiles, visibleFileCount]);
-  const visibleFileIds = useMemo(() => sortedFiles.map((f) => f.name), [sortedFiles]);
+  const pagedFileIds = useMemo(() => pagedFiles.map((f) => f.name), [pagedFiles]);
   const marquee = useMarqueeSelection(bulk.setSelection);
 
   // Keyboard tree nav: Up/Down move, Right expand/child, Left collapse/parent, Enter opens
@@ -678,16 +678,16 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                 <div className="flex items-center gap-3 px-4 py-2 bg-surface-container-low border-b border-surface-container-highest/20">
                   <input
                     type="checkbox"
-                    checked={visibleFiles.length > 0 && visibleFiles.every((f) => bulk.has(f.name))}
-                    ref={(el) => { if (el) (el as HTMLInputElement).indeterminate = bulk.size > 0 && !visibleFiles.every((f) => bulk.has(f.name)) && visibleFiles.some((f) => bulk.has(f.name)); }}
+                    checked={pagedFiles.length > 0 && pagedFiles.every((f) => bulk.has(f.name))}
+                    ref={(el) => { if (el) (el as HTMLInputElement).indeterminate = bulk.size > 0 && !pagedFiles.every((f) => bulk.has(f.name)) && pagedFiles.some((f) => bulk.has(f.name)); }}
                     onChange={() => {
-                      const all = visibleFiles.every((f) => bulk.has(f.name)) ? bulk.clear() : bulk.selectAll(visibleFiles.map((f) => f.name));
+                      const all = pagedFiles.every((f) => bulk.has(f.name)) ? bulk.clear() : bulk.selectAll(pagedFiles.map((f) => f.name));
                       void all;
                     }}
                     className="h-4 w-4 shrink-0 accent-primary"
                     aria-label="Select all"
                   />
-                  <span className="font-label text-xs">Select all displayed ({visibleFiles.length})</span>
+                  <span className="font-label text-xs">Select all displayed ({pagedFiles.length})</span>
                   <span className="ml-auto font-label text-[11px] text-on-surface-variant">{bulk.size} selected</span>
                   <button onClick={() => bulk.clear()} className="rounded-full bg-surface-container-high px-3 py-1 text-[11px]">Clear</button>
                 </div>
@@ -715,7 +715,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                                if ((e.target as HTMLElement).closest("button,input")) return;
                                if (selectMode || e.ctrlKey || e.metaKey || e.shiftKey) {
                                  e.preventDefault();
-                                 if (e.shiftKey) bulk.toggleRange(file.name, visibleFileIds);
+                                  if (e.shiftKey) bulk.toggleRange(file.name, pagedFileIds);
                                  else bulk.toggle(file.name);
                                }
                              }}
@@ -749,7 +749,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                                 onClick={(ev) => {
                                   ev.stopPropagation();
                                   // Shift+click range like FileExplorer — ev has shiftKey
-                                  if ((ev as unknown as { shiftKey?: boolean }).shiftKey) bulk.toggleRange(file.name, visibleFileIds);
+                                   if ((ev as unknown as { shiftKey?: boolean }).shiftKey) bulk.toggleRange(file.name, pagedFileIds);
                                 }}
                                 className="h-4 w-4 shrink-0 accent-primary"
                               />

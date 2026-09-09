@@ -653,9 +653,9 @@ export function FileExplorer({
                 key={e.path}
                 onClick={() => selectMode && isAudio && (isFocused ? bulk.toggleRange(e.path, audioIds) : bulk.toggle(e.path, audioIds))}
                 onContextMenu={(ev) => {
+                  if (selectMode) return;
                   ev.preventDefault();
                   ev.stopPropagation();
-                  if (selectMode) return;
                   setMenuAnchor({ x: ev.clientX, y: ev.clientY, file: e });
                 }}
                 className={`flex items-center gap-3 px-3 py-3 hover:bg-surface-container-high/40 ${checked ? "bg-primary-fixed/20" : "opacity-90"} ${isFocused ? "ring-1 ring-primary" : ""} ${selectMode && isAudio ? "cursor-pointer" : ""}`}

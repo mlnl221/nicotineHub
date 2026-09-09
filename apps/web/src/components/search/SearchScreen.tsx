@@ -21,6 +21,7 @@ import { useContextMenu } from "@/lib/context-menu/useContextMenu";
 import { useWishlist } from "@/lib/wishlist";
 import { humanLength, humanQuality, humanSize } from "@/lib/format";
 import { useBulkSelection } from "@/lib/bulkSelection";
+import { useFinePointer } from "@/lib/useFinePointer";
 
 export function SearchScreen() {
   const { activeTab, activeId, tabs, setActive, closeTab, startSearch, stopSearch, retrySearch, setFilters, clearFilters } = useSearches();
@@ -66,20 +67,14 @@ export function SearchScreen() {
   const ctxMenu = useContextMenu();
   const [menuRow, setMenuRow] = useState<SearchRow | null>(null);
   const [propsRow, setPropsRow] = useState<SearchRow | null>(null);
-  const [selectMode, setSelectMode] = useState(false);
+  const [manualSelect, setManualSelect] = useState<boolean | null>(null);
   const bulk = useBulkSelection();
+  const autoSelect = useFinePointer();
+  const selectMode = manualSelect ?? autoSelect;
   const [tabMenuAnchor, setTabMenuAnchor] = useState<{ x: number; y: number; tab: import("@/lib/search").SearchTab } | null>(null);
-  // Desktop (fine pointer) starts in select mode so single click toggles
-  // rows instead of opening the sheet. Touch starts sheet-first; long-press
-  // enters select mode. Read in effects only (never rendered) so SSR/CSR
-  // mismatch cannot leak into hydration.
-  const isFinePointer = useMemo(
-    () => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(pointer:fine)").matches,
-    [],
-  );
 
   const deferredRows = useDeferredValue(activeTab?.rows ?? []);
-  useEffect(() => { bulk.clear(); setSelectMode(isFinePointer); }, [activeId, bulk.clear, isFinePointer]);
+  useEffect(() => { bulk.clear(); setManualSelect(null); }, [activeId, bulk.clear]);
   const deferredFilters = useDeferredValue(activeTab?.filters ?? null);
   // ponytail: inline filtering — useDeferredValue already de-janks 500+ rows, no worker/comlink needed
   const [sortMode, setSortMode] = useState<SearchSortMode>("best");
@@ -187,7 +182,7 @@ export function SearchScreen() {
 
   const toggleSelected = (row: SearchRow) => bulk.toggle(searchRowId(row));
   const rangeSelected = (row: SearchRow) => bulk.toggleRange(searchRowId(row), visibleIds);
-  const longPressSelected = (row: SearchRow) => { setSelectMode(true); bulk.toggle(searchRowId(row)); };
+  const longPressSelected = (row: SearchRow) => { setManualSelect(true); bulk.toggle(searchRowId(row)); };
 
   const searchSubtitle = activeTab
     ? `${visibleRows.length} of ${activeTab.total} results${activeTab.status === "searching" ? " · searching…" : ""}${activeTab.mode !== "global" ? ` · ${activeTab.mode}${activeTab.target ? `:${activeTab.target}` : ""}` : ""} • ${tabs.length} tabs`
@@ -246,8 +241,8 @@ export function SearchScreen() {
               type="button"
               aria-pressed={selectMode}
               title={selectMode ? "Exit selection — row tap opens details" : "Select rows — row tap toggles selection"}
-              onClick={() => { setSelectMode((v) => !v); if (selectMode) bulk.clear(); }}
-              className={`rounded-full px-2 py-1 text-[10px] font-semibold outline-none ${
+              onClick={() => { if (selectMode) bulk.clear(); setManualSelect((v) => !(v ?? autoSelect)); }}
+              className={`rounded-full min-h-11 px-3 py-2 text-xs font-semibold outline-none ${
                 selectMode
                   ? "bg-primary text-on-primary"
                   : "bg-surface-container-high text-on-surface-variant"
@@ -275,7 +270,7 @@ export function SearchScreen() {
                 setFilters(activeId, { publicOnly: next });
                 setOption("searches", "defilter", { ...settings.searches.defilter, publicFiles: next });
               }}
-              className={`rounded-full px-2 py-1 text-[10px] font-semibold outline-none ${
+              className={`rounded-full min-h-11 px-3 py-2 text-xs font-semibold outline-none ${
                 activeTab.filters.publicOnly
                   ? "bg-primary text-on-primary"
                   : "bg-surface-container-high text-on-surface-variant"
