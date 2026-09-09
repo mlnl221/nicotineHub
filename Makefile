@@ -11,6 +11,7 @@
 #   make verify             # typecheck + test + build
 #   make build-docker       # docker compose build
 #   make run-docker         # docker compose up --build -d + health check
+#   make replace-docker     # build local images, replace running compose stack
 #   make clean              # rm .next/dist (keep node_modules)
 #   make distclean          # clean + rm node_modules
 
@@ -25,7 +26,7 @@ BRIDGE_TOKEN ?=
 NEXT_PUBLIC_BRIDGE_URL ?=
 NEXT_PUBLIC_DEMO ?=
 
-.PHONY: help clean distclean install build dev run typecheck test verify build-docker run-docker logs down
+.PHONY: help clean distclean install build dev run typecheck test verify build-docker run-docker replace-docker logs down
 
 help: ## show targets
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?##"}{printf "  \033[36m%-14s\033[0m %s\n",$$1,$$2}'
@@ -74,6 +75,11 @@ run-docker: ## docker compose up --build -d + health check
 		if curl -sf http://localhost:8788/health >/dev/null 2>&1 && curl -sf http://localhost:3001 >/dev/null 2>&1; then echo "✓ up: http://localhost:3001 + http://localhost:8788/health"; break; fi; \
 		echo "  ...$$i/10"; sleep 2; \
 	done; $(DC) ps
+
+replace-docker: ## build local images, stop running stack, start built images
+	TAG=$(TAG) BRIDGE_TOKEN=$(BRIDGE_TOKEN) NEXT_PUBLIC_BRIDGE_URL=$(NEXT_PUBLIC_BRIDGE_URL) NEXT_PUBLIC_DEMO=$(NEXT_PUBLIC_DEMO) $(DC) build
+	$(DC) down
+	TAG=$(TAG) BRIDGE_TOKEN=$(BRIDGE_TOKEN) NEXT_PUBLIC_BRIDGE_URL=$(NEXT_PUBLIC_BRIDGE_URL) NEXT_PUBLIC_DEMO=$(NEXT_PUBLIC_DEMO) $(DC) up -d
 
 logs: ## docker logs -f
 	$(DC) logs -f
