@@ -40,6 +40,7 @@ import {
   buildMessageAcked,
   buildMessageUser,
   buildPeerInit,
+  buildFileTransferInit,
   buildPierceFireWall,
   buildPlaceInQueueRequest,
   buildPlaceInQueueResponse,
@@ -205,6 +206,8 @@ export interface SessionOptions {
   // F-stream wiring to TransferManager (Phase 4)
   onFileConnection?: (token: number, socket: Socket) => void;
   onFileChunk?: (token: number, chunk: Buffer) => void;
+  onFileClosed?: (token: number) => void;
+  onUploadPierce?: (username: string, socket: Socket) => void;
   getQueuePlace?: (file: string) => number;
 }
 export interface UserInfoEvent {
@@ -234,7 +237,7 @@ export interface RoomEvent {
 }
 export interface TransferEvent {
   type: "transfer-request" | "transfer-response" | "queue-upload" | "place-in-queue" | "upload-failed" | "upload-denied";
-  username?: string; file?: string; token?: number; place?: number; reason?: string; direction?: number; size?: number | bigint;
+  username?: string; file?: string; token?: number; place?: number; reason?: string; direction?: number; size?: number | bigint; allowed?: boolean;
 }
 
 const DEFAULT_SEARCH_TIMEOUT_MS = 20_000; // kept for reference — not used (nicotine parity: searches live until explicit stop, no timeout)
@@ -338,6 +341,8 @@ export class SoulseekSession {
   // inbound pierce parked when the peer dials before our ConnectToPeer copy
   // arrives (remote got the relay first). Adopted on ConnectToPeer match.
   private parkedPierce = new Map<number, { sock: unknown; at: number }>();
+  // Sockets observed closed: processPeer must not re-add state for them.
+  private closedPeers = new WeakSet<object>();
   // user status cache for offline check (P1 hardening)
   private userStatusCache = new Map<string, { status: number; privileged: boolean; updated: number }>();
   // allowed peer responses gating (nicotine allowed_message_responses) — prevent unsolicited 448M
@@ -2100,7 +2105,11 @@ export class SoulseekSession {
           const st = this.peerStates.get(peer as Socket);
           logger.debug("server", "peer inbound close", { username: st?.username, connType: st?.connType, remote: (peer as unknown as { remoteAddress?: string }).remoteAddress });
           this.peerStates.delete(peer as Socket);
+          this.closedPeers.add(peer as Socket);
           if (st?.username && st.connType === "D") this._removeChildPeerConnection(st.username);
+          if ((st?.isFileConn || st?.connType === "F") && st?.fileToken !== undefined) {
+            try { this.opts.onFileClosed?.(st.fileToken); } catch {}
+          }
           this.dequeuePendingSockets();
         },
       },
@@ -2110,15 +2119,18 @@ export class SoulseekSession {
   private startIdleSweep() {
     this.idleTimer = setInterval(() => {
       const now = Date.now();
+      const parkedSocks = new Set([...this.parkedPierce.values()].map((p) => p.sock));
       for (const [sock, st] of this.peerStates) {
         const idle = now - st.lastActive;
         const initTimeout = !st.initDone && (now - st.createdAt) > CONNECTION_INIT_TIMEOUT_MS;
-        const ghost = !st.username && idle > GHOST_IDLE_MS;
+        // Parked pierce has no username yet by design — exempt from ghost kill.
+        const ghost = !st.username && idle > GHOST_IDLE_MS && !parkedSocks.has(sock as unknown as object);
         const dead = idle > CONNECTION_MAX_IDLE_MS;
         if (initTimeout || ghost || dead) {
           logger.debug("peer", "idle sweep close", { username: st.username, connType: st.connType, initDone: st.initDone, bytes: (st as unknown as { bytesReceived?: number }).bytesReceived ?? st.buf.length, msgs: (st as unknown as { msgsParsed?: number }).msgsParsed ?? 0, reason: initTimeout ? "initTimeout" : ghost ? "ghost" : "dead" });
           try { sock.end(); } catch {}
           this.peerStates.delete(sock);
+          this.closedPeers.add(sock as Socket);
           if (st.username && st.connType === "D") this._removeChildPeerConnection(st.username);
           this.dequeuePendingSockets();
         }
@@ -2126,6 +2138,7 @@ export class SoulseekSession {
         if (!st.initDone && st.buf.length > 0 && (now - st.createdAt) > CONNECTION_INIT_TIMEOUT_MS) {
           try { sock.end(); } catch {}
           this.peerStates.delete(sock);
+          this.closedPeers.add(sock as Socket);
           this.dequeuePendingSockets();
         }
       }
@@ -2218,6 +2231,11 @@ export class SoulseekSession {
         logger.debug("peer", "adopted parked pierce", { username: ctp.username, connType: ctp.connType });
         setTimeout(() => this.flushPendingPeerMessages(ctp.username, ctp.connType), 10);
         this.dequeuePendingSockets();
+        // Firewalled downloader pierced to us: serve our oldest queued upload
+        // for them over this socket (they will send FileOffset next).
+        if (ctp.connType === "F") {
+          try { this.opts.onUploadPierce?.(ctp.username, sock as Socket); } catch {}
+        }
         return;
       }
       // parked socket already gone — fall through to dial
@@ -2499,7 +2517,6 @@ export class SoulseekSession {
         // Forward raw bytes to TransferManager via callback; also emit diagnostic
         if (state.buf.length > 0) {
           const chunk = Buffer.from(state.buf);
-          logger.debug("transfer", "F bytes in", { token: state.fileToken, bytes: chunk.length, head: chunk.subarray(0, 16).toString("hex") });
           try { this.opts.onFileChunk?.(state.fileToken, chunk); } catch {}
           this.emitTransfer({ type: "transfer-request", username: state.username, token: state.fileToken, file: `F:${state.fileToken}` });
           state.buf = Buffer.alloc(0);
@@ -2658,7 +2675,6 @@ export class SoulseekSession {
         : (msg.code === PEER_MESSAGE_CODES.fileSearchResponse ? MAX_INCOMING.server16M : MAX_INCOMING.server1M);
       if (msg.payload.length > maxForCode) { try { peer.end(); } catch {} this.peerStates.delete(peer); break; }
       state.buf = state.buf.subarray(8 + msg.payload.length);
-      if (!state.outbound) logger.debug("peer", "P msg parsed", { username: state.username, code: msg.code, payloadLen: msg.payload.length });
       if (msg.code === 9) {
         // Gate on allowed token to prevent zlib bomb from unsolicited peers
         const tokenProbe = (() => { try { const b = inflateProbeToken(msg.payload); return b; } catch { return null; } })();
@@ -2781,7 +2797,7 @@ export class SoulseekSession {
       } else if (msg.code === PEER_MESSAGE_CODES.transferRequest) {
         try { const tr = parseTransferRequest(msg.payload); this.emitTransfer({ type: "transfer-request", username: state.username, token: tr.token, file: tr.file, direction: tr.direction, size: tr.size }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.transferResponse) {
-        try { const tr = parseTransferResponse(msg.payload); this.emitTransfer({ type: "transfer-response", username: state.username, token: tr.token, reason: tr.reason }); } catch {}
+        try { const tr = parseTransferResponse(msg.payload); this.emitTransfer({ type: "transfer-response", username: state.username, token: tr.token, reason: tr.reason, allowed: tr.allowed, size: (tr as unknown as { size?: number | bigint }).size }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.queueUpload) {
         try { const q = parseQueueUpload(msg.payload); const file = typeof q === "string" ? q : (q as { file: string }).file; this.emitTransfer({ type: "queue-upload", username: state.username, file }); } catch {}
       } else if (msg.code === PEER_MESSAGE_CODES.placeInQueueRequest) {
@@ -2813,7 +2829,8 @@ export class SoulseekSession {
     // Keep per-socket state for the life of the connection (close/sweep clean
     // up). Deleting on drain forgets init/username, so the next message on a
     // persistent P socket re-parses as init and legit traffic dies.
-    this.peerStates.set(peer, state);
+    // Never resurrect a socket the close handler already removed.
+    if (!this.closedPeers.has(peer as Socket)) this.peerStates.set(peer, state);
   }
 
   private routeResult(resp: { token: number; username: string; freeUploadSlots: boolean; inQueue: number; uploadSpeed: number; results: SearchFile[] }) {
@@ -3071,6 +3088,24 @@ export class SoulseekSession {
   }
   sendTransferResponse(username: string, token: number, allowed: boolean, sizeOrReason?: number | bigint | string) {
     this.ensurePeerAndSend(username, "P", buildTransferResponse(token, allowed, sizeOrReason));
+  }
+  /** Upload side: dial F to the downloader and send raw FileInit (nicotine slskproto F flow). */
+  async dialFileUpload(username: string, token: number): Promise<Socket> {
+    const sock = await this.connectPeer(username, "F");
+    try {
+      (sock as Socket).write(buildPeerInit(this.username, "F"));
+      (sock as Socket).write(buildFileTransferInit(token));
+    } catch (e) { throw e; }
+    const st = this.peerStates.get(sock as Socket);
+    if (st) { st.isFileConn = true; st.fileToken = token >>> 0; }
+    else this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: true, isFileConn: true, fileToken: token >>> 0, username, outbound: true, connType: "F", lastActive: Date.now(), createdAt: Date.now() } as never);
+    return sock as Socket;
+  }
+  /** Mark an adopted/pierced inbound socket as an upload F channel. */
+  markFileUploadSocket(socket: Socket, token: number, username: string) {
+    const st = this.peerStates.get(socket as Socket);
+    if (st) { st.isFileConn = true; st.fileToken = token >>> 0; st.initDone = true; st.username = username; st.connType = "F"; st.lastActive = Date.now(); }
+    else this.peerStates.set(socket as Socket, { buf: Buffer.alloc(0), initDone: true, isFileConn: true, fileToken: token >>> 0, username, outbound: false, connType: "F", lastActive: Date.now(), createdAt: Date.now() } as never);
   }
 
   private ensurePeerAndSend(username: string, connType: string, msg: Buffer) {

@@ -358,8 +358,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             seedExplicitRef.current = false;
             sendLogin(ws, seed);
           } else {
+            // Server logged out: auto-login from stored creds only when the
+            // server allows auto-connect. Otherwise stay idle (login form).
             const creds = loadCreds();
-            if (creds?.username && creds?.password) {
+            let allowed = true;
+            try {
+              const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
+              if (raw && (JSON.parse(raw) as { server?: { auto_connect_startup?: boolean } })?.server?.auto_connect_startup === false) allowed = false;
+            } catch {}
+            if (allowed && creds?.username && creds?.password) {
               lastLogin.current = creds;
               shouldReconnect.current = true;
               sendLogin(ws, creds);
@@ -709,9 +716,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       login(creds, { quiet: true });
       setState({ status: "connected", user: creds.username, error: undefined, reconnecting: true });
     } else {
-      // No stored creds on THIS client — still check the server singleton:
-      // another device may have logged in already (attach needs no password).
-      // connectSocket sends session:status first; idle stays idle when logged out.
+      // No usable stored creds, or auto-connect disabled: still check the
+      // server singleton — another device may be logged in already (attach
+      // needs no password). connectSocket sends session:status first; idle
+      // stays idle when the server is logged out.
       shouldReconnect.current = true;
       connectSocket(null);
     }
