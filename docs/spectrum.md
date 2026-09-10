@@ -17,7 +17,7 @@
 POST /spectrum/request {fileName, size?, token?} → resolve file → stat mtime/size → probe duration → sox → oxipng → /tmp/spectrals
 ```
 
-* **Resolve file** — worker scans `DATA_DIR/downloads` by basename (containment-checked, `resolve().is_relative_to(DATA_DIR)`); never trusts a client-provided path. `404` when absent.
+* **Resolve file** — homelab: any existing absolute path on container disk resolves (`Path.resolve()`, must `is_file()`); otherwise basename/relative lookup under `DATA_DIR` (+ `downloads/` fallback and shallow scan). `404` when absent.
 * **Duration** — `mutagen` length (existing worker dep); fallback `None` → `zoomStart=0`.
 * **Zoom start** — `duration>5 ? floor(duration/2) : 0` (same knee as before).
 * **sox** — single invocation with both outputs (same args as the old bridge):
@@ -32,7 +32,7 @@ POST /spectrum/request {fileName, size?, token?} → resolve file → stat mtime
 ## HTTP (`apps/worker/app.py`, `WORKER_TOKEN` Bearer gated, `/health` open)
 
 * `POST /spectrum/request {fileName, size?, token?}` → `{etag, hash, urls:{full,zoom}, fromCache}` (`422` non-audio, `404` missing).
-* `GET /spectrum/{stem}/full` and `/zoom` — `If-None-Match` → `304`, else `200 image/png` with `ETag: "hash"`, `Cache-Control: private, max-age=3600`. `GET /spectrum/{stem}` returns `{etag, urls}` JSON.
+* `GET /spectrum/{stem}/full` and `/zoom` — `If-None-Match` → `304`, else `200 image/png` with `ETag: "hash"`, `Cache-Control: private, max-age=3600`.
 * Bridge compat: `GET /spectrum/*` on the bridge returns `410 {error:"moved to worker…"}` and WS `spectrum:request|status` replies `spectrum:error` pointing at `:8789` (stale-bundle guard only).
 
 ## Web provider (`apps/web/src/lib/spectrum.tsx` + `apps/web/src/lib/worker.ts`)

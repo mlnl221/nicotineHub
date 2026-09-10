@@ -110,7 +110,7 @@ Bridge is **leaf-only** (no child aggregation — matches nicotine leaf mode): s
 | `WORKER_INTERNAL_URL` | `http://worker:8789` (Docker) / `http://localhost:8789` (dev) | Server-side worker target for the web proxy |
 | `DISCOGS_TOKEN` / `QOBUZ_APP_ID` / `TIDAL_TOKEN` | *(unset)* | Optional scraper tokens (worker env); Qobuz/Tidal scrape returns a clear error without theirs |
 | `QOBUZ_USER_AUTH_TOKEN` / `TIDAL_COUNTRY` | *(unset)* | Qobuz `X-User-Auth-Token` header; Tidal `countrycode` (default `US`) |
-| `DATA_DIR/worker.json` | *(absent)* | Same tokens via Settings → Worker (write-only, `0600`, never shown back). Env wins when both set. `GET /health` reports `auth:{discogs,tidal,qobuz}` booleans only. |
+| `CONFIG_DIR/worker.json` | *(absent)* | Same tokens via Settings → Worker (write-only, `0600`, never shown back). Env wins when both set (`DATA_DIR/worker.json` read as legacy fallback). `GET /health` reports `auth:{discogs,tidal,qobuz}` booleans only. |
 
 ## Worker (`apps/worker` — FastAPI `:8789`, `python:3.11-slim`)
 
@@ -118,9 +118,10 @@ Keeps CPU/IO-heavy work off the SLSK event loop. Own code throughout (scraper *p
 
 - `GET /health` (open) → `{ok, ts, uptime, version, sources:[discogs,bandcamp,apple,qobuz,tidal,musicbrainz,deezer], queueDepth}`
 - `POST /scrape {url}` → `{artist, album, year, track_count, query, source, confidence, url}` (`422` no-scraper/unreachable, SSRF private-IP reject, 10 s timeout, random UA, Qobuz/Tidal need env tokens). Web `SearchBar` paste-link calls this, then `search:global` on `query`.
-- `POST /spectrum/request {fileName, size?, token?}` → `{etag, hash, urls:{full,zoom}, fromCache}`; `GET /spectrum/{stem}/full|zoom` (PNG, `ETag`, `If-None-Match` → 304); `GET /spectrum/{stem}` (JSON). Reads `bridge-data:/data` RO, writes ephemeral `/tmp/spectrals` (no volume). See `docs/spectrum.md`.
-- `POST /tag {fileName}` → `{tags, coverArtApplied, tracklist}` (mutagen read, full TinyTag parity: artist/album/title/track/disc/genre/year/composer/albumartist + audio props). `POST /tag/write {fileName, tags, coverArt?}` edits via mutagen; `POST /tag/scrape {fileName, url}` scrapes then writes; `POST /tag/bulk {files[]}` for own-file browser.
-- `POST /verify {fileName}` → `{flacOk, upconvert, mqa, logScore, logChecksum, durationMismatch}` (honest subset today: `flacOk` + MQA tag sniff; the rest `null` until spectral checks land).
+- `POST /spectrum/request {fileName, size?, token?}` → `{etag, hash, urls:{full,zoom}, fromCache}`; `GET /spectrum/{stem}/full|zoom` (PNG, `ETag`, `If-None-Match` → 304). Reads `data:/data` (any existing absolute path on container disk, else basename/relative lookup under `DATA_DIR`), writes ephemeral `/tmp/spectrals` (no volume). See `docs/spectrum.md`.
+- `POST /tag {fileName}` → `{tags, coverArtApplied, tracklist}` (mutagen read, full TinyTag parity: artist/album/title/track/disc/genre/year/composer/albumartist + audio props). `POST /tag/write {fileName, tags, removeTags?}` edits via mutagen; `POST /tag/scrape {fileName, url}` scrapes then writes; `POST /tag/cover {fileName, url}` embeds/saves cover; `POST /tag/rename-preview {files[], template}` previews renames; `POST /tag/bulk {files[]}` for own-file browser. `POST /rename {fileName, newName}` renames a file.
+- `POST /verify {fileName}` → `{flacOk, upconvert, mqa, logScore, logChecksum, durationMismatch}` (honest subset today: `flacOk` + MQA tag sniff; the rest `null` until spectral checks land). `POST /verify/bulk {files[]}` for batch checks.
+- `POST /mediainfo {fileName}` → parsed `mediainfo` JSON + summary (501 when the binary is missing). `POST /scan {fileName, …}` forwards download-finished events to `MEDIA_SCAN_URL` (422 when unconfigured).
 - `POST /analyze {fileName}` → `{bitrate, vbr, sampleRate, bitDepth, cutoffHz, likelyTranscode, confidence}` (mutagen + ffmpeg-snippet FFT knee when `numpy` present, else `null`s). `POST /analyze/bulk` for share-scan enrichment.
 - All routes except `/health`: `WORKER_TOKEN` Bearer, 1 MB JSON cap.
 

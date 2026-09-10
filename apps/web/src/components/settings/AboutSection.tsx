@@ -11,11 +11,8 @@ export function AboutSection() {
   useEffect(() => {
     // fetch bridge health for matching version — optional, ignore errors (Vercel demo has no bridge)
     const url = typeof window !== "undefined" ? (localStorage.getItem("nicotineHub.bridgeUrl") || "") : "";
-    const healthUrl = url ? url.replace(/\/ws\/?$/, "/health?json") : "/health?json";
-    // try relative + absolute, but avoid CORS noise: only try same-origin when no custom url
-    const target = healthUrl.startsWith("http") ? healthUrl : "/api/health-proxy?url=" + encodeURIComponent(healthUrl);
-    // simpler: just fetch same-origin /health if bridge not custom
-    fetch(url ? healthUrl : "/health?json", { headers: { accept: "application/json" } })
+    // custom URL hits the bridge directly; same-origin goes through /api/health (proxied to bridge /health)
+    fetch(url ? url.replace(/\/ws\/?$/, "/health?json") : "/api/health?json", { headers: { accept: "application/json" } })
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (j?.version) setBridgeHealth({ version: j.version, commitSha: j.commitSha, buildDate: j.buildDate }); })
       .catch(() => {});

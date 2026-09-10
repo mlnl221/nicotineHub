@@ -252,9 +252,7 @@ function ChatRoomsInner() {
               x: e.clientX,
               y: e.clientY,
               items: chatRoomMenu(activeRoom, activeRoom ? "chat" : "activity", {
-                onFind: () => {},
                 onCopyAll: () => navigator.clipboard.writeText(userMessages.map((m) => `${m.username}: ${m.message}`).join("\n")),
-                onClear: () => {},
                 onLeave: () => activeRoom && leaveRoom(activeRoom),
               }),
             });
@@ -585,8 +583,7 @@ function ChatRoomsInner() {
               <h3 className="font-headline text-lg font-bold">Room Wall — All tickers</h3>
               <button onClick={() => setShowWall(false)} className="rounded-full p-2 hover:bg-surface-container-high"><span className="material-symbols-outlined">close</span></button>
             </div>
-            <p className="font-body text-xs text-on-surface-variant mb-3">Tickers across {joinedRooms.size} joined rooms. Filter or clear per room.</p>
-            <input placeholder="Filter tickers..." className="w-full rounded-lg bg-surface-container-low px-3 py-2 text-sm mb-3" onChange={() => {}} />
+            <p className="font-body text-xs text-on-surface-variant mb-3">Tickers across {joinedRooms.size} joined rooms. Clear per room.</p>
             <ul className="space-y-2">
               {allTickers.length === 0 ? <li className="text-sm text-outline">No tickers yet.</li> : allTickers.map(t => (
                 <li key={`${t.room}-${t.username}`} className="flex justify-between rounded-lg bg-surface-container-low px-3 py-2 text-sm">

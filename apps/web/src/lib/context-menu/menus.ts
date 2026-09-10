@@ -125,8 +125,8 @@ export function transferMenu(t: { user: string; fileName: string; path?: string;
     { id: "sep", label: "---", icon: "" },
     ...(acts.onPlay ? [{ id: "play", label: "Play", icon: "play_arrow", action: acts.onPlay } as MenuItem] : []),
     ...(isUpload ? [] : [
-      { id: "open", label: "Open File", icon: "open_in_new", disabled: true, action: () => toast("Open — browser cannot open local files") } as MenuItem,
-      { id: "open-folder", label: "Open in File Manager", icon: "folder_open", disabled: true } as MenuItem,
+      { id: "open", label: "Open File", icon: "open_in_new", action: () => toast("Open — browser cannot open local files") } as MenuItem,
+      { id: "open-folder", label: "Open in File Manager", icon: "folder_open", action: () => toast("Open in File Manager — browser cannot open local files") } as MenuItem,
     ]),
     { id: "props", label: "File Properties", icon: "info", action: () => toast(display) },
     { id: "sep2", label: "---", icon: "" },
@@ -223,7 +223,7 @@ export function browseFileMenu(username: string, file: { path: string; filename:
       { id: "sep", label: "---", icon: "" },
       { id: "upload", label: "Upload File…", icon: "upload", action: () => toast("Upload file") },
       { id: "sep2", label: "---", icon: "" },
-      { id: "open", label: "Open File", icon: "open_in_new", disabled: true },
+      { id: "open", label: "Open File", icon: "open_in_new", action: () => toast("Open — browser cannot open local files") },
       { id: "sep3", label: "---", icon: "" },
       { id: "props", label: "File Properties", icon: "info", action: () => toast(file.filename) },
       { id: "sep4", label: "---", icon: "" },
@@ -251,41 +251,30 @@ export function browseFileMenu(username: string, file: { path: string; filename:
   ];
 }
 
-export function privateChatMenu(username: string | null, msgs: {username:string;message:string}[] | undefined, actions: { onFind: () => void; onCopyAll: () => void; onClear: () => void }): MenuItem[] {
+export function privateChatMenu(username: string | null, msgs: {username:string;message:string}[] | undefined, actions: { onCopyAll: () => void }): MenuItem[] {
   const userPart: MenuItem[] = username ? userMenu(username, "privatechat") : [];
   return [
-    { id: "find", label: "Find…", icon: "search", action: actions.onFind },
-    { id: "sep", label: "---", icon: "" },
     { id: "copy", label: "Copy", icon: "content_copy", action: () => copy(msgs?.map(m=>`${m.username}: ${m.message}`).join("\n") ?? "") },
     { id: "copy-all", label: "Copy All", icon: "content_copy", action: actions.onCopyAll },
-    { id: "sep2", label: "---", icon: "" },
-    { id: "clear", label: "Clear Message View", icon: "clear_all", action: actions.onClear },
-    { id: "sep3", label: "---", icon: "" },
+    { id: "sep", label: "---", icon: "" },
     { id: "user-actions", label: "User Actions", icon: "person", submenu: userPart.length ? userPart : [{ id:"none", label:"No user", icon:"person", disabled:true}] },
   ];
 }
 
-export function chatRoomMenu(room: string | null, view: "activity"|"chat", actions: { onFind: () => void; onCopyAll: () => void; onClear: () => void; onLeave: () => void }): MenuItem[] {
+export function chatRoomMenu(room: string | null, view: "activity"|"chat", actions: { onCopyAll: () => void; onLeave: () => void }): MenuItem[] {
   if (view === "activity") {
     return [
-      { id: "find", label: "Find…", icon: "search", action: actions.onFind },
-      { id: "sep", label: "---", icon: "" },
       { id: "copy", label: "Copy", icon: "content_copy", action: () => toast("Copy") },
       { id: "copy-all", label: "Copy All", icon: "content_copy", action: actions.onCopyAll },
-      { id: "sep2", label: "---", icon: "" },
-      { id: "clear", label: "Clear Activity View", icon: "clear_all", action: actions.onClear },
-      { id: "sep3", label: "---", icon: "" },
+      { id: "sep", label: "---", icon: "" },
       { id: "leave", label: "Leave Room", icon: "logout", danger: true, action: actions.onLeave },
     ];
   }
   return [
-    { id: "find", label: "Find…", icon: "search", action: actions.onFind },
-    { id: "sep", label: "---", icon: "" },
     { id: "copy", label: "Copy", icon: "content_copy", action: () => toast("Copy") },
     { id: "copy-link", label: "Copy Link", icon: "link", action: () => toast("Copy Link") },
     { id: "copy-all", label: "Copy All", icon: "content_copy", action: actions.onCopyAll },
-    { id: "sep2", label: "---", icon: "" },
-    { id: "clear", label: "Clear Message View", icon: "clear_all", action: actions.onClear },
+    { id: "sep", label: "---", icon: "" },
     { id: "leave", label: "Leave Room", icon: "logout", danger: true, action: actions.onLeave },
   ];
 }

@@ -129,9 +129,8 @@ export class StatsManager {
     this.persist();
   }
 
-  recordDownloadStarted(size?: number) {
+  recordDownloadStarted(_size?: number) {
     this.append("started_downloads", 1);
-    if (size) this.append("downloaded_size", 0); // placeholder
   }
   recordDownloadCompleted(size: number) {
     this.append("completed_downloads", 1);

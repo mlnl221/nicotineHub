@@ -3,7 +3,7 @@
 """Worker service — heavy lifting off the Soulseek event loop.
 
 Endpoints: GET /health, POST /scrape, POST /spectrum/request,
-GET /spectrum/{stem}/full|zoom, GET /spectrum/{stem},
+GET /spectrum/{stem}/full|zoom,
 POST /tag, POST /tag/write, POST /tag/scrape, POST /tag/bulk,
 POST /verify, POST /analyze, POST /analyze/bulk, POST /mediainfo, POST /rename.
 """
@@ -172,14 +172,6 @@ async def spectrum_request(body: SpectrumIn):
         "urls": {"full": f"/spectrum/{stem}/full", "zoom": f"/spectrum/{stem}/zoom"},
         "fromCache": res["fromCache"],
     }
-
-
-@app.get("/spectrum/{stem}")
-async def spectrum_info(stem: str, _auth=Depends(require_auth)):
-    found = _stem_lookup(stem)
-    if not found:
-        return JSONResponse({"detail": "no spectrum"}, status_code=404)
-    return {"etag": found["etag"], "urls": {"full": f"/spectrum/{stem}/full", "zoom": f"/spectrum/{stem}/zoom"}}
 
 
 @app.get("/spectrum/{stem}/{variant}")

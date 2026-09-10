@@ -64,7 +64,22 @@ export function getVaultKey(configDir: string): Buffer {
     if (existsSync(kp)) {
       const raw = readFileSync(kp);
       if (raw.length === 32) return raw;
-      // Legacy/corrupt key file — regenerate below.
+      // Legacy/corrupt key file — warn, back up the old key AND the vault it
+      // protects (unreadable under the new key, kept for manual recovery),
+      // then regenerate below.
+      const stamp = Date.now();
+      console.warn(`[bridge] vault key ${kp} has unexpected length ${raw.length} (want 32), backing up and regenerating`);
+      try {
+        renameSync(kp, `${kp}.bak-${stamp}`);
+      } catch {}
+      try {
+        const vp = vaultPath(configDir);
+        if (existsSync(vp)) {
+          const bak = `${vp}.bak-${stamp}`;
+          renameSync(vp, bak);
+          try { chmodSync(bak, 0o600); } catch {}
+        }
+      } catch {}
     }
   } catch {}
   const key = randomBytes(32);

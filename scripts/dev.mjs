@@ -73,6 +73,7 @@ console.log(`└─────────────────────�
 if (N === 0) {
   console.log(`Tip: run "bun run dev 3" for isolated ports web:3003 bridge:8790 listen:62907 (avoids collision with main worktree)\n`);
 }
+console.log(`Worker (optional, scrape/spectrum/tag): run separately from apps/worker — PORT=8789 CONFIG_DIR=./config DATA_DIR=./data uvicorn app:app --host 0.0.0.0 --port 8789\n`);
 
 const bridgeEnv = { ...process.env, PORT: String(bridgePort), LISTEN_PORT: String(listenPort) };
 // INNER_PORT: proxy-server.js outer/inner split (web dev runs behind the

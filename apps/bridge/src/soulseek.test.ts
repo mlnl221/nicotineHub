@@ -68,6 +68,7 @@ import {
   parseFolderContentsResponse,
   packUint64,
   SlskReader,
+  FramingError,
   parseSharedFileListResponse,
   parseFolderContentsResponse,
 } from "./soulseek.ts";
@@ -828,5 +829,48 @@ describe("browse shares parity (SLSKPROTOCOL.md Peer Codes 4/5/36/37)", () => {
       if (prev === undefined) delete process.env.CONFIG_DIR;
       else process.env.CONFIG_DIR = prev;
     }
+  });
+});
+
+describe("audit Batch 1+3 — framing hardening", () => {
+  test("SlskReader throws catchable FramingError on truncation", () => {
+    expect(() => new SlskReader(Buffer.alloc(2)).uint32()).toThrow(FramingError);
+    expect(() => new SlskReader(Buffer.alloc(0)).uint8()).toThrow(FramingError);
+    expect(() => new SlskReader(Buffer.alloc(3)).ip()).toThrow(FramingError);
+    expect(() => new SlskReader(Buffer.alloc(7)).uint64()).toThrow(FramingError);
+    // declared string length exceeds remaining bytes
+    expect(() => new SlskReader(Buffer.from([0x05, 0, 0, 0, 0x61])).string()).toThrow(FramingError);
+    try {
+      new SlskReader(Buffer.alloc(1)).uint32();
+      expect(true).toBe(false); // must throw above
+    } catch (e) {
+      expect(e).toBeInstanceOf(Error);
+      expect((e as Error).name).toBe("FramingError");
+    }
+  });
+
+  test("parseLoginResponse throws FramingError on truncated payload", () => {
+    expect(() => parseLoginResponse(Buffer.from([1, 2]))).toThrow(FramingError);
+    expect(() => parseLoginResponse(Buffer.from([0]))).toThrow(FramingError);
+  });
+
+  test("parseTransferResponse: omitted size is undefined, not 0", () => {
+    const bare = parseTransferResponse(tryParseMessage(buildTransferResponse(9, true))!.payload);
+    expect(bare).toEqual({ token: 9, allowed: true });
+    expect(bare.size).toBeUndefined();
+    expect("size" in bare).toBe(false);
+    // explicit size still parses
+    expect(parseTransferResponse(tryParseMessage(buildTransferResponse(7, true, 2048))!.payload).size).toBe(2048);
+  });
+
+  test("parseBrowseFile keeps >MAX_SAFE_INTEGER sizes exact via BigInt", () => {
+    const big = BigInt(Number.MAX_SAFE_INTEGER) + 12345n;
+    const inner = Buffer.concat([
+      packUint32(1), packString("Music"), packUint32(1),
+      Buffer.concat([Buffer.from([1]), packString("Music\\huge.bin"), packUint64(big), packString("bin"), packUint32(0)]),
+      packUint32(0),
+    ]);
+    const parsed = parseSharedFileListResponse(deflateSync(inner));
+    expect(parsed.folders[0].files[0].size).toBe(big);
   });
 });
