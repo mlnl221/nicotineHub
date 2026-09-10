@@ -32,7 +32,7 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
     if (!open) return;
     // try to fetch bridge version via same logic as AboutSection
     const custom = typeof window !== "undefined" ? localStorage.getItem("nicotineHub.bridgeUrl") : "";
-    const url = custom ? custom.replace(/\/ws\/?$/, "/health?json") : "/health?json";
+    const url = custom ? custom.replace(/\/ws\/?$/, "/health?json") : "/api/health?json";
     fetch(url, { headers: { accept: "application/json" } })
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (j?.version) setBridgeVersion(j.version); })

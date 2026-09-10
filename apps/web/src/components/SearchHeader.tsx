@@ -16,9 +16,6 @@ export function SearchHeader() {
   return (
     <header className="relative z-10 flex w-full items-center justify-end px-10 py-6">
       <div className="flex items-center space-x-4">
-        <button className="glass-card flex h-10 w-10 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:text-primary dark:text-inverse-primary dark:hover:text-primary-fixed">
-          <span className="material-symbols-outlined">notifications</span>
-        </button>
         <button
           onClick={handleToggle}
           title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}

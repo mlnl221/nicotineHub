@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import { buildInitialFilters, useSearches, type SearchMode } from "@/lib/search";
 import { applyFilters } from "@/lib/filter";
@@ -52,6 +52,22 @@ export function SearchScreen() {
   // panel shows the active tab instead, so leave seeding at defaults there.
   const startWithDraft = (query: string, opts?: { mode?: SearchMode; target?: string }) =>
     startSearch(query, noTabsRef.current ? { ...opts, filters: draftRef.current } : opts);
+  // Deep link: /search?query= (e.g. Downloads/Uploads double-click fallback)
+  // feeds the tab flow once, then strips the param so re-mounts don't re-fire.
+  const searchParams = useSearchParams();
+  const handledQueryRef = useRef<string | null>(null);
+  useEffect(() => {
+    const q = searchParams.get("query")?.trim();
+    if (!q || handledQueryRef.current === q) return;
+    handledQueryRef.current = q;
+    startWithDraft(q);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("query");
+      window.history.replaceState(null, "", url.pathname + (url.search ? url.search : "") + url.hash);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
   // Stable identities: FilterBar debounces 150ms on [local, filters, onChange],
   // so a fresh arrow each render would starve commits while results stream.
   const handleFilterChange = useCallback(

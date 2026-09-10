@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { RequireAuth } from "@/components/RequireAuth";
 
@@ -18,6 +18,7 @@ function BrowseUserInner() {
   const username = decodeURIComponent(params.username ?? "");
   const { state } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
   useEffect(() => {
     if (state.status !== "connected") return;
     if (username) {
@@ -29,10 +30,12 @@ function BrowseUserInner() {
         const next = [username, ...list.filter((x: string) => x.toLowerCase() !== username.toLowerCase())].slice(0, 20);
         localStorage.setItem(key, JSON.stringify(next));
       } catch {}
-      router.replace(`/browse?user=${encodeURIComponent(username)}`);
+      // Preserve ?folder so /browse can preselect it (else the param is dropped)
+      const folder = searchParams.get("folder");
+      router.replace(`/browse?user=${encodeURIComponent(username)}${folder ? `&folder=${encodeURIComponent(folder)}` : ""}`);
     } else {
       router.replace("/browse");
     }
-  }, [username, state.status, router]);
+  }, [username, state.status, router, searchParams]);
   return null;
 }

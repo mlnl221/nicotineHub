@@ -256,9 +256,10 @@ async function waitForHealthy(containerId: string, inspect: ContainerInspect): P
   const nets = Object.values(inspect.NetworkSettings?.Networks ?? {});
   const ip = nets.map((n) => n.IPAddress).find(Boolean);
   if (ip) {
+    const port = Number(process.env.PORT || 8787);
     while (Date.now() < deadline) {
       try {
-        const res = await fetch(`http://${ip}:8787/health`, { signal: AbortSignal.timeout(2000) });
+        const res = await fetch(`http://${ip}:${port}/health`, { signal: AbortSignal.timeout(2000) });
         if (res.ok) return;
       } catch {}
       await new Promise((r) => setTimeout(r, 1000));

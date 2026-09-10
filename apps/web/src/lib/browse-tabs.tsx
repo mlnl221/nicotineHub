@@ -143,7 +143,6 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
         // treat legacy browse-error as error even if no explicit error field
         const hasError = !!m.error || rawType === "browse-error";
         const errMsg = m.error || (rawType === "browse-error" ? "Timed out fetching shares" : undefined);
-        console.log("[browse-tabs] shares recv", m.username, "error", errMsg || "none", "isDemo", isDemo, "rawType", rawType);
         const lower = m.username.toLowerCase();
         const off = m.offset ?? 0;
         const more = !!m.hasMore && !hasError;

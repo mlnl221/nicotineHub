@@ -11,7 +11,7 @@ services:
       # `LISTEN_PORT=NEW docker compose up -d` changes both. Env wins over the
       # persisted CONFIG_DIR/listen_port at boot (see apps/bridge/src/server.ts),
       # so a pinned value here would silently discard the UI-chosen port on recreate.
-      LISTEN_PORT: "${LISTEN_PORT:-40598}"
+      LISTEN_PORT: "${LISTEN_PORT:-60754}"
       CONFIG_DIR: "/config"
       DATA_DIR: "/data"
       # Homelab: any mounted path is browsable, shareable, playable and readable
@@ -32,8 +32,8 @@ services:
       # (same-origin /ws + /api/bridge), so 8787 is NOT published — the
       # bridge lives on the compose network only. LISTEN_PORT below is
       # Soulseek peer traffic and MUST stay published TCP+UDP.
-      - "${LISTEN_PORT:-40598}:${LISTEN_PORT:-40598}"
-      - "${LISTEN_PORT:-40598}:${LISTEN_PORT:-40598}/udp"
+      - "${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}"
+      - "${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}/udp"
     # Homelab: browsers reach the bridge through the web entrypoint only
     # (same-origin /ws + /api/bridge via proxy-server.js) — no 8787 publish.
     # LISTEN_PORT is the host port — changing it in Settings → Network (portrange) writes CONFIG_DIR/listen_port (+ CONFIG_DIR/host.env for .env sync) and hot-swaps Bun.listen + reconnects Soulseek (SetWaitPort) without WS restart; UI stays up, Save triggers fresh connect. The *host* mapping is static at create time — with the socket mount below it self-recreates, otherwise `LISTEN_PORT=NEW docker compose up -d` to change it.
@@ -59,7 +59,7 @@ services:
       # - /home/user/Music:/data/Music:ro
       # - /home/user/Downloads:/data/downloads:ro
     healthcheck:
-      test: ["CMD", "bun", "-e", "fetch('http://localhost:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:${PORT:-8787}/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -96,6 +96,15 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      # Forward Makefile-provided build-time vars (NEXT_PUBLIC_* are baked
+      # into the Next.js bundle) to the Dockerfile ARG names.
+      args:
+        TAG: "${TAG:-latest}"
+        BUILD_TAG: "${BUILD_TAG:-}"
+        COMMIT_SHA: "${COMMIT_SHA:-}"
+        BUILD_DATE: "${BUILD_DATE:-}"
+        NEXT_PUBLIC_BRIDGE_URL: "${NEXT_PUBLIC_BRIDGE_URL:-}"
+        NEXT_PUBLIC_DEMO: "${NEXT_PUBLIC_DEMO:-}"
     restart: unless-stopped
     environment:
       NODE_ENV: production

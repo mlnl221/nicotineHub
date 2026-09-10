@@ -80,6 +80,7 @@ import {
   parseConnectToPeer,
   parseExcludedSearchPhrases,
   parseFileSearchResponse,
+  parseFileSearchResponseBuffer,
   parseFolderContentsResponse,
   parseGlobalRoomMessage,
   parseJoinRoom,
@@ -98,6 +99,7 @@ import {
   parseUploadFailed,
   parseSharedFileListResponse,
   SlskReader,
+  FramingError,
   parseRoomList,
   parseRoomMember,
   parseRoomMembers,
@@ -177,6 +179,19 @@ export function parseWishlistSearchId(searchId: string): { term: string; timesta
   return null;
 }
 
+/**
+ * Namespace a client-supplied search id per WS client (`"<clientId>:<searchId>"`) so two
+ * tabs/clients can reuse the same id without colliding in the singleton session.
+ * Server wiring: pass the namespaced id into search and cancelSearch, call
+ * `cancelClientSearches(clientId)` on ws close.
+ */
+export function namespaceSearchId(clientId: string, searchId: string): string {
+  const c = String(clientId || "").trim();
+  const s = String(searchId || "");
+  if (!c || s.startsWith(`${c}:`)) return s;
+  return `${c}:${s}`;
+}
+
 export function getAutoTerms(terms: string[], autoByTerm?: Map<string, boolean> | Record<string, boolean>): string[] {
   if (!autoByTerm) return terms.slice();
   const isAuto = (t: string): boolean => {
@@ -230,7 +245,7 @@ export interface TransferEvent {
   username?: string; file?: string; token?: number; place?: number; reason?: string; direction?: number; size?: number | bigint; allowed?: boolean;
 }
 
-const DEFAULT_SEARCH_TIMEOUT_MS = 20_000; // kept for reference — not used (nicotine parity: searches live until explicit stop, no timeout)
+const DEFAULT_SEARCH_TIMEOUT_MS = 20_000; // searches live until max_results/stop/timeout — armed per search via armSearchTimeout
 const PEER_ADDRESS_TIMEOUT_MS = 20_000; // INDIRECT_REQUEST_TIMEOUT
 const CONNECTION_MAX_IDLE_MS = 60_000;
 const GHOST_IDLE_MS = 10_000;
@@ -891,6 +906,7 @@ export class SoulseekSession {
         const active: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
         this.searches.set(token, active);
         this.searchIds.set(searchId, token);
+        this.armSearchTimeout(token, active);
         this.serverSocket.write(buildWishlistSearch(token, term));
         logger.info("search", "wishlist auto-search", { term, token, searchId });
         // notify server of start via wishlist event
@@ -1456,7 +1472,12 @@ export class SoulseekSession {
       // Additional per-code overflow guard (shares etc could be larger but server caps at 16M)
       if (msg.payload.length > MAX_INCOMING.server16M) { try { this.serverSocket?.end(); } catch {} break; }
       this.serverBuffer = this.serverBuffer.subarray(8 + msg.payload.length);
-      this.dispatchServerMessage(msg.code, msg.payload);
+      try {
+        this.dispatchServerMessage(msg.code, msg.payload);
+      } catch (e) {
+        // One bad parser must not kill the read loop — drop the frame, keep streaming.
+        logger.warn("server", "dropping malformed server frame", { code: msg.code, error: (e as Error).message });
+      }
     }
   }
 
@@ -1465,7 +1486,14 @@ export class SoulseekSession {
     if (code === SERVER_MESSAGE_CODES.login) {
       this.hasReceivedLoginResponse = true;
       this.consecutiveSilentCloses = 0;
-      const resp = parseLoginResponse(payload);
+      let resp: LoginResponse;
+      try {
+        resp = parseLoginResponse(payload);
+      } catch (e) {
+        // Malformed login frame — drop it, keep the read loop (and login promise) alive.
+        logger.warn("server", "dropping malformed login frame", { error: (e as Error).message, malformed: (e as Error) instanceof FramingError });
+        return;
+      }
       if (resp.success) {
         logger.info("server", "login success", { banner: resp.banner?.slice(0,60), ip: resp.ipAddress });
         this.loggedIn = true;
@@ -2353,6 +2381,7 @@ export class SoulseekSession {
     (state as unknown as { bytesReceived: number }).bytesReceived += bytes.length;
     // Per-conn cap: declared-length gated (n+ parity), not blind 1M pre-append.
     // P shares can be 448M compressed; blind cap was silently killing Donald-sized libraries.
+    // Cap enforced BEFORE append/inflate; unsolicited gated responses die here instead of buffering.
     {
       const maxForState = state.connType === "D" ? MAX_INCOMING.server16K : (state.isFileConn ? MAX_INCOMING.server16M : MAX_INCOMING.server1M);
       if (state.buf.length + bytes.length > maxForState && state.buf.length >= 4) {
@@ -2365,8 +2394,22 @@ export class SoulseekSession {
           if (state.buf.length < 8) return maxForState;
           try { return maxIncomingForPeer(state.buf.readUInt32LE(4)); } catch { return maxForState; }
         })();
-        if (declared > hintedMax || state.buf.length + bytes.length > hintedMax) {
-          logger.warn("peer", "cap kill (declared-length gated)", { declared, hintedMax, buf: state.buf.length, incoming: bytes.length, connType: state.connType, username: state.username, isFileConn: state.isFileConn });
+        // Unsolicited gated responses (never requested via addAllowedPeerResponse) get no
+        // budget — kill as soon as they exceed the per-conn budget, before buffering/inflate (OOM).
+        let budget = hintedMax;
+        try {
+          if (state.initDone && state.buf.length >= 8 && state.username) {
+            const peekCode = state.buf.readUInt32LE(4);
+            if ((peekCode === PEER_MESSAGE_CODES.userInfoResponse ||
+              peekCode === PEER_MESSAGE_CODES.sharedFileListResponse ||
+              peekCode === PEER_MESSAGE_CODES.folderContentsResponse) &&
+              !this.isAllowedPeerResponse(state.username, peekCode)) {
+              budget = 0;
+            }
+          }
+        } catch {}
+        if (declared > budget || state.buf.length + bytes.length > budget) {
+          logger.warn("peer", "cap kill (declared-length gated)", { declared, hintedMax: budget, buf: state.buf.length, incoming: bytes.length, connType: state.connType, username: state.username, isFileConn: state.isFileConn });
           try { peer.end(); } catch {} this.peerStates.delete(peer); return;
         }
       } else if (state.buf.length + bytes.length > MAX_INCOMING.server448M) {
@@ -2646,14 +2689,19 @@ export class SoulseekSession {
       if (msg.payload.length > maxForCode) { try { peer.end(); } catch {} this.peerStates.delete(peer); return; }
       state.buf = state.buf.subarray(8 + msg.payload.length);
       if (msg.code === 9) {
-        // Gate on allowed token to prevent zlib bomb from unsolicited peers
-        const tokenProbe = (() => { try { const b = inflateProbeToken(msg.payload); return b; } catch { return null; } })();
+        // Inflate once (byte cap enforced inside inflateWithCap), gate token, then parse —
+        // never inflate unsolicited payloads twice (OOM) or parse before gating.
+        let inflated: Buffer;
+        try {
+          inflated = inflateWithCap(msg.payload);
+        } catch (e) { logger.warn("search", "FileSearchResponse inflate failed", { error: (e as Error).message }); continue; }
+        const tokenProbe = probeTokenFromInflated(inflated);
         logger.debug("search", "peer FileSearchResponse received", { tokenProbe, allowed: [...this.allowedSearchTokens].slice(0,5), payloadLen: msg.payload.length });
         if (tokenProbe !== null && this.allowedSearchTokens.size > 0 && !this.allowedSearchTokens.has(tokenProbe)) {
           logger.debug("search", "FileSearchResponse dropped — token not allowed", { tokenProbe });
           continue;
         }
-        try { const resp = parseFileSearchResponse(msg.payload); logger.info("search", "search result", { token: resp.token, username: resp.username, results: resp.results?.length, freeSlots: resp.freeUploadSlots }); this.routeResult(resp); } catch (e) { logger.warn("search", "parseFileSearchResponse failed", { error: (e as Error).message }); }
+        try { const resp = parseFileSearchResponseBuffer(inflated); logger.info("search", "search result", { token: resp.token, username: resp.username, results: resp.results?.length, freeSlots: resp.freeUploadSlots }); this.routeResult(resp); } catch (e) { logger.warn("search", "parseFileSearchResponse failed", { error: (e as Error).message }); }
       } else if (msg.code === PEER_MESSAGE_CODES.userInfoResponse) {
         const username = state.username ?? "";
         // gating: only accept if we requested it (mirrors nicotine allowed_message_responses)
@@ -2840,6 +2888,19 @@ export class SoulseekSession {
     }
   }
 
+  /** Arm the per-search timeout (`handlers.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS`) — frees token + ends search. */
+  private armSearchTimeout(token: number, search: ActiveSearch): void {
+    const ms = search.timeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS;
+    if (!(ms > 0)) return;
+    search.timer = setTimeout(() => {
+      if (!this.searches.has(token)) return;
+      this.searches.delete(token);
+      this.searchIds.delete(search.searchId);
+      this.allowedSearchTokens.delete(token);
+      try { search.onEnd({ searchId: search.searchId, reason: "timeout" }); } catch {}
+    }, ms);
+  }
+
   search(query: string, searchId: string, handlers: SearchHandlers): number {
     if (!this.serverSocket || !this.loggedIn) {
       logger.warn("search", "search aborted — not logged in or no socket", { searchId, query: query.slice(0,80), loggedIn: this.loggedIn, hasSocket: !!this.serverSocket });
@@ -2857,6 +2918,7 @@ export class SoulseekSession {
     this.allowedSearchTokens.add(token);
     const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
+    this.armSearchTimeout(token, search);
     try {
       const buf = buildFileSearch(token, outQuery);
       this.serverSocket.write(buf);
@@ -2872,6 +2934,19 @@ export class SoulseekSession {
     this.searches.delete(token); this.searchIds.delete(searchId); this.allowedSearchTokens.delete(token);
     search?.onEnd({ searchId, reason: "stopped" });
   }
+  /** Cancel every search owned by one WS client (call on ws close). Matches `namespaceSearchId` prefix. */
+  cancelClientSearches(clientId: string): void {
+    const prefix = `${String(clientId || "")}:`;
+    if (prefix === ":") return;
+    for (const [token, s] of [...this.searches]) {
+      if (!s.searchId.startsWith(prefix)) continue;
+      if (s.timer) clearTimeout(s.timer);
+      this.searches.delete(token);
+      this.searchIds.delete(s.searchId);
+      this.allowedSearchTokens.delete(token);
+      try { s.onEnd({ searchId: s.searchId, reason: "stopped" }); } catch {}
+    }
+  }
   searchUser(username: string, query: string, searchId: string, handlers: SearchHandlers): number {
     if (!this.loggedIn || !this.serverSocket) {
       logger.warn("search", "searchUser aborted — not logged in", { searchId, username, query: query.slice(0,60), loggedIn: this.loggedIn });
@@ -2886,6 +2961,7 @@ export class SoulseekSession {
     this.allowedSearchTokens.add(token);
     const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
+    this.armSearchTimeout(token, search);
     try {
       const buf = buildUserSearch(username, token, outQuery);
       this.serverSocket.write(buf);
@@ -2906,6 +2982,7 @@ export class SoulseekSession {
     this.allowedSearchTokens.add(token);
     const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
+    this.armSearchTimeout(token, search);
     for (const username of usernames) {
       try { this.serverSocket.write(buildUserSearch(username, token, outQuery)); } catch {}
     }
@@ -2921,6 +2998,7 @@ export class SoulseekSession {
     this.allowedSearchTokens.add(token);
     const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
+    this.armSearchTimeout(token, search);
     this.serverSocket.write(buildRoomSearch(room, token, outQuery));
     return token;
   }
@@ -2932,6 +3010,7 @@ export class SoulseekSession {
     const token = this.allocWishlistToken(outQuery);
     const search: ActiveSearch = { searchId, ...handlers, users: new Set(), count: 0, maxResults: this._maxDisplayedResults };
     this.searches.set(token, search); this.searchIds.set(searchId, token);
+    this.armSearchTimeout(token, search);
     this.serverSocket.write(buildWishlistSearch(token, outQuery));
     return token;
   }
@@ -3197,6 +3276,7 @@ export class SoulseekSession {
         if (this.userInfoRequests.has(username)) {
           this.userInfoRequests.delete(username);
           this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.userInfoResponse);
+          try { this.pendingPeerMessages.delete(username.toLowerCase()); } catch {}
           this.failedUserInfo.add(username); this.emit({ type: "user-info-failed", username });
           reject(new Error("Peer address request timed out."));
         }
@@ -3287,9 +3367,8 @@ function toRow(username: string, freeUploadSlots: boolean, inQueue: number, uplo
   const dot = filename.lastIndexOf("."); const fileType = dot >= 0 ? filename.slice(dot + 1).toLowerCase() : "";
   return { user: username, folder, filename, path: name, size: file.size, fileType, slotFree: freeUploadSlots, speed: uploadSpeed, inQueue, quality: file.attrs.bitrate ?? 0, length: file.attrs.length ?? 0, private: file.private, attributes: file.attrs };
 }
-function inflateProbeToken(payload: Buffer): number | null {
+function probeTokenFromInflated(buf: Buffer): number | null {
   try {
-    const buf: Buffer = inflateWithCap(payload);
     if (buf.length < 8) return null;
     const unameLen = buf.readUInt32LE(0);
     if (4 + unameLen + 4 > buf.length) return null;

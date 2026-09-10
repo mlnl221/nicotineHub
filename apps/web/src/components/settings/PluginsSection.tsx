@@ -66,7 +66,6 @@ export function PluginsSection() {
           <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs text-on-surface-variant dark:bg-surface-container-highest/40">
             Plugins require a running bridge (DATA_DIR/plugins). In the Vercel demo, all logins are mocked and transfers disabled, so plugin install/toggle is not available. Run locally (<span className="font-mono">bun run dev</span> or <span className="font-mono">docker compose up</span>) to manage plugins.
           </div>
-          <ToggleControl label="Enable plugins (demo placeholder)" description="Stored locally only in demo." checked={settings.plugins.enable} onChange={(v) => setOption("plugins", "enable", v)} />
         </SectionCard>
       </div>
     );
