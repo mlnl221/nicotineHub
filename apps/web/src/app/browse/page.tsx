@@ -43,7 +43,7 @@ function BrowseInner() {
 
   useEffect(() => { setRecent(loadRecent()); }, [tabs.length]);
 
-  // Handle ?user= deep link (from profile Browse Files or direct link)
+  // Handle ?user= deep link (from profile Browse Shares or direct link)
   const handledRef = useRef<string | null>(null);
   useEffect(() => {
     const q = searchParams.get("user") || searchParams.get("username");

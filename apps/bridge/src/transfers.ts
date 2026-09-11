@@ -1070,6 +1070,9 @@ export class TransferManager {
       this.transfers.set(id, t);
       this.statsManager.recordUploadFailed();
       this.emit(t);
+      // nicotine-plus parity (uploads.py:953-954): tell the peer, else it stalls
+      // on F pierce waiting for a TransferRequest that never comes.
+      try { this.session?.sendUploadDenied?.(username, virtualPath, "File not shared."); } catch {}
       return t;
     }
     // 4. enqueue
@@ -1192,6 +1195,7 @@ export class TransferManager {
       this.emit(candidate);
       this.emitStats();
       this.persist();
+      try { this.session?.sendUploadDenied?.(candidate.username, candidate.virtualPath, "File not shared."); } catch {}
       setTimeout(() => this.checkUploadQueue(), 100);
       return;
     }
@@ -1246,6 +1250,18 @@ export class TransferManager {
       for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) { target = t; break; }
     }
     if (!target) return;
+    // Finished transfers never restart: repeat peer grants (uploader queue
+    // cycling after our finish) get denied COMPLETE, nicotine-plus parity
+    // (downloads.py _transfer_request_downloads). No token mapping, no status change.
+    if (!target.isUpload && target.status === "Finished") {
+      logger.debug("transfer", "repeat grant for finished transfer denied", { id: target.id, token });
+      try { this.session?.unregisterFileToken(token); } catch {}
+      try {
+        const peer = owner || target.username;
+        if (peer && this.session?.sendTransferResponse) this.session.sendTransferResponse(peer, token, false, "Complete");
+      } catch {}
+      return;
+    }
     // Repeat grant while already streaming: keep the live F, just map + ack.
     if (target.status === "Transferring" && (target as unknown as { _hadRealF?: boolean })._hadRealF) {
       this.tokenIndex.set(token >>> 0, target.id);
@@ -1516,6 +1532,14 @@ export class TransferManager {
       try { socket.end(); } catch {}
       return;
     }
+    // Finished downloads never restart: stray F for a done transfer closes
+    // here instead of re-downloading from offset 0 (partial was moved away
+    // at finish, so resume would restart at 0). Deny went out in handleTransferRequest.
+    if (!t.isUpload && t.status === "Finished") {
+      logger.debug("transfer", "F for finished transfer ignored", { id: t.id, token });
+      try { socket.end(); } catch {}
+      return;
+    }
     // Adopt the live F token (may be an older grant racing a newer request).
     t.token = token;
     this.tokenIndex.set(token >>> 0, t.id);
@@ -1769,6 +1793,7 @@ export class TransferManager {
       this.emit(t);
       this.emitStats();
       this.persist();
+      try { this.session?.sendUploadDenied?.(t.username, t.virtualPath, "File not shared."); } catch {}
       try { socket.end(); } catch {}
       const stall2 = (t as unknown as { _stallTimer?: Timer })._stallTimer;
       if (stall2) { clearTimeout(stall2); (t as unknown as { _stallTimer?: Timer })._stallTimer = undefined; }

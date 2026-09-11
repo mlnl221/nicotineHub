@@ -1042,6 +1042,14 @@ export class ShareDB {
     const all = [...this.publicFolders, ...this.buddyFolders, ...this.trustedFolders];
     const visibleNames = new Set(folders.map(f => f.name));
     const locked = all.filter(f => !visibleNames.has(f.name));
+    // Wire format parity (nicotine-plus shares.py:623-625 + userbrowse.py:339):
+    // folder names are fully qualified, but file names are BASENAMES only.
+    // The receiver joins folder + "\\" + basename. Packing qualified names here
+    // makes remotes request doubled paths ("A\\dir\\A\\dir\\file") we then deny.
+    const wireName = (n: string): string => {
+      const i = n.lastIndexOf("\\");
+      return i >= 0 ? n.slice(i + 1) : n;
+    };
     // inner payload: uint32 ndirs, then for each dir: string name, uint32 nfiles, then files
     const parts: Buffer[] = [];
     parts.push(packUint32(folders.length));
@@ -1053,7 +1061,7 @@ export class ShareDB {
       const filesSorted = [...folder.files].sort((a,b)=> a.name.localeCompare(b.name));
       for (const f of filesSorted) {
         parts.push(Buffer.from([1])); // code
-        parts.push(packString(f.name));
+        parts.push(packString(wireName(f.name)));
         const sz = typeof f.size === "bigint" ? f.size : BigInt(f.size);
         parts.push(packUint64(sz));
         parts.push(packString(f.ext || "")); // legacy ext
@@ -1075,7 +1083,7 @@ export class ShareDB {
       const filesSorted = [...folder.files].sort((a,b)=> a.name.localeCompare(b.name));
       for (const f of filesSorted) {
         parts.push(Buffer.from([1]));
-        parts.push(packString(f.name));
+        parts.push(packString(wireName(f.name)));
         const sz = typeof f.size === "bigint" ? f.size : BigInt(f.size);
         parts.push(packUint64(sz));
         parts.push(packString(f.ext || ""));
@@ -1107,6 +1115,12 @@ export class ShareDB {
     const folders = this.getFoldersForPermission(permission);
     const matches = folders.filter((f) => f.name === dir || f.name.startsWith(dir + "\\"))
       .sort((a, b) => a.name.localeCompare(b.name));
+    // Same basename-on-wire parity as buildSharedFileListResponse (nicotine-plus
+    // shares.py:623-625): folder qualified, files basename-only.
+    const wireName = (n: string): string => {
+      const i = n.lastIndexOf("\\");
+      return i >= 0 ? n.slice(i + 1) : n;
+    };
     const parts: Buffer[] = [];
     parts.push(packUint32(token >>> 0));
     parts.push(packString(dir));
@@ -1117,7 +1131,7 @@ export class ShareDB {
       parts.push(packUint32(files.length));
       for (const f of files) {
         parts.push(Buffer.from([1]));
-        parts.push(packString(f.name));
+        parts.push(packString(wireName(f.name)));
         const sz = typeof f.size === "bigint" ? f.size : BigInt(f.size);
         parts.push(packUint64(sz));
         parts.push(packString(f.ext || ""));
@@ -1156,6 +1170,9 @@ export class ShareDB {
     if (!results.length) return null;
     if (typeof maxResults === "number" && maxResults > 0 && results.length > maxResults) results = results.slice(0, maxResults);
     // Build result payload similar to parseFileSearchResponse expectation: zlib compressed
+    // NOTE: search responses intentionally carry FULL virtual paths (nicotine-plus
+    // search.py appends files[path] full_path_file_data), unlike browse responses
+    // which carry basenames. Do not "fix" this to basename.
     const parts: Buffer[] = [];
     parts.push(packString(username));
     parts.push(packUint32(token >>> 0));

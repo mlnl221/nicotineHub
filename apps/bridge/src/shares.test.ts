@@ -44,8 +44,21 @@ describe("ShareDB browse responses", () => {
     expect(parseFolderContentsResponse(parsedFrame!.payload)).toEqual({
       token: 3,
       dir: "Music",
-      folders: [{ name: "Music", files: [{ name: "Music\\song.mp3", size: 42, ext: "mp3", attrs: [] }] }],
-      files: [{ name: "Music\\song.mp3", size: 42, ext: "mp3", attrs: [] }],
+      folders: [{ name: "Music", files: [{ name: "song.mp3", size: 42, ext: "mp3", attrs: [] }] }],
+      files: [{ name: "song.mp3", size: 42, ext: "mp3", attrs: [] }],
     });
+  });
+
+  test("browse wire files are basenames; folder join reconstructs full virtual path", () => {
+    // nicotine-plus parity: shares.py packs basename, userbrowse.py joins
+    // folder + "\\" + basename. Packing qualified names makes remotes request
+    // doubled paths ("Music\\song" advertised as file of "Music" -> request
+    // "Music\\Music\\song") that resolveSharedFile then denies.
+    const db = testDb();
+    const listFrame = tryParseMessage(db.buildSharedFileListResponse(PermissionLevel.PUBLIC));
+    const list = parseSharedFileListResponse(listFrame!.payload);
+    const music = list.folders.find((f) => f.name === "Music")!;
+    expect(music.files.map((f) => f.name)).toEqual(["song.mp3"]);
+    expect(`${music.name}\\${music.files[0].name}`).toBe("Music\\song.mp3");
   });
 });

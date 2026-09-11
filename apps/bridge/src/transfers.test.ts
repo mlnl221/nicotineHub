@@ -104,6 +104,64 @@ describe("transfers — download engine (Phase 2)", () => {
     mgr.close();
   });
 
+  test("repeat grant for finished download denied COMPLETE, never restarts", async () => {
+    const responses: Array<{ u: string; t: number; allowed: boolean; size?: unknown }> = [];
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+      sendTransferResponse: (u: string, t: number, allowed: boolean, s?: unknown) => { responses.push({ u, t, allowed, size: s }); },
+    };
+    const { mgr, finished } = makeManager(tmp, mockSession);
+    const user = "alice";
+    const virtual = "Music\\album\\05 song.flac";
+    const t = mgr.requestDownload(user, virtual, 1024, "05 song.flac");
+    mgr.handleTransferRequest(1, t.token!, virtual);
+    const sock: any = { write: () => {}, end: () => {} };
+    await (mgr as any).handleFileConnection(t.token!, sock);
+    (mgr as any).handleFileChunk(t.token!, Buffer.alloc(1024, 0x41));
+    expect(mgr.get(t.id)?.status).toBe("Finished");
+    const finishedCount = finished.length;
+    // repeat peer grant, as seen in production log (uploader queue cycling
+    // ~377s after finish) — must stay finished, deny COMPLETE
+    mgr.handleTransferRequest(1, 77777, virtual, user, 1024);
+    expect(mgr.get(t.id)?.status).toBe("Finished");
+    expect(mgr.get(t.id)?.current).toBe(1024);
+    expect(mgr.getByToken(77777)).toBeUndefined();
+    expect(responses[responses.length - 1]).toEqual({ u: user, t: 77777, allowed: false, size: "Complete" });
+    expect(finished.length).toBe(finishedCount);
+    mgr.close();
+  });
+
+  test("stray F for finished download closes socket, no restart", async () => {
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+      sendTransferResponse: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    const user = "alice";
+    const virtual = "Music\\album\\09 song.flac";
+    const t = mgr.requestDownload(user, virtual, 512, "09 song.flac");
+    mgr.handleTransferRequest(1, t.token!, virtual);
+    const sock: any = { write: () => {}, end: () => {} };
+    await (mgr as any).handleFileConnection(t.token!, sock);
+    (mgr as any).handleFileChunk(t.token!, Buffer.alloc(512, 0x41));
+    expect(mgr.get(t.id)?.status).toBe("Finished");
+    let ended = false;
+    const stray: any = { write: () => {}, end: () => { ended = true; } };
+    await (mgr as any).handleFileConnection(t.token!, stray);
+    expect(ended).toBe(true);
+    expect(mgr.get(t.id)?.status).toBe("Finished");
+    expect(mgr.get(t.id)?.current).toBe(512);
+    mgr.close();
+  });
+
   test("grant binds owner only; same path from another user ignored", () => {
     const mockSession = {
       registerFileToken: () => {},

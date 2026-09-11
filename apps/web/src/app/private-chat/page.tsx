@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState, useRef } from "react";
+import { Suspense, useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { RequireAuth } from "@/components/RequireAuth";
 import { Sidebar } from "@/components/Sidebar";
@@ -13,6 +13,7 @@ import { privateChatMenu, userMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
 import { highlightKeywords, usernameHotspotClass } from "@/lib/chatFormat";
 import { usePaneWidth } from "@/lib/usePaneWidth";
+import { useStickToBottom } from "@/lib/useStickToBottom";
 import { isDemo } from "@/lib/demo";
 
 function PrivateChatInner() {
@@ -24,7 +25,6 @@ function PrivateChatInner() {
   const { settings } = useConfig();
   const [newChatUser, setNewChatUser] = useState(initialUser);
   const [filter, setFilter] = useState("");
-  const endRef = useRef<HTMLDivElement>(null);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
   const [pmW, onPmDown] = usePaneWidth("nicotineHub.privatechat.asideW");
 
@@ -36,19 +36,21 @@ function PrivateChatInner() {
     }
   }, [initialUser]);
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [conversations, activeUser]);
-
   const activeMessages = activeUser ? conversations.get(activeUser) || [] : [];
   const filteredUsers = filter ? users.filter((u) => u.toLowerCase().includes(filter.toLowerCase())) : users;
   // divider between disk-log backfill and live messages
   const firstLiveIdx = activeMessages.some((m) => m.backfilled) ? activeMessages.findIndex((m) => !m.backfilled) : -1;
+  const pmStick = useStickToBottom(activeUser ?? "", activeMessages.length);
+  const openPeerMenu = (pos: { clientX: number; clientY: number }) => {
+    if (!activeUser) return;
+    setMenuAnchor({ x: pos.clientX, y: pos.clientY, items: userMenu(activeUser, "privatechat") });
+  };
 
   const handleSend = () => {
     if (!activeUser || !input.trim()) return;
     sendMessage(activeUser, input);
     setInput("");
+    pmStick.jump();
   };
 
   const startNewChat = () => {
@@ -184,7 +186,7 @@ function PrivateChatInner() {
           <div role="separator" aria-orientation="vertical" aria-label="Resize conversations" onPointerDown={onPmDown} className="hidden md:flex w-2 shrink-0 cursor-col-resize items-center justify-center hover:bg-primary/10 touch-none select-none" style={{ touchAction: "none" }}><div className="h-8 w-0.5 rounded-full bg-outline-variant/40" /></div>
 
           {/* Center: Messages + Mobile picker */}
-          <section className="flex flex-1 flex-col overflow-hidden min-h-0" onContextMenu={(e) => {
+          <section className="relative flex flex-1 flex-col overflow-hidden min-h-0" onContextMenu={(e) => {
             const target = e.target as HTMLElement;
             if (target.closest("button, input, textarea, select")) return;
             e.preventDefault();
@@ -236,7 +238,7 @@ function PrivateChatInner() {
               </div>
             ) : (
               <>
-                <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-6 space-y-4">
+                <div ref={pmStick.ref} onScroll={pmStick.onScroll} data-testid="pm-messages" className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-6 space-y-4">
                   {activeMessages.length === 0 ? (
                     <div className="flex justify-center">
                       <span className="rounded-full bg-surface-container-high px-4 py-2 font-label text-xs text-on-surface-variant">
@@ -256,7 +258,14 @@ function PrivateChatInner() {
                         </div>
                       ) : null}
                       <div className={`flex gap-3 max-w-[78%] min-w-0 ${m.isSelf ? "self-end flex-row-reverse" : ""} ${isIgnored ? "opacity-40" : ""}`}>
-                        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-surface-container-high text-xs font-bold">
+                        <div
+                          {...(!m.isSelf ? {
+                            onContextMenu: (e: ReactMouseEvent) => { e.preventDefault(); e.stopPropagation(); openPeerMenu(e); },
+                            onClick: (e: ReactMouseEvent) => { e.stopPropagation(); openPeerMenu(e); },
+                          } : {})}
+                          title={m.isSelf ? undefined : `${m.username} — open user menu`}
+                          className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-surface-container-high text-xs font-bold ${m.isSelf ? "" : "cursor-pointer"}`}
+                        >
                           {m.isSelf ? "You" : m.username.slice(0, 2).toUpperCase()}
                         </div>
                         <div
@@ -287,8 +296,16 @@ function PrivateChatInner() {
                       </div>
                     </div>
                   ) : null}
-                  <div ref={endRef} />
                 </div>
+                {!pmStick.stick && activeMessages.length > 0 ? (
+                  <button
+                    onClick={() => pmStick.jump()}
+                    className="absolute bottom-24 left-1/2 z-10 inline-flex -translate-x-1/2 items-center gap-1 rounded-full bg-primary px-4 py-2 font-label text-xs font-semibold text-on-primary shadow-lg hover:bg-primary-container hover:text-on-primary-container"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">arrow_downward</span>
+                    Latest messages
+                  </button>
+                ) : null}
 
                 <footer className="border-t border-outline-variant/15 bg-surface-container-lowest p-4">
                   <div className="flex items-end gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-low p-2 focus-within:border-primary">

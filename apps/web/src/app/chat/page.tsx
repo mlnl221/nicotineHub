@@ -14,6 +14,7 @@ import { chatRoomMenu, userMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
 import { useCompletion } from "@/lib/completion";
 import { usePaneWidth } from "@/lib/usePaneWidth";
+import { useStickToBottom } from "@/lib/useStickToBottom";
 import { useBuddies } from "@/lib/buddies";
 import { highlightKeywords, usernameHotspotClass } from "@/lib/chatFormat";
 import { isDemo } from "@/lib/demo";
@@ -48,6 +49,10 @@ function ChatRoomsInner() {
   // divider between disk-log backfill and live messages (nicotine-plus "old messages above")
   const firstLiveIdx = userMessages.some((m) => m.backfilled) ? userMessages.findIndex((m) => !m.backfilled) : -1;
   const sysLogRef = useRef<HTMLDivElement>(null);
+  const chatStick = useStickToBottom(activeRoom ?? "", userMessages.length);
+  const openUserMenu = (pos: { clientX: number; clientY: number }, username: string) => {
+    setMenuAnchor({ x: pos.clientX, y: pos.clientY, items: userMenu(username, "chatrooms") });
+  };
   const joinedArray = Array.from(joinedRooms.values());
   const sortedRooms = (() => {
     const list = roomList.length ? roomList : isDemo ? DEMO_ROOMS.map((r) => ({ name: r.name, users: r.users, isPrivate: false })) : [];
@@ -89,6 +94,7 @@ function ChatRoomsInner() {
     if (!activeRoom || !sayInput.trim()) return;
     say(activeRoom, sayInput);
     setSayInput("");
+    chatStick.jump();
   };
 
   return (
@@ -370,9 +376,9 @@ function ChatRoomsInner() {
                 ) : null}
 
                 <div className="flex flex-1 overflow-hidden min-h-0">
-                  <div className="flex flex-1 flex-col overflow-hidden min-h-0">
+                  <div className="flex flex-1 flex-col overflow-hidden min-h-0 relative">
                     {systemMessages.length > 0 ? (
-                    <div ref={sysLogRef} data-testid="system-log" aria-label="System events" className="shrink-0 max-h-[10%] overflow-y-auto overscroll-contain border-b border-outline-variant/15 bg-surface-container-low/60 px-4 md:px-6 py-1">
+                    <div ref={sysLogRef} data-testid="system-log" aria-label="System events" className="shrink-0 max-h-[5%] overflow-y-auto overscroll-contain border-b border-outline-variant/15 bg-surface-container-low/60 px-4 md:px-6 py-1">
                       {systemMessages.map((m) => (
                         <div key={m.id} className="flex justify-center py-0.5 max-w-full overflow-hidden">
                           <span className="truncate whitespace-nowrap font-body text-xs italic text-on-surface-variant max-w-full overflow-hidden">
@@ -385,7 +391,7 @@ function ChatRoomsInner() {
                       ))}
                     </div>
                     ) : null}
-                    <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-4 md:p-6 space-y-2 max-w-full overflow-x-hidden">
+                    <div ref={chatStick.ref} onScroll={chatStick.onScroll} data-testid="room-messages" className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-4 md:p-6 space-y-2 max-w-full overflow-x-hidden">
                       {userMessages.length === 0 ? (
                         <div className="py-10 text-center">
                           <p className="font-body text-sm text-outline">No messages yet. Start the conversation.</p>
@@ -433,13 +439,21 @@ function ChatRoomsInner() {
                           {divider}
                           <div className={`group flex gap-3 hover:bg-surface-container-low/40 -mx-4 md:-mx-6 px-4 md:px-6 py-1.5 max-w-full overflow-hidden ${isIgnored ? "opacity-40" : ""}`}>
                             <span
-                              className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-xs font-bold bg-primary-container text-on-primary-container"
+                              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openUserMenu(e, m.username); }}
+                              onClick={(e) => { e.stopPropagation(); openUserMenu(e, m.username); }}
+                              title={`${m.username} — open user menu`}
+                              className="flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded text-xs font-bold bg-primary-container text-on-primary-container"
                             >
                               {m.username.slice(0, 2).toUpperCase()}
                             </span>
                             <div className="min-w-0 flex-1">
                               <p className="font-body text-sm leading-relaxed">
-                                <span className={usernameHotspotClass(settings.ui.usernamehotspots, settings.ui.usernamestyle)}>
+                                <span
+                                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openUserMenu(e, m.username); }}
+                                  onClick={(e) => { e.stopPropagation(); openUserMenu(e, m.username); }}
+                                  title={`${m.username} — open user menu`}
+                                  className={`${usernameHotspotClass(settings.ui.usernamehotspots, settings.ui.usernamestyle)} cursor-pointer`}
+                                >
                                   {m.username}
                                 </span>
                                 <span className="ml-2 font-mono text-xs text-outline">
@@ -463,6 +477,15 @@ function ChatRoomsInner() {
                         })
                       )}
                     </div>
+                    {!chatStick.stick && userMessages.length > 0 ? (
+                      <button
+                        onClick={() => chatStick.jump()}
+                        className="absolute bottom-24 left-1/2 z-10 inline-flex -translate-x-1/2 items-center gap-1 rounded-full bg-primary px-4 py-2 font-label text-xs font-semibold text-on-primary shadow-lg hover:bg-primary-container hover:text-on-primary-container"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">arrow_downward</span>
+                        Latest messages
+                      </button>
+                    ) : null}
 
                     <div className="border-t border-outline-variant/15 bg-surface p-3 relative">
                       {completion.shouldShow ? (

@@ -50,7 +50,7 @@ export function userMenu(username: string, tabName: string, opts?: { onBrowse?: 
   ];
   if (tabName !== "userinfo") items.push({ id: "view-profile", label: "View User Profile", icon: "account_circle", action: () => (opts?.onProfile ? opts.onProfile() : navigate(`/profile/${encodeURIComponent(username)}`)) });
   if (tabName !== "privatechat") items.push({ id: "send-message", label: "Send Message", icon: "chat_bubble", action: () => (opts?.onMessage ? opts.onMessage() : navigate(`/private-chat?user=${encodeURIComponent(username)}`)) });
-  if (tabName !== "userbrowse") items.push({ id: "browse-files", label: "Browse Files", icon: "folder_managed", action: () => (opts?.onBrowse ? opts.onBrowse() : navigate(`/browse/${encodeURIComponent(username)}`)) });
+  if (tabName !== "userbrowse") items.push({ id: "browse-files", label: "Browse Shares", icon: "folder_managed", action: () => (opts?.onBrowse ? opts.onBrowse() : navigate(`/browse/${encodeURIComponent(username)}`)) });
   if (tabName !== "userlist") items.push({ id: "add-buddy", label: "Add Buddy", icon: "person_add", action: () => toast("Add buddy: use Buddies page") });
   items.push({ id: "sep2", label: "---", icon: "" });
   // Ban/Ignore are exact labels — toast as unavailable until bridge implements
