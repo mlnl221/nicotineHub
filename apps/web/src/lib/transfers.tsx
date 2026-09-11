@@ -34,6 +34,24 @@ const TransfersContext = createContext<TransfersApi | null>(null);
 
 const STORAGE_KEY = "nicotineHub.transfers.mock";
 
+// Clears that may never have reached the bridge (reload drops the in-memory
+// send queue). Flushed on reconnect; resend is a no-op for ids already gone.
+const PENDING_CLEAR_KEY = "nicotineHub.transfers.pendingClear";
+interface PendingClear { id: string; isUpload: boolean }
+function loadPendingClear(): PendingClear[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(PENDING_CLEAR_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((p) => p && typeof p.id === "string").slice(0, 100);
+  } catch { return []; }
+}
+function savePendingClear(list: PendingClear[]) {
+  try { window.localStorage.setItem(PENDING_CLEAR_KEY, JSON.stringify(list)); } catch {}
+}
+
 function loadInitial(): Transfer[] {
   if (typeof window === "undefined") return [];
   // In prod (non-demo) never hydrate demo mock transfers — they are vercel-demo only
@@ -246,6 +264,7 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
         // Optionally trigger browser download via hidden link (Phase 5 OPFS handling deferred)
         // We keep it non-intrusive: UI will show Finished with downloadUrl available
       } else if (msg.type === "transfer:removed") {
+        savePendingClear(loadPendingClear().filter((p) => p.id !== msg.id));
         setTransfers((prev) => prev.filter((t) => t.id !== msg.id));
       } else if (msg.type === "transfer:stats") {
         setStats(msg);
@@ -253,6 +272,20 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
     });
     return unsub;
   }, [subscribe, triggerScan]);
+
+  // Flush clears that predated a reload/reconnect. No-op for ids already gone.
+  useEffect(() => {
+    if (isDemo || state.status !== "connected") return;
+    const pending = loadPendingClear();
+    if (!pending.length) return;
+    for (const p of pending) {
+      try {
+        if (p.isUpload) send({ type: "upload:control", id: p.id, action: "clear" });
+        else send({ type: "download:control", id: p.id, action: "clear" });
+      } catch {}
+    }
+    savePendingClear([]);
+  }, [state.status, send]);
 
   const requestDownload = useCallback(
     (opts: { username: string; virtualPath: string; size: number; fileName?: string }) => {
@@ -315,6 +348,14 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
 
   const clearTransfer = useCallback(
     (id: string, isUpload: boolean) => {
+      // Durable intent: if this never reaches the bridge (offline/reload),
+      // the reconnect flush resends it so the row can't resurrect.
+      const pending = loadPendingClear();
+      if (!pending.some((p) => p.id === id)) {
+        pending.push({ id, isUpload });
+        savePendingClear(pending);
+      }
+      // Bridge denies Queued uploads on clear so the peer can't requeue them.
       if (isUpload) send({ type: "upload:control", id, action: "clear" });
       else send({ type: "download:control", id, action: "clear" });
       setTransfers((prev) => prev.filter((t) => t.id !== id));

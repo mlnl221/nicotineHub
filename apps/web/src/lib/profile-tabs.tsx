@@ -103,6 +103,8 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const counter = useRef<number>(initialMax);
   const tabsRef = useRef<ProfileTab[]>([]);
   tabsRef.current = tabs;
+  const activeIdRef = useRef<string | null>(null);
+  activeIdRef.current = activeId;
   // Guard against rapid double-open of same username (e.g., ?user effect firing twice)
   const pendingOpenRef = useRef<Set<string>>(new Set());
 
@@ -324,24 +326,32 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     if (tab && state.status === "connected") {
       try { send({ type: "userinfo", action: "unwatch", username: tab.username }); } catch {}
     }
-    const idx = tabsRef.current.findIndex((t) => t.id === id);
-    const next = tabsRef.current.filter((t) => t.id !== id);
+    const list = tabsRef.current;
+    const idx = list.findIndex((t) => t.id === id);
+    const next = list.filter((t) => t.id !== id);
+    // Pick next active synchronously (same rule as before) so the cleared list
+    // persists immediately — refresh-before-flush can't resurrect the tab.
+    let nextActive = activeIdRef.current;
+    if (nextActive === id) {
+      nextActive = null;
+      if (next.length > 0) {
+        let preferPrev = true;
+        try {
+          const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
+          if (raw) {
+            const parsed = JSON.parse(raw) as { ui?: { tab_select_previous?: boolean } };
+            if (typeof parsed?.ui?.tab_select_previous === "boolean") preferPrev = parsed.ui.tab_select_previous;
+          }
+        } catch {}
+        if (preferPrev && idx > 0) nextActive = list[idx - 1]?.id ?? next[next.length - 1]?.id ?? null;
+        else if (!preferPrev && idx < list.length - 1) nextActive = list[idx + 1]?.id ?? next[next.length - 1]?.id ?? null;
+        else nextActive = next[next.length - 1]?.id ?? null;
+      }
+    }
+    if (tab) pendingOpenRef.current.delete(tab.username.toLowerCase());
     setTabs(next);
-    setActiveId((cur) => {
-      if (cur !== id) return cur;
-      if (next.length === 0) return null;
-      let preferPrev = true;
-      try {
-        const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
-        if (raw) {
-          const parsed = JSON.parse(raw) as { ui?: { tab_select_previous?: boolean } };
-          if (typeof parsed?.ui?.tab_select_previous === "boolean") preferPrev = parsed.ui.tab_select_previous;
-        }
-      } catch {}
-      if (preferPrev && idx > 0) return tabsRef.current[idx - 1]?.id ?? next[next.length - 1]?.id ?? null;
-      if (!preferPrev && idx < tabsRef.current.length - 1) return tabsRef.current[idx + 1]?.id ?? next[next.length - 1]?.id ?? null;
-      return next[next.length - 1]?.id ?? null;
-    });
+    setActiveId(nextActive);
+    persist(next, nextActive);
   }, [send, state.status]);
 
   const setActive = useCallback((id: string) => setActiveId(id), []);
