@@ -824,7 +824,7 @@ describe("browse shares parity (SLSKPROTOCOL.md Peer Codes 4/5/36/37)", () => {
       expect(parsed.token).toBe(7);
       expect(parsed.dir).toBe("Music");
       expect(parsed.folders.map((f) => f.name).sort()).toEqual(["Music", "Music\\Sub"]);
-      expect(parsed.files.map((f) => f.name)).toEqual(["Music\\a.mp3"]);
+      expect(parsed.files.map((f) => f.name)).toEqual(["a.mp3"]);
     } finally {
       if (prev === undefined) delete process.env.CONFIG_DIR;
       else process.env.CONFIG_DIR = prev;

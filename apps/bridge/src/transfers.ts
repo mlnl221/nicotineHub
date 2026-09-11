@@ -1070,6 +1070,9 @@ export class TransferManager {
       this.transfers.set(id, t);
       this.statsManager.recordUploadFailed();
       this.emit(t);
+      // nicotine-plus parity (uploads.py:953-954): tell the peer, else it stalls
+      // on F pierce waiting for a TransferRequest that never comes.
+      try { this.session?.sendUploadDenied?.(username, virtualPath, "File not shared."); } catch {}
       return t;
     }
     // 4. enqueue
@@ -1192,6 +1195,7 @@ export class TransferManager {
       this.emit(candidate);
       this.emitStats();
       this.persist();
+      try { this.session?.sendUploadDenied?.(candidate.username, candidate.virtualPath, "File not shared."); } catch {}
       setTimeout(() => this.checkUploadQueue(), 100);
       return;
     }
@@ -1789,6 +1793,7 @@ export class TransferManager {
       this.emit(t);
       this.emitStats();
       this.persist();
+      try { this.session?.sendUploadDenied?.(t.username, t.virtualPath, "File not shared."); } catch {}
       try { socket.end(); } catch {}
       const stall2 = (t as unknown as { _stallTimer?: Timer })._stallTimer;
       if (stall2) { clearTimeout(stall2); (t as unknown as { _stallTimer?: Timer })._stallTimer = undefined; }
