@@ -10,14 +10,7 @@ import { useBuddies } from "@/lib/buddies";
 import { useConfig } from "@/lib/config/provider";
 import { useProfileTabs } from "@/lib/profile-tabs";
 import type { ProfileTab } from "@/lib/profile-tabs";
-
-function profilePicSrc(pic: unknown): string {
-  if (typeof pic !== "string" || !pic) return "";
-  const trim = pic.trimStart();
-  const isSvg = trim.startsWith("<svg") || trim.startsWith("PHN2");
-  const mime = isSvg ? "image/svg+xml" : "image/png";
-  return `data:${mime};base64,${pic}`;
-}
+import { profilePicSrc } from "@/lib/profile-pic";
 
 function guessMime(pic: unknown): string {
   if (typeof pic !== "string" || !pic) return "image/png";
@@ -253,7 +246,7 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
 
   return (
     <div className="flex flex-col">
-      <header className="md:sticky md:top-0 z-10 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-8 py-4 md:py-6 flex flex-col gap-3 md:gap-4 border-b border-outline-variant/10">
+      <header className="md:sticky md:top-0 z-10 bg-surface-bright/80 dark:bg-surface-container-lowest/80 backdrop-blur-xl px-4 md:px-8 py-3 md:py-6 flex flex-col gap-3 md:gap-4 border-b border-outline-variant/10">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className={`flex items-center gap-4 min-w-0 flex-1 ${profile.info && !profile.info.slotsavail ? "opacity-60" : ""}`} title={profile.info && !profile.info.slotsavail ? "Slots full" : undefined}>
             {profile.info?.pic && showPic ? (
@@ -289,7 +282,7 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
               </div>
             )}
             <div className="min-w-0">
-              <h2 className="font-headline text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight truncate">
+              <h2 className="font-headline text-2xl md:text-3xl font-bold text-on-surface dark:text-on-surface tracking-tight truncate">
                 {username}
               </h2>
               <div className="mt-1 flex flex-wrap items-center gap-2 font-label text-xs uppercase tracking-widest text-on-surface-variant dark:text-outline">

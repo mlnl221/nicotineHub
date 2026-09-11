@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useWishlist } from "@/lib/wishlist";
 import { useSession } from "@/lib/session";
 import { useConfig } from "@/lib/config/provider";
+import { MobileHelp } from "@/components/ui/MobileHelp";
 
 export function WishlistManager() {
   const { terms, entries, addTerm, removeTerm, interval, toggleAuto, resetSeen } = useWishlist();
@@ -78,10 +79,12 @@ export function WishlistManager() {
         </ul>
       )}
 
-      <p className="mt-3 text-[11px] text-on-surface-variant">
-        Uses <code className="rounded bg-surface-container-high px-1">search:wishlist (103)</code> with server interval <code>WishlistInterval 104</code>. Notifications:{" "}
-        {settings.notifications.notification_popup_wish ? "on" : "off"}.
-      </p>
+      <MobileHelp short="Auto-search details" testId="wishlist-protocol-help">
+        <p className="mt-3 text-[11px] text-on-surface-variant">
+          Uses <code className="rounded bg-surface-container-high px-1">search:wishlist (103)</code> with server interval <code>WishlistInterval 104</code>. Notifications:{" "}
+          {settings.notifications.notification_popup_wish ? "on" : "off"}.
+        </p>
+      </MobileHelp>
     </div>
   );
 }

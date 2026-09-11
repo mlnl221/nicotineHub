@@ -16,6 +16,7 @@ import { SearchTabs } from "./SearchTabs";
 import { FilterBar } from "./FilterBar";
 import { ResultsList, searchRowId } from "./ResultsList";
 import { ContextMenu } from "@/components/ui/ContextMenu";
+import { MobileHelp, wishlistDefaultOpen } from "@/components/ui/MobileHelp";
 import { searchResultMenu, searchTabMenu } from "@/lib/context-menu/menus";
 import { useContextMenu } from "@/lib/context-menu/useContextMenu";
 import { useWishlist } from "@/lib/wishlist";
@@ -27,10 +28,14 @@ export function SearchScreen() {
   const { activeTab, activeId, tabs, setActive, closeTab, startSearch, stopSearch, retrySearch, setFilters, clearFilters } = useSearches();
   const { requestDownload } = useTransfers();
   const { settings, setOption } = useConfig();
-  const { getIgnored, markSeen } = useWishlist();
+  const { getIgnored, markSeen, terms } = useWishlist();
   const router = useRouter();
   const [showFilters, setShowFilters] = useState(() => settings.searches.filters_visible ?? false);
   useEffect(() => { setShowFilters(settings.searches.filters_visible ?? false); }, [settings.searches.filters_visible]);
+  // Wishlist collapsible on mobile (open on desktop). Single mounted instance,
+  // CSS show/hide only, so the draft input survives toggling/resizing.
+  const [wishlistOpen, setWishlistOpen] = useState(true);
+  useEffect(() => { setWishlistOpen(wishlistDefaultOpen(window.innerWidth)); }, []);
   // Sticky zero-tab draft: FilterBar stays usable with no tabs, and the next
   // user-initiated search (from empty state) seeds from it. Seeded from the
   // same defaults as new tabs so the panel shows what the search will use.
@@ -207,7 +212,7 @@ export function SearchScreen() {
   return (
     <div className="flex min-h-screen max-w-full overflow-x-hidden flex-col bg-surface-container-low dark:bg-inverse-surface" data-custom-menu>
       <PageHeader title="Search" subtitle={searchSubtitle} settingsHref="/settings?tab=searches#searches" />
-      <div className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-low/95 backdrop-blur dark:bg-inverse-surface/95 border-b border-outline-variant/10">
+      <div className="sticky top-[calc(60px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-low/95 backdrop-blur dark:bg-inverse-surface/95 border-b border-outline-variant/10">
         <SearchBar
           onSearch={startWithDraft}
           onToggleFilters={() => {
@@ -340,21 +345,27 @@ export function SearchScreen() {
                   ? "Search limit reached — no matching results"
                   : "No results"}
             </p>
-            <p className="max-w-md font-body text-xs leading-relaxed text-on-surface-variant">
+            <div className="max-w-md font-body text-xs leading-relaxed text-on-surface-variant">
               {activeTab.reason === "error" ? (
                 <>Search ended because the connection dropped. Your previous results are kept — <button onClick={() => retrySearch(activeTab.id)} className="text-primary underline">Retry</button> will continue the same tab.</>
               ) : activeTab.reason === "timeout" && activeTab.total === 0 ? (
-                <>
-                  Soulseek returns results peer-to-peer to your listening port (currently <code className="rounded bg-surface-container-high px-1 py-0.5 font-mono text-[11px]">{settings.server.portrange[0] ?? 60754}</code>). If this port isn&apos;t forwarded through your VPN/router and into WSL, searches will time out with 0 results.
-                  <br />
-                  Check <a href="/settings?tab=network#network" className="text-primary underline">Settings → Network</a> and your VPN port-forward / OS port-proxy settings.
-                </>
+                <MobileHelp short="Searches need a reachable listening port." testId="search-port-help">
+                  <>
+                    Soulseek returns results peer-to-peer to your listening port (currently <code className="rounded bg-surface-container-high px-1 py-0.5 font-mono text-[11px]">{settings.server.portrange[0] ?? 60754}</code>). If this port isn&apos;t forwarded through your VPN/router and into WSL, searches will time out with 0 results.
+                    <br />
+                    Check <a href="/settings?tab=network#network" className="text-primary underline">Settings → Network</a> and your VPN port-forward / OS port-proxy settings.
+                  </>
+                </MobileHelp>
               ) : activeTab.total === 0 ? (
-                "Try a different query or widen your filters. Results are live — some queries return nothing if peers are offline."
+                <MobileHelp short="Try a different query or widen your filters." testId="search-empty-results-help">
+                  <p className="font-body text-xs leading-relaxed text-on-surface-variant">
+                    Try a different query or widen your filters. Results are live — some queries return nothing if peers are offline.
+                  </p>
+                </MobileHelp>
               ) : (
                 "All results are filtered out. Try clearing filters."
               )}
-            </p>
+            </div>
             {activeTab.reason === "timeout" && activeTab.total === 0 ? (
               <div className="mt-2 rounded-lg bg-error-container/20 px-3 py-2 font-label text-[11px] text-on-error-container">
                 Search ended: timeout (no peer could connect back). This is expected if {settings.server.portrange[0] ?? 60754} isn&apos;t reachable.
@@ -407,13 +418,15 @@ export function SearchScreen() {
           </div>
         )
       ) : (
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4 py-8">
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-4 md:gap-4 md:py-8">
           <div className="flex flex-col items-center gap-3 text-center">
             <span className="material-symbols-outlined text-5xl text-outline">travel_explore</span>
             <p className="font-headline text-xl text-on-surface">Search the network</p>
-            <p className="font-body text-sm text-on-surface-variant">
-              Enter a query above to search Soulseek. Each search opens in its own tab.
-            </p>
+            <MobileHelp short="Enter a query above to search Soulseek." testId="search-empty-help">
+              <p className="font-body text-sm text-on-surface-variant">
+                Enter a query above to search Soulseek. Each search opens in its own tab.
+              </p>
+            </MobileHelp>
             {settings.searches.enable_history && settings.searches.history.length > 0 ? (
               <div className="mt-2 flex flex-wrap justify-center gap-2">
                 {settings.searches.history.slice(0, 8).map((h) => (
@@ -429,10 +442,26 @@ export function SearchScreen() {
             ) : null}
           </div>
           <div className="w-full max-w-md">
-            <WishlistManager />
+            <button
+              type="button"
+              onClick={() => setWishlistOpen((v) => !v)}
+              aria-expanded={wishlistOpen}
+              className="flex min-h-11 w-full items-center justify-between gap-2 rounded-2xl bg-surface-container-high px-4 py-2.5 font-label text-sm font-semibold text-on-surface md:hidden"
+            >
+              <span className="inline-flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px] text-on-surface-variant">favorite</span>
+                Wishlist{terms.length ? ` (${terms.length})` : ""}
+              </span>
+              <span className="material-symbols-outlined text-[20px] text-on-surface-variant">{wishlistOpen ? "expand_less" : "expand_more"}</span>
+            </button>
+            <div className={`${wishlistOpen ? "mt-2 block" : "hidden"} md:mt-0 md:block`}>
+              <WishlistManager />
+            </div>
           </div>
           <div className="text-[11px] text-on-surface-variant">
-            Grouping: {settings.searches.group_searches} · Expand: {settings.searches.expand_results} · Filters {settings.searches.enablefilters ? "on" : "off"}
+            <MobileHelp short="Search defaults" testId="search-defaults-help">
+              <span>Grouping: {settings.searches.group_searches} · Expand: {settings.searches.expand_results} · Filters {settings.searches.enablefilters ? "on" : "off"}</span>
+            </MobileHelp>
           </div>
         </div>
       )}

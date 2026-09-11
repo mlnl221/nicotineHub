@@ -5,6 +5,7 @@ import type { SearchMode } from "@/lib/search";
 import { useConfig } from "@/lib/config/provider";
 import { useRooms } from "@/lib/rooms";
 import { scrapeRelease } from "@/lib/worker";
+import { MobileHelp, scopeRowVisible } from "@/components/ui/MobileHelp";
 
 interface SearchBarProps {
   onSearch: (query: string, opts?: { mode: SearchMode; target?: string }) => void;
@@ -63,11 +64,15 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
 
   const current = MODES.find((m) => m.id === mode) ?? MODES[0];
   const [showHelp, setShowHelp] = useState(false);
+  // Mobile collapses the scope row to one pill (global default); the select
+  // stays the sole setMode path so non-global modes always show the row.
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const showScope = scopeRowVisible(mode, scopeOpen);
 
   return (
-    <div className="flex flex-col gap-2 px-3 pt-2 pb-2 md:px-3 md:py-3 max-w-full overflow-hidden">
+    <div className="flex flex-col gap-2 px-3 pt-1 pb-1 md:px-3 md:py-3 max-w-full overflow-hidden">
       {/* Card container — keeps everything inside viewport */}
-      <div className="flex flex-col gap-2.5 rounded-2xl bg-surface-container-lowest ghost-border p-2 md:p-3 shadow-sm max-w-full overflow-hidden">
+      <div className="flex flex-col gap-2 rounded-2xl bg-surface-container-lowest ghost-border p-1.5 md:gap-2.5 md:p-3 shadow-sm max-w-full overflow-hidden">
         {/* Row 1: query + actions */}
         <div className="flex items-center gap-1.5 sm:gap-2 max-w-full min-w-0">
           <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-surface-container-low px-3 sm:px-4 py-2.5 ghost-border transition-all focus-within:border-primary">
@@ -145,8 +150,20 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
           )}
         </div>
 
-        {/* Row 2: scope dropdown — replaces overflow chip row */}
-        <div className="flex items-center gap-2 max-w-full min-w-0">
+        {/* Row 2: scope — one compact pill on mobile until expanded */}
+        {!showScope ? (
+          <button
+            type="button"
+            onClick={() => setScopeOpen(true)}
+            aria-label="Change search scope"
+            className="flex min-h-11 w-full items-center gap-2 rounded-full bg-surface-container-low ghost-border px-3 font-label text-sm font-medium text-on-surface md:hidden"
+          >
+            <span className="material-symbols-outlined text-[18px] text-on-surface-variant">{current.icon}</span>
+            <span className="flex-1 truncate text-left">{current.label} — {current.desc}</span>
+            <span className="material-symbols-outlined text-[20px] text-on-surface-variant">expand_more</span>
+          </button>
+        ) : null}
+        <div className={`${showScope ? "flex" : "hidden"} items-center gap-2 max-w-full min-w-0 md:flex`}>
           <span className="hidden sm:inline-flex items-center gap-1 shrink-0 font-label text-[11px] uppercase tracking-widest text-on-surface-variant">
             <span className="material-symbols-outlined text-[14px]">tune</span>
             Scope
@@ -175,6 +192,16 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
           <span className="hidden sm:inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-container-low px-2.5 py-1 font-label text-[11px] text-on-surface-variant">
             {current.label}
           </span>
+          {mode === "global" ? (
+            <button
+              type="button"
+              onClick={() => setScopeOpen(false)}
+              aria-label="Collapse scope"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface-container-low text-on-surface-variant ghost-border md:hidden"
+            >
+              <span className="material-symbols-outlined">expand_less</span>
+            </button>
+          ) : null}
         </div>
 
         {mode === "user" ? (
@@ -216,10 +243,18 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
           </>
         ) : null}
         {mode === "buddies" ? (
-          <p className="px-2 font-label text-xs leading-relaxed text-on-surface-variant">Searches each buddy (uses your buddy list). Add target username for single buddy or leave blank for all.</p>
+          <div className="px-2">
+            <MobileHelp short="Searches each buddy (uses your buddy list)." testId="scope-buddies-help">
+              <p className="font-label text-xs leading-relaxed text-on-surface-variant">Searches each buddy (uses your buddy list). Add target username for single buddy or leave blank for all.</p>
+            </MobileHelp>
+          </div>
         ) : null}
         {mode === "wishlist" ? (
-          <p className="px-2 font-label text-xs leading-relaxed text-on-surface-variant">Wishlist search — server will periodically re-run this query.</p>
+          <div className="px-2">
+            <MobileHelp short="Server re-runs this query periodically." testId="scope-wishlist-help">
+              <p className="font-label text-xs leading-relaxed text-on-surface-variant">Wishlist search — server will periodically re-run this query.</p>
+            </MobileHelp>
+          </div>
         ) : null}
         {showHelp ? (
           <div className="rounded-xl bg-surface-container-high p-3 ghost-border">

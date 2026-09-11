@@ -243,12 +243,12 @@ html[data-demo="true"] div.sticky.top-0:not([data-demo-banner]),
 html[data-demo="true"] .sticky.top-0:not([data-demo-banner]) {
   top: var(--demo-banner-h) !important;
 }
-/* mobile secondary sticky that sits under TopBar: top-[calc(56px+env(safe-area-inset-top,0px))] -> + banner */
-html[data-demo="true"] div.sticky.top-\[calc\(56px\+env\(safe-area-inset-top\,0px\)\)\] {
-  top: calc(var(--demo-banner-h) + 56px + env(safe-area-inset-top, 0px)) !important;
+/* mobile secondary sticky that sits under TopBar: top-[calc(60px+env(safe-area-inset-top,0px))] -> + banner */
+html[data-demo="true"] div.sticky.top-\[calc\(60px\+env\(safe-area-inset-top\,0px\)\)\] {
+  top: calc(var(--demo-banner-h) + 60px + env(safe-area-inset-top, 0px)) !important;
 }
 @media (min-width: 768px) {
-  html[data-demo="true"] div.sticky.top-\[calc\(56px\+env\(safe-area-inset-top\,0px\)\)\] {
+  html[data-demo="true"] div.sticky.top-\[calc\(60px\+env\(safe-area-inset-top\,0px\)\)\] {
     top: var(--demo-banner-h) !important;
   }
 }

@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { useBrowseTabs } from "@/lib/browse-tabs";
 import { BrowseTabs } from "@/components/browse/BrowseTabs";
 import { BrowseView } from "@/components/browse/BrowseView";
+import { MobileHelp } from "@/components/ui/MobileHelp";
 
 const RECENT_BROWSE_KEY = "nicotineHub.recentBrowse";
 
@@ -99,9 +100,9 @@ function BrowseInner() {
           settingsHref="/settings?tab=shares#shares"
         />
 
-        {/* Input + tabs bar */}
-        <div className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-lowest/80 backdrop-blur-xl border-b border-surface-container-highest/20">
-          <div className="mx-auto w-full max-w-screen-2xl px-3 py-2 md:px-10 md:py-3 flex flex-col gap-3">
+        {/* Input + tabs bar — flush under TopBar on mobile */}
+        <div className="sticky top-[calc(60px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-lowest/80 backdrop-blur-xl border-b border-surface-container-highest/20">
+          <div className="mx-auto w-full max-w-screen-2xl px-3 py-1.5 md:px-10 md:py-3 flex flex-col gap-2 md:gap-3">
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-outline">search</span>
@@ -131,9 +132,13 @@ function BrowseInner() {
             <BrowseView key={activeTab.id} tab={activeTab} />
           ) : (
             <div className="mx-auto w-full max-w-xl flex-1 overflow-y-auto overscroll-contain min-h-0 p-4 sm:p-6 md:p-10">
-              <div className="rounded-xl bg-surface-container-lowest p-8 shadow-sm ring-1 ring-outline-variant/15">
-                <p className="font-body text-sm text-on-surface-variant">No browse open. Enter a username above or pick from recent.</p>
-                <p className="mt-2 font-label text-xs text-outline">Tip: use &quot;Browse&quot; from a search result or profile to jump directly. Tabs load in background and persist.</p>
+              <div className="rounded-xl bg-surface-container-lowest p-4 md:p-8 shadow-sm ring-1 ring-outline-variant/15">
+                <MobileHelp short="Enter a username above or pick from recent." testId="browse-empty-help">
+                  <>
+                    <p className="font-body text-sm text-on-surface-variant">No browse open. Enter a username above or pick from recent.</p>
+                    <p className="mt-2 font-label text-xs text-outline">Tip: use &quot;Browse&quot; from a search result or profile to jump directly. Tabs load in background and persist.</p>
+                  </>
+                </MobileHelp>
               </div>
               {recent.length ? (
                 <div className="mt-8 rounded-xl bg-surface-container-lowest p-6 ghost-border">
