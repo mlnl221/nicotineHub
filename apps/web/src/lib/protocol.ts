@@ -336,6 +336,12 @@ export interface UploadControlRequest {
   action: "cancel" | "clear" | "deny";
 }
 
+export interface TransferClearManyRequest {
+  type: "transfer:clear-many";
+  isUpload: boolean;
+  statuses: string[] | null | undefined;
+}
+
 /* ------------------------------------------------------------------ *
  * Chat — private + rooms
  * ------------------------------------------------------------------ */

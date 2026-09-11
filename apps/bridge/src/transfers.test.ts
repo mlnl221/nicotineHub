@@ -260,6 +260,36 @@ describe("transfers — download engine (Phase 2)", () => {
     mgr.close();
   });
 
+  test("clearByStatuses filters by direction and status (nicotine parity)", () => {
+    const { mgr, removed } = makeManager(tmp);
+    mgr.requestDownload("alice", "a.mp3", 100);
+    mgr.requestDownload("alice", "b.mp3", 100);
+    mgr.requestDownload("bob", "c.mp3", 100);
+    mgr.controlDownload("alice::a.mp3", "cancel"); // Cancelled
+    mgr.controlDownload("alice::b.mp3", "pause"); // Paused
+    const n = mgr.clearByStatuses(false, ["Cancelled"]);
+    expect(n).toBe(1);
+    expect(mgr.get("alice::a.mp3")).toBeUndefined();
+    expect(mgr.get("alice::b.mp3")).toBeDefined();
+    expect(removed).toContain("alice::a.mp3");
+    // null statuses = everything remaining in direction
+    const m = mgr.clearByStatuses(false, null);
+    expect(m).toBe(2);
+    expect(mgr.get("bob::c.mp3")).toBeUndefined();
+    mgr.close();
+  });
+
+  test("clearFinished removes Finished only, keeps active", () => {
+    const { mgr } = makeManager(tmp);
+    mgr.requestDownload("alice", "a.mp3", 100);
+    mgr.requestDownload("alice", "b.mp3", 100);
+    mgr.get("alice::a.mp3")!.status = "Finished";
+    mgr.clearFinished("downloads");
+    expect(mgr.get("alice::a.mp3")).toBeUndefined();
+    expect(mgr.get("alice::b.mp3")).toBeDefined();
+    mgr.close();
+  });
+
   test("persistence: downloads.json created and reloaded", () => {
     const { mgr } = makeManager(tmp);
     mgr.requestDownload("alice", "Music\\song.mp3", 1000);
