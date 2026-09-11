@@ -67,6 +67,7 @@ function DownloadsInner() {
   const [bulkResult, setBulkResult] = useState<{ title: string; rows: Array<Record<string, unknown>> } | null>(null);
   const [focusedIdx, setFocusedIdx] = useState(-1);
   const [clearOpen, setClearOpen] = useState(false);
+  const [mobileMore, setMobileMore] = useState(false);
   const totalDown = stats?.downloadSpeed ?? downloads.filter(d => d.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const totalUp = stats?.uploadSpeed ?? 0;
   const activeCount = downloads.length;
@@ -107,6 +108,11 @@ function DownloadsInner() {
   })();
 
   const transferIds = downloads.map((d) => d.id);
+  // Mobile overflow menu labels (defined after group/expand mode to avoid TDZ).
+  const groupLabel = groupMode === "folder_grouping" ? "Folder" : groupMode === "user_grouping" ? "User" : "Off";
+  const cycleGroup = () => setOption("transfers", "groupdownloads", groupMode === "folder_grouping" ? "user_grouping" : groupMode === "user_grouping" ? "ungrouped" : "folder_grouping");
+  const expandLabel = expandMode === "all" ? "All" : expandMode === "partial" ? "Partial" : "Collapse";
+  const cycleExpand = () => setOption("transfers", "expand_downloads", expandMode === "all" ? "partial" : expandMode === "partial" ? "none" : "all");
   const marquee = useMarqueeSelection(bulk.setSelection);
   // Drop picks for transfers that vanished (cleared/finished-removed) so
   // the count bar never counts ghosts. Guarded: no setState when clean.
@@ -288,6 +294,7 @@ function DownloadsInner() {
                       <button onClick={() => bulk.clear()} className="inline-flex rounded-full bg-surface-container-high px-2 min-h-11 py-1 text-xs">Clear</button>
                     </>
                   ) : null}
+                  <span className="hidden md:flex items-center gap-1">
                   <select value={groupMode} onChange={(e) => setOption("transfers", "groupdownloads", e.target.value)} className="rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-semibold outline-none">
                     <option value="folder_grouping">By Folder</option>
                     <option value="user_grouping">By User</option>
@@ -298,11 +305,14 @@ function DownloadsInner() {
                     <option value="partial">Partial</option>
                     <option value="none">Collapse</option>
                   </select>
+                  </span>
                 </div>
               </div>
               {selectMode ? <p className="font-body text-[10px] text-outline">Select-all covers every row, any user/grouping · Tag ops use first 50 · Shift+click / Shift+↑/↓ extends range</p> : null}
-              {/* Nicotine-plus parity toolbar: always visible, touch-sized */}
+              {/* Nicotine-plus parity toolbar: always visible, touch-sized.
+                  Desktop: full row. Mobile: Resume + Remove + More overflow. */}
               <div className="flex flex-wrap items-center gap-1.5" role="toolbar" aria-label="Download actions">
+              <div className="hidden md:flex flex-wrap items-center gap-1.5">
                 <button onClick={bulkResume} disabled={!selectedTransfers.length} title="Resume selected" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold disabled:opacity-40">
                   <span className="material-symbols-outlined text-[16px]">play_arrow</span> Resume
                 </button>
@@ -341,6 +351,58 @@ function DownloadsInner() {
                     </div>
                   ) : null}
                 </div>
+              </div>
+              <div className="flex md:hidden items-center gap-1.5">
+                <button onClick={bulkResume} disabled={!selectedTransfers.length} title="Resume selected" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold disabled:opacity-40">
+                  <span className="material-symbols-outlined text-[16px]">play_arrow</span> Resume
+                </button>
+                <button onClick={bulkRemove} disabled={!selectedTransfers.length} title="Remove selected" className="inline-flex items-center gap-1 rounded-full bg-error-container px-3 min-h-11 py-1 text-xs font-semibold text-on-error-container disabled:opacity-40">
+                  <span className="material-symbols-outlined text-[16px]">delete</span> Remove
+                </button>
+                <div className="relative">
+                  <button onClick={() => setMobileMore((v) => !v)} aria-label="More download actions" aria-haspopup="menu" aria-expanded={mobileMore} title="More actions" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-surface-container-high text-on-surface-variant">
+                    <span className="material-symbols-outlined text-[20px]">more_vert</span>
+                  </button>
+                  {mobileMore ? (
+                    <>
+                      <button aria-hidden tabIndex={-1} onClick={() => setMobileMore(false)} className="fixed inset-0 z-[59] cursor-default bg-transparent" />
+                      <div role="menu" aria-label="More download actions" className="absolute right-0 z-[60] mt-1 max-h-[60dvh] w-60 overflow-auto rounded-xl bg-surface-container-lowest shadow-xl ghost-border">
+                        <button role="menuitem" disabled={!selectedTransfers.length} onClick={() => { bulkPause(); setMobileMore(false); }} className="flex w-full items-center gap-2 px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high disabled:opacity-40">
+                          <span className="material-symbols-outlined text-[16px]">pause</span> Pause selected
+                        </button>
+                        <button role="menuitem" onClick={() => { clearMany(false, DOWNLOAD_CLEAR_SETS["finished-filtered"] ?? null); setMobileMore(false); }} className="flex w-full items-center gap-2 px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high">
+                          <span className="material-symbols-outlined text-[16px]">done_all</span> Clear Finished
+                        </button>
+                        <div className="mx-4 border-t border-outline-variant/10" />
+                        {[
+                          { label: "Finished / Filtered", key: "finished-filtered" },
+                          { label: "Finished", key: "finished" },
+                          { label: "Paused", key: "paused" },
+                          { label: "Filtered", key: "filtered" },
+                          { label: "Queued…", key: "queued", confirm: "Clear queued downloads?" },
+                          { label: "Everything…", key: "all", confirm: "Clear all downloads?", danger: true },
+                        ].map((opt) => (
+                          <button
+                            key={opt.key}
+                            role="menuitem"
+                            onClick={() => { if (opt.confirm && !window.confirm(opt.confirm)) return; clearMany(false, DOWNLOAD_CLEAR_SETS[opt.key] ?? null); setMobileMore(false); }}
+                            className={`flex w-full items-center px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high ${opt.danger ? "text-error" : ""}`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                        <div className="mx-4 border-t border-outline-variant/10" />
+                        <button role="menuitem" onClick={() => { cycleGroup(); setMobileMore(false); }} className="flex w-full items-center gap-2 px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high">
+                          <span className="material-symbols-outlined text-[16px]">group_work</span> Group: {groupLabel}
+                        </button>
+                        <button role="menuitem" onClick={() => { cycleExpand(); setMobileMore(false); }} className="flex w-full items-center gap-2 px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high">
+                          <span className="material-symbols-outlined text-[16px]">{expandMode === "none" ? "unfold_less" : "unfold_more"}</span> Expand: {expandLabel}
+                        </button>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              </div>
               </div>
               {downloads.length === 0 ? (
                 <div data-testid="empty-downloads" className="py-12 text-center">
