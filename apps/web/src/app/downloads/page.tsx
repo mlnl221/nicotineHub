@@ -14,6 +14,7 @@ import { DownloadStats } from "@/components/transfers/StatsCards";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/mobile/EmptyState";
 import { ContextMenu } from "@/components/ui/ContextMenu";
+import { useContextMenu } from "@/lib/context-menu/useContextMenu";
 import { transferMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
 import { useSearchesOptional } from "@/lib/search";
@@ -65,8 +66,12 @@ function DownloadsInner() {
   const [bulkScrape, setBulkScrape] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ title: string; rows: Array<Record<string, unknown>> } | null>(null);
   const [focusedIdx, setFocusedIdx] = useState(-1);
-  const [clearOpen, setClearOpen] = useState(false);
-  const [mobileMore, setMobileMore] = useState(false);
+  const clearMenu = useContextMenu();
+  const moreMenu = useContextMenu();
+  const openBelow = (menu: { openAt: (x: number, y: number) => void }) => (e: React.MouseEvent<HTMLButtonElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    menu.openAt(Math.min(r.left, window.innerWidth - 328), r.bottom + 4);
+  };
   const totalDown = stats?.downloadSpeed ?? downloads.filter(d => d.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const totalUp = stats?.uploadSpeed ?? 0;
   const activeCount = downloads.length;
@@ -248,9 +253,9 @@ function DownloadsInner() {
 
         <div className="p-4 md:p-10 space-y-6 md:space-y-8 max-w-screen-2xl mx-auto w-full">
           {isDemo ? (
-            <div className="rounded-xl bg-tertiary-fixed/20 dark:bg-tertiary-container/20 px-4 py-3 flex items-center gap-3 ghost-border">
-              <span className="material-symbols-outlined text-tertiary">info</span>
-              <p className="font-label text-xs font-semibold text-on-tertiary-container dark:text-tertiary-fixed">Demo preview — 1 download + 1 upload simulated below (animated). New downloads are disabled on Vercel — search, chat, profiles &amp; browse are mocked.</p>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-center gap-3 dark:border-amber-800 dark:bg-amber-950/30">
+              <span className="material-symbols-outlined text-amber-700 dark:text-amber-300">info</span>
+              <p className="font-label text-xs font-semibold text-amber-900 dark:text-amber-200">Demo preview — 1 download + 1 upload simulated below (animated). New downloads are disabled on Vercel — search, chat, profiles &amp; browse are mocked.</p>
             </div>
           ) : null}
           <ThroughputChart />
@@ -313,30 +318,9 @@ function DownloadsInner() {
                   <span className="material-symbols-outlined text-[16px]">done_all</span> Clear Finished
                 </button>
                 <div className="relative">
-                  <button onClick={() => setClearOpen((v) => !v)} aria-haspopup="menu" aria-expanded={clearOpen} title="Clear downloads by status" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold">
-                    <span className="material-symbols-outlined text-[16px]">clear_all</span> Clear All <span className="material-symbols-outlined text-[14px]">{clearOpen ? "expand_less" : "expand_more"}</span>
+                  <button onClick={openBelow(clearMenu)} aria-haspopup="menu" aria-expanded={!!clearMenu.anchor} title="Clear downloads by status" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold">
+                    <span className="material-symbols-outlined text-[16px]">clear_all</span> Clear All <span className="material-symbols-outlined text-[14px]">expand_more</span>
                   </button>
-                  {clearOpen ? (
-                    <div role="menu" className="absolute left-0 z-[60] mt-1 w-52 overflow-hidden rounded-xl bg-surface-container-lowest shadow-xl ghost-border">
-                      {[
-                        { label: "Finished / Filtered", key: "finished-filtered" },
-                        { label: "Finished", key: "finished" },
-                        { label: "Paused", key: "paused" },
-                        { label: "Filtered", key: "filtered" },
-                        { label: "Queued…", key: "queued", confirm: "Clear queued downloads?" },
-                        { label: "Everything…", key: "all", confirm: "Clear all downloads?", danger: true },
-                      ].map((opt) => (
-                        <button
-                          key={opt.key}
-                          role="menuitem"
-                          onClick={() => { if (opt.confirm && !window.confirm(opt.confirm)) return; clearMany(false, DOWNLOAD_CLEAR_SETS[opt.key] ?? null); setClearOpen(false); }}
-                          className={`flex w-full items-center px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high ${opt.danger ? "text-error" : ""}`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
                 </div>
               </div>
               <div className="flex md:hidden items-center gap-1.5">
@@ -347,47 +331,9 @@ function DownloadsInner() {
                   <span className="material-symbols-outlined text-[16px]">delete</span> Remove
                 </button>
                 <div className="relative">
-                  <button onClick={() => setMobileMore((v) => !v)} aria-label="More download actions" aria-haspopup="menu" aria-expanded={mobileMore} title="More actions" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-surface-container-high text-on-surface-variant">
+                  <button onClick={openBelow(moreMenu)} aria-label="More download actions" aria-haspopup="menu" aria-expanded={!!moreMenu.anchor} title="More actions" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-surface-container-high text-on-surface-variant">
                     <span className="material-symbols-outlined text-[20px]">more_vert</span>
                   </button>
-                  {mobileMore ? (
-                    <>
-                      <button aria-hidden tabIndex={-1} onClick={() => setMobileMore(false)} className="fixed inset-0 z-[59] cursor-default bg-transparent" />
-                      <div role="menu" aria-label="More download actions" className="absolute right-0 z-[60] mt-1 max-h-[60dvh] w-60 overflow-auto rounded-xl bg-surface-container-lowest shadow-xl ghost-border">
-                        <button role="menuitem" disabled={!selectedTransfers.length} onClick={() => { bulkPause(); setMobileMore(false); }} className="flex w-full items-center gap-2 px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high disabled:opacity-40">
-                          <span className="material-symbols-outlined text-[16px]">pause</span> Pause selected
-                        </button>
-                        <button role="menuitem" onClick={() => { clearMany(false, DOWNLOAD_CLEAR_SETS["finished-filtered"] ?? null); setMobileMore(false); }} className="flex w-full items-center gap-2 px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high">
-                          <span className="material-symbols-outlined text-[16px]">done_all</span> Clear Finished
-                        </button>
-                        <div className="mx-4 border-t border-outline-variant/10" />
-                        {[
-                          { label: "Finished / Filtered", key: "finished-filtered" },
-                          { label: "Finished", key: "finished" },
-                          { label: "Paused", key: "paused" },
-                          { label: "Filtered", key: "filtered" },
-                          { label: "Queued…", key: "queued", confirm: "Clear queued downloads?" },
-                          { label: "Everything…", key: "all", confirm: "Clear all downloads?", danger: true },
-                        ].map((opt) => (
-                          <button
-                            key={opt.key}
-                            role="menuitem"
-                            onClick={() => { if (opt.confirm && !window.confirm(opt.confirm)) return; clearMany(false, DOWNLOAD_CLEAR_SETS[opt.key] ?? null); setMobileMore(false); }}
-                            className={`flex w-full items-center px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high ${opt.danger ? "text-error" : ""}`}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                        <div className="mx-4 border-t border-outline-variant/10" />
-                        <button role="menuitem" onClick={() => { cycleGroup(); setMobileMore(false); }} className="flex w-full items-center gap-2 px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high">
-                          <span className="material-symbols-outlined text-[16px]">group_work</span> Group: {groupLabel}
-                        </button>
-                        <button role="menuitem" onClick={() => { cycleExpand(); setMobileMore(false); }} className="flex w-full items-center gap-2 px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high">
-                          <span className="material-symbols-outlined text-[16px]">{expandMode === "none" ? "unfold_less" : "unfold_more"}</span> Expand: {expandLabel}
-                        </button>
-                      </div>
-                    </>
-                  ) : null}
                 </div>
               </div>
                 </div>
@@ -508,6 +454,42 @@ function DownloadsInner() {
             }
           )}
           onClose={() => setMenuAnchor(null)}
+        />
+      ) : null}
+      {clearMenu.anchor ? (
+        <ContextMenu
+          x={clearMenu.anchor.x}
+          y={clearMenu.anchor.y}
+          items={[
+            { id: "finished-filtered", label: "Finished / Filtered", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["finished-filtered"] ?? null) },
+            { id: "finished", label: "Finished", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["finished"] ?? null) },
+            { id: "paused", label: "Paused", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["paused"] ?? null) },
+            { id: "filtered", label: "Filtered", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["filtered"] ?? null) },
+            { id: "queued", label: "Queued…", action: () => { if (!window.confirm("Clear queued downloads?")) return; clearMany(false, DOWNLOAD_CLEAR_SETS["queued"] ?? null); } },
+            { id: "all", label: "Everything…", danger: true, action: () => { if (!window.confirm("Clear all downloads?")) return; clearMany(false, DOWNLOAD_CLEAR_SETS["all"] ?? null); } },
+          ]}
+          onClose={clearMenu.close}
+        />
+      ) : null}
+      {moreMenu.anchor ? (
+        <ContextMenu
+          x={moreMenu.anchor.x}
+          y={moreMenu.anchor.y}
+          items={[
+            { id: "pause", label: "Pause selected", icon: "pause", disabled: !selectedTransfers.length, action: () => bulkPause() },
+            { id: "clear-finished", label: "Clear Finished", icon: "done_all", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["finished-filtered"] ?? null) },
+            { id: "sep1", label: "---" },
+            { id: "finished-filtered", label: "Finished / Filtered", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["finished-filtered"] ?? null) },
+            { id: "finished", label: "Finished", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["finished"] ?? null) },
+            { id: "paused", label: "Paused", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["paused"] ?? null) },
+            { id: "filtered", label: "Filtered", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["filtered"] ?? null) },
+            { id: "queued", label: "Queued…", action: () => { if (!window.confirm("Clear queued downloads?")) return; clearMany(false, DOWNLOAD_CLEAR_SETS["queued"] ?? null); } },
+            { id: "all", label: "Everything…", danger: true, action: () => { if (!window.confirm("Clear all downloads?")) return; clearMany(false, DOWNLOAD_CLEAR_SETS["all"] ?? null); } },
+            { id: "sep2", label: "---" },
+            { id: "group", label: `Group: ${groupLabel}`, icon: "group_work", action: () => cycleGroup() },
+            { id: "expand", label: `Expand: ${expandLabel}`, icon: expandMode === "none" ? "unfold_less" : "unfold_more", action: () => cycleExpand() },
+          ]}
+          onClose={moreMenu.close}
         />
       ) : null}
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} /> : null}
