@@ -28,6 +28,7 @@ import { BulkBar } from "@/components/tag/BulkBar";
 import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
 import { AdjustTagsModal } from "@/components/tag/AdjustTagsModal";
 import { useBulkSelection, useMarqueeSelection } from "@/lib/bulkSelection";
+import { DOWNLOAD_CLEAR_SETS } from "@/lib/transfers";
 import { bulkVerify, bulkAnalyze, bulkRequestSpectrum, verifyFile, analyzeFile } from "@/lib/worker";
 import { bridgeFetchUrl } from "@/lib/bridgeHttp";
 import { humanSize, humanSpeed as _humanSpeed } from "@/lib/format";
@@ -47,7 +48,7 @@ function isAudioForSpectrum(fileName: string): boolean {
 }
 
 function DownloadsInner() {
-  const { downloads, stats, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer } = useTransfers();
+  const { downloads, stats, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer, clearMany, abortTransfer, banUser } = useTransfers();
   const { total } = useStatistics();
   const { settings, setOption } = useConfig();
   const searches = useSearchesOptional();
@@ -65,6 +66,7 @@ function DownloadsInner() {
   const [bulkScrape, setBulkScrape] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ title: string; rows: Array<Record<string, unknown>> } | null>(null);
   const [focusedIdx, setFocusedIdx] = useState(-1);
+  const [clearOpen, setClearOpen] = useState(false);
   const totalDown = stats?.downloadSpeed ?? downloads.filter(d => d.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const totalUp = stats?.uploadSpeed ?? 0;
   const activeCount = downloads.length;
@@ -115,21 +117,30 @@ function DownloadsInner() {
     if ([...bulk.selected].some((id) => !live.has(id))) bulk.setSelection([...bulk.selected].filter((id) => live.has(id)));
   }, [liveIds]);
   const selectedFileNames = Array.from(bulk.selected).map((id) => downloads.find((d) => d.id === id)?.fileName).filter(Boolean) as string[];
+  // Tag/verify/analyze/spectrum bulk ops stay capped at 50 files; transfer selection itself is uncapped.
+  const capTagFiles = (files: string[]) => {
+    if (files.length > 50) {
+      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Tag bulk limit", body: "First 50 files used for tag operations." } }));
+      return files.slice(0, 50);
+    }
+    return files;
+  };
   const handleBulkVerify = async () => {
     const ids = Array.from(bulk.selected);
-    const files = ids.map((id) => downloads.find((d) => d.id === id)?.fileName).filter(Boolean) as string[];
+    const files = capTagFiles(ids.map((id) => downloads.find((d) => d.id === id)?.fileName).filter(Boolean) as string[]);
     if (!files.length) return;
     try { const r = await bulkVerify(files); setBulkResult({ title: `Verify — ${files.length} files`, rows: r.results as Array<Record<string, unknown>> }); } catch (e) { setBulkResult({ title: "Verify error", rows: [{ error: e instanceof Error ? e.message : String(e) }] }); }
   };
   const handleBulkAnalyze = async () => {
     const ids = Array.from(bulk.selected);
-    const files = ids.map((id) => downloads.find((d) => d.id === id)?.fileName).filter(Boolean) as string[];
+    const files = capTagFiles(ids.map((id) => downloads.find((d) => d.id === id)?.fileName).filter(Boolean) as string[]);
     if (!files.length) return;
     try { const r = await bulkAnalyze(files); setBulkResult({ title: `Analyze (fast) — ${files.length} files`, rows: r.results as Array<Record<string, unknown>> }); } catch (e) { setBulkResult({ title: "Analyze error", rows: [{ error: e instanceof Error ? e.message : String(e) }] }); }
   };
   const handleBulkSpectrum = async () => {
     const ids = Array.from(bulk.selected);
-    const files = ids.map((id) => { const t = downloads.find((d) => d.id === id); return t ? { fileName: t.fileName, size: t.size, token: parseDownloadToken(t as unknown as { downloadUrl?: string }) } : null; }).filter(Boolean) as Array<{ fileName: string; size?: number; token?: number }>;
+    const picked = ids.map((id) => { const t = downloads.find((d) => d.id === id); return t ? { fileName: t.fileName, size: t.size, token: parseDownloadToken(t as unknown as { downloadUrl?: string }) } : null; }).filter(Boolean) as Array<{ fileName: string; size?: number; token?: number }>;
+    const files = capTagFiles(picked.map((f) => f.fileName)).map((name) => picked.find((f) => f.fileName === name)!);
     if (!files.length) return;
     setBulkResult({ title: "Spectrum queue started", rows: files.map((f) => ({ fileName: f.fileName, status: "queued" })) });
     const res = await bulkRequestSpectrum(files);
@@ -260,14 +271,17 @@ function DownloadsInner() {
                 </h3>
                 <div className="flex items-center gap-1">
                   {!isDemo ? (
-                    <button onClick={() => setSelectMode((v) => !v)} className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-[10px] font-semibold ${selectMode ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant"}`}>
-                      <span className="material-symbols-outlined text-[14px]">{selectMode ? "check_box" : "check_box_outline_blank"}</span> {selectMode ? `Selecting (${bulk.size}/50)` : "Select"}
+                    <button onClick={() => setSelectMode((v) => !v)} className={`inline-flex items-center gap-1 rounded-full px-3 min-h-11 py-1 text-xs font-semibold ${selectMode ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant"}`}>
+                      <span className="material-symbols-outlined text-[14px]">{selectMode ? "check_box" : "check_box_outline_blank"}</span> {selectMode ? `Selecting (${bulk.size})` : "Select"}
                     </button>
                   ) : null}
                    {selectMode && transferIds.length ? (
                     <>
-                       <button onClick={() => bulk.selectAll(transferIds)} className="hidden sm:inline-flex rounded-full bg-surface-container-high px-2 py-1 text-[10px]">All</button>
-                      <button onClick={() => bulk.clear()} className="hidden sm:inline-flex rounded-full bg-surface-container-high px-2 py-1 text-[10px]">Clear</button>
+                      <label className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-2 min-h-11 py-1 text-xs font-semibold cursor-pointer" title="Select all">
+                        <input type="checkbox" aria-label="Select all downloads" checked={bulk.size === transferIds.length} ref={(el) => { if (el) el.indeterminate = bulk.size > 0 && bulk.size < transferIds.length; }} onChange={() => (bulk.size === transferIds.length ? bulk.clear() : bulk.selectAll(transferIds))} className="h-4 w-4 accent-primary" />
+                        All
+                      </label>
+                      <button onClick={() => bulk.clear()} className="inline-flex rounded-full bg-surface-container-high px-2 min-h-11 py-1 text-xs">Clear</button>
                     </>
                   ) : null}
                   <select value={groupMode} onChange={(e) => setOption("transfers", "groupdownloads", e.target.value)} className="rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-semibold outline-none">
@@ -282,7 +296,48 @@ function DownloadsInner() {
                   </select>
                 </div>
               </div>
-              {selectMode ? <p className="font-body text-[10px] text-outline">Bulk edit: title+artist per-file, others uniform · Limit 50 · Shift+click / Shift+↑/↓ extends range — per-page only</p> : null}
+              {selectMode ? <p className="font-body text-[10px] text-outline">Select-all covers every row, any user/grouping · Tag ops use first 50 · Shift+click / Shift+↑/↓ extends range</p> : null}
+              {/* Nicotine-plus parity toolbar: always visible, touch-sized */}
+              <div className="flex flex-wrap items-center gap-1.5" role="toolbar" aria-label="Download actions">
+                <button onClick={bulkResume} disabled={!selectedTransfers.length} title="Resume selected" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold disabled:opacity-40">
+                  <span className="material-symbols-outlined text-[16px]">play_arrow</span> Resume
+                </button>
+                <button onClick={bulkPause} disabled={!selectedTransfers.length} title="Pause selected" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold disabled:opacity-40">
+                  <span className="material-symbols-outlined text-[16px]">pause</span> Pause
+                </button>
+                <button onClick={bulkRemove} disabled={!selectedTransfers.length} title="Remove selected" className="inline-flex items-center gap-1 rounded-full bg-error-container px-3 min-h-11 py-1 text-xs font-semibold text-on-error-container disabled:opacity-40">
+                  <span className="material-symbols-outlined text-[16px]">delete</span> Remove
+                </button>
+                <button onClick={() => clearMany(false, DOWNLOAD_CLEAR_SETS["finished-filtered"] ?? null)} title="Clear all finished/filtered downloads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold">
+                  <span className="material-symbols-outlined text-[16px]">done_all</span> Clear Finished
+                </button>
+                <div className="relative">
+                  <button onClick={() => setClearOpen((v) => !v)} aria-haspopup="menu" aria-expanded={clearOpen} title="Clear downloads by status" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold">
+                    <span className="material-symbols-outlined text-[16px]">clear_all</span> Clear All <span className="material-symbols-outlined text-[14px]">{clearOpen ? "expand_less" : "expand_more"}</span>
+                  </button>
+                  {clearOpen ? (
+                    <div role="menu" className="absolute left-0 z-50 mt-1 w-52 overflow-hidden rounded-xl bg-surface-container-lowest shadow-xl ghost-border">
+                      {[
+                        { label: "Finished / Filtered", key: "finished-filtered" },
+                        { label: "Finished", key: "finished" },
+                        { label: "Paused", key: "paused" },
+                        { label: "Filtered", key: "filtered" },
+                        { label: "Queued…", key: "queued", confirm: "Clear queued downloads?" },
+                        { label: "Everything…", key: "all", confirm: "Clear all downloads?", danger: true },
+                      ].map((opt) => (
+                        <button
+                          key={opt.key}
+                          role="menuitem"
+                          onClick={() => { if (opt.confirm && !window.confirm(opt.confirm)) return; clearMany(false, DOWNLOAD_CLEAR_SETS[opt.key] ?? null); setClearOpen(false); }}
+                          className={`flex w-full items-center px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high ${opt.danger ? "text-error" : ""}`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
               {downloads.length === 0 ? (
                 <div data-testid="empty-downloads" className="py-12 text-center">
                   <p className="font-body text-on-surface-variant">No active downloads</p>
@@ -363,6 +418,8 @@ function DownloadsInner() {
               onRemove: () => menuAnchor.isUpload ? clearTransfer(menuAnchor.transfer.id, true) : cancelDownload(menuAnchor.transfer.id),
               onRetry: () => retryDownload(menuAnchor.transfer.id),
               onClear: () => clearTransfer(menuAnchor.transfer.id, menuAnchor.isUpload),
+              onClearMany: (s) => clearMany(false, s),
+              onBan: () => banUser(menuAnchor.transfer.username),
               onAnalyzeSpectrum: menuAnchor.isUpload
                 ? undefined
                 : isAudioForSpectrum(menuAnchor.transfer.fileName) && menuAnchor.transfer.status === "Finished"
@@ -400,8 +457,8 @@ function DownloadsInner() {
       {scrapeFile ? <AdjustTagsModal open={!!scrapeFile} files={[scrapeFile]} onClose={() => setScrapeFile(null)} /> : null}
       {mediainfoFile ? <MediainfoModal filePath={mediainfoFile} onClose={() => setMediainfoFile(null)} /> : null}
        <BulkBar count={bulk.size} onClear={bulk.clear} onEdit={() => setBulkEditor(true)} onScrape={() => setBulkScrape(true)} onVerify={handleBulkVerify} onAnalyze={handleBulkAnalyze} onSpectrum={handleBulkSpectrum} onPause={bulkPause} onResume={bulkResume} onRemove={bulkRemove} />
-      {bulkEditor ? <BulkTagEditor open={bulkEditor} files={selectedFileNames} onClose={() => setBulkEditor(false)} onSaved={() => bulk.clear()} /> : null}
-      {bulkScrape ? <AdjustTagsModal open={bulkScrape} files={selectedFileNames} onClose={() => setBulkScrape(false)} /> : null}
+      {bulkEditor ? <BulkTagEditor open={bulkEditor} files={selectedFileNames.slice(0, 50)} onClose={() => setBulkEditor(false)} onSaved={() => bulk.clear()} /> : null}
+      {bulkScrape ? <AdjustTagsModal open={bulkScrape} files={selectedFileNames.slice(0, 50)} onClose={() => setBulkScrape(false)} /> : null}
       {bulkResult ? (
         <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
           <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col overflow-hidden rounded-t-2xl md:rounded-2xl bg-surface-container-lowest shadow-xl ghost-border" onClick={(e) => e.stopPropagation()}>

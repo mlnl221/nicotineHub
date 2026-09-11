@@ -412,11 +412,16 @@ export class TransferManager {
   }
 
   clearFinished(type: "downloads" | "uploads" | "all" = "all") {
+    this.clearByStatuses(type === "all" ? null : type === "downloads" ? false : true, ["Finished"]);
+  }
+
+  /** Nicotine-plus parity bulk clear (list entries only, files stay on disk).
+   * statuses null/empty = everything (honors isUpload filter). */
+  clearByStatuses(isUpload: boolean | null, statuses: string[] | null): number {
     const toDelete: string[] = [];
     for (const [id, t] of this.transfers) {
-      if (t.status !== "Finished") continue;
-      if (type === "downloads" && t.isUpload) continue;
-      if (type === "uploads" && !t.isUpload) continue;
+      if (isUpload !== null && t.isUpload !== isUpload) continue;
+      if (statuses && statuses.length && !statuses.includes(t.status)) continue;
       toDelete.push(id);
     }
     for (const id of toDelete) {
@@ -426,6 +431,7 @@ export class TransferManager {
     }
     if (toDelete.length) this.persist();
     this.emitStats();
+    return toDelete.length;
   }
 
   /** True while a user-cleared upload id is still suppressed from peer requeue. */

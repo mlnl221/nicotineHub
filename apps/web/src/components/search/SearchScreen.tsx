@@ -264,7 +264,7 @@ export function SearchScreen() {
                   : "bg-surface-container-high text-on-surface-variant"
               }`}
             >
-              {selectMode ? `Selecting (${bulk.size}/50)` : "Select"}
+              {selectMode ? `Selecting (${bulk.size})` : "Select"}
             </button>
             {activeTab.mode === "wishlist" && visibleRows.length > 0 ? (
               <button

@@ -18,13 +18,7 @@ export function useBulkSelection() {
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
-      else {
-        if (next.size >= 50) {
-          if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Selection limit", body: "Maximum 50 files can be selected for bulk operations." } }));
-          return prev;
-        }
-        next.add(id);
-      }
+      else next.add(id);
       return next;
     });
     setLastAnchor(id);
@@ -38,34 +32,20 @@ export function useBulkSelection() {
     const slice = rangeSlice(allIds, lastAnchor, id);
     setSelected((prev) => {
       const next = new Set(prev);
-      let added = 0;
-      for (const x of slice) {
-        if (!next.has(x)) {
-          if (next.size + added >= 50) {
-            if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Selection limit", body: "Maximum 50 files — first 50 selected." } }));
-            break;
-          }
-          next.add(x);
-          added++;
-        }
-      }
+      for (const x of slice) next.add(x);
       return next;
     });
     setLastAnchor(id);
   }, [lastAnchor, toggle]);
 
   const selectAll = useCallback((ids: string[]) => {
-    const cap = ids.slice(0, 50);
-    if (ids.length > 50 && typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Selection limit", body: "Maximum 50 files — first 50 selected." } }));
-    setSelected(new Set(cap));
-    setLastAnchor(cap[cap.length - 1] ?? null);
+    setSelected(new Set(ids));
+    setLastAnchor(ids[ids.length - 1] ?? null);
   }, []);
 
   const setSelection = useCallback((ids: string[]) => {
-    const cap = ids.slice(0, 50);
-    if (ids.length > 50 && typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Selection limit", body: "Maximum 50 files — first 50 selected." } }));
-    setSelected(new Set(cap));
-    setLastAnchor(cap[cap.length - 1] ?? null);
+    setSelected(new Set(ids));
+    setLastAnchor(ids[ids.length - 1] ?? null);
   }, []);
 
   const clear = useCallback(() => { setSelected(new Set()); setLastAnchor(null); }, []);

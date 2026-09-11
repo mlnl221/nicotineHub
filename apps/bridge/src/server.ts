@@ -149,6 +149,12 @@ const UploadControlSchema = z.object({
   id: z.string().min(1).max(1024),
   action: z.enum(["cancel", "clear", "deny"]),
 });
+// Nicotine-plus parity bulk clear (list entries only). statuses null = everything.
+const TransferClearManySchema = z.object({
+  type: z.literal("transfer:clear-many"),
+  isUpload: z.boolean(),
+  statuses: z.array(z.string().min(1).max(64)).max(32).nullish(),
+});
 const UserInfoRequestSchema = z.object({ type: z.literal("userinfo") }).and(UserInfoMessageSchema);
 
 const ChatRoomSchema = z.object({
@@ -1573,6 +1579,14 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             if (!ok) ws.send(errorMessage("Upload deny failed: transfer is no longer queued."));
           }
         } else sharedTransfers?.controlUpload(result.data.id, result.data.action);
+        return;
+      }
+      if (data.type === "transfer:clear-many") {
+        const result = TransferClearManySchema.safeParse(parsed);
+        if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid transfer clear.")); return; }
+        const session = requireLogin(); if (!session) return;
+        logger.info("transfer", "clear-many", { isUpload: result.data.isUpload, statuses: result.data.statuses ?? "all" });
+        sharedTransfers?.clearByStatuses(result.data.isUpload, result.data.statuses ?? null);
         return;
       }
 

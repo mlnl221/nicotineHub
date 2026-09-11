@@ -28,7 +28,35 @@ interface TransfersApi {
   retryDownload: (id: string) => void;
   clearTransfer: (id: string, isUpload: boolean) => void;
   cancelUpload: (id: string) => void;
+  /** Nicotine-plus parity bulk clear (list entries only). statuses null = everything in direction. */
+  clearMany: (isUpload: boolean, statuses: string[] | null) => void;
+  /** Abort: downloads -> pause, uploads -> cancel (nicotine abort semantics). */
+  abortTransfer: (id: string, isUpload: boolean) => void;
+  banUser: (username: string) => void;
+  /** Private-message every distinct user (uploads "Message All"). */
+  messageAll: (usernames: string[], message: string) => void;
 }
+
+// Nicotine-plus parity clear sets (pynicotine gtkgui/downloads.py + uploads.py).
+// "Deleted" (Finished + file missing on disk) omitted — browser cannot stat files.
+export const DOWNLOAD_CLEAR_SETS: Record<string, string[] | null> = {
+  "finished-filtered": ["Finished", "Filtered"],
+  finished: ["Finished"],
+  paused: ["Paused"],
+  filtered: ["Filtered"],
+  queued: ["Queued"],
+  all: null,
+};
+export const UPLOAD_CLEAR_SETS: Record<string, string[] | null> = {
+  "finished-cancelled-failed": ["Cancelled", "Finished", "Connection timeout", "Local file error"],
+  "finished-cancelled": ["Cancelled", "Finished"],
+  finished: ["Finished"],
+  cancelled: ["Cancelled"],
+  failed: ["Connection timeout", "Local file error"],
+  "logged-off": ["User logged off"],
+  queued: ["Queued"],
+  all: null,
+};
 
 const TransfersContext = createContext<TransfersApi | null>(null);
 
@@ -371,12 +399,56 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
     [send],
   );
 
+  const clearMany = useCallback(
+    (isUpload: boolean, statuses: string[] | null) => {
+      send({ type: "transfer:clear-many", isUpload, statuses });
+      // optimistic: drop matching rows locally
+      setTransfers((prev) =>
+        prev.filter((t) => {
+          if (t.isUpload !== isUpload) return true;
+          if (!statuses || statuses.length === 0) return false;
+          return !statuses.includes(t.status);
+        }),
+      );
+    },
+    [send],
+  );
+
+  const abortTransfer = useCallback(
+    (id: string, isUpload: boolean) => {
+      if (isUpload) {
+        send({ type: "upload:control", id, action: "cancel" });
+        setTransfers((prev) => prev.map((t) => (t.id === id ? { ...t, status: "Cancelled" as const } : t)));
+      } else {
+        send({ type: "download:control", id, action: "pause" });
+        setTransfers((prev) => prev.map((t) => (t.id === id ? { ...t, status: "Paused" as const } : t)));
+      }
+    },
+    [send],
+  );
+
+  const banUser = useCallback(
+    (username: string) => {
+      send({ type: "ban:add", username });
+    },
+    [send],
+  );
+
+  const messageAll = useCallback(
+    (usernames: string[], message: string) => {
+      const msg = message.trim();
+      if (!msg) return;
+      [...new Set(usernames)].forEach((u) => send({ type: "chat:private", action: "send", username: u, message: msg }));
+    },
+    [send],
+  );
+
   const downloads = useMemo(() => transfers.filter((t) => !t.isUpload), [transfers]);
   const uploads = useMemo(() => transfers.filter((t) => t.isUpload), [transfers]);
 
   const api = useMemo<TransfersApi>(
-    () => ({ transfers, downloads, uploads, stats, requestDownload, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer, cancelUpload }),
-    [transfers, downloads, uploads, stats, requestDownload, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer, cancelUpload],
+    () => ({ transfers, downloads, uploads, stats, requestDownload, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer, cancelUpload, clearMany, abortTransfer, banUser, messageAll }),
+    [transfers, downloads, uploads, stats, requestDownload, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer, cancelUpload, clearMany, abortTransfer, banUser, messageAll],
   );
 
   return <TransfersContext.Provider value={api}>{children}</TransfersContext.Provider>;
