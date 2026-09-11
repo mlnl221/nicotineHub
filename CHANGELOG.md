@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.35.0](https://github.com/mlnl221/nicotineHub/compare/v0.34.0...v0.35.0) (2026-09-11)
+
+
+### Features
+
+* **web:** stick-to-bottom chat scroll, username menus, syslog 5% ([1a14871](https://github.com/mlnl221/nicotineHub/commit/1a14871981fd5e27bc543c90eed0f253cb2d68de))
+* **web:** stick-to-bottom chat scroll, username menus, syslog 5% ([5a081cb](https://github.com/mlnl221/nicotineHub/commit/5a081cb333bfb46867f601bfa6e05674945d2b5e))
+
+
+### Bug Fixes
+
+* **bridge:** deny repeat peer grants for finished downloads ([818d412](https://github.com/mlnl221/nicotineHub/commit/818d41242722146fb0d135eac5da42784d91fe2b))
+* **bridge:** pack browse basenames so peers request single paths; deny auto-reject with UploadDenied ([209bb3f](https://github.com/mlnl221/nicotineHub/commit/209bb3fafa3afe1c7c786e69bdaf60b2092ffe6b))
+* **bridge:** pack browse basenames so peers request single paths; deny auto-reject with UploadDenied ([9f69490](https://github.com/mlnl221/nicotineHub/commit/9f694903930f20d87fb5bbb50c1c245eb0db0573))
+
 ## [0.34.0](https://github.com/mlnl221/nicotineHub/compare/v0.33.0...v0.34.0) (2026-09-11)
 
 
