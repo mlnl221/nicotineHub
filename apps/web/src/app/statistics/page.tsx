@@ -20,7 +20,7 @@ function StatisticsInner() {
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Statistics" />
-      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-clip max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <PageHeader
           title="Statistics"
           subtitle="Transfer statistics — total and session."

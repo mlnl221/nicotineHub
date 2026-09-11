@@ -7,6 +7,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/mobile/EmptyState";
 import { usePrivateChat } from "@/lib/privateChat";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { privateChatMenu, userMenu } from "@/lib/context-menu/menus";
@@ -67,7 +68,7 @@ function PrivateChatInner() {
     <div className="flex min-h-[100dvh] h-screen max-w-full overflow-hidden bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title={topBarTitle} subtitle={topBarSubtitle} />
-      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 bg-surface-dim dark:bg-inverse-surface pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
+      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 bg-surface-dim dark:bg-inverse-surface pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
         <PageHeader
           title="Private Chat"
           subtitle={`${users.length} conversations${activeUser ? ` • ${activeUser}` : ""}`}
@@ -121,7 +122,7 @@ function PrivateChatInner() {
             </div>
             {users.length > 0 ? (
               <div className="flex justify-between items-center px-2 py-1">
-                <span className="font-label text-[10px] uppercase tracking-widest text-outline">{users.length} chats</span>
+                <span className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">{users.length} chats</span>
                 <button
                   onClick={() => {
                     if (confirm("Close all chats?")) closeAll();
@@ -206,7 +207,7 @@ function PrivateChatInner() {
               <select
                 value={activeUser || ""}
                 onChange={(e) => setActiveUser(e.target.value || null)}
-                className="w-full rounded-lg border border-outline-variant/30 bg-surface px-3 py-2.5 min-h-11 text-sm"
+                className="w-full rounded-lg border border-outline-variant/30 bg-surface px-3 py-2.5 min-h-11 text-base md:text-sm"
               >
                 <option value="">Select a conversation</option>
                 {users.map((u) => (
@@ -220,7 +221,7 @@ function PrivateChatInner() {
                   value={newChatUser}
                   onChange={(e) => setNewChatUser(e.target.value)}
                   placeholder="New chat username"
-                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 text-sm"
+                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 text-base md:text-sm"
                 />
                 <button onClick={startNewChat} className="shrink-0 rounded-lg bg-primary px-4 py-2.5 min-h-11 text-sm text-on-primary">
                   Start
@@ -229,16 +230,15 @@ function PrivateChatInner() {
             </div>
 
             {!activeUser ? (
-              <div className="flex flex-1 items-center justify-center p-8 text-center">
-                <div>
-                  <span className="material-symbols-outlined text-5xl text-outline-variant">forum</span>
-                  <p className="mt-2 font-headline text-lg font-semibold">Select a conversation</p>
-                  <p className="mt-1 font-body text-sm text-on-surface-variant">Choose a peer from the list or start a new chat.</p>
-                </div>
-              </div>
+              <EmptyState
+                icon="forum"
+                title="Select a conversation"
+                helper="Choose a peer from the list or start a new chat."
+                className="flex-1"
+              />
             ) : (
               <>
-                <div ref={pmStick.ref} onScroll={pmStick.onScroll} data-testid="pm-messages" className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-6 space-y-4">
+                <div ref={pmStick.ref} onScroll={pmStick.onScroll} data-testid="pm-messages" className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-4 md:p-6 space-y-2 max-w-full overflow-x-hidden">
                   {activeMessages.length === 0 ? (
                     <div className="flex justify-center">
                       <span className="rounded-full bg-surface-container-high px-4 py-2 font-label text-xs text-on-surface-variant">
@@ -253,7 +253,7 @@ function PrivateChatInner() {
                       {idx === firstLiveIdx ? (
                         <div className="flex items-center gap-2 py-1" aria-hidden="true">
                           <span className="h-px flex-1 bg-outline-variant/40" />
-                          <span className="font-label text-[10px] uppercase tracking-widest text-outline">Old messages above</span>
+                          <span className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Old messages above</span>
                           <span className="h-px flex-1 bg-outline-variant/40" />
                         </div>
                       ) : null}
@@ -307,7 +307,7 @@ function PrivateChatInner() {
                   </button>
                 ) : null}
 
-                <footer className="border-t border-outline-variant/15 bg-surface-container-lowest p-4">
+                <footer className="border-t border-outline-variant/15 bg-surface-container-lowest p-3">
                   <div className="flex items-end gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-low p-2 focus-within:border-primary">
                     <textarea
                       value={input}
@@ -321,7 +321,7 @@ function PrivateChatInner() {
                       }}
                       placeholder={`Message ${activeUser}...`}
                       rows={1}
-                      className="max-h-32 min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 font-body text-sm placeholder:text-outline focus:outline-none"
+                      className="max-h-28 min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 font-body text-base md:text-sm placeholder:text-outline focus:outline-none"
                     />
                     <button
                       onClick={handleSend}

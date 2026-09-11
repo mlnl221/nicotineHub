@@ -12,6 +12,7 @@ import { TransferCard } from "@/components/transfers/TransferCard";
 import { ThroughputChart } from "@/components/transfers/ThroughputChart";
 import { DownloadStats } from "@/components/transfers/StatsCards";
 import { PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/mobile/EmptyState";
 import { useStatistics } from "@/lib/statistics";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { transferMenu } from "@/lib/context-menu/menus";
@@ -238,7 +239,7 @@ function DownloadsInner() {
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Downloads" subtitle={`${dlCount} downloading`} />
-      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-clip max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <PageHeader
           title="Downloads"
           subtitle={`${activeCount} active`}
@@ -405,10 +406,12 @@ function DownloadsInner() {
               </div>
               </div>
               {downloads.length === 0 ? (
-                <div data-testid="empty-downloads" className="py-12 text-center">
-                  <p className="font-body text-on-surface-variant">No active downloads</p>
-                  <Link href="/search" className="mt-3 inline-flex font-label text-sm font-semibold text-primary hover:underline">Search Files</Link>
-                </div>
+                <EmptyState
+                  icon="downloading"
+                  title="No active downloads"
+                  testId="empty-downloads"
+                  action={<Link href="/search" className="mt-1 inline-flex font-label text-sm font-semibold text-primary hover:underline">Search Files</Link>}
+                />
               ) : (
                 <div className="space-y-4">
                   {downloadGroups.map(([groupKey, items]) => {

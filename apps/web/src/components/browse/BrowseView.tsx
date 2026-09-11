@@ -510,7 +510,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                 value={fileQuery}
                 onChange={(e) => setFileQuery(e.target.value)}
                 placeholder="Search files in folder..."
-                className="w-full sm:w-64 min-h-11 rounded-full bg-surface-container-low py-2.5 pl-9 pr-4 font-body text-sm placeholder:text-outline-variant focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="w-full sm:w-64 min-h-11 rounded-full bg-surface-container-low py-2.5 pl-9 pr-4 font-body text-base placeholder:text-outline-variant focus:outline-none focus:ring-2 focus:ring-primary/20 md:text-sm"
               />
             </div>
             {error ? (
@@ -537,7 +537,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                   }
                 }}
                 placeholder="Search folders..."
-                className="w-full rounded-full bg-surface-container-low py-2 pl-9 pr-4 font-body text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="w-full rounded-full bg-surface-container-low py-2.5 pl-9 pr-4 font-body text-base focus:outline-none focus:ring-2 focus:ring-primary/20 min-h-11 md:text-sm"
               />
             </div>
             <button

@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { PageHeader } from "@/components/PageHeader";
+import { EmptyState, CompactEmpty } from "@/components/mobile/EmptyState";
 import { useRooms } from "@/lib/rooms";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { chatRoomMenu, userMenu } from "@/lib/context-menu/menus";
@@ -117,7 +118,7 @@ function ChatRoomsInner() {
     <div className="flex min-h-[100dvh] h-screen max-w-full overflow-hidden bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title={activeRoom || "Chat Rooms"} subtitle={activeRoom ? `${activeUsers.length} users • ${roomList.length} public rooms` : `${joinedArray.length} joined • ${roomList.length} public`} />
-      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 bg-surface-dim dark:bg-inverse-surface pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
+      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 bg-surface-dim dark:bg-inverse-surface pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
         <PageHeader
           title="Chat Rooms"
           subtitle={`${activeRoom ? `${activeUsers.length} users • ${activeRoom}` : `${joinedArray.length} joined • ${roomList.length} public`} • Monitoring rooms`}
@@ -197,7 +198,7 @@ function ChatRoomsInner() {
               {joinedArray.length > 0 ? (
                 <div>
                   <div className="flex items-center justify-between px-3 py-1">
-                    <h4 className="font-label text-[10px] uppercase tracking-widest text-on-surface-variant">
+                    <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">
                       Joined Rooms
                     </h4>
                     <button
@@ -238,7 +239,7 @@ function ChatRoomsInner() {
 
               {/* Public */}
               <div>
-                <h4 className="px-3 py-1 font-label text-[10px] uppercase tracking-widest text-on-surface-variant">
+                <h4 className="px-3 py-1 font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">
                   Public Rooms {roomList.length ? `• ${roomList.length}` : ""}
                 </h4>
                 {filteredRooms.length === 0 ? (
@@ -298,7 +299,7 @@ function ChatRoomsInner() {
                   value={joinInput}
                   onChange={(e) => setJoinInput(e.target.value)}
                   placeholder="Room name"
-                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 text-sm"
+                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 text-base md:text-sm"
                 />
                 <button onClick={handleJoin} className="shrink-0 rounded-lg bg-primary px-4 py-2.5 min-h-11 text-sm text-on-primary">
                   Join
@@ -312,7 +313,7 @@ function ChatRoomsInner() {
                   const v = e.target.value;
                   if (v) setJoinInput(v);
                 }}
-                className="min-w-0 flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest dark:bg-surface-container-low dark:text-inverse-primary px-3 py-2.5 text-sm focus:border-primary outline-none"
+                className="min-w-0 flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest dark:bg-surface-container-low dark:text-inverse-primary px-3 py-2.5 min-h-11 text-base focus:border-primary outline-none md:text-sm"
               >
                 <option value="">Choose a room to join… ({sortedRooms.length})</option>
                 {sortedRooms.slice(0, 50).map((r) => (
@@ -336,13 +337,12 @@ function ChatRoomsInner() {
             </div>
 
             {!activeRoom ? (
-              <div className="flex flex-1 items-center justify-center p-8 text-center">
-                <div>
-                  <span className="material-symbols-outlined text-5xl text-outline-variant">groups</span>
-                  <p className="mt-2 font-headline text-lg font-semibold">No room selected</p>
-                  <p className="mt-1 font-body text-sm text-on-surface-variant">Join or create a room from the sidebar.</p>
-                </div>
-              </div>
+              <EmptyState
+                icon="groups"
+                title="No room selected"
+                helper="Join or create a room above to start."
+                className="flex-1"
+              />
             ) : (
               <>
                 {/* Room header — long-press name on touch opens Leave menu */}
@@ -440,8 +440,8 @@ function ChatRoomsInner() {
                     ) : null}
                     <div ref={chatStick.ref} onScroll={chatStick.onScroll} data-testid="room-messages" className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-4 md:p-6 space-y-2 max-w-full overflow-x-hidden">
                       {userMessages.length === 0 ? (
-                        <div className="py-10 text-center">
-                          <p className="font-body text-sm text-outline">No messages yet. Start the conversation.</p>
+                        <div className="py-10">
+                          <CompactEmpty>No messages yet. Start the conversation.</CompactEmpty>
                         </div>
                       ) : (
                         userMessages.map((m, idx) => {
@@ -567,7 +567,7 @@ function ChatRoomsInner() {
                           }}
                           placeholder={`Message #${activeRoom}...`}
                           rows={1}
-                          className="max-h-28 min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 text-sm placeholder:text-outline focus:outline-none"
+                          className="max-h-28 min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 text-base md:text-sm placeholder:text-outline focus:outline-none"
                         />
                         <button
                           onClick={handleSay}
@@ -623,7 +623,7 @@ function ChatRoomsInner() {
                     ) : null}
                     {(settings.ui.buddylistinchatrooms === "chatrooms" || settings.ui.buddylistinchatrooms === "always") && buddies.length > 0 ? (
                       <div className={`${showUserList ? "border-t" : ""} border-outline-variant/15 px-2 py-2`}>
-                        <h4 className="px-2 py-1 font-label text-[10px] uppercase tracking-widest text-on-surface-variant">Buddies • {buddies.length}</h4>
+                        <h4 className="px-2 py-1 font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Buddies • {buddies.length}</h4>
                         <div className="space-y-1 max-h-40 overflow-y-auto">
                           {buddies.slice(0, 12).map((b) => (
                             <button key={b.username} onClick={() => router.push(`/profile/${encodeURIComponent(b.username)}`)} className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left hover:bg-surface-container-low">

@@ -294,7 +294,7 @@ export function SharesStep({ onNext, onBack, isFirst }: StepNav) {
             key={p}
             type="button"
             onClick={() => setPerm(p)}
-            className={`h-10 flex-1 rounded-xl font-label text-xs font-bold uppercase tracking-widest ${
+            className={`min-h-11 flex-1 rounded-xl font-label text-xs font-bold uppercase tracking-widest ${
               perm === p ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant dark:bg-surface-container-highest/60"
             }`}
           >
@@ -304,7 +304,7 @@ export function SharesStep({ onNext, onBack, isFirst }: StepNav) {
         <button
           type="button"
           onClick={add}
-          className="h-10 shrink-0 rounded-xl bg-secondary-container px-4 font-label text-xs font-bold uppercase tracking-widest text-on-secondary-container"
+          className="min-h-11 shrink-0 rounded-xl bg-secondary-container px-4 font-label text-xs font-bold uppercase tracking-widest text-on-secondary-container"
         >
           Add
         </button>
@@ -342,7 +342,7 @@ export function SharesStep({ onNext, onBack, isFirst }: StepNav) {
           type="button"
           onClick={rescan}
           disabled={state.status !== "connected" || rescanning}
-          className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-surface-container-high px-4 font-label text-xs font-bold uppercase tracking-widest text-primary disabled:opacity-50 dark:bg-surface-container-highest/60"
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-surface-container-high px-4 font-label text-xs font-bold uppercase tracking-widest text-primary disabled:opacity-50 dark:bg-surface-container-highest/60"
         >
           <span className={`material-symbols-outlined text-[18px] ${rescanning ? "animate-spin" : ""}`}>
             {rescanning ? "progress_activity" : "refresh"}
