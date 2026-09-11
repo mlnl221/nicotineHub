@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSession } from "@/lib/session";
+import { onExternalKey } from "@/lib/storage-sync";
 import type { BrowseFolder, BrowseFile } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
 import { DEMO_BROWSE_USERS, mockBrowseFolders } from "@/lib/demo/fixtures";
@@ -369,6 +370,32 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
     if (!tab) return;
     requestShares(id, tab.username);
   }, [requestShares]);
+
+  // Cross-tab close sync: another tab closed browse tabs — drop them locally
+  // instead of letting our next persist effect resurrect them. Subtractive-only.
+  useEffect(() => {
+    return onExternalKey(STORAGE_KEY, () => {
+      const p = loadPersisted();
+      const keep = new Set((p?.tabs ?? []).map((t) => t.id));
+      const dropped = tabsRef.current.filter((t) => !keep.has(t.id));
+      if (!dropped.length) return;
+      const ids = new Set(dropped.map((t) => t.id));
+      for (const t of dropped) {
+        const timer = timersRef.current.get(t.id);
+        if (timer) { clearTimeout(timer); timersRef.current.delete(t.id); }
+        nextOffsetRef.current.delete(t.id);
+        pendingFolderRef.current.delete(t.id);
+        pendingOpenRef.current.delete(t.username.toLowerCase());
+      }
+      const next = tabsRef.current.filter((t) => !ids.has(t.id));
+      let nextActive = activeIdRef.current;
+      if (nextActive && ids.has(nextActive)) {
+        nextActive = next.length ? next[next.length - 1]!.id : null;
+      }
+      setTabs(next);
+      setActiveId(nextActive);
+    });
+  }, []);
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) ?? null, [tabs, activeId]);
 

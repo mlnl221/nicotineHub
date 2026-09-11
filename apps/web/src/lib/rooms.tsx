@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSession } from "@/lib/session";
+import { onExternalKey } from "@/lib/storage-sync";
 import { useConfig } from "@/lib/config/provider";
 import type { ChatEvent, ChatLogRow, RoomEvent, UserInfoEvent } from "@/lib/protocol";
 import { censorText, replaceText, truncateMessages } from "@/lib/chatFormat";
@@ -560,6 +561,38 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
     setActiveRoom(null);
     dropFromAutojoin(rooms);
   }, [send, setActiveRoom, dropFromAutojoin]);
+
+  // Cross-tab close sync: another tab left rooms — drop them locally instead
+  // of letting our next persist effect resurrect them. Subtractive-only:
+  // rooms opened elsewhere appear here on refresh/reconnect as before.
+  useEffect(() => {
+    return onExternalKey([JOINED_KEY, ACTIVE_KEY], () => {
+      const persisted = new Set((loadPersistedJoined() ?? []).map((r) => r.toLowerCase()));
+      const dropped = Array.from(joinedRoomsRef.current.keys()).filter((r) => !persisted.has(r.toLowerCase()));
+      if (!dropped.length) return;
+      const ids = new Set(dropped.map((r) => r.toLowerCase()));
+      for (const room of dropped) {
+        leftAtRef.current.set(room.toLowerCase(), Date.now());
+        backfilledRef.current.delete(room.toLowerCase());
+        // The other tab already sent leave on the shared session, but if it
+        // was offline the bridge never heard it — resend is idempotent.
+        if (state.status === "connected") {
+          try { send({ type: "chat:room", action: "leave", room }); } catch {}
+        }
+      }
+      setJoinedRooms((prev) => {
+        const next = new Map(prev);
+        for (const room of next.keys()) if (ids.has(room.toLowerCase())) next.delete(room);
+        return next;
+      });
+      setMessages((prev) => {
+        const next = new Map(prev);
+        for (const room of next.keys()) if (ids.has(room.toLowerCase())) next.delete(room);
+        return next;
+      });
+      if (activeRoomRef.current && ids.has(activeRoomRef.current.toLowerCase())) setActiveRoom(null);
+    });
+  }, [send, state.status, setActiveRoom]);
 
   const value: RoomsApi = { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, addOperator, removeOperator, cancelMembership, cancelOwnership, closeAll, userStats, refreshRoomList };
   return <RoomsContext.Provider value={value}>{children}</RoomsContext.Provider>;
