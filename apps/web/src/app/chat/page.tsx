@@ -289,6 +289,28 @@ function ChatRoomsInner() {
                 </div>
               ) : (
                 <>
+              {joinedArray.length > 0 ? (
+                <select
+                  value={activeRoom || ""}
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      setActiveRoom(e.target.value);
+                      setPickerOpen(false);
+                    }
+                  }}
+                  aria-label="Switch active room"
+                  className="mb-2 w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2.5 min-h-11 text-base md:text-sm"
+                >
+                  <option value="" disabled={!!activeRoom}>
+                    Switch room… ({joinedArray.length} joined)
+                  </option>
+                  {joinedArray.map((r) => (
+                    <option key={r.name} value={r.name}>
+                      {r.name} ({r.users.length})
+                    </option>
+                  ))}
+                </select>
+              ) : null}
               <div className="flex gap-2">
                 <input
                   value={joinInput}

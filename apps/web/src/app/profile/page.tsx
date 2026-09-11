@@ -125,7 +125,7 @@ function TabbedProfileInner() {
               <button
                 onClick={go}
                 disabled={!username.trim() || tabs.length >= 10}
-                className={`${lookupCollapsed ? "hidden" : ""} shrink-0 rounded-xl bg-primary-container px-5 py-3 min-h-11 font-label text-xs font-semibold uppercase tracking-widest text-on-primary-container hover:bg-primary hover:text-on-primary disabled:opacity-50 md:shrink-0`}
+                className={`${lookupCollapsed ? "hidden" : ""} shrink-0 rounded-xl bg-primary-container px-5 py-3 min-h-11 font-label text-xs font-semibold uppercase tracking-widest text-on-primary-container hover:bg-primary hover:text-on-primary disabled:opacity-50 md:inline-flex md:shrink-0`}
               >
                 View
               </button>
