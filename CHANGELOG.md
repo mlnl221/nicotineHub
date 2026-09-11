@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.34.0](https://github.com/mlnl221/nicotineHub/compare/v0.33.0...v0.34.0) (2026-09-11)
+
+
+### Bug Fixes
+
+* **audit:** framing guards, search cancel, containment, dead UI prune ([c622777](https://github.com/mlnl221/nicotineHub/commit/c622777a2c2a4759560ddab5b64317b86aa51c01))
+* **audit:** framing guards, ws-close search cancel, path containment, dead UI prune ([3e00492](https://github.com/mlnl221/nicotineHub/commit/3e004923b39c612654a6793a8f21ee390d920614))
+* **web:** APG treeview keyboard for browse shares ([238f950](https://github.com/mlnl221/nicotineHub/commit/238f9500f1c6e7989cea7f34f2793c96ee29f258))
+
+
+### Miscellaneous Chores
+
+* release train 0.34 bundles audit hardening and treeview keyboard ([d65afa9](https://github.com/mlnl221/nicotineHub/commit/d65afa9ab15f3aee2f59fd303ed7a74e4edf363e))
+
 ## [0.33.0](https://github.com/mlnl221/nicotineHub/compare/v0.32.0...v0.33.0) (2026-09-09)
 
 
