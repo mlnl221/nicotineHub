@@ -93,7 +93,7 @@ function BrowseInner() {
     <div className="flex h-[100dvh] min-h-[100dvh] max-w-full overflow-hidden bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Browse" subtitle={`Browse shared files • ${tabs.length}/10 tabs`} />
-      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 bg-surface-dim dark:bg-inverse-surface pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="md:ml-72 flex flex-1 flex-col overflow-x-clip min-h-0 bg-surface-dim dark:bg-inverse-surface pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <PageHeader
           title="Browse Shares"
           subtitle={`${tabs.length}/10 tabs • Browse another user's shared files — ${hasTabs ? `${activeTab?.username ?? tabs[0].username}` : "enter a username above"}`}
@@ -127,7 +127,7 @@ function BrowseInner() {
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col overflow-hidden min-h-0">
+        <div className="flex flex-1 flex-col overflow-x-clip min-h-0">
           {activeTab ? (
             <BrowseView key={activeTab.id} tab={activeTab} />
           ) : (

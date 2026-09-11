@@ -93,7 +93,7 @@ function TabbedProfileInner() {
     <div className="flex min-h-screen max-w-full overflow-x-clip bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Profiles" subtitle={`${tabs.length}/10 tabs • User profiles`} />
-      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-clip max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <PageHeader
           title="User Profiles"
           subtitle={`${tabs.length}/10 tabs • ${activeTab ? `Viewing ${activeTab.username}` : "Look up any Soulseek user"}`}
@@ -157,7 +157,7 @@ function TabbedProfileInner() {
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col overflow-x-hidden max-w-full min-w-0 min-h-0">
+        <div className="flex flex-1 flex-col overflow-x-clip max-w-full min-w-0 min-h-0">
           {activeTab ? (
             <ProfileView key={activeTab.id} tab={activeTab} />
           ) : (

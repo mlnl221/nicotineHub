@@ -210,7 +210,7 @@ export function SearchScreen() {
     : `Find files across the network • ${tabs.length} tabs`;
 
   return (
-    <div className="flex min-h-screen max-w-full overflow-x-hidden flex-col bg-surface-container-low dark:bg-inverse-surface" data-custom-menu>
+    <div className="flex min-h-screen max-w-full overflow-x-clip flex-col bg-surface-container-low dark:bg-inverse-surface" data-custom-menu>
       <PageHeader title="Search" subtitle={searchSubtitle} settingsHref="/settings?tab=searches#searches" />
       <div className="sticky top-[calc(60px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-low/95 backdrop-blur dark:bg-inverse-surface/95 border-b border-outline-variant/10">
         <SearchBar
