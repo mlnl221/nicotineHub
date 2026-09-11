@@ -55,6 +55,20 @@ function ChatRoomsInner() {
   const openUserMenu = (pos: { clientX: number; clientY: number }, username: string) => {
     setMenuAnchor({ x: pos.clientX, y: pos.clientY, items: userMenu(username, "chatrooms") });
   };
+  const openHeaderRoomMenu = (x: number, y: number) => {
+    if (!activeRoom) return;
+    const room = activeRoom;
+    setMenuAnchor({
+      x,
+      y,
+      items: chatRoomMenu(room, "chat", {
+        onCopyAll: () => navigator.clipboard.writeText(userMessages.map((m) => `${m.username}: ${m.message}`).join("\n")),
+        onLeave: () => {
+          if (confirm(`Leave ${room}?`)) leaveRoom(room);
+        },
+      }),
+    });
+  };
   const joinedArray = Array.from(joinedRooms.values());
   const sortedRooms = (() => {
     const list = roomList.length ? roomList : isDemo ? DEMO_ROOMS.map((r) => ({ name: r.name, users: r.users, isPrivate: false })) : [];
@@ -344,25 +358,21 @@ function ChatRoomsInner() {
                         headerLongPressed.current = false;
                       }
                     }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (headerLongPressTimer.current) clearTimeout(headerLongPressTimer.current);
+                      openHeaderRoomMenu(e.clientX, e.clientY);
+                    }}
                     onPointerDown={(e) => {
                       if (e.pointerType !== "touch" || !activeRoom) return;
                       const x = e.clientX;
                       const y = e.clientY;
-                      const room = activeRoom;
                       if (headerLongPressTimer.current) clearTimeout(headerLongPressTimer.current);
                       headerLongPressTimer.current = setTimeout(() => {
                         headerLongPressed.current = true;
                         if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate?.(10);
-                        setMenuAnchor({
-                          x,
-                          y,
-                          items: chatRoomMenu(room, "chat", {
-                            onCopyAll: () => navigator.clipboard.writeText(userMessages.map((m) => `${m.username}: ${m.message}`).join("\n")),
-                            onLeave: () => {
-                              if (confirm(`Leave ${room}?`)) leaveRoom(room);
-                            },
-                          }),
-                        });
+                        openHeaderRoomMenu(x, y);
                       }, 500);
                     }}
                     onPointerUp={() => { if (headerLongPressTimer.current) clearTimeout(headerLongPressTimer.current); }}
