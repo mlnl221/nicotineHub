@@ -266,8 +266,8 @@ function DownloadsInner() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 max-w-full overflow-hidden">
-            <section data-testid="downloads-section" className="flex flex-col gap-4 bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border max-w-full overflow-hidden">
+          <div className="grid grid-cols-1 gap-6 max-w-full overflow-x-clip">
+            <section data-testid="downloads-section" className="flex flex-col gap-4 bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border max-w-full overflow-x-clip">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <h3 className="font-headline text-xl font-semibold flex items-center gap-2">
                   <span className="material-symbols-outlined text-primary">download</span>
@@ -320,7 +320,7 @@ function DownloadsInner() {
                     <span className="material-symbols-outlined text-[16px]">clear_all</span> Clear All <span className="material-symbols-outlined text-[14px]">{clearOpen ? "expand_less" : "expand_more"}</span>
                   </button>
                   {clearOpen ? (
-                    <div role="menu" className="absolute left-0 z-50 mt-1 w-52 overflow-hidden rounded-xl bg-surface-container-lowest shadow-xl ghost-border">
+                    <div role="menu" className="absolute left-0 z-[60] mt-1 w-52 overflow-hidden rounded-xl bg-surface-container-lowest shadow-xl ghost-border">
                       {[
                         { label: "Finished / Filtered", key: "finished-filtered" },
                         { label: "Finished", key: "finished" },

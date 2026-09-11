@@ -180,7 +180,7 @@ function UploadsInner() {
           ) : null}
           <ThroughputChart />
           <UploadStats />
-          <section data-testid="uploads-section" className="bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border flex flex-col gap-4 max-w-full overflow-hidden">
+          <section data-testid="uploads-section" className="bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border flex flex-col gap-4 max-w-full overflow-x-clip">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <h3 className="font-headline text-xl font-semibold flex items-center gap-2">
                 <span className="material-symbols-outlined text-tertiary">upload</span>
@@ -236,7 +236,7 @@ function UploadsInner() {
                   <span className="material-symbols-outlined text-[16px]">clear_all</span> Clear All <span className="material-symbols-outlined text-[14px]">{clearOpen ? "expand_less" : "expand_more"}</span>
                 </button>
                 {clearOpen ? (
-                  <div role="menu" className="absolute left-0 z-50 mt-1 w-60 overflow-hidden rounded-xl bg-surface-container-lowest shadow-xl ghost-border">
+                  <div role="menu" className="absolute left-0 z-[60] mt-1 w-60 overflow-hidden rounded-xl bg-surface-container-lowest shadow-xl ghost-border">
                     {[
                       { label: "Finished / Cancelled / Failed", key: "finished-cancelled-failed" },
                       { label: "Finished / Cancelled", key: "finished-cancelled" },
