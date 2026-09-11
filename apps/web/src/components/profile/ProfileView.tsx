@@ -11,14 +11,16 @@ import { useConfig } from "@/lib/config/provider";
 import { useProfileTabs } from "@/lib/profile-tabs";
 import type { ProfileTab } from "@/lib/profile-tabs";
 
-function profilePicSrc(pic: string): string {
+function profilePicSrc(pic: unknown): string {
+  if (typeof pic !== "string" || !pic) return "";
   const trim = pic.trimStart();
   const isSvg = trim.startsWith("<svg") || trim.startsWith("PHN2");
   const mime = isSvg ? "image/svg+xml" : "image/png";
   return `data:${mime};base64,${pic}`;
 }
 
-function guessMime(pic: string): string {
+function guessMime(pic: unknown): string {
+  if (typeof pic !== "string" || !pic) return "image/png";
   const t = pic.trimStart();
   if (t.startsWith("<svg") || t.startsWith("PHN2")) return "image/svg+xml";
   if (t.startsWith("iVBOR")) return "image/png";
