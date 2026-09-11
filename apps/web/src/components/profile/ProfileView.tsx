@@ -336,7 +336,7 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
               onClick={() => router.push(`/browse?user=${encodeURIComponent(username)}`)}
               className="flex-1 sm:flex-none rounded-xl bg-primary px-4 py-2.5 min-h-11 font-label text-xs font-semibold uppercase tracking-widest text-on-primary transition-colors hover:bg-primary-container hover:text-on-primary-container shadow-sm"
             >
-              Browse Files
+              Browse Shares
             </button>
             <button
               onClick={() => router.push(`/private-chat?user=${encodeURIComponent(username)}`)}
