@@ -1246,6 +1246,18 @@ export class TransferManager {
       for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) { target = t; break; }
     }
     if (!target) return;
+    // Finished transfers never restart: repeat peer grants (uploader queue
+    // cycling after our finish) get denied COMPLETE, nicotine-plus parity
+    // (downloads.py _transfer_request_downloads). No token mapping, no status change.
+    if (!target.isUpload && target.status === "Finished") {
+      logger.debug("transfer", "repeat grant for finished transfer denied", { id: target.id, token });
+      try { this.session?.unregisterFileToken(token); } catch {}
+      try {
+        const peer = owner || target.username;
+        if (peer && this.session?.sendTransferResponse) this.session.sendTransferResponse(peer, token, false, "Complete");
+      } catch {}
+      return;
+    }
     // Repeat grant while already streaming: keep the live F, just map + ack.
     if (target.status === "Transferring" && (target as unknown as { _hadRealF?: boolean })._hadRealF) {
       this.tokenIndex.set(token >>> 0, target.id);
@@ -1513,6 +1525,14 @@ export class TransferManager {
     const t = this.getByToken(token);
     if (!t) {
       logger.debug("transfer", "F connection unknown token, closing", { token });
+      try { socket.end(); } catch {}
+      return;
+    }
+    // Finished downloads never restart: stray F for a done transfer closes
+    // here instead of re-downloading from offset 0 (partial was moved away
+    // at finish, so resume would restart at 0). Deny went out in handleTransferRequest.
+    if (!t.isUpload && t.status === "Finished") {
+      logger.debug("transfer", "F for finished transfer ignored", { id: t.id, token });
       try { socket.end(); } catch {}
       return;
     }
