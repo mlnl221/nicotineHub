@@ -41,6 +41,8 @@ function ChatRoomsInner() {
   const [tickerInput, setTickerInput] = useState("");
   const [showWall, setShowWall] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
+  const headerLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const headerLongPressed = useRef(false);
   const [roomListW, onRoomListDown] = usePaneWidth("nicotineHub.chat.asideW");
 
   const activeMessages = activeRoom ? messages.get(activeRoom) || [] : [];
@@ -52,6 +54,20 @@ function ChatRoomsInner() {
   const chatStick = useStickToBottom(activeRoom ?? "", userMessages.length);
   const openUserMenu = (pos: { clientX: number; clientY: number }, username: string) => {
     setMenuAnchor({ x: pos.clientX, y: pos.clientY, items: userMenu(username, "chatrooms") });
+  };
+  const openHeaderRoomMenu = (x: number, y: number) => {
+    if (!activeRoom) return;
+    const room = activeRoom;
+    setMenuAnchor({
+      x,
+      y,
+      items: chatRoomMenu(room, "chat", {
+        onCopyAll: () => navigator.clipboard.writeText(userMessages.map((m) => `${m.username}: ${m.message}`).join("\n")),
+        onLeave: () => {
+          if (confirm(`Leave ${room}?`)) leaveRoom(room);
+        },
+      }),
+    });
   };
   const joinedArray = Array.from(joinedRooms.values());
   const sortedRooms = (() => {
@@ -329,9 +345,40 @@ function ChatRoomsInner() {
               </div>
             ) : (
               <>
-                {/* Room header */}
+                {/* Room header — long-press name on touch opens Leave menu */}
                 <div className="flex items-center justify-between border-b border-outline-variant/15 bg-surface-container-lowest/60 px-4 md:px-6 py-3 backdrop-blur-sm max-w-full overflow-hidden gap-2">
-                  <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                  <div
+                    data-custom-menu
+                    title={activeRoom ? `${activeRoom} — long-press for options` : undefined}
+                    className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden select-none"
+                    onClickCapture={(e) => {
+                      if (headerLongPressed.current) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        headerLongPressed.current = false;
+                      }
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (headerLongPressTimer.current) clearTimeout(headerLongPressTimer.current);
+                      openHeaderRoomMenu(e.clientX, e.clientY);
+                    }}
+                    onPointerDown={(e) => {
+                      if (e.pointerType !== "touch" || !activeRoom) return;
+                      const x = e.clientX;
+                      const y = e.clientY;
+                      if (headerLongPressTimer.current) clearTimeout(headerLongPressTimer.current);
+                      headerLongPressTimer.current = setTimeout(() => {
+                        headerLongPressed.current = true;
+                        if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate?.(10);
+                        openHeaderRoomMenu(x, y);
+                      }, 500);
+                    }}
+                    onPointerUp={() => { if (headerLongPressTimer.current) clearTimeout(headerLongPressTimer.current); }}
+                    onPointerCancel={() => { if (headerLongPressTimer.current) clearTimeout(headerLongPressTimer.current); }}
+                    onPointerLeave={() => { if (headerLongPressTimer.current) clearTimeout(headerLongPressTimer.current); }}
+                  >
                     <span className="material-symbols-outlined text-primary">tag</span>
                     <h3 className="font-headline font-bold truncate min-w-0 max-w-[40vw]">{activeRoom}</h3>
                     <span className="rounded-full bg-surface-container-high px-2 py-0.5 font-label text-xs">
