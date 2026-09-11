@@ -347,19 +347,31 @@ export function packIp(value: string): Buffer {
   return Buffer.from([nums[3]!, nums[2]!, nums[1]!, nums[0]!]);
 }
 
-/** Cursor reader — mirrors SlskMessage. */
+/** Thrown by {@link SlskReader} when a frame ends mid-field. Catchable — callers drop the frame. */
+export class FramingError extends Error {
+  constructor(message = "Truncated frame") {
+    super(message);
+    this.name = "FramingError";
+  }
+}
+
+/** Cursor reader — mirrors SlskMessage. Every read bounds-checks `remaining` and throws {@link FramingError} on truncation. */
 export class SlskReader {
   private offset = 0;
   constructor(private readonly buf: Buffer) {}
   get remaining(): number { return this.buf.length - this.offset; }
-  uint32(): number { const v = this.buf.readUInt32LE(this.offset); this.offset += 4; return v; }
-  int32(): number { const v = this.buf.readInt32LE(this.offset); this.offset += 4; return v; }
-  uint16(): number { const v = this.buf.readUInt16LE(this.offset); this.offset += 2; return v; }
-  uint8(): number { const v = this.buf.readUInt8(this.offset); this.offset += 1; return v; }
+  private need(n: number): void {
+    if (this.remaining < n) throw new FramingError(`Truncated frame: need ${n} byte(s), have ${this.remaining}`);
+  }
+  uint32(): number { this.need(4); const v = this.buf.readUInt32LE(this.offset); this.offset += 4; return v; }
+  int32(): number { this.need(4); const v = this.buf.readInt32LE(this.offset); this.offset += 4; return v; }
+  uint16(): number { this.need(2); const v = this.buf.readUInt16LE(this.offset); this.offset += 2; return v; }
+  uint8(): number { this.need(1); const v = this.buf.readUInt8(this.offset); this.offset += 1; return v; }
   bool(): boolean { return this.uint8() !== 0; }
-  uint64(): bigint { const v = this.buf.readBigUInt64LE(this.offset); this.offset += 8; return v; }
+  uint64(): bigint { this.need(8); const v = this.buf.readBigUInt64LE(this.offset); this.offset += 8; return v; }
   string(): string {
     const len = this.uint32();
+    this.need(len);
     const raw = this.buf.subarray(this.offset, this.offset + len);
     this.offset += len;
     try {
@@ -370,10 +382,12 @@ export class SlskReader {
   }
   bytes(): Buffer {
     const len = this.uint32();
+    this.need(len);
     const v = Buffer.from(this.buf.subarray(this.offset, this.offset + len));
     this.offset += len; return v;
   }
   ip(): string {
+    this.need(4);
     const start = this.offset; this.offset += 4;
     const b = this.buf.subarray(start, this.offset);
     // wire: little-endian reversed inet_aton
@@ -582,25 +596,16 @@ export interface LoginSuccess { success: true; banner: string; ipAddress: string
 export interface LoginFailure { success: false; rejectionReason: string; rejectionDetail?: string; }
 export type LoginResponse = LoginSuccess | LoginFailure;
 export function parseLoginResponse(payload: Buffer): LoginResponse {
-  let offset = 0;
-  const readBool = (): boolean => { const v = payload[offset] !== 0; offset += 1; return v; };
-  const readUint32 = (): number => { const v = payload.readUInt32LE(offset); offset += 4; return v; };
-  const readString = (): string => {
-    const len = readUint32();
-    const raw = payload.subarray(offset, offset + len);
-    offset += len;
-    try { return new TextDecoder("utf-8", { fatal: true }).decode(raw); } catch { return raw.toString("latin1"); }
-  };
-  const success = readBool();
+  const r = new SlskReader(payload);
+  const success = r.bool();
   if (!success) {
-    const rejectionReason = readString();
-    const rejectionDetail = offset < payload.length ? readString() : undefined;
+    const rejectionReason = r.string();
+    const rejectionDetail = r.remaining ? r.string() : undefined;
     return { success: false, rejectionReason, rejectionDetail };
   }
-  const banner = readString();
-  const ipBytes = payload.subarray(offset, offset + 4); offset += 4;
-  const ipAddress = `${ipBytes[3]}.${ipBytes[2]}.${ipBytes[1]}.${ipBytes[0]}`;
-  const checksum = readString(); const isSupporter = readBool();
+  const banner = r.string();
+  const ipAddress = r.ip();
+  const checksum = r.string(); const isSupporter = r.bool();
   return { success: true, banner, ipAddress, checksum, isSupporter };
 }
 export function describeRejection(reason: string): string {
@@ -672,7 +677,11 @@ function readFileSize(buf: Buffer, offset: number): { size: number; next: number
 }
 
 export function parseFileSearchResponse(payload: Buffer): FileSearchResult {
-  const buf = inflateWithCap(payload);
+  return parseFileSearchResponseBuffer(inflateWithCap(payload));
+}
+
+/** Parse an already-inflated FileSearchResponse buffer (single-inflate path — inflate once, gate token, then parse). */
+export function parseFileSearchResponseBuffer(buf: Buffer): FileSearchResult {
   let offset = 0;
   const readString = (): string => {
     const len = buf.readUInt32LE(offset); offset += 4;
@@ -864,7 +873,9 @@ export interface TransferResponseMsg { token: number; allowed: boolean; size?: n
 export function parseTransferResponse(payload: Buffer): TransferResponseMsg {
   const r = new SlskReader(payload); const token = r.uint32(); const allowed = r.bool();
   if (allowed) {
-    const raw = r.remaining >= 8 ? r.uint64() : BigInt(0);
+    // nicotine-plus parity: bare allowed reply is token+bool only — omitted size stays undefined, not 0.
+    if (r.remaining < 8) return { token, allowed };
+    const raw = r.uint64();
     const size = raw <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(raw) : raw;
     return { token, allowed, size };
   }
@@ -928,16 +939,16 @@ export function parseRoomTickerEvent(payload: Buffer): RoomTickerEvent {
 
 /* Browse shares — SharedFileListResponse 5 + FolderContentsResponse 37 */
 
-export interface BrowseFileEntry { name: string; size: number; ext: string; attrs: Array<[number, number]>; }
+export interface BrowseFileEntry { name: string; size: number | bigint; ext: string; attrs: Array<[number, number]>; }
 export interface BrowseFolderEntry { name: string; files: BrowseFileEntry[]; }
 
 function parseBrowseFile(r: SlskReader): BrowseFileEntry {
   const code = r.uint8(); // 1
   void code;
   const name = r.string();
-  // size is uint64
+  // size is uint64 — exact via BigInt past MAX_SAFE_INTEGER, never bitmask-truncated
   const raw = r.uint64();
-  const size = raw <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(raw) : Number(raw & BigInt(0x1fffffffffffff));
+  const size = raw <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(raw) : raw;
   const ext = r.string();
   const nAttrs = r.uint32();
   const attrs: Array<[number, number]> = [];

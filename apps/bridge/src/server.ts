@@ -17,7 +17,7 @@
 import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync, chmodSync, renameSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { z } from "zod";
-import { SoulseekSession } from "./session.ts";
+import { SoulseekSession, namespaceSearchId } from "./session.ts";
 import { PermissionLevel } from "./shares.ts";
 import { TransferManager } from "./transfers.ts";
 import { diagClear, diagLog, diagTail, diagSubscribe, logger, type LogLevel } from "./logger.ts";
@@ -234,27 +234,29 @@ const BUILD_DATE = process.env.BUILD_DATE || process.env.NEXT_PUBLIC_BUILD_DATE 
 // WSL bun dev: not writable → fallback to ./config/./data or /tmp/nicotine-hub-*, then env-sync so ShareDB/others see same dir.
 // MUST run before any CONFIG_DIR/DATA_DIR-dependent reads (listen_port, upnp, PluginManager)
 function ensureDirWithFallback(initial: string, fallbacks: string[], envKey: string): string {
-  let dir = initial;
   try {
-    mkdirSync(dir, { recursive: true });
-    const tf = join(dir, ".writetest");
+    mkdirSync(initial, { recursive: true });
+    const tf = join(initial, ".writetest");
     writeFileSync(tf, "ok");
     rmSync(tf);
-    return dir;
+    return initial;
   } catch {}
   const { tmpdir } = require("node:os") as typeof import("node:os");
   for (const cand of fallbacks) {
-    const full = cand.startsWith("/tmp") ? join(tmpdir(), cand.slice(5)) : cand;
+    // Resolve to absolute — a silent relative ./config would depend on cwd
+    // and diverge between dev, prod, and tests.
+    const full = cand.startsWith("/tmp") ? join(tmpdir(), cand.slice(5)) : resolve(cand);
     try {
       mkdirSync(full, { recursive: true });
       const tf = join(full, ".writetest");
       writeFileSync(tf, "ok");
       rmSync(tf);
-      if (dir === initial) console.warn(`[bridge] ${envKey} ${initial} not writable, falling back to ${full}`);
+      console.warn(`[bridge] ${envKey} ${initial} not writable, falling back to ${full}`);
       return full;
     } catch {}
   }
-  return dir;
+  console.warn(`[bridge] ${envKey} ${initial} not writable and no fallback worked, using ${initial} anyway`);
+  return initial;
 }
 CONFIG_DIR = ensureDirWithFallback(CONFIG_DIR, ["./config", "/tmp/nicotine-hub-config"], "CONFIG_DIR");
 DATA_DIR = ensureDirWithFallback(DATA_DIR, ["./data", "/tmp/nicotine-hub"], "DATA_DIR");
@@ -391,6 +393,7 @@ const activeSessions = new Set<SoulseekSession>();
  */
 type AttachedClient = { send: (payload: string) => unknown };
 const attachedClients = new Set<AttachedClient>();
+let wsClientSeq = 0;
 
 function broadcast(payload: string): void {
   for (const c of attachedClients) {
@@ -400,8 +403,15 @@ function broadcast(payload: string): void {
 
 function broadcastJson(msg: unknown): void {
   let s: string;
-  try { s = JSON.stringify(msg); } catch { return; }
+  try { s = jsonStringifySafe(msg); } catch { return; }
   broadcast(s);
+}
+
+// Peer-supplied file sizes can exceed MAX_SAFE_INTEGER (parsed as BigInt) —
+// plain JSON.stringify would throw and drop the whole payload.
+export function jsonStringifySafe(msg: unknown): string {
+  return JSON.stringify(msg, (_k, v: unknown) =>
+    typeof v === "bigint" ? (v <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(v) : v.toString()) : v);
 }
 
 function sessionStatusPayload(): { type: "session:status"; loggedIn: boolean; username?: string } {
@@ -444,23 +454,26 @@ function createSharedTransfers(): TransferManager {
   return tm;
 }
 
-/** Event callbacks for the singleton session — all pushes fan out to every attached client. */
-function sharedSessionCallbacks() {
+/** Event callbacks for the singleton session — all pushes fan out to every attached client.
+ * boundTransfers pins F-chunk/transfer routing to the manager created at login:
+ * after a re-login the old session's in-flight chunks still land on the OLD
+ * (closed) manager instead of being rerouted into the new login's transfers. */
+function sharedSessionCallbacks(boundTransfers: TransferManager) {
   return {
     onFileConnection: (token: number, socket: unknown) => {
-      try { (sharedTransfers as unknown as { handleFileConnection: (t: number, s: unknown) => void })?.handleFileConnection(token, socket as unknown as never); } catch {}
+      try { (boundTransfers as unknown as { handleFileConnection: (t: number, s: unknown) => void })?.handleFileConnection(token, socket as unknown as never); } catch {}
     },
     onFileChunk: (token: number, chunk: Buffer) => {
-      try { (sharedTransfers as unknown as { handleFileChunk: (t: number, c: Buffer) => void })?.handleFileChunk(token, chunk); } catch {}
+      try { (boundTransfers as unknown as { handleFileChunk: (t: number, c: Buffer) => void })?.handleFileChunk(token, chunk); } catch {}
     },
     onFileClosed: (token: number) => {
-      try { (sharedTransfers as unknown as { handleFileClosed: (t: number) => void })?.handleFileClosed(token); } catch {}
+      try { (boundTransfers as unknown as { handleFileClosed: (t: number) => void })?.handleFileClosed(token); } catch {}
     },
     onUploadPierce: (username: string, socket: unknown) => {
-      try { (sharedTransfers as unknown as { handleUploadPierced: (u: string, s: unknown) => Promise<void> })?.handleUploadPierced(username, socket as unknown as never); } catch {}
+      try { (boundTransfers as unknown as { handleUploadPierced: (u: string, s: unknown) => Promise<void> })?.handleUploadPierced(username, socket as unknown as never); } catch {}
     },
     getQueuePlace: (file: string) => {
-      try { return (sharedTransfers as unknown as { getQueuePlace: (f: string) => number })?.getQueuePlace(file) ?? 1; } catch { return 1; }
+      try { return (boundTransfers as unknown as { getQueuePlace: (f: string) => number })?.getQueuePlace(file) ?? 1; } catch { return 1; }
     },
     filterWishlistTerm: (t: string): string | null => {
       const out = pluginManager.outgoingWishlistSearchEvent(t);
@@ -540,17 +553,13 @@ function sharedSessionCallbacks() {
             seen.add(name);
             out.push(f);
           }
-          try { browseCache.set(event.username.toLowerCase(), { folders: out as unknown[], ts: Date.now() }); } catch {}
+          try { setBrowseCache(event.username.toLowerCase(), { folders: out as unknown[], ts: Date.now() }); } catch {}
           const page = out.slice(0, BROWSE_PAGE_SIZE);
           const hasMore = out.length > BROWSE_PAGE_SIZE;
           const lockedCount = Array.isArray(event.lockedFolders) ? event.lockedFolders.length : 0;
-          // Stash the full result on every attached client so browse:page works per client.
-          // NB: browse:page reads ws.data — stash there, not on the wrapper object.
-          for (const c of attachedClients) {
-            const bag = ((c as unknown as { data?: Record<string, unknown> }).data ?? (c as unknown as Record<string, unknown>));
-            try { bag._browseFull = out; } catch {}
-            try { bag._browseUser = event.username; } catch {}
-          }
+          // Stash the full result keyed per user so browse:page serves the
+          // right user even with concurrent browses from multiple clients.
+          try { setBrowseFull(event.username, out); } catch {}
           broadcastJson({ type: "browse:shares", username: event.username, folders: page as never, total: out.length, hasMore, offset: 0, lockedCount });
         }
         else if (event.type === "browse-folder") broadcastJson({ type: "browse:folder", username: event.username, folder: event.folder, token: event.token, files: event.files, folders: (event as { folders?: unknown }).folders });
@@ -581,7 +590,7 @@ function sharedSessionCallbacks() {
       }
       logger.debug("transfer", "transfer event", { type: event.type, username: event.username, file: event.file?.slice(0, 80), token: event.token });
       broadcastJson({ type: "peer:transfer", event });
-      const tm = sharedTransfers;
+      const tm = boundTransfers;
       if (!tm) return;
       try {
         if (event.type === "place-in-queue" && event.file && event.place !== undefined) {
@@ -653,7 +662,7 @@ async function establishSharedSession(creds: StoredCreds): Promise<{ ok: boolean
       listenPort: LISTEN_PORT,
       profile: defaultProfile(creds.username),
       dataDir: DATA_DIR,
-      ...sharedSessionCallbacks(),
+      ...sharedSessionCallbacks(sharedTransfers),
     });
     try { (session as unknown as { setUpnpEnabled?: (b: boolean) => void }).setUpnpEnabled?.(GLOBAL_UPNP_ENABLED); } catch {}
     sharedSession = session;
@@ -725,9 +734,60 @@ const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const BROWSE_CACHE_TTL_MS = 5 * 60 * 1000;
 const USERINFO_CACHE_TTL_MS = 5 * 60 * 1000;
 const SEARCH_CACHE_MAX = 100;
+const BROWSE_CACHE_MAX = 500;
+const USERINFO_CACHE_MAX = 500;
 const searchCache = new Map<string, { rows: unknown[]; total: number; ts: number }>();
 const browseCache = new Map<string, { folders: unknown[]; ts: number }>();
 const userInfoCache = new Map<string, { data: unknown; ts: number }>();
+// Full browse results keyed per user — concurrent browses for different users
+// no longer overwrite each other (replaces the old per-client fan-out stash).
+const BROWSE_FULL_MAX = 50;
+const browseFullStash = new Map<string, { folders: unknown[]; username: string; ts: number }>();
+function setBrowseCache(key: string, val: { folders: unknown[]; ts: number }) {
+  if (!browseCache.has(key) && browseCache.size >= BROWSE_CACHE_MAX) {
+    const first = browseCache.keys().next().value as string | undefined;
+    if (first) browseCache.delete(first);
+  }
+  browseCache.set(key, val);
+}
+function setUserInfoCache(key: string, val: { data: unknown; ts: number }) {
+  if (!userInfoCache.has(key) && userInfoCache.size >= USERINFO_CACHE_MAX) {
+    const first = userInfoCache.keys().next().value as string | undefined;
+    if (first) userInfoCache.delete(first);
+  }
+  userInfoCache.set(key, val);
+}
+function setBrowseFull(username: string, folders: unknown[]) {
+  const key = username.toLowerCase();
+  if (!browseFullStash.has(key) && browseFullStash.size >= BROWSE_FULL_MAX) {
+    const first = browseFullStash.keys().next().value as string | undefined;
+    if (first) browseFullStash.delete(first);
+  }
+  browseFullStash.set(key, { folders, username, ts: Date.now() });
+}
+function getBrowseFull(username: string): { folders: unknown[]; username: string } | null {
+  const key = username.toLowerCase();
+  const e = browseFullStash.get(key);
+  if (!e) return null;
+  if (Date.now() - e.ts > BROWSE_CACHE_TTL_MS) { browseFullStash.delete(key); return null; }
+  return e;
+}
+function sweepExpiredCaches(): void {
+  const now = Date.now();
+  for (const [k, e] of searchCache) if (now - e.ts > SEARCH_CACHE_TTL_MS) searchCache.delete(k);
+  for (const [k, e] of browseCache) if (now - e.ts > BROWSE_CACHE_TTL_MS) browseCache.delete(k);
+  for (const [k, e] of userInfoCache) if (now - e.ts > USERINFO_CACHE_TTL_MS) userInfoCache.delete(k);
+  for (const [k, e] of browseFullStash) if (now - e.ts > BROWSE_CACHE_TTL_MS) browseFullStash.delete(k);
+}
+const cacheSweepTimer = setInterval(sweepExpiredCaches, 60_000);
+try { (cacheSweepTimer as unknown as { unref?: () => void }).unref?.(); } catch {}
+// /files/:token links die after 24h (autoclear_* behavior unchanged).
+const FILE_TOKEN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+function fileTokenExpired(issuedAt: number | undefined, fallbackMtime: number | undefined): boolean {
+  const at = issuedAt ?? fallbackMtime;
+  if (at === undefined || !Number.isFinite(at)) return false; // untimestamped legacy → allow
+  return Date.now() - at > FILE_TOKEN_MAX_AGE_MS;
+}
 
 function cacheKeySearch(query: string, mode = "global", target = ""): string {
   return `${mode}:${target.toLowerCase()}:${query.trim().toLowerCase()}`;
@@ -746,7 +806,7 @@ function setCachedSearch(key: string, rows: unknown[], total: number) {
   searchCache.set(key, { rows: [...rows], total, ts: Date.now() });
 }
 // Exported for session.ts integration (optional)
-export const bridgeCaches = { searchCache, browseCache, userInfoCache, getCachedSearch, setCachedSearch };
+export const bridgeCaches = { searchCache, browseCache, userInfoCache, getCachedSearch, setCachedSearch, setBrowseCache, setUserInfoCache, sweepExpiredCaches };
 // ─────────────────────────────────────────────────────────
 
 function errorMessage(error: string): string { return JSON.stringify({ type: "error", error }); }
@@ -857,10 +917,10 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       const st = getGlobalPortMapperStatus();
       return new Response(JSON.stringify({ ...st, listenPort: LISTEN_PORT, ts: new Date().toISOString() }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store", ...cors } });
     }
-    // Port checker — external host (mirrors pynicotine/portchecker.py, slsknet.org)
+    // Port checker — external host (mirrors pynicotine/portchecker.py, slsknet.org).
+    // Gated like /upnp/status when BRIDGE_TOKEN is set (reveals listen-port reachability).
     if ((url.pathname === "/portchecker" || url.pathname === "/api/portchecker") && req.method === "GET") {
-      // No auth required for homelab LAN check; if BRIDGE_TOKEN set, still allow but gate via same as health json if needed.
-      // We keep it open for diagnostics (like /health plain) but include token check for detailed gate if BRIDGE_TOKEN enforced.
+      { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const portParam = Number(url.searchParams.get("port") || LISTEN_PORT);
       const port = Number.isInteger(portParam) && portParam >= 1 && portParam <= 65535 ? portParam : LISTEN_PORT;
       try {
@@ -1140,35 +1200,40 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       try {
         const mgrPath = sharedTransfers?.getFilePathForToken(token);
         if (mgrPath) {
-          const { existsSync: es } = require("node:fs") as typeof import("node:fs");
+          const { existsSync: es, statSync: ss } = require("node:fs") as typeof import("node:fs");
           const { basename: bn, resolve: res } = require("node:path") as typeof import("node:path");
           const r = res(mgrPath);
           const root = sharedTransfers?.downloadsRoot?.() ?? res(join(DATA_DIR, "downloads"));
           if (es(r) && (r === root || r.startsWith(root + "/"))) {
+            const t = sharedTransfers?.getByToken(token) as { finishedAt?: number } | undefined;
+            let mt: number | undefined;
+            try { mt = ss(r).mtimeMs; } catch {}
+            if (fileTokenExpired(t?.finishedAt, mt)) return new Response("Not found", { status: 404, headers: secHeaders });
             return serveFileWithRanges(r, req, cors, sanitizeFileNameForHeader(bn(r)));
           }
         }
       } catch {}
       try {
-        const { existsSync, readFileSync } = require("node:fs") as typeof import("node:fs");
+        const { existsSync, readFileSync, statSync } = require("node:fs") as typeof import("node:fs");
         const { join, basename, resolve } = require("node:path") as typeof import("node:path");
         // Strict lookup: only Finished entries match token; no fallback to arbitrary first file
         const dlPath = join(CONFIG_DIR, "downloads.json");
         let fileName: string | undefined;
+        let tokenIssuedAt: number | undefined;
         if (existsSync(dlPath)) {
           try {
-            const arr = JSON.parse(readFileSync(dlPath, "utf8")) as Array<{ token?: number; fileName?: string; size?: number; status?: string }>;
+            const arr = JSON.parse(readFileSync(dlPath, "utf8")) as Array<{ token?: number; fileName?: string; size?: number; status?: string; finishedAt?: number }>;
             const entry = arr.find((e) => e.token === token && e.status === "Finished");
-            if (entry) fileName = entry.fileName;
+            if (entry) { fileName = entry.fileName; tokenIssuedAt = entry.finishedAt; }
           } catch {}
         }
         if (!fileName) {
           const alt = join(CONFIG_DIR, "transfers.json");
           if (existsSync(alt)) {
             try {
-              const arr = JSON.parse(readFileSync(alt, "utf8")) as Array<{ token?: number; fileName?: string; size?: number; status?: string }>;
+              const arr = JSON.parse(readFileSync(alt, "utf8")) as Array<{ token?: number; fileName?: string; size?: number; status?: string; finishedAt?: number }>;
               const entry = arr.find((e) => e.token === token && e.status === "Finished");
-              if (entry) fileName = entry.fileName;
+              if (entry) { fileName = entry.fileName; tokenIssuedAt = entry.finishedAt; }
             } catch {}
           }
         }
@@ -1209,6 +1274,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           } catch {}
         }
         if (!filePath || !existsSync(filePath)) return new Response("Not found", { status: 404, headers: secHeaders });
+        // Token expiry: finishedAt when present, else file mtime as issue-time proxy.
+        try {
+          const mt = statSync(filePath).mtimeMs;
+          if (fileTokenExpired(tokenIssuedAt, mt)) return new Response("Not found", { status: 404, headers: secHeaders });
+        } catch {}
         return serveFileWithRanges(filePath, req, cors, safeName);
       } catch {
         return new Response("Not found", { status: 404, headers: secHeaders });
@@ -1228,6 +1298,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     open(ws) {
       ws.data = {};
       (ws.data as unknown as Record<string, unknown>).pluginManager = pluginManager;
+      (ws.data as unknown as Record<string, unknown>).clientId = `c${++wsClientSeq}`;
       logger.info("bridge", "ws open", { ip: (ws as unknown as { remoteAddress?: string }).remoteAddress });
       // Attach to the singleton session — no per-client Soulseek login.
       try { attachedClients.add(ws as unknown as AttachedClient); } catch {}
@@ -1315,6 +1386,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         return;
       }
 
+      // Per-client search-id namespace: session keys are "<clientId>:<searchId>" so
+      // two tabs reusing an id can't collide; payloads back to clients keep the
+      // original id via the `...p, searchId` override at each call site.
+      const wsClientId = (): string => String((ws.data as unknown as Record<string, unknown>).clientId ?? "");
+      const nsSearchId = (searchId: string): string => namespaceSearchId(wsClientId(), searchId);
       // Helpers to enforce logged-in (singleton session shared by all clients)
       const requireLogin = (): SoulseekSession | null => {
         const s = sharedSession;
@@ -1335,14 +1411,14 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const finalQuery = (out?.[0] as string) ?? query;
         // Search cache disabled — always hit network for fresh results (see fix/port-search-browse)
         logger.info("search", "search request", { searchId, query: finalQuery.slice(0,80), origQuery: query.slice(0,80) });
-        const token = session.search(finalQuery, searchId, {
+        const token = session.search(finalQuery, nsSearchId(searchId), {
           onResult: (p) => {
             logger.info("search", "search result → all clients", { searchId, token: p.token, rows: p.rows?.length });
-            broadcastJson({ type: "search:result", ...p });
+            broadcastJson({ type: "search:result", ...p, searchId });
           },
           onEnd: (p) => {
             logger.info("search", "search end", { searchId, reason: p.reason });
-            broadcastJson({ type: "search:end", ...p });
+            broadcastJson({ type: "search:end", ...p, searchId });
           },
         });
         logger.info("search", "search dispatched", { searchId, token, query: finalQuery.slice(0,80) });
@@ -1360,9 +1436,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const out = pluginManager.outgoingUserSearchEvent([username], query);
         if (out === null) return;
         const finalQuery = (out?.[1] as string) ?? query;
-        const token = session.searchUser(username, finalQuery, searchId, {
-          onResult: (p) => broadcastJson({ type: "search:result", ...p }),
-          onEnd: (p) => broadcastJson({ type: "search:end", ...p }),
+        const token = session.searchUser(username, finalQuery, nsSearchId(searchId), {
+          onResult: (p) => broadcastJson({ type: "search:result", ...p, searchId }),
+          onEnd: (p) => broadcastJson({ type: "search:end", ...p, searchId }),
         });
         broadcastJson({ type: "search:start", searchId, token });
         return;
@@ -1375,9 +1451,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const out = pluginManager.outgoingRoomSearchEvent([room], query);
         if (out === null) return;
         const finalQuery = (out?.[1] as string) ?? query;
-        const token = session.searchRoom(room, finalQuery, searchId, {
-          onResult: (p) => broadcastJson({ type: "search:result", ...p }),
-          onEnd: (p) => broadcastJson({ type: "search:end", ...p }),
+        const token = session.searchRoom(room, finalQuery, nsSearchId(searchId), {
+          onResult: (p) => broadcastJson({ type: "search:result", ...p, searchId }),
+          onEnd: (p) => broadcastJson({ type: "search:end", ...p, searchId }),
         });
         broadcastJson({ type: "search:start", searchId, token });
         return;
@@ -1390,9 +1466,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         const out = pluginManager.outgoingWishlistSearchEvent(query);
         if (out === null) return;
         const finalQuery = (out?.[0] as string) ?? query;
-        const token = session.wishlistSearch(finalQuery, searchId, {
-          onResult: (p) => broadcastJson({ type: "search:result", ...p }),
-          onEnd: (p) => broadcastJson({ type: "search:end", ...p }),
+        const token = session.wishlistSearch(finalQuery, nsSearchId(searchId), {
+          onResult: (p) => broadcastJson({ type: "search:result", ...p, searchId }),
+          onEnd: (p) => broadcastJson({ type: "search:end", ...p, searchId }),
         });
         broadcastJson({ type: "search:start", searchId, token });
         return;
@@ -1407,9 +1483,9 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         if (out === null) return;
         const finalUsernames = (out?.[0] as string[]) ?? usernames;
         const finalQuery = (out?.[1] as string) ?? query;
-        const token = (session as unknown as { searchBuddies: (u:string[], q:string, id:string, h: unknown)=>number }).searchBuddies(finalUsernames, finalQuery, searchId, {
-          onResult: (p: unknown) => broadcastJson({ type: "search:result", ...(p as object) }),
-          onEnd: (p: unknown) => broadcastJson({ type: "search:end", ...(p as object) }),
+        const token = (session as unknown as { searchBuddies: (u:string[], q:string, id:string, h: unknown)=>number }).searchBuddies(finalUsernames, finalQuery, nsSearchId(searchId), {
+          onResult: (p: unknown) => broadcastJson({ type: "search:result", ...(p as object), searchId }),
+          onEnd: (p: unknown) => broadcastJson({ type: "search:end", ...(p as object), searchId }),
         });
         broadcastJson({ type: "search:start", searchId, token });
         return;
@@ -1417,7 +1493,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (data.type === "search:stop") {
         const result = StopMessageSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid stop message.")); return; }
-        sharedSession?.cancelSearch(result.data.searchId);
+        sharedSession?.cancelSearch(nsSearchId(result.data.searchId));
         return;
       }
       if (data.type === "search:page") {
@@ -1430,6 +1506,13 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (data.type === "browse:page") {
         const result = BrowsePageSchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid browse:page.")); return; }
+        // Per-user stash first — exact owner, no cross-browse mixups.
+        const stashed = getBrowseFull(result.data.username);
+        if (stashed) {
+          const slice = stashed.folders.slice(result.data.offset, result.data.offset + result.data.limit);
+          ws.send(jsonStringifySafe({ type: "browse:shares", username: stashed.username, folders: slice as never, total: stashed.folders.length, hasMore: result.data.offset + result.data.limit < stashed.folders.length, offset: result.data.offset }));
+          return;
+        }
         const full = ((ws.data as unknown as Record<string, unknown>)._browseFull as unknown[] | undefined) || [];
         const owner = ((ws.data as unknown as Record<string, unknown>)._browseUser as string | undefined) || result.data.username;
         if (owner.toLowerCase() !== result.data.username.toLowerCase()) {
@@ -1437,14 +1520,14 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           const cached = browseCache.get(result.data.username.toLowerCase());
           if (cached && Date.now() - cached.ts < BROWSE_CACHE_TTL_MS) {
             const slice = cached.folders.slice(result.data.offset, result.data.offset + result.data.limit);
-            ws.send(JSON.stringify({ type: "browse:shares", username: result.data.username, folders: slice as never, total: cached.folders.length, hasMore: result.data.offset + result.data.limit < cached.folders.length, offset: result.data.offset }));
+            ws.send(jsonStringifySafe({ type: "browse:shares", username: result.data.username, folders: slice as never, total: cached.folders.length, hasMore: result.data.offset + result.data.limit < cached.folders.length, offset: result.data.offset }));
             return;
           }
           ws.send(errorMessage("No cached browse for that user."));
           return;
         }
         const slice = full.slice(result.data.offset, result.data.offset + result.data.limit);
-        ws.send(JSON.stringify({ type: "browse:shares", username: owner, folders: slice as never, total: full.length, hasMore: result.data.offset + result.data.limit < full.length, offset: result.data.offset }));
+        ws.send(jsonStringifySafe({ type: "browse:shares", username: owner, folders: slice as never, total: full.length, hasMore: result.data.offset + result.data.limit < full.length, offset: result.data.offset }));
         return;
       }
       if (data.type === "ping") {
@@ -1631,10 +1714,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
               const page = all.slice(0, BROWSE_PAGE_SIZE);
               const hasMore = all.length > BROWSE_PAGE_SIZE;
               logger.info("browse", "local self-shares", { username: result.data.username, dirs: all.length });
-              try { browseCache.set(result.data.username.toLowerCase(), { folders: all as unknown[], ts: Date.now() }); } catch {}
+              try { setBrowseCache(result.data.username.toLowerCase(), { folders: all as unknown[], ts: Date.now() }); } catch {}
+              try { setBrowseFull(result.data.username, all); } catch {}
               (ws.data as unknown as Record<string, unknown>)._browseFull = all;
               (ws.data as unknown as Record<string, unknown>)._browseUser = result.data.username;
-              ws.send(JSON.stringify({ type: "browse:shares", username: result.data.username, folders: page as never, total: all.length, hasMore, offset: 0 }));
+              ws.send(jsonStringifySafe({ type: "browse:shares", username: result.data.username, folders: page as never, total: all.length, hasMore, offset: 0 }));
             } catch (e) {
               ws.send(JSON.stringify({ type: "browse:shares", username: result.data.username, folders: [] as never, total: 0, hasMore: false, offset: 0, error: (e as Error).message }));
             }
@@ -2074,7 +2158,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                   if (getter) { const st = getter(); queuesize = st.queuedUploads; slotsavail = st.activeUploads < 3; }
                 } catch {}
                 const payload = { type: "user-info-response" as const, username: p.username, descr: p.descr, pic: p.pic ? p.pic.toString("base64") : null, totalupl: p.totalupl, queuesize, slotsavail, uploadallowed: p.uploadallowed };
-                userInfoCache.set(msg.username.toLowerCase(), { data: payload, ts: Date.now() });
+                setUserInfoCache(msg.username.toLowerCase(), { data: payload, ts: Date.now() });
                 ws.send(JSON.stringify(payload));
               } catch (e) {
                 ws.send(JSON.stringify({ type: "user-info-failed", username: msg.username }));
@@ -2089,7 +2173,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             session.requestUserInfo(msg.username)
               .then((info) => {
                 const payload = { type: "user-info-response" as const, username: info.username, descr: info.descr, pic: info.pic ? info.pic.toString("base64") : null, totalupl: info.totalupl, queuesize: info.queuesize, slotsavail: info.slotsavail, uploadallowed: info.uploadallowed };
-                userInfoCache.set(msg.username.toLowerCase(), { data: payload, ts: Date.now() });
+                setUserInfoCache(msg.username.toLowerCase(), { data: payload, ts: Date.now() });
                 ws.send(JSON.stringify(payload));
               })
               .catch(() => ws.send(JSON.stringify({ type: "user-info-failed", username: msg.username })));
@@ -2211,6 +2295,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     },
     close(ws, code, reason) {
       try { (ws.data as unknown as { logUnsub?: () => void }).logUnsub?.(); } catch {}
+      try { sharedSession?.cancelClientSearches(String((ws.data as unknown as Record<string, unknown>).clientId ?? "")); } catch {}
       try { attachedClients.delete(ws as unknown as AttachedClient); } catch {}
       // Detach only — the singleton Soulseek session stays up for other clients.
       const searchCount = (sharedSession as unknown as { searches?: Map<unknown, unknown> } | null)?.searches?.size ?? 0;

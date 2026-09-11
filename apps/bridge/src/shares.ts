@@ -551,12 +551,9 @@ export class ShareDB {
       if (!vName || !rawPath) continue;
       const rPath = this.resolveRealPath(rawPath);
       if (!existsSync(rPath)) {
-        // Path not mounted — keep placeholder so UI shows, but no files. Persist virtual→real mapping anyway.
+        // Path not mounted — keep virtual→real mapping so getUnavailableShares warns, but share no empty folder (peers must not see phantom dirs).
         this.virtual2real.set(vName, rawPath);
         this.real2virtual.set(rawPath, vName);
-        // create empty folder entry so peer sees virtual name even if host path missing (nicotine parity: empty dirs still reported)
-        const existsVirtual = folders.find((f) => f.name === vName);
-        if (!existsVirtual) folders.push({ name: vName, files: [] });
         continue;
       }
       try {
@@ -786,9 +783,9 @@ export class ShareDB {
       if (!vName || !rawPath) continue;
       const rPath = this.resolveRealPath(rawPath);
       if (!existsSync(rPath)) {
+        // Path not mounted — keep mapping so getUnavailableShares warns, no phantom empty folder.
         this.virtual2real.set(vName, rawPath);
         this.real2virtual.set(rawPath, vName);
-        if (!folders.find((f) => f.name === vName)) folders.push({ name: vName, files: [] });
         continue;
       }
       try {
@@ -838,9 +835,9 @@ export class ShareDB {
       if (!vName || !rawPath) continue;
       const rPath = this.resolveRealPath(rawPath);
       if (!existsSync(rPath)) {
+        // Path not mounted — keep mapping so getUnavailableShares warns, no phantom empty folder.
         this.virtual2real.set(vName, rawPath);
         this.real2virtual.set(rawPath, vName);
-        if (!folders.find((f) => f.name === vName)) folders.push({ name: vName, files: [] });
         continue;
       }
       try {

@@ -25,5 +25,5 @@ export function usePaneWidth(key: string, fallback = 320, min = 240, max = 640) 
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   }, [w, min, max]);
-  return [w, onPointerDown] as const;
+  return [w, onPointerDown, (n: number) => setW(Math.min(max, Math.max(min, n)))] as const;
 }

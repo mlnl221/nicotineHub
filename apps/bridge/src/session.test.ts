@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Socket } from "bun";
-import { buildPeerInit, frameMessage, PEER_MESSAGE_CODES } from "./soulseek.ts";
+import { buildPeerInit, frameMessage, packString, packUint32, PEER_MESSAGE_CODES, SERVER_MESSAGE_CODES } from "./soulseek.ts";
 import { SoulseekSession } from "./session.ts";
 import { PermissionLevel, ShareDB } from "./shares.ts";
 
@@ -202,5 +202,33 @@ describe("peer TCP framing", () => {
     processPeer(peer, frameMessage(PEER_MESSAGE_CODES.sharedFileListRequest, Buffer.alloc(0)), false);
     // code-5 reply must be written, not throttled by the log-line check
     expect(written.some((b) => b.length >= 8 && b.readUInt32LE(4) === PEER_MESSAGE_CODES.sharedFileListResponse)).toBe(true);
+  });
+
+  test("handleServerData drops a bad frame without killing the read loop", () => {
+    const session = Object.create(SoulseekSession.prototype) as SoulseekSession;
+    const seen: string[] = [];
+    Object.assign(session as unknown as Record<string, unknown>, {
+      serverBuffer: Buffer.alloc(0),
+      serverSocket: { write() {}, end() {} },
+      hasReceivedLoginResponse: false,
+      consecutiveSilentCloses: 0,
+      shouldReconnect: true,
+      loginResolve: undefined,
+      // first dispatch (login reject) throws out of the user callback — loop must survive it
+      loginReject: () => { throw new Error("boom"); },
+      opts: { username: "me", onUserEvent: (e: { type: string }) => { seen.push(e.type); } },
+      username: "me",
+    });
+    const handleServerData = (session as unknown as { handleServerData: (c: Buffer) => void }).handleServerData.bind(session);
+    const badLogin = frameMessage(SERVER_MESSAGE_CODES.login, Buffer.concat([Buffer.from([0]), packString("INVALIDPASS")]));
+    const goodPriv = frameMessage(SERVER_MESSAGE_CODES.checkPrivileges, packUint32(60));
+    expect(() => handleServerData(Buffer.concat([badLogin, goodPriv]))).not.toThrow();
+    // bad login frame was still consumed/processed (no reconnect), good frame dispatched after it
+    expect((session as unknown as { hasReceivedLoginResponse: boolean }).hasReceivedLoginResponse).toBe(true);
+    expect(seen).toEqual(["check-privileges"]);
+    // truncated tail is retained, not dispatched and not fatal
+    const before = seen.length;
+    expect(() => handleServerData(goodPriv.subarray(0, 5))).not.toThrow();
+    expect(seen.length).toBe(before);
   });
 });

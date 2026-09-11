@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useBrowseTabs } from "@/lib/browse-tabs";
 import type { BrowseTab } from "@/lib/browse-tabs";
@@ -16,26 +16,34 @@ const PAGE_SIZE = 50;
 
 // Memoized folder row — prevents all 9k rows re-rendering on select/expand.
 // contentVisibility skips offscreen layout (browser-native virtualization).
-const FolderRow = memo(function FolderRow({ name, short, depth, hasChildren, isExpanded, isSelected, statsLine, onToggle, onSelect, onMenu }: {
+// APG treeview: the row itself is the single tab stop (roving tabindex —
+// selected row tabIndex 0, rest -1); inner buttons are click-only
+// (tabIndex -1) so Tab crosses the whole tree in N stops, not 2N.
+const FolderRow = memo(function FolderRow({ name, short, depth, hasChildren, isExpanded, isSelected, statsLine, rowRef, onToggle, onSelect, onMenu }: {
   name: string; short: string; depth: number; hasChildren: boolean; isExpanded: boolean; isSelected: boolean; statsLine: string;
+  rowRef: (el: HTMLDivElement | null) => void;
   onToggle: () => void; onSelect: () => void; onMenu: (x: number, y: number) => void;
 }) {
   return (
     <div
+      ref={rowRef}
       title={name}
       role="treeitem"
       data-folder-row={name}
+      tabIndex={isSelected ? 0 : -1}
       aria-selected={isSelected}
+      aria-level={depth + 1}
       aria-expanded={hasChildren ? isExpanded : undefined}
-      className={`flex w-full min-w-max items-center gap-1 rounded-lg text-left transition-colors ${isSelected ? "bg-primary-fixed/20 text-primary border border-primary/10" : "hover:bg-surface-container-low text-on-surface-variant"}`}
+      className={`flex w-full min-w-max items-center gap-1 rounded-lg text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${isSelected ? "bg-primary-fixed/20 text-primary border border-primary/10" : "hover:bg-surface-container-low text-on-surface-variant"}`}
       style={{ paddingLeft: `${8 + depth * 16}px`, paddingRight: "8px", paddingTop: "6px", paddingBottom: "6px", contentVisibility: "auto", containIntrinsicSize: "auto 57px" }}
     >
       {hasChildren ? (
         <button
           type="button"
+          tabIndex={-1}
           onClick={(e) => { e.stopPropagation(); onToggle(); }}
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full hover:bg-surface-container-high"
-          aria-label={isExpanded ? "Collapse" : "Expand"}
+          aria-label={isExpanded ? `Collapse ${short}` : `Expand ${short}`}
         >
           <span className="material-symbols-outlined text-[18px]">{isExpanded ? "expand_more" : "chevron_right"}</span>
         </button>
@@ -43,6 +51,7 @@ const FolderRow = memo(function FolderRow({ name, short, depth, hasChildren, isE
         <span className="w-7 shrink-0" aria-hidden />
       )}
       <button
+        tabIndex={-1}
         onClick={onSelect}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onMenu(e.clientX, e.clientY); }}
         className="flex flex-1 items-center gap-3 min-w-0 text-left"
@@ -103,7 +112,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   }, [folders, selectedFolder, settings]);
 
   // Pane width persisted
-  const [asideW, onAsideDown] = usePaneWidth("nicotineHub.browse.asideW");
+  const [asideW, onAsideDown, setAsideW] = usePaneWidth("nicotineHub.browse.asideW");
 
   const allFoldersWithParents = useMemo(() => {
     const names = new Set(folders.map((f) => f.name));
@@ -310,15 +319,29 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const pagedFileIds = useMemo(() => pagedFiles.map((f) => f.name), [pagedFiles]);
   const marquee = useMarqueeSelection(bulk.setSelection);
 
-  // Keyboard tree nav: Up/Down move, Right expand/child, Left collapse/parent, Enter opens
+  // Keyboard tree nav: Up/Down move, Right expand/child, Left collapse/parent, Enter opens.
+  // Single stable ref callback (memo-safe): DOM focus follows selection so screen
+  // readers announce moves; roving tabindex keeps one tab stop for the whole tree.
   const folderListRef = useRef<HTMLDivElement | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const rowRefCb = useCallback((el: HTMLDivElement | null) => {
+    const n = el?.dataset.folderRow;
+    if (!n) return;
+    if (el) rowRefs.current.set(n, el);
+    else rowRefs.current.delete(n);
+  }, []);
+  const typeRef = useRef<{ buf: string; at: number }>({ buf: "", at: 0 });
   const selectFolder = (name: string) => {
     setSelectedFolder(name);
     openFolder(tab.id, name);
     const idx = visibleTreeFolders.findIndex((f) => f.name === name);
     if (idx >= visibleFolderCount) setVisibleFolderCount(Math.min(idx + PAGE_SIZE, visibleTreeFolders.length));
     requestAnimationFrame(() => {
-      try { folderListRef.current?.querySelector(`[data-folder-row="${CSS.escape(name)}"]`)?.scrollIntoView({ block: "nearest" }); } catch {}
+      try {
+        const row = rowRefs.current.get(name) ?? folderListRef.current?.querySelector(`[data-folder-row="${CSS.escape(name)}"]`);
+        row?.scrollIntoView({ block: "nearest" });
+        (row as HTMLElement | undefined)?.focus?.({ preventScroll: true });
+      } catch {}
     });
   };
   const toggleFolder = (name: string, expand: boolean) => {
@@ -332,8 +355,8 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   };
   const handleFolderKeyDown = (e: React.KeyboardEvent) => {
     if ((e.target as HTMLElement | null)?.closest?.("input,textarea,select,[contenteditable]")) return;
-    // Let focused inner buttons handle Enter/Space natively (expand toggle / select)
-    if ((e.key === "Enter" || e.key === " ") && (e.target as HTMLElement | null)?.closest?.("button")) return;
+    // Inner row buttons are tabIndex -1 (click-only) — all keyboard goes through
+    // this single path, so Enter/Space can't double-fire native + container logic.
     const idx = Math.max(0, visibleTreeFolders.findIndex((f) => f.name === selectedFolder));
     const cur = visibleTreeFolders[idx];
     if (!cur) return;
@@ -369,6 +392,17 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
       e.preventDefault();
       const last = visibleTreeFolders[visibleTreeFolders.length - 1];
       if (last) selectFolder(last.name);
+    } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // Type-ahead (APG): jump to next folder starting with the typed prefix.
+      const now = Date.now();
+      if (now - typeRef.current.at > 600) typeRef.current.buf = "";
+      typeRef.current.at = now;
+      typeRef.current.buf += e.key.toLowerCase();
+      const buf = typeRef.current.buf;
+      const shorts = visibleTreeFolders.map((f) => (f.name.split("\\").pop() || f.name).toLowerCase());
+      let at = shorts.findIndex((n, i) => i > idx && n.startsWith(buf));
+      if (at < 0) at = shorts.findIndex((n) => n.startsWith(buf));
+      if (at >= 0 && visibleTreeFolders[at].name !== selectedFolder) selectFolder(visibleTreeFolders[at].name);
     }
   };
 
@@ -398,6 +432,13 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
     }
   };
 
+  // Escape closes the properties dialog (backdrop click already does).
+  useEffect(() => {
+    if (!propsFile) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setPropsFile(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [propsFile]);
   // Header totals memoized — old code re-reduced all files every render.
   const { totalSize, totalFiles } = useMemo(() => {
     let size = 0, count = 0;
@@ -488,6 +529,13 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
               <input
                 value={folderInput}
                 onChange={(e) => setFolderInput(e.target.value)}
+                onKeyDown={(e) => {
+                  // ↓ drops focus into the first matching row — closes the search/keyboard gap.
+                  if (e.key === "ArrowDown" && visibleTreeFolders.length) {
+                    e.preventDefault();
+                    selectFolder(visibleTreeFolders[0].name);
+                  }
+                }}
                 placeholder="Search folders..."
                 className="w-full rounded-full bg-surface-container-low py-2 pl-9 pr-4 font-body text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
               />
@@ -552,6 +600,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                       isExpanded={expandedPaths.has(f.name)}
                       isSelected={selectedFolder === f.name}
                       statsLine={statsLine}
+                      rowRef={rowRefCb}
                       onToggle={() => toggleFolder(f.name, !expandedPaths.has(f.name))}
                       onSelect={() => { setSelectedFolder(f.name); openFolder(tab.id, f.name); }}
                       onMenu={(x, y) => setMenuAnchor({ x, y, items: browseFolderMenu(username, f.name, false, { onDownloadFolder: downloadFolder }) })}
@@ -572,13 +621,22 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
             )}
             </div>
         </aside>
-        {/* Drag handle — resize folder pane */}
+        {/* Drag handle — resize folder pane (pointer + ArrowLeft/Right when focused) */}
         <div
           role="separator"
           aria-orientation="vertical"
-          aria-label="Resize folder list"
+          aria-label="Resize folder list (Left/Right arrows)"
+          aria-valuenow={Math.round(asideW)}
+          aria-valuemin={240}
+          aria-valuemax={640}
+          tabIndex={0}
           onPointerDown={onAsideDown}
-          className="hidden md:flex w-2 shrink-0 cursor-col-resize items-center justify-center hover:bg-primary/10 touch-none select-none"
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+            e.preventDefault();
+            setAsideW(asideW + (e.key === "ArrowRight" ? 24 : -24));
+          }}
+          className="hidden md:flex w-2 shrink-0 cursor-col-resize items-center justify-center hover:bg-primary/10 touch-none select-none focus-visible:outline-none focus-visible:bg-primary/20"
           style={{ touchAction: "none" }}
         >
           <div className="h-8 w-0.5 rounded-full bg-outline-variant/40" />
@@ -709,6 +767,19 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                            <li
                              key={file.name}
                              {...marquee(file.name)}
+                             // Keyboard selection mirrors mouse: Enter/Space toggles (range with Shift).
+                             // tabIndex only in select mode — otherwise per-row Download buttons cover keyboard users.
+                             tabIndex={selectMode ? 0 : -1}
+                             role="checkbox"
+                             aria-checked={checked}
+                             aria-label={shortName}
+                             onKeyDown={(e) => {
+                               if (e.key !== "Enter" && e.key !== " ") return;
+                               if ((e.target as HTMLElement).closest("button,input")) return;
+                               e.preventDefault();
+                               if (e.shiftKey) bulk.toggleRange(file.name, pagedFileIds);
+                               else bulk.toggle(file.name);
+                             }}
                              onClick={(e) => {
                                marquee(file.name).onClick(e);
                                if (e.defaultPrevented) return;
@@ -806,11 +877,11 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
 
       {menuAnchor ? <ContextMenu x={menuAnchor.x} y={menuAnchor.y} items={menuAnchor.items} onClose={() => setMenuAnchor(null)} /> : null}
       {propsFile ? (
-        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 p-4" onClick={() => setPropsFile(null)}>
+        <div role="dialog" aria-modal="true" aria-label={`Properties of ${propsFile.name.split("\\").pop() || propsFile.name}`} className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 p-4" onClick={() => setPropsFile(null)}>
           <div className="w-full max-w-md rounded-2xl bg-surface-container-lowest p-6 shadow-xl max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-4">
               <h3 className="font-headline text-lg font-bold truncate">{propsFile.name.split("\\").pop()}</h3>
-              <button onClick={() => setPropsFile(null)} className="rounded-full p-2 hover:bg-surface-container-high"><span className="material-symbols-outlined">close</span></button>
+              <button autoFocus onClick={() => setPropsFile(null)} aria-label="Close properties" className="rounded-full p-2 hover:bg-surface-container-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"><span className="material-symbols-outlined">close</span></button>
             </div>
             <div className="mt-4 space-y-3 font-body text-sm">
               <div className="flex justify-between"><span className="text-on-surface-variant">Folder</span><span className="font-mono text-xs truncate max-w-[60%] text-right">{propsFile.folder}</span></div>

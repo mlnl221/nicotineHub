@@ -214,18 +214,3 @@ async def _generate(file_path: Path, label: str, digest: str, duration: float | 
         prune_if_needed(full.parent)
         etag = f'"{digest}"'
         return {"full": full, "zoom": zoom, "etag": etag, "hash": digest}
-
-
-def find_latest(label: str) -> dict | None:
-    """Newest spectrum pair for a label prefix (bridge-compat lookup)."""
-    d = spectrum_dir()
-    try:
-        cands = sorted(d.glob(f"{label}-*-Full.png"), key=lambda p: p.stat().st_mtime)
-    except OSError:
-        return None
-    for full in reversed(cands):
-        digest = full.name[len(label) + 1: -len("-Full.png")]
-        zoom = d / f"{label}-{digest}-Zoom.png"
-        if zoom.exists():
-            return {"full": full, "zoom": zoom, "etag": f'"{digest}"', "hash": digest}
-    return None

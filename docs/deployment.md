@@ -12,7 +12,8 @@ docker compose up --build  # http://localhost:3000 (only published UI port + LIS
 and the Soulseek peer `LISTEN_PORT` are published — bridge `:8787` and
 worker `:8789` live on the compose network only; browsers reach them
 through the web entrypoint (same-origin `/ws` piped + `/api/bridge/*` +
-`/api/worker/*` proxied by `apps/web/proxy-server.js`):
+`/api/worker/*` forwarded by `apps/web/proxy-server.js` to the inner Next
+server, whose `/api/bridge/*` + `/api/worker/*` route handlers proxy on):
 
 - `bridge` — `apps/bridge/Dockerfile` → `PORT=8787`, `LISTEN_PORT`, `CONFIG_DIR=/config`, `DATA_DIR=/data`, volumes `config:/config` + `data:/data`, `ports:` = `LISTEN_PORT` TCP+UDP only (no `8787` publish, no `network_mode` key)
 - `worker` — `apps/worker/Dockerfile` → `:8789`, volumes `config:/config:ro` + `data:/data`, no `ports:` block
@@ -56,7 +57,7 @@ LISTEN_PORT=60755 docker compose up -d
 
 ## GHCR — prebuilt images (no build required)
 
-Images are published to GHCR on every `main` push and on version tags `v*.*.*`. Both services are versioned together via `compose.yaml` `${TAG:-latest}`.
+Images are published to GHCR on every `main` push and on version tags `v*.*.*`. All three services are versioned together via `compose.yaml` `${TAG:-latest}`.
 
 ```bash
 # latest (default)
@@ -77,12 +78,14 @@ Images:
 
 - `ghcr.io/mlnl221/nicotinehub-bridge` — Bun bridge (`:latest`, `:sha-<short>`, `:<semver>` e.g. `:0.2.0`, `:0.2`, `:0`)
 - `ghcr.io/mlnl221/nicotinehub-web` — Next.js PWA (same tags)
+- `ghcr.io/mlnl221/nicotinehub-worker` — Python worker (same tags)
 
 Manual pulls:
 
 ```bash
 docker pull ghcr.io/mlnl221/nicotinehub-bridge:latest
 docker pull ghcr.io/mlnl221/nicotinehub-web:latest
+docker pull ghcr.io/mlnl221/nicotinehub-worker:latest
 docker pull ghcr.io/mlnl221/nicotinehub-bridge:0.2.0
 ```
 
@@ -103,7 +106,7 @@ feature/*  →  stage  (PR, dry-run docker build)  →  main  (promotion, builds
   - **Scheduled:** `.github/workflows/promote.yml` runs `cron: 0 2 * * 1` (Mondays 02:00 UTC) and via `workflow_dispatch` — if `stage` is ahead of `main` and no open `stage→main` PR exists, it auto-creates `chore: promote stage → main`.
   - **Manual:** `gh pr create --base main --head stage --title "chore: promote stage → main"` or via GitHub UI (base `main`, compare `stage`).
 
-Merging the promotion PR (push to `main`) triggers GHCR publish: `ghcr.io/mlnl221/nicotinehub-bridge|web:latest` + `sha-<short>` and on `v*.*.*` tags `0.2.0`/`0.2`/`0` + `latest` + `sha-`. Both services are versioned together; `compose.yaml` pins them via `${TAG:-latest}`.
+Merging the promotion PR (push to `main`) triggers GHCR publish: `ghcr.io/mlnl221/nicotinehub-bridge|web|worker:latest` + `sha-<short>` and on `v*.*.*` tags `0.2.0`/`0.2`/`0` + `latest` + `sha-`. All three services are versioned together; `compose.yaml` pins them via `${TAG:-latest}`.
 
 ## GitHub Releases (release-please)
 

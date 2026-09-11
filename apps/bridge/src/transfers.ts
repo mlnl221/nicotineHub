@@ -68,6 +68,7 @@ export interface BridgeTransfer {
   isUpload: boolean;
   isSlopLike?: boolean;
   token?: number;
+  finishedAt?: number; // ms epoch when status became Finished — bounds /files/:token age (24h)
   // internal
   _timer?: Timer;
   _pollTimer?: Timer;
@@ -172,6 +173,12 @@ function containedPath(dest: string, downloadsDir: string): string | null {
   return r === root || r.startsWith(root + sep) ? dest : null;
 }
 
+// ponytail: one sink for stall-timer teardown; callers previously each inlined the cast
+function clearStallTimer(t: BridgeTransfer): void {
+  const st = (t as unknown as { _stallTimer?: Timer })._stallTimer;
+  if (st) { clearTimeout(st); (t as unknown as { _stallTimer?: Timer })._stallTimer = undefined; }
+}
+
 function getIncompletePath(virtualPath: string, username: string, incompleteDir: string): string {
   const hash = createHash("md5").update(virtualPath + username).digest("hex");
   const prefix = `INCOMPLETE${hash}`;
@@ -225,6 +232,7 @@ export class TransferManager {
   private onQueue?: TransferQueueCb;
   private onFinished?: TransferFinishedCb;
   private statsTimer: Timer | null = null;
+  private pollTimer: Timer | null = null;
   private dataDir: string;
   private configDir: string;
   private incompleteDir: string;
@@ -320,7 +328,7 @@ export class TransferManager {
 
     this.statsTimer = setInterval(() => this.emitStats(), 2000);
     // Poll PlaceInQueue every 300 s
-    setInterval(() => this.pollQueuePositions(), 300_000);
+    this.pollTimer = setInterval(() => this.pollQueuePositions(), 300_000);
   }
 
   setSessionGetter(getter: () => any) {
@@ -1918,6 +1926,7 @@ export class TransferManager {
     t.speed = 0;
     t.timeLeft = null;
     t.queuePosition = null;
+    t.finishedAt = Date.now();
     // Live token stays on t.token for /files/ lookup; drop historic grants so
     // a stale token can never reopen a finished transfer.
     this.forgetTokensFor(t.id);
@@ -1966,6 +1975,8 @@ export class TransferManager {
         if (t._timer) clearInterval(t._timer);
         if (t._statusTimer) clearTimeout(t._statusTimer);
         if (t._pollTimer) clearInterval(t._pollTimer);
+        if (t._retryTimer) { clearTimeout(t._retryTimer); t._retryTimer = undefined; }
+        clearStallTimer(t);
         t.speed = 0;
         this.emit(t);
         this.emitStats();
@@ -1974,6 +1985,8 @@ export class TransferManager {
         if (t.status === "Transferring" && t._timer) clearInterval(t._timer);
         t.status = "Paused";
         this.closeTransferSockets(t);
+        if (t._retryTimer) { clearTimeout(t._retryTimer); t._retryTimer = undefined; }
+        clearStallTimer(t);
         t.speed = 0;
         this.emit(t);
         this.emitStats();
@@ -2075,5 +2088,6 @@ export class TransferManager {
       if (t._fileHandle !== undefined) try { const { closeSync } = require("node:fs"); closeSync(t._fileHandle); } catch {}
     }
     if (this.statsTimer) clearInterval(this.statsTimer);
+    if (this.pollTimer) clearInterval(this.pollTimer);
   }
 }

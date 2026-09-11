@@ -192,12 +192,10 @@ function PrivateChatInner() {
               x: e.clientX,
               y: e.clientY,
               items: privateChatMenu(activeUser, activeMessages as unknown as { username: string; message: string }[], {
-                onFind: () => {},
                 onCopyAll: () => {
                   const text = activeMessages.map((m) => `${m.username}: ${m.message}`).join("\n");
                   navigator.clipboard.writeText(text);
                 },
-                onClear: () => {},
               }),
             });
           }}>
