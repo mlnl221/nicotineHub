@@ -117,7 +117,7 @@ function ChatRoomsInner() {
     <div className="flex min-h-[100dvh] h-screen max-w-full overflow-hidden bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title={activeRoom || "Chat Rooms"} subtitle={activeRoom ? `${activeUsers.length} users • ${roomList.length} public rooms` : `${joinedArray.length} joined • ${roomList.length} public`} />
-      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 bg-surface-dim dark:bg-inverse-surface pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
+      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 bg-surface-dim dark:bg-inverse-surface pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
         <PageHeader
           title="Chat Rooms"
           subtitle={`${activeRoom ? `${activeUsers.length} users • ${activeRoom}` : `${joinedArray.length} joined • ${roomList.length} public`} • Monitoring rooms`}

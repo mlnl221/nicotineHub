@@ -81,7 +81,7 @@ function TabbedProfileInner() {
       title={state.user ? `View ${state.user}'s public profile` : "Sign in to view your profile"}
       className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-primary to-primary-container font-headline text-sm font-bold text-on-primary disabled:opacity-50 md:hidden"
     >
-      {ownPic ? (
+      {typeof ownPic === "string" && ownPic ? (
         <Image src={profilePicSrc(ownPic)} alt="My profile picture" width={44} height={44} unoptimized loading="lazy" className="h-full w-full object-cover" />
       ) : (
         <span aria-hidden>{(state.user ?? "?").slice(0, 1).toUpperCase()}</span>
