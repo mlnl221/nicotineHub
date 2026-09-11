@@ -315,6 +315,7 @@ function UploadsInner() {
           x={menuAnchor.x}
           y={menuAnchor.y}
           items={transferMenu({ user: menuAnchor.transfer.username, fileName: menuAnchor.transfer.fileName, virtualPath: menuAnchor.transfer.virtualPath }, true, {
+            onPause: () => abortTransfer(menuAnchor.transfer.id, true),
             onRemove: () => clearTransfer(menuAnchor.transfer.id, true),
             onClear: () => clearTransfer(menuAnchor.transfer.id, true),
             onClearMany: (s) => clearMany(true, s),

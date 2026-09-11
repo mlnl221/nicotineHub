@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export function rangeSlice(allIds: string[], anchor: string | null, target: string, cap = 50): string[] {
+export function rangeSlice(allIds: string[], anchor: string | null, target: string): string[] {
   if (!anchor || !allIds.includes(anchor) || !allIds.includes(target)) return [target];
   const a = allIds.indexOf(anchor);
   const b = allIds.indexOf(target);

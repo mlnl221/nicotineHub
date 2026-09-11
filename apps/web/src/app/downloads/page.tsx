@@ -139,8 +139,12 @@ function DownloadsInner() {
   };
   const handleBulkSpectrum = async () => {
     const ids = Array.from(bulk.selected);
-    const picked = ids.map((id) => { const t = downloads.find((d) => d.id === id); return t ? { fileName: t.fileName, size: t.size, token: parseDownloadToken(t as unknown as { downloadUrl?: string }) } : null; }).filter(Boolean) as Array<{ fileName: string; size?: number; token?: number }>;
-    const files = capTagFiles(picked.map((f) => f.fileName)).map((name) => picked.find((f) => f.fileName === name)!);
+    let picked = ids.map((id) => { const t = downloads.find((d) => d.id === id); return t ? { fileName: t.fileName, size: t.size, token: parseDownloadToken(t as unknown as { downloadUrl?: string }) } : null; }).filter(Boolean) as Array<{ fileName: string; size?: number; token?: number }>;
+    if (picked.length > 50) {
+      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Tag bulk limit", body: "First 50 files used for tag operations." } }));
+      picked = picked.slice(0, 50);
+    }
+    const files = picked;
     if (!files.length) return;
     setBulkResult({ title: "Spectrum queue started", rows: files.map((f) => ({ fileName: f.fileName, status: "queued" })) });
     const res = await bulkRequestSpectrum(files);

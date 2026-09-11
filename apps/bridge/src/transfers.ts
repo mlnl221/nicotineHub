@@ -416,7 +416,9 @@ export class TransferManager {
   }
 
   /** Nicotine-plus parity bulk clear (list entries only, files stay on disk).
-   * statuses null/empty = everything (honors isUpload filter). */
+   * statuses null/empty = everything (honors isUpload filter).
+   * Routes each id through the per-id clear path so sockets, timers,
+   * file handles and tokens are released like a single clear. */
   clearByStatuses(isUpload: boolean | null, statuses: string[] | null): number {
     const toDelete: string[] = [];
     for (const [id, t] of this.transfers) {
@@ -425,12 +427,11 @@ export class TransferManager {
       toDelete.push(id);
     }
     for (const id of toDelete) {
-      this.forgetTokensFor(id);
-      this.transfers.delete(id);
-      this.onRemoved(id);
+      const t = this.transfers.get(id);
+      if (!t) continue;
+      if (t.isUpload) this.controlUpload(id, "clear");
+      else this.controlDownload(id, "clear");
     }
-    if (toDelete.length) this.persist();
-    this.emitStats();
     return toDelete.length;
   }
 

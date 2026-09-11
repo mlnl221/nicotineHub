@@ -418,10 +418,10 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
     (id: string, isUpload: boolean) => {
       if (isUpload) {
         send({ type: "upload:control", id, action: "cancel" });
-        setTransfers((prev) => prev.map((t) => (t.id === id ? { ...t, status: "Cancelled" as const } : t)));
+        setTransfers((prev) => prev.map((t) => (t.id === id && t.isUpload ? { ...t, status: "Cancelled" as const } : t)));
       } else {
         send({ type: "download:control", id, action: "pause" });
-        setTransfers((prev) => prev.map((t) => (t.id === id ? { ...t, status: "Paused" as const } : t)));
+        setTransfers((prev) => prev.map((t) => (t.id === id && !t.isUpload ? { ...t, status: "Paused" as const } : t)));
       }
     },
     [send],
@@ -429,16 +429,18 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
 
   const banUser = useCallback(
     (username: string) => {
-      send({ type: "ban:add", username });
+      const name = username.trim();
+      if (!name) return;
+      send({ type: "ban:add", username: name });
     },
     [send],
   );
 
   const messageAll = useCallback(
     (usernames: string[], message: string) => {
-      const msg = message.trim();
+      const msg = message.trim().slice(0, 5000);
       if (!msg) return;
-      [...new Set(usernames)].forEach((u) => send({ type: "chat:private", action: "send", username: u, message: msg }));
+      [...new Set(usernames.map((u) => u.trim()).filter(Boolean))].forEach((u) => send({ type: "chat:private", action: "send", username: u, message: msg }));
     },
     [send],
   );

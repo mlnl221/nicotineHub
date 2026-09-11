@@ -1584,6 +1584,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       if (data.type === "transfer:clear-many") {
         const result = TransferClearManySchema.safeParse(parsed);
         if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid transfer clear.")); return; }
+        if (result.data.statuses === undefined) { ws.send(errorMessage("statuses is required (array or null for everything).")); return; }
         const session = requireLogin(); if (!session) return;
         logger.info("transfer", "clear-many", { isUpload: result.data.isUpload, statuses: result.data.statuses ?? "all" });
         sharedTransfers?.clearByStatuses(result.data.isUpload, result.data.statuses ?? null);

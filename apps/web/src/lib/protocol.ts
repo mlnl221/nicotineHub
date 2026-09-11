@@ -339,7 +339,7 @@ export interface UploadControlRequest {
 export interface TransferClearManyRequest {
   type: "transfer:clear-many";
   isUpload: boolean;
-  statuses: string[] | null;
+  statuses: string[] | null | undefined;
 }
 
 /* ------------------------------------------------------------------ *
