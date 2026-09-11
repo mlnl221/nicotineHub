@@ -15,6 +15,7 @@ import { ProfileTabs } from "@/components/profile/ProfileTabs";
 import { ProfileView } from "@/components/profile/ProfileView";
 import { MobileHelp } from "@/components/ui/MobileHelp";
 import { profilePicSrc } from "@/lib/profile-pic";
+import { EmptyState } from "@/components/mobile/EmptyState";
 
 const RECENT_KEY = "nicotineHub.recentProfiles";
 
@@ -92,15 +93,15 @@ function TabbedProfileInner() {
   return (
     <div className="flex min-h-screen max-w-full overflow-x-clip bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
-      <TopBar title="Profiles" subtitle={`${tabs.length}/10 tabs • User profiles`} />
+      <TopBar title="Profiles" subtitle={`User profiles • ${tabs.length}/10 tabs`} />
       <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-clip max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <PageHeader
           title="User Profiles"
           subtitle={`${tabs.length}/10 tabs • ${activeTab ? `Viewing ${activeTab.username}` : "Look up any Soulseek user"}`}
           settingsHref="/settings?tab=user-profile#user-profile"
         />
-        <div className="sticky top-[calc(60px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-lowest/80 backdrop-blur-xl border-b border-outline-variant/10">
-          <div className="mx-auto w-full max-w-screen-2xl px-4 sm:px-6 md:px-10 py-1.5 md:py-3 flex flex-col gap-2 md:gap-3">
+        <div className="sticky top-[calc(60px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-lowest/80 dark:bg-surface-container-low/80 backdrop-blur-xl border-b border-outline-variant/10">
+          <div className="mx-auto w-full max-w-screen-2xl px-4 sm:px-6 md:px-10 py-3 flex flex-col gap-3">
             <div className="flex gap-2">
               {lookupCollapsed ? (
                 <button
@@ -119,7 +120,7 @@ function TabbedProfileInner() {
                 onKeyDown={(e) => e.key === "Enter" && go()}
                 placeholder={tabs.length >= 10 ? "Max 10 tabs reached — close one first" : "Enter a username"}
                 disabled={tabs.length >= 10}
-                className={`${lookupCollapsed ? "hidden" : "block"} flex-1 min-w-0 rounded-xl bg-surface-container-low px-4 py-3 font-body text-sm outline-none ghost-border focus:border-primary disabled:opacity-50 md:block`}
+                className={`${lookupCollapsed ? "hidden" : "block"} flex-1 min-w-0 rounded-xl bg-surface-container-low px-4 py-3 font-body text-base outline-none ghost-border md:text-sm focus:border-primary disabled:opacity-50 md:block`}
               />
               <button
                 onClick={go}
@@ -163,12 +164,17 @@ function TabbedProfileInner() {
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center px-6 py-8">
               <div className="w-full max-w-md text-center">
-                <h2 className="font-headline text-3xl font-bold">User Profiles</h2>
-                <MobileHelp short="Look up any Soulseek user." testId="profile-empty-help">
-                  <p className="font-body text-sm text-on-surface-variant mt-2 mb-6">
-                    Look up any Soulseek user to see their shared files, speed, description, and interests. Each profile opens in its own tab.
-                  </p>
-                </MobileHelp>
+                <EmptyState
+                  icon="account_circle"
+                  title="Profiles"
+                  helper={
+                    <MobileHelp short="Look up any Soulseek user." testId="profile-empty-help">
+                      <p className="font-body text-sm text-on-surface-variant mt-2 mb-6">
+                        Look up any Soulseek user to see their shared files, speed, description, and interests. Each profile opens in its own tab.
+                      </p>
+                    </MobileHelp>
+                  }
+                />
                 {recent.length ? (
                   <div className="mt-8 text-left">
                     <h3 className="font-label text-xs uppercase tracking-widest text-on-surface-variant mb-3">Recently Viewed</h3>

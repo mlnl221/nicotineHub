@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { PageHeader } from "@/components/PageHeader";
+import { EmptyState, CompactEmpty } from "@/components/mobile/EmptyState";
 import { useRooms } from "@/lib/rooms";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { chatRoomMenu, userMenu } from "@/lib/context-menu/menus";
@@ -37,6 +38,7 @@ function ChatRoomsInner() {
   const [joinInput, setJoinInput] = useState("");
   const [sayInput, setSayInput] = useState("");
   const [filter, setFilter] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [tickerInput, setTickerInput] = useState("");
   const [showWall, setShowWall] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
@@ -99,9 +101,9 @@ function ChatRoomsInner() {
     if (!r) return;
     const sanitized = r.replace(/[^ -~]/g, "").replace(/\s+/g, " ").trim().slice(0, 24);
     if (!sanitized) return;
-    // private rooms join the same path — no flag needed
     joinRoom(sanitized);
     setJoinInput("");
+    setPickerOpen(false);
   };
 
   const handleSay = () => {
@@ -191,7 +193,7 @@ function ChatRoomsInner() {
               {joinedArray.length > 0 ? (
                 <div>
                   <div className="flex items-center justify-between px-3 py-1">
-                    <h4 className="font-label text-[10px] uppercase tracking-widest text-on-surface-variant">
+                    <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">
                       Joined Rooms
                     </h4>
                     <button
@@ -232,7 +234,7 @@ function ChatRoomsInner() {
 
               {/* Public */}
               <div>
-                <h4 className="px-3 py-1 font-label text-[10px] uppercase tracking-widest text-on-surface-variant">
+                <h4 className="px-3 py-1 font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">
                   Public Rooms {roomList.length ? `• ${roomList.length}` : ""}
                 </h4>
                 {filteredRooms.length === 0 ? (
@@ -275,12 +277,24 @@ function ChatRoomsInner() {
           }}>
             {/* Mobile room picker — single flow: name/Join or public list */}
             <div className="border-b border-outline-variant/15 bg-surface p-3 md:hidden">
+              {activeRoom && !pickerOpen ? (
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[18px] text-outline">search</span>
+                  <button onClick={() => setPickerOpen(true)} className="flex-1 rounded-full border border-outline-variant/30 bg-surface-container-lowest px-4 py-2.5 min-h-11 text-left text-sm text-outline">
+                    Look up rooms…
+                  </button>
+                  <button onClick={() => setPickerOpen(true)} aria-label="Expand room picker" className="shrink-0 rounded-lg border border-outline-variant/30 px-3 min-h-11">
+                    <span className="material-symbols-outlined text-[18px] align-middle">expand_more</span>
+                  </button>
+                </div>
+              ) : (
+                <>
               <div className="flex gap-2">
                 <input
                   value={joinInput}
                   onChange={(e) => setJoinInput(e.target.value)}
                   placeholder="Room name"
-                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 text-sm"
+                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 text-base md:text-sm"
                 />
                 <button onClick={handleJoin} className="shrink-0 rounded-lg bg-primary px-4 py-2.5 min-h-11 text-sm text-on-primary">
                   Join
@@ -294,7 +308,7 @@ function ChatRoomsInner() {
                   const v = e.target.value;
                   if (v) setJoinInput(v);
                 }}
-                className="min-w-0 flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest dark:bg-surface-container-low dark:text-inverse-primary px-3 py-2.5 text-sm focus:border-primary outline-none"
+                className="min-w-0 flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest dark:bg-surface-container-low dark:text-inverse-primary px-3 py-2.5 min-h-11 text-base focus:border-primary outline-none md:text-sm"
               >
                 <option value="">Choose a room to join… ({sortedRooms.length})</option>
                 {sortedRooms.slice(0, 50).map((r) => (
@@ -312,16 +326,22 @@ function ChatRoomsInner() {
                 <span className="material-symbols-outlined text-[18px] align-middle">refresh</span>
                 </button>
               </div>
+                  {activeRoom ? (
+                    <button onClick={() => setPickerOpen(false)} aria-label="Collapse room picker" className="md:hidden mt-2 inline-flex items-center gap-1 rounded-lg px-3 min-h-11 text-xs text-on-surface-variant">
+                      <span className="material-symbols-outlined text-[18px]">expand_less</span> Hide
+                    </button>
+                  ) : null}
+                </>
+              )}
             </div>
 
             {!activeRoom ? (
-              <div className="flex flex-1 items-center justify-center p-8 text-center">
-                <div>
-                  <span className="material-symbols-outlined text-5xl text-outline-variant">groups</span>
-                  <p className="mt-2 font-headline text-lg font-semibold">No room selected</p>
-                  <p className="mt-1 font-body text-sm text-on-surface-variant">Join or create a room above to start.</p>
-                </div>
-              </div>
+              <EmptyState
+                icon="groups"
+                title="No room selected"
+                helper="Join or create a room above to start."
+                className="flex-1"
+              />
             ) : (
               <>
                 {/* Room header — long-press name on touch opens Leave menu */}
@@ -419,8 +439,8 @@ function ChatRoomsInner() {
                     ) : null}
                     <div ref={chatStick.ref} onScroll={chatStick.onScroll} data-testid="room-messages" className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-4 md:p-6 space-y-2 max-w-full overflow-x-hidden">
                       {userMessages.length === 0 ? (
-                        <div className="py-10 text-center">
-                          <p className="font-body text-sm text-outline">No messages yet. Start the conversation.</p>
+                        <div className="py-10">
+                          <CompactEmpty>No messages yet. Start the conversation.</CompactEmpty>
                         </div>
                       ) : (
                         userMessages.map((m, idx) => {
@@ -546,7 +566,7 @@ function ChatRoomsInner() {
                           }}
                           placeholder={`Message #${activeRoom}...`}
                           rows={1}
-                          className="max-h-28 min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 text-sm placeholder:text-outline focus:outline-none"
+                          className="max-h-28 min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 text-base md:text-sm placeholder:text-outline focus:outline-none"
                         />
                         <button
                           onClick={handleSay}
@@ -602,7 +622,7 @@ function ChatRoomsInner() {
                     ) : null}
                     {(settings.ui.buddylistinchatrooms === "chatrooms" || settings.ui.buddylistinchatrooms === "always") && buddies.length > 0 ? (
                       <div className={`${showUserList ? "border-t" : ""} border-outline-variant/15 px-2 py-2`}>
-                        <h4 className="px-2 py-1 font-label text-[10px] uppercase tracking-widest text-on-surface-variant">Buddies • {buddies.length}</h4>
+                        <h4 className="px-2 py-1 font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Buddies • {buddies.length}</h4>
                         <div className="space-y-1 max-h-40 overflow-y-auto">
                           {buddies.slice(0, 12).map((b) => (
                             <button key={b.username} onClick={() => router.push(`/profile/${encodeURIComponent(b.username)}`)} className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left hover:bg-surface-container-low">
@@ -626,7 +646,7 @@ function ChatRoomsInner() {
       <BottomNav />
       {/* Global Room Wall — aggregates tickers from all joined rooms (roomwall.py parity) */}
       {showWall && activeRoom ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowWall(false)}>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onClick={() => setShowWall(false)}>
           <div className="w-full max-w-lg rounded-2xl bg-surface-container-lowest p-6 shadow-xl max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-headline text-lg font-bold">Room Wall — All tickers</h3>

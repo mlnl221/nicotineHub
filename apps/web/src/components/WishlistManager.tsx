@@ -37,9 +37,9 @@ export function WishlistManager() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
           placeholder="Add wish (e.g. pink floyd - wish you were here)"
-          className="flex-1 rounded-xl bg-surface-container-low px-3 py-2 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary dark:bg-surface-container-high"
+          className="flex-1 rounded-xl bg-surface-container-low px-3 py-2.5 min-h-11 text-base text-on-surface outline-none focus:ring-1 focus:ring-primary dark:bg-surface-container-high md:text-sm"
         />
-        <button onClick={handleAdd} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary">Add</button>
+        <button onClick={handleAdd} className="rounded-xl bg-primary px-4 py-2.5 min-h-11 text-sm font-medium text-on-primary">Add</button>
       </div>
 
       {terms.length === 0 ? (

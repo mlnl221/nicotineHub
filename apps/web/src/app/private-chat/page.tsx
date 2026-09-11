@@ -7,6 +7,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/mobile/EmptyState";
 import { usePrivateChat } from "@/lib/privateChat";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { privateChatMenu, userMenu } from "@/lib/context-menu/menus";
@@ -25,6 +26,7 @@ function PrivateChatInner() {
   const { settings } = useConfig();
   const [newChatUser, setNewChatUser] = useState(initialUser);
   const [filter, setFilter] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
   const [pmW, onPmDown] = usePaneWidth("nicotineHub.privatechat.asideW");
 
@@ -58,6 +60,7 @@ function PrivateChatInner() {
     if (!u) return;
     setActiveUser(u);
     setNewChatUser("");
+    setPickerOpen(false);
   };
 
   const topBarTitle = activeUser ? activeUser : "Private Chat";
@@ -121,7 +124,7 @@ function PrivateChatInner() {
             </div>
             {users.length > 0 ? (
               <div className="flex justify-between items-center px-2 py-1">
-                <span className="font-label text-[10px] uppercase tracking-widest text-outline">{users.length} chats</span>
+                <span className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">{users.length} chats</span>
                 <button
                   onClick={() => {
                     if (confirm("Close all chats?")) closeAll();
@@ -203,10 +206,22 @@ function PrivateChatInner() {
           }}>
             {/* Mobile user picker */}
             <div className="border-b border-outline-variant/15 bg-surface-container-lowest p-3 md:hidden">
+              {activeUser && !pickerOpen ? (
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[18px] text-outline">search</span>
+                  <button onClick={() => setPickerOpen(true)} className="flex-1 rounded-full border border-outline-variant/30 bg-surface px-4 py-2.5 min-h-11 text-left text-sm text-outline">
+                    Look up conversations…
+                  </button>
+                  <button onClick={() => setPickerOpen(true)} aria-label="Expand conversation picker" className="shrink-0 rounded-lg border border-outline-variant/30 px-3 min-h-11">
+                    <span className="material-symbols-outlined text-[18px] align-middle">expand_more</span>
+                  </button>
+                </div>
+              ) : (
+                <>
               <select
                 value={activeUser || ""}
                 onChange={(e) => setActiveUser(e.target.value || null)}
-                className="w-full rounded-lg border border-outline-variant/30 bg-surface px-3 py-2.5 min-h-11 text-sm"
+                className="w-full rounded-lg border border-outline-variant/30 bg-surface px-3 py-2.5 min-h-11 text-base md:text-sm"
               >
                 <option value="">Select a conversation</option>
                 {users.map((u) => (
@@ -220,25 +235,31 @@ function PrivateChatInner() {
                   value={newChatUser}
                   onChange={(e) => setNewChatUser(e.target.value)}
                   placeholder="New chat username"
-                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 text-sm"
+                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 text-base md:text-sm"
                 />
                 <button onClick={startNewChat} className="shrink-0 rounded-lg bg-primary px-4 py-2.5 min-h-11 text-sm text-on-primary">
                   Start
                 </button>
               </div>
+                  {activeUser ? (
+                    <button onClick={() => setPickerOpen(false)} aria-label="Collapse conversation picker" className="md:hidden mt-2 inline-flex items-center gap-1 rounded-lg px-3 min-h-11 text-xs text-on-surface-variant">
+                      <span className="material-symbols-outlined text-[18px]">expand_less</span> Hide
+                    </button>
+                  ) : null}
+                </>
+              )}
             </div>
 
             {!activeUser ? (
-              <div className="flex flex-1 items-center justify-center p-8 text-center">
-                <div>
-                  <span className="material-symbols-outlined text-5xl text-outline-variant">forum</span>
-                  <p className="mt-2 font-headline text-lg font-semibold">Select a conversation</p>
-                  <p className="mt-1 font-body text-sm text-on-surface-variant">Choose a peer from the list or start a new chat.</p>
-                </div>
-              </div>
+              <EmptyState
+                icon="forum"
+                title="Select a conversation"
+                helper="Choose a peer from the list or start a new chat."
+                className="flex-1"
+              />
             ) : (
               <>
-                <div ref={pmStick.ref} onScroll={pmStick.onScroll} data-testid="pm-messages" className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-6 space-y-4">
+                <div ref={pmStick.ref} onScroll={pmStick.onScroll} data-testid="pm-messages" className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-4 md:p-6 space-y-2 max-w-full overflow-x-hidden">
                   {activeMessages.length === 0 ? (
                     <div className="flex justify-center">
                       <span className="rounded-full bg-surface-container-high px-4 py-2 font-label text-xs text-on-surface-variant">
@@ -253,7 +274,7 @@ function PrivateChatInner() {
                       {idx === firstLiveIdx ? (
                         <div className="flex items-center gap-2 py-1" aria-hidden="true">
                           <span className="h-px flex-1 bg-outline-variant/40" />
-                          <span className="font-label text-[10px] uppercase tracking-widest text-outline">Old messages above</span>
+                          <span className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Old messages above</span>
                           <span className="h-px flex-1 bg-outline-variant/40" />
                         </div>
                       ) : null}
@@ -307,7 +328,7 @@ function PrivateChatInner() {
                   </button>
                 ) : null}
 
-                <footer className="border-t border-outline-variant/15 bg-surface-container-lowest p-4">
+                <footer className="border-t border-outline-variant/15 bg-surface-container-lowest p-3">
                   <div className="flex items-end gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-low p-2 focus-within:border-primary">
                     <textarea
                       value={input}
@@ -321,7 +342,7 @@ function PrivateChatInner() {
                       }}
                       placeholder={`Message ${activeUser}...`}
                       rows={1}
-                      className="max-h-32 min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 font-body text-sm placeholder:text-outline focus:outline-none"
+                      className="max-h-28 min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 font-body text-base md:text-sm placeholder:text-outline focus:outline-none"
                     />
                     <button
                       onClick={handleSend}

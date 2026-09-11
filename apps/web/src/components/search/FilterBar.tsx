@@ -61,7 +61,7 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
               value={local[f.key] as string}
               onChange={(e) => setLocal((prev) => ({ ...prev, [f.key]: e.target.value }))}
               placeholder={f.placeholder}
-              className="rounded-xl bg-surface-container-lowest px-3 py-2.5 min-h-11 font-body text-sm text-on-surface ghost-border transition-all focus:border-primary focus:outline-none"
+              className="rounded-xl bg-surface-container-lowest px-3 py-2.5 min-h-11 font-body text-base text-on-surface ghost-border transition-all focus:border-primary focus:outline-none md:text-sm"
             />
           </label>
         ))}

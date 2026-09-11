@@ -17,8 +17,8 @@ export function ProfileTabs() {
             key={tab.id}
             type="button"
             onClick={() => setActive(tab.id)}
-            className={`group flex shrink-0 snap-start items-center gap-1.5 rounded-full px-3 py-1.5 font-label text-xs transition-colors min-h-9 text-left cursor-pointer ${
-              active ? "bg-primary-container text-on-primary-container" : "bg-surface-container-lowest text-on-surface-variant ghost-border hover:bg-surface-container-low"
+            className={`group flex shrink-0 snap-start items-center gap-1.5 rounded-full px-3 py-2.5 font-label text-xs transition-colors min-h-11 text-left cursor-pointer ${
+              active ? "bg-primary-container text-on-primary-container" : "bg-surface-container-lowest text-on-surface-variant ghost-border hover:bg-surface-container-low dark:bg-surface-container-high dark:text-on-surface dark:hover:bg-surface-container-highest"
             }`}
           >
             <span className="material-symbols-outlined text-[14px] opacity-70 shrink-0 pointer-events-none">account_circle</span>
@@ -33,7 +33,7 @@ export function ProfileTabs() {
                 aria-label="Close profile"
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); closeProfile(tab.id); }}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); closeProfile(tab.id); } }}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-on-surface-variant/70 hover:text-error hover:bg-surface-container-high -mr-1"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-on-surface-variant/70 hover:text-error hover:bg-surface-container-high -mr-1"
               >
                 <span className="material-symbols-outlined text-[14px]">close</span>
               </span>

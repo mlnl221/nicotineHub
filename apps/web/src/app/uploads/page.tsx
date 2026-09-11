@@ -12,6 +12,7 @@ import { TransferCard } from "@/components/transfers/TransferCard";
 import { ThroughputChart } from "@/components/transfers/ThroughputChart";
 import { UploadStats } from "@/components/transfers/StatsCards";
 import { PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/mobile/EmptyState";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { transferMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
@@ -165,7 +166,7 @@ function UploadsInner() {
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Uploads" subtitle={`${uploads.length} uploading • ${downloads.length} total`} />
-      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-clip max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <PageHeader
           title="Uploads"
           subtitle={`${activeCount} active`}
@@ -187,6 +188,8 @@ function UploadsInner() {
           <ThroughputChart />
           <UploadStats />
           <section data-testid="uploads-section" className="bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border flex flex-col gap-4 max-w-full overflow-x-clip">
+            <div className="sticky top-[calc(60px+env(safe-area-inset-top,0px))] md:static z-20 bg-surface-container-low/95 backdrop-blur dark:bg-surface-container-low/80 border-b border-outline-variant/10 md:bg-transparent md:dark:bg-transparent md:backdrop-blur-none md:border-transparent">
+              <div className="px-4 py-1.5 md:px-0 md:py-0 flex flex-col gap-2 md:gap-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <h3 className="font-headline text-xl font-semibold flex items-center gap-2">
                 <span className="material-symbols-outlined text-tertiary">upload</span>
@@ -326,19 +329,24 @@ function UploadsInner() {
                 ) : null}
               </div>
             </div>
+                </div>
+              </div>
             </div>
             {uploads.length === 0 ? (
-              <div data-testid="empty-uploads" className="py-16 text-center">
-                <p className="font-body text-on-surface-variant">No active uploads</p>
-                <div className="mt-4 bg-tertiary-fixed/30 dark:bg-tertiary-container/20 rounded-lg p-4 flex gap-3 items-start max-w-lg mx-auto text-left">
-                  <span className="material-symbols-outlined text-tertiary text-xl">info</span>
-                  <div>
-                    <p className="font-label text-xs font-semibold text-on-tertiary-container dark:text-tertiary-fixed">No shared folders configured</p>
-                    <p className="font-label text-xs text-on-surface-variant mt-1">Uploads are queued but cannot start until you configure Shares (Settings → Shares). The queue stays visible in the meantime.</p>
-                  </div>
-                </div>
-                <Link href="/downloads" className="mt-6 inline-flex font-label text-sm font-semibold text-primary hover:underline">View Downloads</Link>
-              </div>
+              <EmptyState
+                icon="upload"
+                title="No active uploads"
+                testId="empty-uploads"
+                helper={
+                  <>
+                    <span className="mb-2 block rounded-lg bg-tertiary-fixed/30 p-4 text-left dark:bg-tertiary-container/20">
+                      <span className="font-label text-xs font-semibold text-on-tertiary-container dark:text-tertiary-fixed">No shared folders configured</span>
+                      <span className="mt-1 block font-label text-xs text-on-surface-variant">Uploads are queued but cannot start until you configure Shares (Settings → Shares). The queue stays visible in the meantime.</span>
+                    </span>
+                    <Link href="/downloads" className="mt-2 inline-flex font-label text-sm font-semibold text-primary hover:underline">View Downloads</Link>
+                  </>
+                }
+              />
             ) : (
               <div className="space-y-4">
                 {uploadGroups.map(([groupKey, items]) => {

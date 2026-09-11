@@ -13,6 +13,7 @@ import { useBrowseTabs } from "@/lib/browse-tabs";
 import { BrowseTabs } from "@/components/browse/BrowseTabs";
 import { BrowseView } from "@/components/browse/BrowseView";
 import { MobileHelp } from "@/components/ui/MobileHelp";
+import { EmptyState } from "@/components/mobile/EmptyState";
 
 const RECENT_BROWSE_KEY = "nicotineHub.recentBrowse";
 
@@ -95,14 +96,14 @@ function BrowseInner() {
       <TopBar title="Browse" subtitle={`Browse shared files • ${tabs.length}/10 tabs`} />
       <main className="md:ml-72 flex flex-1 flex-col overflow-x-clip min-h-0 bg-surface-dim dark:bg-inverse-surface pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <PageHeader
-          title="Browse Shares"
+          title="Browse"
           subtitle={`${tabs.length}/10 tabs • Browse another user's shared files — ${hasTabs ? `${activeTab?.username ?? tabs[0].username}` : "enter a username above"}`}
           settingsHref="/settings?tab=shares#shares"
         />
 
-        {/* Input + tabs bar — flush under TopBar on mobile */}
-        <div className="sticky top-[calc(60px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-lowest/80 backdrop-blur-xl border-b border-surface-container-highest/20">
-          <div className="mx-auto w-full max-w-screen-2xl px-3 py-1.5 md:px-10 md:py-3 flex flex-col gap-2 md:gap-3">
+        {/* Input + tabs bar */}
+        <div className="sticky top-[calc(60px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-lowest/80 dark:bg-surface-container-low/80 backdrop-blur-xl border-b border-surface-container-highest/20">
+          <div className="mx-auto w-full max-w-screen-2xl px-3 py-2 md:px-10 md:py-3 flex flex-col gap-3">
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-outline">search</span>
@@ -112,7 +113,7 @@ function BrowseInner() {
                   onKeyDown={(e) => e.key === "Enter" && go()}
                   placeholder={tabs.length >= 10 ? "Max 10 tabs reached — close one first" : "Enter username to browse"}
                   disabled={tabs.length >= 10}
-                  className="w-full rounded-xl bg-surface-container-low pl-9 pr-4 py-3 min-h-11 font-body text-sm outline-none ghost-border focus:border-primary disabled:opacity-50"
+                  className="w-full rounded-xl bg-surface-container-low pl-9 pr-4 py-3 min-h-11 font-body text-base outline-none ghost-border md:text-sm focus:border-primary disabled:opacity-50"
                 />
               </div>
               <button
@@ -132,14 +133,18 @@ function BrowseInner() {
             <BrowseView key={activeTab.id} tab={activeTab} />
           ) : (
             <div className="mx-auto w-full max-w-xl flex-1 overflow-y-auto overscroll-contain min-h-0 p-4 sm:p-6 md:p-10">
-              <div className="rounded-xl bg-surface-container-lowest p-4 md:p-8 shadow-sm ring-1 ring-outline-variant/15">
-                <MobileHelp short="Enter a username above or pick from recent." testId="browse-empty-help">
-                  <>
-                    <p className="font-body text-sm text-on-surface-variant">No browse open. Enter a username above or pick from recent.</p>
-                    <p className="mt-2 font-label text-xs text-outline">Tip: use &quot;Browse&quot; from a search result or profile to jump directly. Tabs load in background and persist.</p>
-                  </>
-                </MobileHelp>
-              </div>
+              <EmptyState
+                icon="folder_open"
+                title="No browse open"
+                helper={
+                  <MobileHelp short="Enter a username above or pick from recent." testId="browse-empty-help">
+                    <>
+                      <p className="font-body text-sm text-on-surface-variant">No browse open. Enter a username above or pick from recent.</p>
+                      <p className="mt-2 font-label text-xs text-outline">Tip: use &quot;Browse&quot; from a search result or profile to jump directly. Tabs load in background and persist.</p>
+                    </>
+                  </MobileHelp>
+                }
+              />
               {recent.length ? (
                 <div className="mt-8 rounded-xl bg-surface-container-lowest p-6 ghost-border">
                   <div className="flex items-center justify-between">
