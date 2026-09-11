@@ -38,7 +38,7 @@ function ChatRoomsInner() {
   const [joinInput, setJoinInput] = useState("");
   const [sayInput, setSayInput] = useState("");
   const [filter, setFilter] = useState("");
-  const [isPrivate, setIsPrivate] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [tickerInput, setTickerInput] = useState("");
   const [showWall, setShowWall] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
@@ -101,10 +101,9 @@ function ChatRoomsInner() {
     if (!r) return;
     const sanitized = r.replace(/[^ -~]/g, "").replace(/\s+/g, " ").trim().slice(0, 24);
     if (!sanitized) return;
-    // private flag: nicotine shows private rooms with lock; we pass via suffix hint and setTicker path — UI only for now
     joinRoom(sanitized);
     setJoinInput("");
-    setIsPrivate(false);
+    setPickerOpen(false);
   };
 
   const handleSay = () => {
@@ -178,10 +177,6 @@ function ChatRoomsInner() {
                 <span className="material-symbols-outlined text-[18px] align-middle">refresh</span>
               </button>
               </div>
-              <label className="flex items-center gap-2 text-xs text-on-surface-variant">
-                <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} className="rounded" />
-                Private room
-              </label>
               <div className="relative">
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-outline">search</span>
                 <input
@@ -282,19 +277,19 @@ function ChatRoomsInner() {
           }}>
             {/* Mobile room picker */}
             <div className="border-b border-outline-variant/15 bg-surface p-3 md:hidden">
-              <select
-                value={activeRoom || ""}
-                onChange={(e) => setActiveRoom(e.target.value || null)}
-                className="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2.5 min-h-11 text-sm"
-              >
-                <option value="">Select a room</option>
-                {joinedArray.map((r) => (
-                  <option key={r.name} value={r.name}>
-                    {r.name} ({r.users.length})
-                  </option>
-                ))}
-              </select>
-              <div className="mt-2 flex gap-2">
+              {activeRoom && !pickerOpen ? (
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[18px] text-outline">search</span>
+                  <button onClick={() => setPickerOpen(true)} className="flex-1 rounded-full border border-outline-variant/30 bg-surface-container-lowest px-4 py-2.5 min-h-11 text-left text-sm text-outline">
+                    Look up rooms…
+                  </button>
+                  <button onClick={() => setPickerOpen(true)} aria-label="Expand room picker" className="shrink-0 rounded-lg border border-outline-variant/30 px-3 min-h-11">
+                    <span className="material-symbols-outlined text-[18px] align-middle">expand_more</span>
+                  </button>
+                </div>
+              ) : (
+                <>
+              <div className="flex gap-2">
                 <input
                   value={joinInput}
                   onChange={(e) => setJoinInput(e.target.value)}
@@ -331,9 +326,13 @@ function ChatRoomsInner() {
                 <span className="material-symbols-outlined text-[18px] align-middle">refresh</span>
               </button>
               </div>
-              <label className="mt-2 flex items-center gap-2 text-xs text-on-surface-variant">
-                <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} /> Private
-              </label>
+                  {activeRoom ? (
+                    <button onClick={() => setPickerOpen(false)} aria-label="Collapse room picker" className="md:hidden mt-2 inline-flex items-center gap-1 rounded-lg px-3 min-h-11 text-xs text-on-surface-variant">
+                      <span className="material-symbols-outlined text-[18px]">expand_less</span> Hide
+                    </button>
+                  ) : null}
+                </>
+              )}
             </div>
 
             {!activeRoom ? (

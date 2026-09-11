@@ -13,7 +13,6 @@ import { ThroughputChart } from "@/components/transfers/ThroughputChart";
 import { DownloadStats } from "@/components/transfers/StatsCards";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/mobile/EmptyState";
-import { useStatistics } from "@/lib/statistics";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { transferMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
@@ -32,7 +31,7 @@ import { useBulkSelection, useMarqueeSelection } from "@/lib/bulkSelection";
 import { DOWNLOAD_CLEAR_SETS } from "@/lib/transfers";
 import { bulkVerify, bulkAnalyze, bulkRequestSpectrum, verifyFile, analyzeFile } from "@/lib/worker";
 import { bridgeFetchUrl } from "@/lib/bridgeHttp";
-import { humanSize, humanSpeed as _humanSpeed } from "@/lib/format";
+import { humanSpeed as _humanSpeed } from "@/lib/format";
 
 function humanSpeed(bps: number): string {
   if (!bps) return "—";
@@ -50,7 +49,6 @@ function isAudioForSpectrum(fileName: string): boolean {
 
 function DownloadsInner() {
   const { downloads, stats, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer, clearMany, abortTransfer, banUser } = useTransfers();
-  const { total } = useStatistics();
   const { settings, setOption } = useConfig();
   const searches = useSearchesOptional();
   const router = useRouter();
@@ -74,9 +72,6 @@ function DownloadsInner() {
   const activeCount = downloads.length;
 
   const dlCount = downloads.length;
-  const dlDone = total?.completed_downloads ?? 0;
-  const dlSize = total?.downloaded_size ?? 0;
-  const dlPeers = new Set(downloads.map((d) => d.username)).size;
 
   const groupMode = settings.transfers.groupdownloads ?? "folder_grouping";
   const expandMode = settings.transfers.expand_downloads ?? "all";
@@ -262,19 +257,10 @@ function DownloadsInner() {
 
           <DownloadStats />
 
-          {/* Mobile download stats */}
-          <div className="flex xl:hidden rounded-xl bg-surface-container-low p-1 gap-1">
-            <div
-              data-testid="download-stats"
-              className="flex-1 min-h-11 py-2 px-2 rounded-lg bg-surface-container-lowest ghost-border flex flex-col items-center justify-center text-center"
-            >
-              <span className="font-label text-[10px] leading-none uppercase tracking-widest text-outline">All-time Downloads</span>
-              <span className="font-label text-xs font-semibold text-on-surface truncate">{dlDone} files • {humanSize(dlSize)} • {dlPeers} peers</span>
-            </div>
-          </div>
-
           <div className="grid grid-cols-1 gap-6 max-w-full overflow-x-clip">
             <section data-testid="downloads-section" className="flex flex-col gap-4 bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border max-w-full overflow-x-clip">
+              <div className="sticky top-[calc(60px+env(safe-area-inset-top,0px))] md:static z-20 bg-surface-container-low/95 backdrop-blur dark:bg-surface-container-low/80 border-b border-outline-variant/10 md:bg-transparent md:dark:bg-transparent md:backdrop-blur-none md:border-transparent">
+                <div className="px-4 py-1.5 md:px-0 md:py-0 flex flex-col gap-2 md:gap-4">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <h3 className="font-headline text-xl font-semibold flex items-center gap-2">
                   <span className="material-symbols-outlined text-primary">download</span>
@@ -404,6 +390,8 @@ function DownloadsInner() {
                   ) : null}
                 </div>
               </div>
+                </div>
+                </div>
               </div>
               {downloads.length === 0 ? (
                 <EmptyState

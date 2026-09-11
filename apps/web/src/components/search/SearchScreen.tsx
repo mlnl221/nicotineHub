@@ -16,6 +16,7 @@ import { SearchTabs } from "./SearchTabs";
 import { FilterBar } from "./FilterBar";
 import { ResultsList, searchRowId } from "./ResultsList";
 import { ContextMenu } from "@/components/ui/ContextMenu";
+import { BulkBarShell } from "@/components/ui/BulkBarShell";
 import { EmptyState } from "@/components/mobile/EmptyState";
 import { searchResultMenu, searchTabMenu } from "@/lib/context-menu/menus";
 import { useContextMenu } from "@/lib/context-menu/useContextMenu";
@@ -553,12 +554,16 @@ export function SearchScreen() {
          />
        ) : null}
       {bulk.size > 0 ? (
-        <div className="fixed bottom-[calc(64px+env(safe-area-inset-bottom,0px))] md:bottom-4 left-1/2 z-40 flex w-[min(94vw,560px)] -translate-x-1/2 items-center gap-2 rounded-2xl bg-surface-container-highest p-3 shadow-xl ghost-border">
-          <span className="flex-1 font-label text-xs font-bold">{bulk.size} selected</span>
-          <button onClick={downloadSelected} disabled={isDemo} className="rounded-full bg-primary px-3 py-2.5 min-h-11 font-label text-xs font-bold text-on-primary disabled:opacity-50">Download</button>
-          <button onClick={downloadSelectedFolders} disabled={isDemo} className="rounded-full bg-surface-container-high px-3 py-2.5 min-h-11 font-label text-xs">Folders</button>
-          <button onClick={() => bulk.clear()} className="rounded-full bg-surface-container-high px-3 py-2 min-h-9 font-label text-xs">Clear</button>
-        </div>
+        <BulkBarShell
+          count={bulk.size}
+          onClear={() => bulk.clear()}
+          actions={
+            <>
+              <button onClick={downloadSelected} disabled={isDemo} className="flex-1 min-w-[72px] rounded-full bg-primary px-3 py-2.5 min-h-11 font-label text-xs font-bold text-on-primary disabled:opacity-50">Download</button>
+              <button onClick={downloadSelectedFolders} disabled={isDemo} className="flex-1 min-w-[72px] rounded-full bg-surface-container-high px-3 py-2.5 min-h-11 font-label text-xs">Folders</button>
+            </>
+          }
+        />
       ) : null}
       {propsRow ? (
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 p-4" onClick={() => setPropsRow(null)}>

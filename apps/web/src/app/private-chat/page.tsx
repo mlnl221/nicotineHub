@@ -26,6 +26,7 @@ function PrivateChatInner() {
   const { settings } = useConfig();
   const [newChatUser, setNewChatUser] = useState(initialUser);
   const [filter, setFilter] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
   const [pmW, onPmDown] = usePaneWidth("nicotineHub.privatechat.asideW");
 
@@ -59,6 +60,7 @@ function PrivateChatInner() {
     if (!u) return;
     setActiveUser(u);
     setNewChatUser("");
+    setPickerOpen(false);
   };
 
   const topBarTitle = activeUser ? activeUser : "Private Chat";
@@ -204,6 +206,18 @@ function PrivateChatInner() {
           }}>
             {/* Mobile user picker */}
             <div className="border-b border-outline-variant/15 bg-surface-container-lowest p-3 md:hidden">
+              {activeUser && !pickerOpen ? (
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[18px] text-outline">search</span>
+                  <button onClick={() => setPickerOpen(true)} className="flex-1 rounded-full border border-outline-variant/30 bg-surface px-4 py-2.5 min-h-11 text-left text-sm text-outline">
+                    Look up conversations…
+                  </button>
+                  <button onClick={() => setPickerOpen(true)} aria-label="Expand conversation picker" className="shrink-0 rounded-lg border border-outline-variant/30 px-3 min-h-11">
+                    <span className="material-symbols-outlined text-[18px] align-middle">expand_more</span>
+                  </button>
+                </div>
+              ) : (
+                <>
               <select
                 value={activeUser || ""}
                 onChange={(e) => setActiveUser(e.target.value || null)}
@@ -227,6 +241,13 @@ function PrivateChatInner() {
                   Start
                 </button>
               </div>
+                  {activeUser ? (
+                    <button onClick={() => setPickerOpen(false)} aria-label="Collapse conversation picker" className="md:hidden mt-2 inline-flex items-center gap-1 rounded-lg px-3 min-h-11 text-xs text-on-surface-variant">
+                      <span className="material-symbols-outlined text-[18px]">expand_less</span> Hide
+                    </button>
+                  ) : null}
+                </>
+              )}
             </div>
 
             {!activeUser ? (

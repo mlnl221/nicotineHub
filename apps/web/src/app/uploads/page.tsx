@@ -188,6 +188,8 @@ function UploadsInner() {
           <ThroughputChart />
           <UploadStats />
           <section data-testid="uploads-section" className="bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border flex flex-col gap-4 max-w-full overflow-x-clip">
+            <div className="sticky top-[calc(60px+env(safe-area-inset-top,0px))] md:static z-20 bg-surface-container-low/95 backdrop-blur dark:bg-surface-container-low/80 border-b border-outline-variant/10 md:bg-transparent md:dark:bg-transparent md:backdrop-blur-none md:border-transparent">
+              <div className="px-4 py-1.5 md:px-0 md:py-0 flex flex-col gap-2 md:gap-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <h3 className="font-headline text-xl font-semibold flex items-center gap-2">
                 <span className="material-symbols-outlined text-tertiary">upload</span>
@@ -327,6 +329,8 @@ function UploadsInner() {
                 ) : null}
               </div>
             </div>
+                </div>
+              </div>
             </div>
             {uploads.length === 0 ? (
               <EmptyState
