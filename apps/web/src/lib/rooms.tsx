@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSession } from "@/lib/session";
+import { onExternalKey } from "@/lib/storage-sync";
 import { useConfig } from "@/lib/config/provider";
 import type { ChatEvent, ChatLogRow, RoomEvent, UserInfoEvent } from "@/lib/protocol";
 import { censorText, replaceText, truncateMessages } from "@/lib/chatFormat";
@@ -85,7 +86,7 @@ function persistActive(room: string | null) {
 
 export function RoomsProvider({ children }: { children: ReactNode }) {
   const { send, subscribe, state } = useSession();
-  const { settings } = useConfig();
+  const { settings, setOption, markSectionSaved } = useConfig();
   const [roomList, setRoomList] = useState<{ name: string; users: number; isPrivate?: boolean }[]>([]);
   const [joinedRooms, setJoinedRooms] = useState<Map<string, JoinedRoom>>(() => {
     const persisted = loadPersistedJoined();
@@ -104,6 +105,11 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
   joinedRoomsRef.current = joinedRooms;
   const activeRoomRef = useRef(activeRoom);
   activeRoomRef.current = activeRoom;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  // Rooms the user explicitly left (lowercased → epoch ms). Skips the
+  // rejoin-on-reconnect burst for just-left rooms; pruned on read.
+  const leftAtRef = useRef<Map<string, number>>(new Map());
   const linesRef = useRef(settings.logging.readroomlines || 200);
   linesRef.current = settings.logging.readroomlines || 200;
   // rooms already backfilled from disk logs this session (lowercased)
@@ -144,13 +150,21 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
   const rejoinRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (state.status !== "connected") return;
+    // prune stale left-room stamps (cap growth)
+    if (leftAtRef.current.size > 200) {
+      const cutoff = Date.now() - 10_000;
+      for (const [k, v] of leftAtRef.current) if (v < cutoff) leftAtRef.current.delete(k);
+    }
     const toJoin = Array.from(joinedRoomsRef.current.keys());
     for (const room of toJoin) {
       if (rejoinRef.current.has(room.toLowerCase())) continue;
+      const leftAt = leftAtRef.current.get(room.toLowerCase());
+      if (leftAt && Date.now() - leftAt < 10_000) continue; // just left — skip burst
       rejoinRef.current.add(room.toLowerCase());
       // stagger to avoid burst
       const idx = toJoin.indexOf(room);
       setTimeout(() => {
+        if (!joinedRoomsRef.current.has(room)) return; // left while queued
         try { send({ type: "chat:room", action: "join", room }); } catch {}
         requestRoomBackfill(room);
         setTimeout(() => rejoinRef.current.delete(room.toLowerCase()), 2000);
@@ -467,13 +481,28 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
     [send, setActiveRoom, requestRoomBackfill],
   );
 
+  // Explicit Leave also drops the room from durable server.autojoin — else the
+  // bridge rejoins it on next login and the leave looks unsaved. No-op unless
+  // the room is actually listed, so manual joins never dirty settings.
+  const dropFromAutojoin = useCallback((rooms: string[]) => {
+    const lower = new Set(rooms.map((r) => r.toLowerCase()));
+    const cur = settingsRef.current.server.autojoin ?? [];
+    if (!cur.some((a) => lower.has(String(a).toLowerCase()))) return;
+    const next = cur.filter((a) => !lower.has(String(a).toLowerCase()));
+    setOption("server", "autojoin", next);
+    try { send({ type: "config:update", section: "server", key: "autojoin", value: next }); } catch {}
+    markSectionSaved("server", { ...settingsRef.current.server, autojoin: next });
+  }, [send, setOption, markSectionSaved]);
+
   const leaveRoom = useCallback(
     (room: string) => {
       send({ type: "chat:room", action: "leave", room });
       backfilledRef.current.delete(room.toLowerCase());
+      leftAtRef.current.set(room.toLowerCase(), Date.now());
       setJoinedRooms((prev) => {
         const next = new Map(prev);
         next.delete(room);
+        persistJoined(next);
         return next;
       });
       setMessages((prev) => {
@@ -482,8 +511,9 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
         return next;
       });
       if (activeRoomRef.current === room) setActiveRoom(null);
+      dropFromAutojoin([room]);
     },
-    [send, setActiveRoom],
+    [send, setActiveRoom, dropFromAutojoin],
   );
 
   const say = useCallback(
@@ -519,14 +549,50 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
   const cancelOwnership = useCallback((room: string) => send({ type: "chat:room", action: "cancelOwnership", room } as unknown as never), [send]);
 
   const closeAll = useCallback(() => {
-    joinedRoomsRef.current.forEach((_, room) => {
+    const rooms = Array.from(joinedRoomsRef.current.keys());
+    rooms.forEach((room) => {
       send({ type: "chat:room", action: "leave", room });
     });
+    for (const room of rooms) leftAtRef.current.set(room.toLowerCase(), Date.now());
     setJoinedRooms(new Map());
+    persistJoined(new Map());
     setMessages(new Map());
     backfilledRef.current.clear();
     setActiveRoom(null);
-  }, [send, setActiveRoom]);
+    dropFromAutojoin(rooms);
+  }, [send, setActiveRoom, dropFromAutojoin]);
+
+  // Cross-tab close sync: another tab left rooms — drop them locally instead
+  // of letting our next persist effect resurrect them. Subtractive-only:
+  // rooms opened elsewhere appear here on refresh/reconnect as before.
+  useEffect(() => {
+    return onExternalKey([JOINED_KEY, ACTIVE_KEY], () => {
+      const persisted = new Set((loadPersistedJoined() ?? []).map((r) => r.toLowerCase()));
+      const dropped = Array.from(joinedRoomsRef.current.keys()).filter((r) => !persisted.has(r.toLowerCase()));
+      if (!dropped.length) return;
+      const ids = new Set(dropped.map((r) => r.toLowerCase()));
+      for (const room of dropped) {
+        leftAtRef.current.set(room.toLowerCase(), Date.now());
+        backfilledRef.current.delete(room.toLowerCase());
+        // The other tab already sent leave on the shared session, but if it
+        // was offline the bridge never heard it — resend is idempotent.
+        if (state.status === "connected") {
+          try { send({ type: "chat:room", action: "leave", room }); } catch {}
+        }
+      }
+      setJoinedRooms((prev) => {
+        const next = new Map(prev);
+        for (const room of next.keys()) if (ids.has(room.toLowerCase())) next.delete(room);
+        return next;
+      });
+      setMessages((prev) => {
+        const next = new Map(prev);
+        for (const room of next.keys()) if (ids.has(room.toLowerCase())) next.delete(room);
+        return next;
+      });
+      if (activeRoomRef.current && ids.has(activeRoomRef.current.toLowerCase())) setActiveRoom(null);
+    });
+  }, [send, state.status, setActiveRoom]);
 
   const value: RoomsApi = { roomList, joinedRooms, messages, activeRoom, setActiveRoom, joinRoom, leaveRoom, say, setTicker, addOperator, removeOperator, cancelMembership, cancelOwnership, closeAll, userStats, refreshRoomList };
   return <RoomsContext.Provider value={value}>{children}</RoomsContext.Provider>;

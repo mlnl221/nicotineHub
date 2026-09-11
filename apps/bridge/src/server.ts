@@ -18,6 +18,7 @@ import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync, chmodSync, 
 import { join, resolve, sep } from "node:path";
 import { z } from "zod";
 import { SoulseekSession, namespaceSearchId } from "./session.ts";
+import { userInfoPicToBase64 } from "./soulseek.ts";
 import { PermissionLevel } from "./shares.ts";
 import { TransferManager } from "./transfers.ts";
 import { diagClear, diagLog, diagTail, diagSubscribe, logger, type LogLevel } from "./logger.ts";
@@ -493,6 +494,14 @@ function sharedSessionCallbacks(boundTransfers: TransferManager) {
         try { (sharedTransfers as unknown as { handlePeerAddressResolved?: (u: string, ip: string) => void })?.handlePeerAddressResolved?.(event.username ?? "", pa.ip ?? ""); } catch {}
       }
       logger.debug("server", "user event", { type: event.type, username: event.username });
+      // Peer user-info carries pic as Buffer — JSON would relay a truthy
+      // {type,data} object that crashes clients calling string methods on it.
+      if (event.type === "user-info-response") {
+        const ev = event as unknown as { info?: { pic?: unknown } };
+        if (ev.info && typeof ev.info === "object") {
+          try { ev.info.pic = userInfoPicToBase64(ev.info.pic); } catch {}
+        }
+      }
       broadcastJson({ type: "userinfo:event", event });
       if (event.type === "wishlist-interval" && typeof event.wishlistInterval === "number") {
         broadcastJson({ type: "wishlist:interval", wishlistInterval: event.wishlistInterval });

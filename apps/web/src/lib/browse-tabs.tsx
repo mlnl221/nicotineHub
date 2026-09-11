@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSession } from "@/lib/session";
+import { onExternalKey } from "@/lib/storage-sync";
 import type { BrowseFolder, BrowseFile } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
 import { DEMO_BROWSE_USERS, mockBrowseFolders } from "@/lib/demo/fixtures";
@@ -94,6 +95,8 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   const counter = useRef<number>(initialMax);
   const tabsRef = useRef<BrowseTab[]>([]);
   tabsRef.current = tabs;
+  const activeIdRef = useRef<string | null>(null);
+  activeIdRef.current = activeId;
   const pendingOpenRef = useRef<Set<string>>(new Set());
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const nextOffsetRef = useRef<Map<string, number>>(new Map());
@@ -309,28 +312,37 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
   }, [requestShares]);
 
   const closeBrowse = useCallback((id: string) => {
+    const closing = tabsRef.current.find((t) => t.id === id);
     const timer = timersRef.current.get(id);
     if (timer) { clearTimeout(timer); timersRef.current.delete(id); }
     nextOffsetRef.current.delete(id);
     pendingFolderRef.current.delete(id);
-    const idx = tabsRef.current.findIndex((t) => t.id === id);
-    const next = tabsRef.current.filter((t) => t.id !== id);
+    const list = tabsRef.current;
+    const idx = list.findIndex((t) => t.id === id);
+    const next = list.filter((t) => t.id !== id);
+    // Pick next active synchronously (same rule as before) so the cleared list
+    // persists immediately — refresh-before-flush can't resurrect the tab.
+    let nextActive = activeIdRef.current;
+    if (nextActive === id) {
+      nextActive = null;
+      if (next.length > 0) {
+        let preferPrev = true;
+        try {
+          const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
+          if (raw) {
+            const parsed = JSON.parse(raw) as { ui?: { tab_select_previous?: boolean } };
+            if (typeof parsed?.ui?.tab_select_previous === "boolean") preferPrev = parsed.ui.tab_select_previous;
+          }
+        } catch {}
+        if (preferPrev && idx > 0) nextActive = list[idx - 1]?.id ?? next[next.length - 1]?.id ?? null;
+        else if (!preferPrev && idx < list.length - 1) nextActive = list[idx + 1]?.id ?? next[next.length - 1]?.id ?? null;
+        else nextActive = next[next.length - 1]?.id ?? null;
+      }
+    }
+    if (closing) pendingOpenRef.current.delete(closing.username.toLowerCase());
     setTabs(next);
-    setActiveId((cur) => {
-      if (cur !== id) return cur;
-      if (next.length === 0) return null;
-      let preferPrev = true;
-      try {
-        const raw = localStorage.getItem("nicotineHub.settings") ?? localStorage.getItem("nicotine.settings");
-        if (raw) {
-          const parsed = JSON.parse(raw) as { ui?: { tab_select_previous?: boolean } };
-          if (typeof parsed?.ui?.tab_select_previous === "boolean") preferPrev = parsed.ui.tab_select_previous;
-        }
-      } catch {}
-      if (preferPrev && idx > 0) return tabsRef.current[idx - 1]?.id ?? next[next.length - 1]?.id ?? null;
-      if (!preferPrev && idx < tabsRef.current.length - 1) return tabsRef.current[idx + 1]?.id ?? next[next.length - 1]?.id ?? null;
-      return next[next.length - 1]?.id ?? null;
-    });
+    setActiveId(nextActive);
+    persist(next, nextActive);
   }, []);
 
   const setActive = useCallback((id: string) => { setActiveId(id); }, []);
@@ -358,6 +370,32 @@ export function BrowseProvider({ children }: { children: ReactNode }) {
     if (!tab) return;
     requestShares(id, tab.username);
   }, [requestShares]);
+
+  // Cross-tab close sync: another tab closed browse tabs — drop them locally
+  // instead of letting our next persist effect resurrect them. Subtractive-only.
+  useEffect(() => {
+    return onExternalKey(STORAGE_KEY, () => {
+      const p = loadPersisted();
+      const keep = new Set((p?.tabs ?? []).map((t) => t.id));
+      const dropped = tabsRef.current.filter((t) => !keep.has(t.id));
+      if (!dropped.length) return;
+      const ids = new Set(dropped.map((t) => t.id));
+      for (const t of dropped) {
+        const timer = timersRef.current.get(t.id);
+        if (timer) { clearTimeout(timer); timersRef.current.delete(t.id); }
+        nextOffsetRef.current.delete(t.id);
+        pendingFolderRef.current.delete(t.id);
+        pendingOpenRef.current.delete(t.username.toLowerCase());
+      }
+      const next = tabsRef.current.filter((t) => !ids.has(t.id));
+      let nextActive = activeIdRef.current;
+      if (nextActive && ids.has(nextActive)) {
+        nextActive = next.length ? next[next.length - 1]!.id : null;
+      }
+      setTabs(next);
+      setActiveId(nextActive);
+    });
+  }, []);
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) ?? null, [tabs, activeId]);
 

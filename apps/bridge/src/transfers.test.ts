@@ -889,3 +889,106 @@ describe("transfers — statistics breakdown (failed/cancelled + live)", () => {
     expect(sm.getSession().failed_downloads).toBe(1);
   });
 });
+
+describe("transfers — explicit clear sticks (no resurrect)", () => {
+  let tmp: string;
+  beforeEach(() => { tmp = makeTmpDir(); });
+  afterEach(() => { try { rmSync(tmp, { recursive: true, force: true }); } catch {} });
+
+  function sharedSetup() {
+    const { mkdirSync: mks, writeFileSync: wfs } = require("node:fs") as typeof import("node:fs");
+    const sharedDir = join(tmp, "shared");
+    mks(sharedDir, { recursive: true });
+    wfs(join(sharedDir, "share.mp3"), Buffer.alloc(10));
+  }
+  function denySession() {
+    const denied: Array<{ u: string; f: string; r: string }> = [];
+    const mockSession: any = { sendUploadDenied: (u: string, f: string, r: string) => { denied.push({ u, f, r }); } };
+    return { mockSession, denied };
+  }
+
+  test("controlUpload clear deletes, persists removal, denies queued peer", () => {
+    sharedSetup();
+    const { mockSession, denied } = denySession();
+    const { mgr, removed } = makeManager(tmp, mockSession);
+    const id = "alice::Music\\share.mp3";
+    const t = mgr.handleQueueUpload("alice", "Music\\share.mp3");
+    expect(t.status).toBe("Queued");
+    mgr.controlUpload(id, "clear");
+    expect(mgr.get(id)).toBeUndefined();
+    expect(removed).toContain(id);
+    expect(denied.length).toBe(1);
+    expect(denied[0]).toEqual({ u: "alice", f: "Music\\share.mp3", r: "Denied" });
+    const raw = JSON.parse(readFileSync(join(tmp, "downloads.json"), "utf8")) as Array<{ id: string }>;
+    expect(raw.find((r) => r.id === id)).toBeUndefined();
+    mgr.close();
+    // reload stays cleared
+    const { mgr: mgr2 } = makeManager(tmp, mockSession);
+    expect(mgr2.get(id)).toBeUndefined();
+    mgr2.close();
+  });
+
+  test("controlUpload clear of non-queued upload stays silent", () => {
+    sharedSetup();
+    const { mockSession, denied } = denySession();
+    const { mgr, removed } = makeManager(tmp, mockSession);
+    const id = "alice::Music\\share.mp3";
+    mgr.handleQueueUpload("alice", "Music\\share.mp3");
+    (mgr as any).transfers.get(id).status = "Transferring";
+    mgr.controlUpload(id, "clear");
+    expect(mgr.get(id)).toBeUndefined();
+    expect(removed).toContain(id);
+    expect(denied.length).toBe(0);
+    mgr.close();
+  });
+
+  test("peer requeue after clear is denied, not resurrected", () => {
+    sharedSetup();
+    const { mockSession, denied } = denySession();
+    const { mgr } = makeManager(tmp, mockSession);
+    const id = "alice::Music\\share.mp3";
+    mgr.handleQueueUpload("alice", "Music\\share.mp3");
+    mgr.controlUpload(id, "clear");
+    expect(denied.length).toBe(1);
+    // same peer asks again (in-flight duplicate / retry)
+    const again = mgr.handleQueueUpload("alice", "Music\\share.mp3");
+    expect(mgr.get(id)).toBeUndefined();
+    expect(again.isUpload).toBe(true);
+    expect(denied.length).toBe(2);
+    mgr.close();
+  });
+
+  test("retryUploads bypasses cleared suppression (user-driven)", () => {
+    sharedSetup();
+    const { mockSession } = denySession();
+    const { mgr } = makeManager(tmp, mockSession);
+    const id = "alice::Music\\share.mp3";
+    mgr.handleQueueUpload("alice", "Music\\share.mp3");
+    mgr.controlUpload(id, "clear");
+    expect(mgr.get(id)).toBeUndefined();
+    mgr.retryUploads("alice", "Music\\share.mp3");
+    const t = mgr.get(id);
+    // recreated (may instantly start serving when slots are free)
+    expect(["Queued", "Transferring"]).toContain(t?.status);
+    expect(t?.isUpload).toBe(true);
+    mgr.close();
+  });
+
+  test("denyUpload removes queued upload, rejects non-queued", () => {
+    sharedSetup();
+    const { mockSession, denied } = denySession();
+    const { mgr, removed } = makeManager(tmp, mockSession);
+    const id = "alice::Music\\share.mp3";
+    mgr.handleQueueUpload("alice", "Music\\share.mp3");
+    expect(mgr.denyUpload("alice", "Music\\share.mp3")).toBe(true);
+    expect(mgr.get(id)).toBeUndefined();
+    expect(removed).toContain(id);
+    expect(denied.length).toBe(1);
+    // non-queued entry is kept
+    mgr.handleQueueUpload("bob", "Music\\share.mp3");
+    (mgr as any).transfers.get("bob::Music\\share.mp3").status = "Transferring";
+    expect(mgr.denyUpload("bob", "Music\\share.mp3")).toBe(false);
+    expect(mgr.get("bob::Music\\share.mp3")).toBeDefined();
+    mgr.close();
+  });
+});

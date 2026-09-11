@@ -41,6 +41,7 @@ import {
   buildRoomListRequest,
   buildUserInfoResponse,
   parseUserInfoResponse,
+  userInfoPicToBase64,
   buildQueueUpload,
   buildTransferRequest,
   buildTransferResponse,
@@ -525,6 +526,22 @@ describe("user info — peer UserInfoResponse", () => {
     const msg = parseUserInfoResponse(p.payload, "heidi");
     expect(msg.pic).toBeNull();
     expect(msg.descr).toBe("no pic");
+  });
+
+  test("userInfoPicToBase64 keeps WS payload a string (blank-page guard)", () => {
+    // peer Buffer -> base64 string (never relay the {type,data} JSON object)
+    const pic = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const b64 = userInfoPicToBase64(pic);
+    expect(typeof b64).toBe("string");
+    expect(b64).toBe(pic.toString("base64"));
+    expect(() => (b64 as string).trimStart()).not.toThrow();
+    // valid strings pass through, null/empty/garbage drop to null
+    expect(userInfoPicToBase64("iVBORw0KGgo=")).toBe("iVBORw0KGgo=");
+    expect(userInfoPicToBase64(null)).toBeNull();
+    expect(userInfoPicToBase64(undefined)).toBeNull();
+    expect(userInfoPicToBase64(Buffer.alloc(0))).toBeNull();
+    expect(userInfoPicToBase64(12345)).toBeNull();
+    expect(userInfoPicToBase64({ type: "Buffer", data: [1, 2, 3] })).toBeNull();
   });
 });
 

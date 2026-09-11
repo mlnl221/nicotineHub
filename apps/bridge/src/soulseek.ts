@@ -845,6 +845,25 @@ export function parseWatchUser(payload: Buffer): { username: string; exists: boo
 
 export function buildUserInfoRequest(): Buffer { return frameMessage(PEER_MESSAGE_CODES.userInfoRequest, Buffer.alloc(0)); }
 export interface UserInfoResponseMessage { username: string; descr: string; pic: Buffer | null; totalupl: number; queuesize: number; slotsavail: boolean; uploadallowed: number; }
+/** Max base64 picture accepted from a peer for WS relay (matches server zod cap). */
+export const MAX_USERINFO_PIC_B64 = 5_000_000;
+/**
+ * WS-safe picture: peers yield Buffer|null, but JSON.stringify(Buffer) relays a
+ * truthy {type,data} object that crashes clients calling string methods.
+ * Returns base64 string, passes valid strings through, drops the rest.
+ */
+export function userInfoPicToBase64(pic: unknown): string | null {
+  try {
+    if (pic === null || pic === undefined) return null;
+    if (typeof pic === "string") return pic.length <= MAX_USERINFO_PIC_B64 ? pic : null;
+    if (typeof Buffer !== "undefined" && Buffer.isBuffer(pic)) {
+      if (pic.length === 0) return null;
+      const b64 = pic.toString("base64");
+      return b64.length <= MAX_USERINFO_PIC_B64 ? b64 : null;
+    }
+    return null;
+  } catch { return null; }
+}
 export function parseUserInfoResponse(payload: Buffer, username: string): UserInfoResponseMessage {
   const r = new SlskReader(payload);
   const descr = r.string(); const hasPic = r.bool(); const pic = hasPic ? r.bytes() : null;
