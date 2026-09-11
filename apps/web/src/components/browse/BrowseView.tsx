@@ -877,7 +877,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
 
       {menuAnchor ? <ContextMenu x={menuAnchor.x} y={menuAnchor.y} items={menuAnchor.items} onClose={() => setMenuAnchor(null)} /> : null}
       {propsFile ? (
-        <div role="dialog" aria-modal="true" aria-label={`Properties of ${propsFile.name.split("\\").pop() || propsFile.name}`} className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 p-4" onClick={() => setPropsFile(null)}>
+        <div role="dialog" aria-modal="true" aria-label={`Properties of ${propsFile.name.split("\\").pop() || propsFile.name}`} className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/40 p-4" onClick={() => setPropsFile(null)}>
           <div className="w-full max-w-md rounded-2xl bg-surface-container-lowest p-6 shadow-xl max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-4">
               <h3 className="font-headline text-lg font-bold truncate">{propsFile.name.split("\\").pop()}</h3>

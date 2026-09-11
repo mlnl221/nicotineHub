@@ -594,7 +594,7 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
       </div>
 
       {toast ? (
-        <div className="fixed bottom-6 left-1/2 z-40 -translate-x-1/2 rounded-full bg-inverse-surface px-4 py-2 font-label text-xs text-inverse-on-surface shadow-lg">{toast}</div>
+        <div className="fixed bottom-[calc(76px+env(safe-area-inset-bottom,0px))] md:bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-full bg-inverse-surface px-4 py-2 text-center font-label text-xs text-inverse-on-surface shadow-lg">{toast}</div>
       ) : null}
     </div>
   );

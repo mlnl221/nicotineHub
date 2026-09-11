@@ -44,7 +44,7 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
   const tag = displayVersion();
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose} role="dialog" aria-modal="true" aria-label="About Nicotine Hub">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose} role="dialog" aria-modal="true" aria-label="About Nicotine Hub">
       <div
         className="w-full max-w-[520px] max-h-[85dvh] flex flex-col overflow-hidden rounded-2xl bg-surface-container-lowest shadow-xl dark:bg-surface-container-high ghost-border"
         onClick={(e) => e.stopPropagation()}

@@ -25,5 +25,5 @@ export function ToastHost() {
     return () => window.removeEventListener("nicotineHub:toast", handler as EventListener);
   }, []);
 
-  return <div ref={containerRef} className="pointer-events-none fixed bottom-20 right-4 z-50 flex flex-col items-end md:bottom-4" aria-live="polite" />;
+  return <div ref={containerRef} className="pointer-events-none fixed bottom-[calc(76px+env(safe-area-inset-bottom,0px))] right-4 z-50 flex flex-col items-end md:bottom-4" aria-live="polite" />;
 }

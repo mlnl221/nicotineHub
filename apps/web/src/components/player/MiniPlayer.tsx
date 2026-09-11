@@ -28,7 +28,7 @@ export function MiniPlayer() {
 
   return (
     <div
-      className={`fixed inset-x-3 bottom-[calc(76px+env(safe-area-inset-bottom))] z-40 rounded-2xl bg-surface-container-lowest/90 shadow-[0_8px_40px_4px_rgb(0_0_0/0.10)] backdrop-blur-[20px] ghost-border dark:bg-surface-container-highest/90 md:inset-x-auto md:bottom-6 md:right-6 md:w-auto ${collapsed ? "md:left-[88px]" : "md:left-[312px]"}`}
+      className={`fixed inset-x-3 bottom-[calc(76px+env(safe-area-inset-bottom,0px))] z-40 rounded-2xl bg-surface-container-lowest/90 shadow-[0_8px_40px_4px_rgb(0_0_0/0.10)] backdrop-blur-[20px] ghost-border dark:bg-surface-container-highest/90 md:inset-x-auto md:bottom-6 md:right-6 md:w-auto ${collapsed ? "md:left-[88px]" : "md:left-[312px]"}`}
       role="region"
       aria-label="Audio player"
     >

@@ -448,7 +448,7 @@ export function SearchScreen() {
           onClick={() => setSheetRow(null)}
         >
           <div
-            className="w-full max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-surface-container p-3 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] md:max-w-md md:rounded-2xl"
+            className="w-full max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-surface-container p-4 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] md:max-w-md md:rounded-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-outline-variant" />
@@ -566,7 +566,7 @@ export function SearchScreen() {
         />
       ) : null}
       {propsRow ? (
-        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 p-4" onClick={() => setPropsRow(null)}>
+        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/40 p-4" onClick={() => setPropsRow(null)}>
           <div className="w-full max-w-md rounded-2xl bg-surface-container-lowest p-6 shadow-xl max-h-[80vh] overflow-y-auto ghost-border" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-4">
               <h3 className="font-headline text-lg font-bold truncate">{propsRow.filename}</h3>

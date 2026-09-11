@@ -646,7 +646,7 @@ function ChatRoomsInner() {
       <BottomNav />
       {/* Global Room Wall — aggregates tickers from all joined rooms (roomwall.py parity) */}
       {showWall && activeRoom ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowWall(false)}>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onClick={() => setShowWall(false)}>
           <div className="w-full max-w-lg rounded-2xl bg-surface-container-lowest p-6 shadow-xl max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-headline text-lg font-bold">Room Wall — All tickers</h3>
