@@ -9,6 +9,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { PageHeader } from "@/components/PageHeader";
+import { CompactEmpty } from "@/components/mobile/EmptyState";
 import type { DiagEntry, DiagLevel, DiagnosticsHealth } from "@/lib/protocol";
 import { PortChecker } from "@/components/PortChecker";
 import { useConfig } from "@/lib/config/provider";
@@ -364,7 +365,7 @@ function DiagnosticsInner() {
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Diagnostics" />
-      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-clip max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <div className="pointer-events-none absolute inset-0 opacity-20" style={{ background: "radial-gradient(circle at 50% 0%, rgba(51,102,204,0.12) 0%, transparent 60%)" }} />
         <PageHeader
           title="Diagnostics"
@@ -425,20 +426,20 @@ function DiagnosticsInner() {
                 <span className="rounded-full bg-primary-container/30 px-2 py-0.5 font-mono text-[11px] normal-case tracking-normal dark:bg-primary-container/20">{filtered.length} / {logs.length}</span>
               </h2>
               <div className="flex items-center gap-2">
-                <button onClick={() => setPaused((v)=>!v)} className={`rounded-full px-3 py-1.5 font-label text-xs uppercase tracking-widest ${paused ? "bg-tertiary text-on-tertiary" : "bg-surface-container-high text-on-surface-variant dark:bg-surface-variant"}`}>{paused ? "Resume" : "Pause"}</button>
-                <button onClick={handleCopy} className="rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs uppercase tracking-widest text-on-surface-variant dark:bg-surface-variant">{copied ? "Copied" : "Copy"}</button>
-                <button onClick={handleDownload} className="rounded-full bg-surface-container-high px-3 py-1.5 font-label text-xs uppercase tracking-widest text-on-surface-variant dark:bg-surface-variant">Download</button>
-                <button onClick={handleClear} className="rounded-full bg-error-container px-3 py-1.5 font-label text-xs uppercase tracking-widest text-on-error-container">Clear</button>
+                <button onClick={() => setPaused((v)=>!v)} className={`rounded-full px-3 py-2.5 font-label text-xs uppercase tracking-widest ${paused ? "bg-tertiary text-on-tertiary" : "bg-surface-container-high text-on-surface-variant dark:bg-surface-variant"}`}>{paused ? "Resume" : "Pause"}</button>
+                <button onClick={handleCopy} className="rounded-full bg-surface-container-high px-3 py-2.5 font-label text-xs uppercase tracking-widest text-on-surface-variant dark:bg-surface-variant">{copied ? "Copied" : "Copy"}</button>
+                <button onClick={handleDownload} className="rounded-full bg-surface-container-high px-3 py-2.5 font-label text-xs uppercase tracking-widest text-on-surface-variant dark:bg-surface-variant">Download</button>
+                <button onClick={handleClear} className="rounded-full bg-error-container px-3 py-2.5 font-label text-xs uppercase tracking-widest text-on-error-container">Clear</button>
               </div>
             </div>
 
             <div className="mb-3 flex flex-wrap gap-2">
               <div className="flex gap-1">
                 {LEVELS.map((lvl) => (
-                  <button key={lvl} onClick={() => setLevelFilter(lvl)} className={`rounded-full px-2.5 py-1 font-label text-xs uppercase tracking-widest ${levelFilter===lvl ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant dark:bg-surface-variant"}`}>{lvl}</button>
+                  <button key={lvl} onClick={() => setLevelFilter(lvl)} className={`rounded-full px-2.5 py-2 font-label text-xs uppercase tracking-widest ${levelFilter===lvl ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant dark:bg-surface-variant"}`}>{lvl}</button>
                 ))}
               </div>
-              <select value={scopeFilter} onChange={(e)=>setScopeFilter(e.target.value)} className="rounded-full bg-surface-container-high px-3 py-1 font-label text-xs uppercase tracking-widest text-on-surface-variant dark:bg-surface-variant">
+              <select value={scopeFilter} onChange={(e)=>setScopeFilter(e.target.value)} className="rounded-full bg-surface-container-high px-3 py-2 font-label text-xs uppercase tracking-widest text-on-surface-variant dark:bg-surface-variant">
                 <option value="all">all scopes</option>
                 <option value="bridge">bridge</option>
                 <option value="server">server</option>
@@ -449,7 +450,7 @@ function DiagnosticsInner() {
                 <option value="system">system</option>
                 <option value="auth">auth</option>
               </select>
-              <input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Filter text…" className="min-w-[140px] flex-1 rounded-full bg-surface-container-high px-3 py-1 font-body text-xs text-on-surface placeholder:text-on-surface-variant dark:bg-surface-variant sm:max-w-[240px]" />
+              <input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Filter text…" className="min-w-[140px] flex-1 rounded-full bg-surface-container-high px-3 py-2 font-body text-xs text-on-surface placeholder:text-on-surface-variant dark:bg-surface-variant sm:max-w-[240px]" />
               <label className="flex items-center gap-1.5 font-label text-xs uppercase tracking-widest text-on-surface-variant">
                 <input type="checkbox" checked={autoScroll} onChange={(e)=>setAutoScroll(e.target.checked)} className="accent-primary" /> autoscroll
               </label>
@@ -462,7 +463,9 @@ function DiagnosticsInner() {
               style={{ scrollbarWidth: "thin" }}
             >
               {filtered.length === 0 ? (
-                <div className="py-8 text-center font-body text-xs text-on-surface-variant dark:text-outline">No logs yet — logs appear here in real time (bridge + browser). Try a search or download.</div>
+                <div className="py-8">
+                  <CompactEmpty>No logs yet — logs appear here in real time (bridge + browser). Try a search or download.</CompactEmpty>
+                </div>
               ) : filtered.map((e, i) => (
                 <div key={i} className="flex gap-2 whitespace-pre-wrap break-words">
                   <span className="shrink-0 text-on-surface-variant dark:text-outline">[{e.scope}]</span>

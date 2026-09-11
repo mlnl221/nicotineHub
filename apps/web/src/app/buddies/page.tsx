@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/mobile/EmptyState";
 import { useBuddies } from "@/lib/buddies";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { buddyMenu } from "@/lib/context-menu/menus";
@@ -40,13 +41,13 @@ function BuddiesInner() {
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Buddies" subtitle={`${buddies.length} buddies • ${onlineCount} online`} />
-      <main className="md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-clip max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <PageHeader
           title="Buddies"
           subtitle={`${buddies.length} buddies • ${onlineCount} online • Trusted peers • watch status`}
           settingsHref="/settings?tab=network#network"
         />
-          <div className="mx-auto w-full max-w-screen-2xl flex-1 px-4 sm:px-6 py-8 md:px-10 overflow-x-hidden max-w-full">
+          <div className="mx-auto w-full max-w-screen-2xl flex-1 px-4 sm:px-6 py-8 md:px-10 overflow-x-clip max-w-full">
           <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="max-w-2xl font-body text-sm leading-relaxed text-on-surface-variant">
@@ -63,7 +64,7 @@ function BuddiesInner() {
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
                   placeholder="Filter buddies..."
-                  className="w-full sm:w-64 min-h-11 rounded-full bg-surface-container-lowest py-2.5 pl-9 pr-4 font-body text-sm placeholder:text-outline-variant focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  className="w-full sm:w-64 min-h-11 rounded-full bg-surface-container-lowest py-2.5 pl-9 pr-4 font-body text-base placeholder:text-outline-variant focus:outline-none md:text-sm focus:ring-2 focus:ring-primary/30"
                 />
               </div>
             </div>
@@ -80,7 +81,7 @@ function BuddiesInner() {
                 onChange={(e) => setAddInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleAdd()}
                 placeholder="Add buddy… (username)"
-                className="w-full rounded-xl bg-surface-container-lowest py-3 pl-10 pr-4 font-body text-sm ghost-border focus:outline-none focus:ring-2 focus:ring-primary/20 min-h-11"
+                className="w-full rounded-xl bg-surface-container-lowest py-3 pl-10 pr-4 font-body text-base ghost-border focus:outline-none md:text-sm focus:ring-2 focus:ring-primary/20 min-h-11"
               />
             </div>
             <button
@@ -92,15 +93,11 @@ function BuddiesInner() {
           </div>
 
           {buddies.length === 0 ? (
-            <div className="rounded-xl bg-surface p-10 text-center ghost-border">
-              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary-container/20">
-                <span className="material-symbols-outlined text-primary">group</span>
-              </div>
-              <h2 className="font-headline text-lg font-semibold">No buddies yet</h2>
-              <p className="mx-auto mt-2 max-w-md font-body text-sm text-on-surface-variant">
-                Add usernames you trust. We&apos;ll watch their status and let you message or browse them quickly.
-              </p>
-            </div>
+            <EmptyState
+              icon="group"
+              title="No buddies yet"
+              helper="Add usernames you trust. We'll watch their status and let you message or browse them quickly."
+            />
           ) : (
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {buddies.map((b) => {
@@ -132,7 +129,7 @@ function BuddiesInner() {
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => setTrusted(b.username, !b.trusted)}
-                          className={`p-1.5 rounded-full ${b.trusted ? "bg-tertiary-container text-on-tertiary-container" : "bg-surface-container-low text-outline hover:text-tertiary"}`}
+                          className={`p-2 min-h-9 min-w-9 flex items-center justify-center rounded-full ${b.trusted ? "bg-tertiary-container text-on-tertiary-container" : "bg-surface-container-low text-outline hover:text-tertiary"}`}
                           title={b.trusted ? "Trusted" : "Not trusted"}
                         >
                           <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: "'FILL' 1" }}>
@@ -141,7 +138,7 @@ function BuddiesInner() {
                         </button>
                         <button
                           onClick={() => setNotify(b.username, !b.notify)}
-                          className={`p-1.5 rounded-full ${b.notify ? "bg-primary-fixed text-on-primary-fixed" : "bg-surface-container-low text-outline"}`}
+                          className={`p-2 min-h-9 min-w-9 flex items-center justify-center rounded-full ${b.notify ? "bg-primary-fixed text-on-primary-fixed" : "bg-surface-container-low text-outline"}`}
                           title={b.notify ? "Notify on status change" : "Muted"}
                         >
                           <span className="material-symbols-outlined text-[16px]">notifications</span>
@@ -165,13 +162,13 @@ function BuddiesInner() {
                     <div className="mt-4 grid grid-cols-2 gap-2 text-center">
                       <div className="rounded-lg bg-surface-container-low p-2">
                         <div className="font-bold text-on-surface text-sm">{b.files ?? "—"}</div>
-                        <div className="font-label text-[10px] uppercase tracking-wider text-on-surface-variant">Files</div>
+                        <div className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Files</div>
                       </div>
                       <div className="rounded-lg bg-surface-container-low p-2">
                         <div className="font-bold text-on-surface text-sm">
                           {b.avgspeed ? `${Math.round(b.avgspeed / 1000)} kB/s` : "—"}
                         </div>
-                        <div className="font-label text-[10px] uppercase tracking-wider text-on-surface-variant">Speed</div>
+                        <div className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Speed</div>
                       </div>
                     </div>
 

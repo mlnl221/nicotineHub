@@ -21,8 +21,8 @@ export function BrowseTabs() {
             aria-current={active ? "true" : undefined}
             onClick={() => setActive(tab.id)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActive(tab.id); } }}
-            className={`group flex shrink-0 snap-start items-center gap-1.5 rounded-full px-3 py-1.5 font-label text-xs transition-colors min-h-9 text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${
-              active ? "bg-primary-container text-on-primary-container" : "bg-surface-container-lowest text-on-surface-variant ghost-border hover:bg-surface-container-low"
+            className={`group flex shrink-0 snap-start items-center gap-1.5 rounded-full px-3 py-2.5 font-label text-xs transition-colors min-h-11 text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${
+              active ? "bg-primary-container text-on-primary-container" : "bg-surface-container-lowest text-on-surface-variant ghost-border hover:bg-surface-container-low dark:bg-surface-container-high dark:text-on-surface dark:hover:bg-surface-container-highest"
             }`}
           >
             <span className="material-symbols-outlined text-[14px] opacity-70 shrink-0 pointer-events-none">folder_managed</span>
@@ -40,7 +40,7 @@ export function BrowseTabs() {
                 type="button"
                 aria-label="Close browse"
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); closeBrowse(tab.id); }}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-on-surface-variant/70 hover:text-error hover:bg-surface-container-high -mr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-on-surface-variant/70 hover:text-error hover:bg-surface-container-high -mr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
               >
                 <span className="material-symbols-outlined text-[14px]">close</span>
               </button>

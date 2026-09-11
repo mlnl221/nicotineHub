@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useWishlist } from "@/lib/wishlist";
 import { useSession } from "@/lib/session";
 import { useConfig } from "@/lib/config/provider";
+import { MobileHelp } from "@/components/ui/MobileHelp";
 
 export function WishlistManager() {
   const { terms, entries, addTerm, removeTerm, interval, toggleAuto, resetSeen } = useWishlist();
@@ -36,9 +37,9 @@ export function WishlistManager() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
           placeholder="Add wish (e.g. pink floyd - wish you were here)"
-          className="flex-1 rounded-xl bg-surface-container-low px-3 py-2 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary dark:bg-surface-container-high"
+          className="flex-1 rounded-xl bg-surface-container-low px-3 py-2.5 min-h-11 text-base text-on-surface outline-none focus:ring-1 focus:ring-primary dark:bg-surface-container-high md:text-sm"
         />
-        <button onClick={handleAdd} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary">Add</button>
+        <button onClick={handleAdd} className="rounded-xl bg-primary px-4 py-2.5 min-h-11 text-sm font-medium text-on-primary">Add</button>
       </div>
 
       {terms.length === 0 ? (
@@ -78,10 +79,12 @@ export function WishlistManager() {
         </ul>
       )}
 
-      <p className="mt-3 text-[11px] text-on-surface-variant">
-        Uses <code className="rounded bg-surface-container-high px-1">search:wishlist (103)</code> with server interval <code>WishlistInterval 104</code>. Notifications:{" "}
-        {settings.notifications.notification_popup_wish ? "on" : "off"}.
-      </p>
+      <MobileHelp short="Auto-search details" testId="wishlist-protocol-help">
+        <p className="mt-3 text-[11px] text-on-surface-variant">
+          Uses <code className="rounded bg-surface-container-high px-1">search:wishlist (103)</code> with server interval <code>WishlistInterval 104</code>. Notifications:{" "}
+          {settings.notifications.notification_popup_wish ? "on" : "off"}.
+        </p>
+      </MobileHelp>
     </div>
   );
 }

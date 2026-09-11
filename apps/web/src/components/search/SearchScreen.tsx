@@ -16,6 +16,9 @@ import { SearchTabs } from "./SearchTabs";
 import { FilterBar } from "./FilterBar";
 import { ResultsList, searchRowId } from "./ResultsList";
 import { ContextMenu } from "@/components/ui/ContextMenu";
+import { MobileHelp, wishlistDefaultOpen } from "@/components/ui/MobileHelp";
+import { BulkBarShell } from "@/components/ui/BulkBarShell";
+import { EmptyState } from "@/components/mobile/EmptyState";
 import { searchResultMenu, searchTabMenu } from "@/lib/context-menu/menus";
 import { useContextMenu } from "@/lib/context-menu/useContextMenu";
 import { useWishlist } from "@/lib/wishlist";
@@ -27,10 +30,14 @@ export function SearchScreen() {
   const { activeTab, activeId, tabs, setActive, closeTab, startSearch, stopSearch, retrySearch, setFilters, clearFilters } = useSearches();
   const { requestDownload } = useTransfers();
   const { settings, setOption } = useConfig();
-  const { getIgnored, markSeen } = useWishlist();
+  const { getIgnored, markSeen, terms } = useWishlist();
   const router = useRouter();
   const [showFilters, setShowFilters] = useState(() => settings.searches.filters_visible ?? false);
   useEffect(() => { setShowFilters(settings.searches.filters_visible ?? false); }, [settings.searches.filters_visible]);
+  // Wishlist collapsible on mobile (open on desktop). Single mounted instance,
+  // CSS show/hide only, so the draft input survives toggling/resizing.
+  const [wishlistOpen, setWishlistOpen] = useState(true);
+  useEffect(() => { setWishlistOpen(wishlistDefaultOpen(window.innerWidth)); }, []);
   // Sticky zero-tab draft: FilterBar stays usable with no tabs, and the next
   // user-initiated search (from empty state) seeds from it. Seeded from the
   // same defaults as new tabs so the panel shows what the search will use.
@@ -205,9 +212,9 @@ export function SearchScreen() {
     : `Find files across the network • ${tabs.length} tabs`;
 
   return (
-    <div className="flex min-h-screen max-w-full overflow-x-hidden flex-col bg-surface-container-low dark:bg-inverse-surface" data-custom-menu>
+    <div className="flex min-h-screen max-w-full overflow-x-clip flex-col bg-surface-container-low dark:bg-inverse-surface" data-custom-menu>
       <PageHeader title="Search" subtitle={searchSubtitle} settingsHref="/settings?tab=searches#searches" />
-      <div className="sticky top-[calc(56px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-low/95 backdrop-blur dark:bg-inverse-surface/95 border-b border-outline-variant/10">
+      <div className="sticky top-[calc(60px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-surface-container-low/95 backdrop-blur dark:bg-surface-container-low/80 border-b border-outline-variant/10">
         <SearchBar
           onSearch={startWithDraft}
           onToggleFilters={() => {
@@ -297,7 +304,7 @@ export function SearchScreen() {
             <select
               value={sortMode}
               onChange={(e) => setSortMode(e.target.value as SearchSortMode)}
-              className="rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-semibold text-on-surface-variant outline-none"
+              className="rounded-full bg-surface-container-high px-2 py-2 text-[10px] font-semibold text-on-surface-variant outline-none"
               title="Sort: Best = free slots, fastest first"
             >
               <option value="best">Best first</option>
@@ -308,7 +315,7 @@ export function SearchScreen() {
             <select
               value={settings.searches.group_searches}
               onChange={(e) => setOption("searches", "group_searches", e.target.value)}
-              className="rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-semibold text-on-surface-variant outline-none"
+              className="rounded-full bg-surface-container-high px-2 py-2 text-[10px] font-semibold text-on-surface-variant outline-none"
               title="Grouping"
             >
               <option value="user_grouping">By User</option>
@@ -317,7 +324,7 @@ export function SearchScreen() {
             <select
               value={settings.searches.expand_results}
               onChange={(e) => setOption("searches", "expand_results", e.target.value)}
-              className="rounded-full bg-surface-container-low px-2 py-1 text-[10px] font-semibold text-on-surface-variant outline-none"
+              className="rounded-full bg-surface-container-low px-2 py-2 text-[10px] font-semibold text-on-surface-variant outline-none"
               title="Expand"
             >
               <option value="all">Expand All</option>
@@ -330,31 +337,39 @@ export function SearchScreen() {
 
       {activeTab ? (
         visibleRows.length === 0 && activeTab.status === "ended" ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 py-16 text-center">
-            <span className="material-symbols-outlined text-4xl text-outline">search_off</span>
-            <p className="font-body text-sm font-semibold text-on-surface">
-              {activeTab.reason === "error" ? "Connection lost — retry?"
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-8 text-center">
+            <EmptyState
+              icon="search_off"
+              title={
+                activeTab.reason === "error" ? "Connection lost — retry?"
                 : activeTab.reason === "timeout" && activeTab.total === 0
                   ? "No results — check your listening port"
                 : activeTab.reason === "max_results"
                   ? "Search limit reached — no matching results"
-                  : "No results"}
-            </p>
-            <p className="max-w-md font-body text-xs leading-relaxed text-on-surface-variant">
-              {activeTab.reason === "error" ? (
-                <>Search ended because the connection dropped. Your previous results are kept — <button onClick={() => retrySearch(activeTab.id)} className="text-primary underline">Retry</button> will continue the same tab.</>
-              ) : activeTab.reason === "timeout" && activeTab.total === 0 ? (
-                <>
-                  Soulseek returns results peer-to-peer to your listening port (currently <code className="rounded bg-surface-container-high px-1 py-0.5 font-mono text-[11px]">{settings.server.portrange[0] ?? 60754}</code>). If this port isn&apos;t forwarded through your VPN/router and into WSL, searches will time out with 0 results.
-                  <br />
-                  Check <a href="/settings?tab=network#network" className="text-primary underline">Settings → Network</a> and your VPN port-forward / OS port-proxy settings.
-                </>
-              ) : activeTab.total === 0 ? (
-                "Try a different query or widen your filters. Results are live — some queries return nothing if peers are offline."
-              ) : (
-                "All results are filtered out. Try clearing filters."
-              )}
-            </p>
+                  : "No results"
+              }
+              helper={
+                activeTab.reason === "error" ? (
+                  <>Search ended because the connection dropped. Your previous results are kept — <button onClick={() => retrySearch(activeTab.id)} className="text-primary underline">Retry</button> will continue the same tab.</>
+                ) : activeTab.reason === "timeout" && activeTab.total === 0 ? (
+                  <MobileHelp short="Searches need a reachable listening port." testId="search-port-help">
+                    <>
+                      Soulseek returns results peer-to-peer to your listening port (currently <code className="rounded bg-surface-container-high px-1 py-0.5 font-mono text-[11px]">{settings.server.portrange[0] ?? 60754}</code>). If this port isn&apos;t forwarded through your VPN/router and into WSL, searches will time out with 0 results.
+                      <br />
+                      Check <a href="/settings?tab=network#network" className="text-primary underline">Settings → Network</a> and your VPN port-forward / OS port-proxy settings.
+                    </>
+                  </MobileHelp>
+                ) : activeTab.total === 0 ? (
+                  <MobileHelp short="Try a different query or widen your filters." testId="search-empty-results-help">
+                    <p className="font-body text-xs leading-relaxed text-on-surface-variant">
+                      Try a different query or widen your filters. Results are live — some queries return nothing if peers are offline.
+                    </p>
+                  </MobileHelp>
+                ) : (
+                  "All results are filtered out. Try clearing filters."
+                )
+              }
+            />
             {activeTab.reason === "timeout" && activeTab.total === 0 ? (
               <div className="mt-2 rounded-lg bg-error-container/20 px-3 py-2 font-label text-[11px] text-on-error-container">
                 Search ended: timeout (no peer could connect back). This is expected if {settings.server.portrange[0] ?? 60754} isn&apos;t reachable.
@@ -408,31 +423,53 @@ export function SearchScreen() {
         )
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4 py-8">
-          <div className="flex flex-col items-center gap-3 text-center">
-            <span className="material-symbols-outlined text-5xl text-outline">travel_explore</span>
-            <p className="font-headline text-xl text-on-surface">Search the network</p>
-            <p className="font-body text-sm text-on-surface-variant">
-              Enter a query above to search Soulseek. Each search opens in its own tab.
-            </p>
-            {settings.searches.enable_history && settings.searches.history.length > 0 ? (
-              <div className="mt-2 flex flex-wrap justify-center gap-2">
-                {settings.searches.history.slice(0, 8).map((h) => (
-                  <button
-                    key={h}
-                    onClick={() => startWithDraft(h)}
-                    className="rounded-full bg-surface-container-high px-3 py-1 text-xs text-on-surface-variant hover:text-primary"
-                  >
-                    {h}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
+          <EmptyState
+            icon="travel_explore"
+            title="Search the network"
+            helper={
+              <MobileHelp short="Enter a query above to search Soulseek." testId="search-empty-help">
+                <p className="font-body text-sm text-on-surface-variant">
+                  Enter a query above to search Soulseek. Each search opens in its own tab.
+                </p>
+              </MobileHelp>
+            }
+            action={
+              settings.searches.enable_history && settings.searches.history.length > 0 ? (
+                <div className="mt-2 flex flex-wrap justify-center gap-2">
+                  {settings.searches.history.slice(0, 8).map((h) => (
+                    <button
+                      key={h}
+                      onClick={() => startWithDraft(h)}
+                      className="rounded-full bg-surface-container-high px-3 py-1 text-xs text-on-surface-variant hover:text-primary"
+                    >
+                      {h}
+                    </button>
+                  ))}
+                </div>
+              ) : undefined
+            }
+          />
           <div className="w-full max-w-md">
-            <WishlistManager />
+            <button
+              type="button"
+              onClick={() => setWishlistOpen((v) => !v)}
+              aria-expanded={wishlistOpen}
+              className="flex min-h-11 w-full items-center justify-between gap-2 rounded-2xl bg-surface-container-high px-4 py-2.5 font-label text-sm font-semibold text-on-surface md:hidden"
+            >
+              <span className="inline-flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px] text-on-surface-variant">favorite</span>
+                Wishlist{terms.length ? ` (${terms.length})` : ""}
+              </span>
+              <span className="material-symbols-outlined text-[20px] text-on-surface-variant">{wishlistOpen ? "expand_less" : "expand_more"}</span>
+            </button>
+            <div className={`${wishlistOpen ? "mt-2 block" : "hidden"} md:mt-0 md:block`}>
+              <WishlistManager />
+            </div>
           </div>
           <div className="text-[11px] text-on-surface-variant">
-            Grouping: {settings.searches.group_searches} · Expand: {settings.searches.expand_results} · Filters {settings.searches.enablefilters ? "on" : "off"}
+            <MobileHelp short="Search defaults" testId="search-defaults-help">
+              <span>Grouping: {settings.searches.group_searches} · Expand: {settings.searches.expand_results} · Filters {settings.searches.enablefilters ? "on" : "off"}</span>
+            </MobileHelp>
           </div>
         </div>
       )}
@@ -444,7 +481,7 @@ export function SearchScreen() {
           onClick={() => setSheetRow(null)}
         >
           <div
-            className="w-full max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-surface-container p-3 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] md:max-w-md md:rounded-2xl"
+            className="w-full max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-surface-container p-4 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] md:max-w-md md:rounded-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-outline-variant" />
@@ -550,15 +587,19 @@ export function SearchScreen() {
          />
        ) : null}
       {bulk.size > 0 ? (
-        <div className="fixed bottom-[calc(64px+env(safe-area-inset-bottom,0px))] md:bottom-4 left-1/2 z-40 flex w-[min(94vw,560px)] -translate-x-1/2 items-center gap-2 rounded-2xl bg-surface-container-highest p-3 shadow-xl ghost-border">
-          <span className="flex-1 font-label text-xs font-bold">{bulk.size} selected</span>
-          <button onClick={downloadSelected} disabled={isDemo} className="rounded-full bg-primary px-3 py-2 font-label text-xs font-bold text-on-primary disabled:opacity-50">Download</button>
-          <button onClick={downloadSelectedFolders} disabled={isDemo} className="rounded-full bg-surface-container-high px-3 py-2 font-label text-xs">Folders</button>
-          <button onClick={() => bulk.clear()} className="rounded-full bg-surface-container-high px-3 py-2 font-label text-xs">Clear</button>
-        </div>
+        <BulkBarShell
+          count={bulk.size}
+          onClear={() => bulk.clear()}
+          actions={
+            <>
+              <button onClick={downloadSelected} disabled={isDemo} className="flex-1 min-w-[72px] rounded-full bg-primary px-3 py-2.5 min-h-11 font-label text-xs font-bold text-on-primary disabled:opacity-50">Download</button>
+              <button onClick={downloadSelectedFolders} disabled={isDemo} className="flex-1 min-w-[72px] rounded-full bg-surface-container-high px-3 py-2.5 min-h-11 font-label text-xs">Folders</button>
+            </>
+          }
+        />
       ) : null}
       {propsRow ? (
-        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 p-4" onClick={() => setPropsRow(null)}>
+        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/40 p-4" onClick={() => setPropsRow(null)}>
           <div className="w-full max-w-md rounded-2xl bg-surface-container-lowest p-6 shadow-xl max-h-[80vh] overflow-y-auto ghost-border" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-4">
               <h3 className="font-headline text-lg font-bold truncate">{propsRow.filename}</h3>

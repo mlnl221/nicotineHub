@@ -12,7 +12,9 @@ import { TransferCard } from "@/components/transfers/TransferCard";
 import { ThroughputChart } from "@/components/transfers/ThroughputChart";
 import { UploadStats } from "@/components/transfers/StatsCards";
 import { PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/mobile/EmptyState";
 import { ContextMenu } from "@/components/ui/ContextMenu";
+import { useContextMenu } from "@/lib/context-menu/useContextMenu";
 import { transferMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
 import { useSearchesOptional } from "@/lib/search";
@@ -52,8 +54,12 @@ function UploadsInner() {
   const [bulkScrape, setBulkScrape] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ title: string; rows: Array<Record<string, unknown>> } | null>(null);
   const [focusedIdx, setFocusedIdx] = useState(-1);
-  const [clearOpen, setClearOpen] = useState(false);
-  const [mobileMore, setMobileMore] = useState(false);
+  const clearMenu = useContextMenu();
+  const moreMenu = useContextMenu();
+  const openBelow = (menu: { openAt: (x: number, y: number) => void }) => (e: React.MouseEvent<HTMLButtonElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    menu.openAt(Math.min(r.left, window.innerWidth - 328), r.bottom + 4);
+  };
   const { requestSpectrum } = useSpectrum();
   const groupMode = settings.transfers.groupuploads ?? "folder_grouping";
   const expandMode = settings.transfers.expand_uploads ?? "all";
@@ -165,7 +171,7 @@ function UploadsInner() {
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Uploads" subtitle={`${uploads.length} uploading • ${downloads.length} total`} />
-      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-clip max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <PageHeader
           title="Uploads"
           subtitle={`${activeCount} active`}
@@ -179,14 +185,16 @@ function UploadsInner() {
 
         <div className="p-4 md:p-10 space-y-6 md:space-y-8 max-w-screen-2xl mx-auto w-full">
           {isDemo ? (
-            <div className="rounded-xl bg-tertiary-fixed/20 dark:bg-tertiary-container/20 px-4 py-3 flex items-center gap-3 ghost-border">
-              <span className="material-symbols-outlined text-tertiary">info</span>
-              <p className="font-label text-xs font-semibold text-on-tertiary-container dark:text-tertiary-fixed">Demo preview — 1 download + 1 upload simulated below (animated). New downloads are disabled on Vercel — search, chat, profiles &amp; browse are mocked.</p>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-center gap-3 dark:border-amber-800 dark:bg-amber-950/30">
+              <span className="material-symbols-outlined text-amber-700 dark:text-amber-300">info</span>
+              <p className="font-label text-xs font-semibold text-amber-900 dark:text-amber-200">Demo preview — 1 download + 1 upload simulated below (animated). New downloads are disabled on Vercel — search, chat, profiles &amp; browse are mocked.</p>
             </div>
           ) : null}
           <ThroughputChart />
           <UploadStats />
           <section data-testid="uploads-section" className="bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border flex flex-col gap-4 max-w-full overflow-x-clip">
+            <div className="sticky top-[calc(60px+env(safe-area-inset-top,0px))] md:static z-20 bg-surface-container-low/95 backdrop-blur dark:bg-surface-container-low/80 border-b border-outline-variant/10 md:bg-transparent md:dark:bg-transparent md:backdrop-blur-none md:border-transparent">
+              <div className="px-4 py-1.5 md:px-0 md:py-0 flex flex-col gap-2 md:gap-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <h3 className="font-headline text-xl font-semibold flex items-center gap-2">
                 <span className="material-symbols-outlined text-tertiary">upload</span>
@@ -242,32 +250,9 @@ function UploadsInner() {
                 <span className="material-symbols-outlined text-[16px]">chat_bubble</span> Message All
               </button>
               <div className="relative">
-                <button onClick={() => setClearOpen((v) => !v)} aria-haspopup="menu" aria-expanded={clearOpen} title="Clear uploads by status" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold">
-                  <span className="material-symbols-outlined text-[16px]">clear_all</span> Clear All <span className="material-symbols-outlined text-[14px]">{clearOpen ? "expand_less" : "expand_more"}</span>
+                <button onClick={openBelow(clearMenu)} aria-haspopup="menu" aria-expanded={!!clearMenu.anchor} title="Clear uploads by status" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold">
+                  <span className="material-symbols-outlined text-[16px]">clear_all</span> Clear All <span className="material-symbols-outlined text-[14px]">expand_more</span>
                 </button>
-                {clearOpen ? (
-                  <div role="menu" className="absolute left-0 z-[60] mt-1 w-60 overflow-hidden rounded-xl bg-surface-container-lowest shadow-xl ghost-border">
-                    {[
-                      { label: "Finished / Cancelled / Failed", key: "finished-cancelled-failed" },
-                      { label: "Finished / Cancelled", key: "finished-cancelled" },
-                      { label: "Finished", key: "finished" },
-                      { label: "Cancelled", key: "cancelled" },
-                      { label: "Failed", key: "failed" },
-                      { label: "User Logged Off", key: "logged-off" },
-                      { label: "Queued…", key: "queued", confirm: "Clear queued uploads?" },
-                      { label: "Everything…", key: "all", confirm: "Clear all uploads?", danger: true },
-                    ].map((opt) => (
-                      <button
-                        key={opt.key}
-                        role="menuitem"
-                        onClick={() => { if (opt.confirm && !window.confirm(opt.confirm)) return; clearMany(true, UPLOAD_CLEAR_SETS[opt.key] ?? null); setClearOpen(false); }}
-                        className={`flex w-full items-center px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high ${opt.danger ? "text-error" : ""}`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
               </div>
             </div>
             <div className="flex md:hidden items-center gap-1.5">
@@ -278,67 +263,29 @@ function UploadsInner() {
                 <span className="material-symbols-outlined text-[16px]">delete</span> Remove
               </button>
               <div className="relative">
-                <button onClick={() => setMobileMore((v) => !v)} aria-label="More upload actions" aria-haspopup="menu" aria-expanded={mobileMore} title="More actions" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-surface-container-high text-on-surface-variant">
+                <button onClick={openBelow(moreMenu)} aria-label="More upload actions" aria-haspopup="menu" aria-expanded={!!moreMenu.anchor} title="More actions" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-surface-container-high text-on-surface-variant">
                   <span className="material-symbols-outlined text-[20px]">more_vert</span>
                 </button>
-                {mobileMore ? (
-                  <>
-                    <button aria-hidden tabIndex={-1} onClick={() => setMobileMore(false)} className="fixed inset-0 z-[59] cursor-default bg-transparent" />
-                    <div role="menu" aria-label="More upload actions" className="absolute right-0 z-[60] mt-1 max-h-[60dvh] w-60 overflow-auto rounded-xl bg-surface-container-lowest shadow-xl ghost-border">
-                      <button role="menuitem" disabled={!selectedTransfers.length} onClick={() => { bulkAbortUsers(); setMobileMore(false); }} className="flex w-full items-center gap-2 px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high disabled:opacity-40">
-                        <span className="material-symbols-outlined text-[16px]">group_off</span> Abort Users
-                      </button>
-                      <button role="menuitem" onClick={() => { clearMany(true, UPLOAD_CLEAR_SETS["finished-cancelled"] ?? null); setMobileMore(false); }} className="flex w-full items-center gap-2 px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high">
-                        <span className="material-symbols-outlined text-[16px]">done_all</span> Clear Finished
-                      </button>
-                      <button role="menuitem" onClick={() => { handleMessageAll(); setMobileMore(false); }} className="flex w-full items-center gap-2 px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high">
-                        <span className="material-symbols-outlined text-[16px]">chat_bubble</span> Message All
-                      </button>
-                      <div className="mx-4 border-t border-outline-variant/10" />
-                      {[
-                        { label: "Finished / Cancelled / Failed", key: "finished-cancelled-failed" },
-                        { label: "Finished / Cancelled", key: "finished-cancelled" },
-                        { label: "Finished", key: "finished" },
-                        { label: "Cancelled", key: "cancelled" },
-                        { label: "Failed", key: "failed" },
-                        { label: "User Logged Off", key: "logged-off" },
-                        { label: "Queued…", key: "queued", confirm: "Clear queued uploads?" },
-                        { label: "Everything…", key: "all", confirm: "Clear all uploads?", danger: true },
-                      ].map((opt) => (
-                        <button
-                          key={opt.key}
-                          role="menuitem"
-                          onClick={() => { if (opt.confirm && !window.confirm(opt.confirm)) return; clearMany(true, UPLOAD_CLEAR_SETS[opt.key] ?? null); setMobileMore(false); }}
-                          className={`flex w-full items-center px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high ${opt.danger ? "text-error" : ""}`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                      <div className="mx-4 border-t border-outline-variant/10" />
-                      <button role="menuitem" onClick={() => { cycleGroup(); setMobileMore(false); }} className="flex w-full items-center gap-2 px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high">
-                        <span className="material-symbols-outlined text-[16px]">group_work</span> Group: {groupLabel}
-                      </button>
-                      <button role="menuitem" onClick={() => { cycleExpand(); setMobileMore(false); }} className="flex w-full items-center gap-2 px-4 min-h-11 text-left text-xs font-semibold hover:bg-surface-container-high">
-                        <span className="material-symbols-outlined text-[16px]">{expandMode === "none" ? "unfold_less" : "unfold_more"}</span> Expand: {expandLabel}
-                      </button>
-                    </div>
-                  </>
-                ) : null}
               </div>
             </div>
+                </div>
+              </div>
             </div>
             {uploads.length === 0 ? (
-              <div data-testid="empty-uploads" className="py-16 text-center">
-                <p className="font-body text-on-surface-variant">No active uploads</p>
-                <div className="mt-4 bg-tertiary-fixed/30 dark:bg-tertiary-container/20 rounded-lg p-4 flex gap-3 items-start max-w-lg mx-auto text-left">
-                  <span className="material-symbols-outlined text-tertiary text-xl">info</span>
-                  <div>
-                    <p className="font-label text-xs font-semibold text-on-tertiary-container dark:text-tertiary-fixed">No shared folders configured</p>
-                    <p className="font-label text-xs text-on-surface-variant mt-1">Uploads are queued but cannot start until you configure Shares (Settings → Shares). The queue stays visible in the meantime.</p>
-                  </div>
-                </div>
-                <Link href="/downloads" className="mt-6 inline-flex font-label text-sm font-semibold text-primary hover:underline">View Downloads</Link>
-              </div>
+              <EmptyState
+                icon="upload"
+                title="No active uploads"
+                testId="empty-uploads"
+                helper={
+                  <>
+                    <span className="mb-2 block rounded-lg bg-tertiary-fixed/30 p-4 text-left dark:bg-tertiary-container/20">
+                      <span className="font-label text-xs font-semibold text-on-tertiary-container dark:text-tertiary-fixed">No shared folders configured</span>
+                      <span className="mt-1 block font-label text-xs text-on-surface-variant">Uploads are queued but cannot start until you configure Shares (Settings → Shares). The queue stays visible in the meantime.</span>
+                    </span>
+                    <Link href="/downloads" className="mt-2 inline-flex font-label text-sm font-semibold text-primary hover:underline">View Downloads</Link>
+                  </>
+                }
+              />
             ) : (
               <div className="space-y-4">
                 {uploadGroups.map(([groupKey, items]) => {
@@ -392,6 +339,47 @@ function UploadsInner() {
             hasSpectrum: false,
           })}
           onClose={() => setMenuAnchor(null)}
+        />
+      ) : null}
+      {clearMenu.anchor ? (
+        <ContextMenu
+          x={clearMenu.anchor.x}
+          y={clearMenu.anchor.y}
+          items={[
+            { id: "fccf", label: "Finished / Cancelled / Failed", action: () => clearMany(true, UPLOAD_CLEAR_SETS["finished-cancelled-failed"] ?? null) },
+            { id: "fc", label: "Finished / Cancelled", action: () => clearMany(true, UPLOAD_CLEAR_SETS["finished-cancelled"] ?? null) },
+            { id: "finished", label: "Finished", action: () => clearMany(true, UPLOAD_CLEAR_SETS["finished"] ?? null) },
+            { id: "cancelled", label: "Cancelled", action: () => clearMany(true, UPLOAD_CLEAR_SETS["cancelled"] ?? null) },
+            { id: "failed", label: "Failed", action: () => clearMany(true, UPLOAD_CLEAR_SETS["failed"] ?? null) },
+            { id: "logged-off", label: "User Logged Off", action: () => clearMany(true, UPLOAD_CLEAR_SETS["logged-off"] ?? null) },
+            { id: "queued", label: "Queued…", action: () => { if (!window.confirm("Clear queued uploads?")) return; clearMany(true, UPLOAD_CLEAR_SETS["queued"] ?? null); } },
+            { id: "all", label: "Everything…", danger: true, action: () => { if (!window.confirm("Clear all uploads?")) return; clearMany(true, UPLOAD_CLEAR_SETS["all"] ?? null); } },
+          ]}
+          onClose={clearMenu.close}
+        />
+      ) : null}
+      {moreMenu.anchor ? (
+        <ContextMenu
+          x={moreMenu.anchor.x}
+          y={moreMenu.anchor.y}
+          items={[
+            { id: "abort-users", label: "Abort Users", icon: "group_off", disabled: !selectedTransfers.length, action: () => bulkAbortUsers() },
+            { id: "clear-finished", label: "Clear Finished", icon: "done_all", action: () => clearMany(true, UPLOAD_CLEAR_SETS["finished-cancelled"] ?? null) },
+            { id: "message-all", label: "Message All", icon: "chat_bubble", action: () => handleMessageAll() },
+            { id: "sep1", label: "---" },
+            { id: "fccf", label: "Finished / Cancelled / Failed", action: () => clearMany(true, UPLOAD_CLEAR_SETS["finished-cancelled-failed"] ?? null) },
+            { id: "fc", label: "Finished / Cancelled", action: () => clearMany(true, UPLOAD_CLEAR_SETS["finished-cancelled"] ?? null) },
+            { id: "finished", label: "Finished", action: () => clearMany(true, UPLOAD_CLEAR_SETS["finished"] ?? null) },
+            { id: "cancelled", label: "Cancelled", action: () => clearMany(true, UPLOAD_CLEAR_SETS["cancelled"] ?? null) },
+            { id: "failed", label: "Failed", action: () => clearMany(true, UPLOAD_CLEAR_SETS["failed"] ?? null) },
+            { id: "logged-off", label: "User Logged Off", action: () => clearMany(true, UPLOAD_CLEAR_SETS["logged-off"] ?? null) },
+            { id: "queued", label: "Queued…", action: () => { if (!window.confirm("Clear queued uploads?")) return; clearMany(true, UPLOAD_CLEAR_SETS["queued"] ?? null); } },
+            { id: "all", label: "Everything…", danger: true, action: () => { if (!window.confirm("Clear all uploads?")) return; clearMany(true, UPLOAD_CLEAR_SETS["all"] ?? null); } },
+            { id: "sep2", label: "---" },
+            { id: "group", label: `Group: ${groupLabel}`, icon: "group_work", action: () => cycleGroup() },
+            { id: "expand", label: `Expand: ${expandLabel}`, icon: expandMode === "none" ? "unfold_less" : "unfold_more", action: () => cycleExpand() },
+          ]}
+          onClose={moreMenu.close}
         />
       ) : null}
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} /> : null}

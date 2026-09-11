@@ -114,7 +114,7 @@ export default function SettingsPage() {
       <Sidebar />
       <TopBar title="Settings" />
 
-      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-clip max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <div
           className="pointer-events-none absolute inset-0 opacity-20"
           style={{
@@ -148,10 +148,10 @@ export default function SettingsPage() {
         />
 
         <div className="relative z-10 mx-auto w-full max-w-6xl flex-1 px-4 pt-4 pb-6 md:px-8 md:pt-2 md:pb-8">
-          <h1 className="mb-1 font-headline text-3xl font-bold tracking-tight text-on-surface dark:text-inverse-primary md:text-4xl">
+          <h1 className="hidden md:block mb-1 font-headline text-3xl font-bold tracking-tight text-on-surface dark:text-inverse-primary md:text-4xl">
             Settings
           </h1>
-          <p className="mb-6 font-body text-sm text-on-surface-variant dark:text-outline">
+          <p className="hidden md:block mb-6 font-body text-sm text-on-surface-variant dark:text-outline">
             Edits stay local until you press <span className="font-medium">Save</span> on a section — saving stores them in the browser and on the bridge (<span className="font-mono">/config/settings.json</span>) so they survive restarts.
           </p>
 
@@ -215,7 +215,7 @@ export default function SettingsPage() {
                               role="tab"
                               aria-selected={active}
                               onClick={() => handleTabChange(t.id)}
-                              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left font-label text-sm transition-all ${
+                              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 min-h-11 text-left font-label text-sm transition-all ${
                                 active
                                   ? "bg-primary text-on-primary shadow-sm"
                                   : "text-on-surface-variant hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant/60"
