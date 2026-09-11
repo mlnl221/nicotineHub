@@ -37,7 +37,6 @@ function ChatRoomsInner() {
   const [joinInput, setJoinInput] = useState("");
   const [sayInput, setSayInput] = useState("");
   const [filter, setFilter] = useState("");
-  const [isPrivate, setIsPrivate] = useState(false);
   const [tickerInput, setTickerInput] = useState("");
   const [showWall, setShowWall] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
@@ -100,10 +99,9 @@ function ChatRoomsInner() {
     if (!r) return;
     const sanitized = r.replace(/[^ -~]/g, "").replace(/\s+/g, " ").trim().slice(0, 24);
     if (!sanitized) return;
-    // private flag: nicotine shows private rooms with lock; we pass via suffix hint and setTicker path — UI only for now
+    // private rooms join the same path — no flag needed
     joinRoom(sanitized);
     setJoinInput("");
-    setIsPrivate(false);
   };
 
   const handleSay = () => {
@@ -177,10 +175,6 @@ function ChatRoomsInner() {
                 <span className="material-symbols-outlined text-[18px] align-middle">refresh</span>
               </button>
               </div>
-              <label className="flex items-center gap-2 text-xs text-on-surface-variant">
-                <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} className="rounded" />
-                Private room
-              </label>
               <div className="relative">
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-outline">search</span>
                 <input
@@ -279,21 +273,9 @@ function ChatRoomsInner() {
               }),
             });
           }}>
-            {/* Mobile room picker */}
+            {/* Mobile room picker — single flow: name/Join or public list */}
             <div className="border-b border-outline-variant/15 bg-surface p-3 md:hidden">
-              <select
-                value={activeRoom || ""}
-                onChange={(e) => setActiveRoom(e.target.value || null)}
-                className="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2.5 min-h-11 text-sm"
-              >
-                <option value="">Select a room</option>
-                {joinedArray.map((r) => (
-                  <option key={r.name} value={r.name}>
-                    {r.name} ({r.users.length})
-                  </option>
-                ))}
-              </select>
-              <div className="mt-2 flex gap-2">
+              <div className="flex gap-2">
                 <input
                   value={joinInput}
                   onChange={(e) => setJoinInput(e.target.value)}
@@ -328,11 +310,8 @@ function ChatRoomsInner() {
                 className="shrink-0 rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 min-h-11 text-on-surface-variant hover:text-primary hover:border-primary"
               >
                 <span className="material-symbols-outlined text-[18px] align-middle">refresh</span>
-              </button>
+                </button>
               </div>
-              <label className="mt-2 flex items-center gap-2 text-xs text-on-surface-variant">
-                <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} /> Private
-              </label>
             </div>
 
             {!activeRoom ? (
@@ -340,7 +319,7 @@ function ChatRoomsInner() {
                 <div>
                   <span className="material-symbols-outlined text-5xl text-outline-variant">groups</span>
                   <p className="mt-2 font-headline text-lg font-semibold">No room selected</p>
-                  <p className="mt-1 font-body text-sm text-on-surface-variant">Join or create a room from the sidebar.</p>
+                  <p className="mt-1 font-body text-sm text-on-surface-variant">Join or create a room above to start.</p>
                 </div>
               </div>
             ) : (
