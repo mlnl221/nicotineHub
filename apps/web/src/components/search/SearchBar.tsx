@@ -70,7 +70,7 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
   const showScope = scopeRowVisible(mode, scopeOpen);
 
   return (
-    <div className="flex flex-col gap-2 px-3 pt-1 pb-1 md:px-3 md:py-3 max-w-full overflow-hidden">
+    <div className="flex flex-col gap-2 px-3 pt-0 pb-1 md:px-3 md:py-3 max-w-full overflow-hidden">
       {/* Card container — keeps everything inside viewport */}
       <div className="flex flex-col gap-2 rounded-2xl bg-surface-container-lowest ghost-border p-1.5 md:gap-2.5 md:p-3 shadow-sm max-w-full overflow-hidden">
         {/* Row 1: query + actions */}
