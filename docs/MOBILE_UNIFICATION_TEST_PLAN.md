@@ -61,7 +61,13 @@ stale demo pt-56 selector removed.
 /search /browse /profile /chat /settings: full text visible, no collapsed pills, stickies top-0,
 desktop navs intact, no console errors.
 
-## Phase 2 — behavior (separate branch)
+## Phase 2 — behavior (IMPLEMENTED 2026-09-11, same branch)
+
+Chat/private picker collapse (lookup pill when room active, expand/collapse, Join/Start closes);
+dead Private flag + duplicate Select-a-room removed; dl/up toolbars sticky top-60 mobile
+(md:static desktop, verified sticks @60 with scrollable content); mobile download-stats strip
+removed (DownloadStats renders on mobile, testid unreferenced); BulkBarShell shared
+(count + Clear + actions slot, dark kept) rewiring tag/BulkBar + search bulk, behavior identical.
 
 Chat/private picker collapse (profile lookup-pill pattern); dl/up sticky toolbars + stats-strip
 dedup; BulkBar dedup (keep dark variant); extend `mobile-help.test.ts`; re-check
