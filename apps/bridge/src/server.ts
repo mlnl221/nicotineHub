@@ -159,7 +159,7 @@ const UserInfoRequestSchema = z.object({ type: z.literal("userinfo") }).and(User
 
 const ChatRoomSchema = z.object({
   type: z.literal("chat:room"),
-  action: z.enum(["join", "leave", "say", "ticker", "setTicker", "addOperator", "removeOperator", "cancelMembership", "cancelOwnership", "refreshList"]),
+  action: z.enum(["join", "leave", "say", "ticker", "setTicker", "addMember", "addOperator", "removeOperator", "cancelMembership", "cancelOwnership", "refreshList"]),
   room: z.string().min(1).max(64).optional(),
   message: z.string().max(5000).optional(),
   username: z.string().max(64).optional(),
@@ -1638,7 +1638,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             const txt = isAction ? finalMsg.replace(/^\/(me)\s+|^\*\s+/, "") : finalMsg;
             logRoomMessage(room, session.username, txt, { isAction });
           } catch {}
-        } else if (action === "setTicker" && message !== undefined) session.setRoomTicker(room, message);
+        }         else if (action === "setTicker" && message !== undefined) session.setRoomTicker(room, message);
+        else if (action === "addMember" && result.data.username) session.addRoomMember(room, result.data.username);
         else if (action === "addOperator" && result.data.username) session.addRoomOperator(room, result.data.username);
         else if (action === "removeOperator" && result.data.username) session.removeRoomOperator(room, result.data.username);
         else if (action === "cancelMembership") session.cancelRoomMembership(room);

@@ -347,7 +347,9 @@ export interface TransferClearManyRequest {
  * ------------------------------------------------------------------ */
 
 export interface ChatEvent {
-  type: "say-chatroom" | "private-message" | "private-message-acked" | "global-room-message";
+  // NOTE: no delivery-ack variant exists. The server consumes MessageAcked
+  // without relaying, so a sender-side ack event can never fire. Do not re-add.
+  type: "say-chatroom" | "private-message" | "global-room-message";
   room?: string;
   username?: string;
   message?: string;
@@ -398,7 +400,7 @@ export interface RoomEventMessage {
 
 export interface ChatRoomRequest {
   type: "chat:room";
-  action: "join" | "leave" | "say" | "ticker" | "setTicker" | "addOperator" | "removeOperator" | "cancelMembership" | "cancelOwnership" | "refreshList";
+  action: "join" | "leave" | "say" | "ticker" | "setTicker" | "addMember" | "addOperator" | "removeOperator" | "cancelMembership" | "cancelOwnership" | "refreshList";
   room?: string;
   message?: string;
   username?: string;

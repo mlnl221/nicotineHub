@@ -512,6 +512,7 @@ export function buildEnableRoomInvitations(enabled: boolean): Buffer {
   return frameMessage(SERVER_MESSAGE_CODES.enableRoomInvitations, Buffer.from([enabled ? 1 : 0]));
 }
 export function buildCancelRoomMembership(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.cancelRoomMembership, packString(room)); }
+export function buildAddRoomMember(room: string, username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.addRoomMember, Buffer.concat([packString(room), packString(username)])); }
 export function buildCancelRoomOwnership(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.cancelRoomOwnership, packString(room)); }
 export function buildAddRoomOperator(room: string, username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.addRoomOperator, Buffer.concat([packString(room), packString(username)])); }
 export function buildRemoveRoomOperator(room: string, username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.removeRoomOperator, Buffer.concat([packString(room), packString(username)])); }
@@ -953,7 +954,15 @@ export function parsePrivileges(payload: Buffer): { username: string; timeLeft?:
 export interface RoomTickerEvent { room: string; username: string; msg: string; }
 export function parseRoomTickerEvent(payload: Buffer): RoomTickerEvent {
   const r = new SlskReader(payload);
-  return { room: r.string(), username: r.string(), msg: r.string() };
+  const room = r.string();
+  const username = r.string();
+  // RoomTickerRemoved carries only (room, username); RoomTickerAdded-style
+  // frames append the message. Never throw on the 2-string form.
+  let msg = "";
+  try {
+    if (r.remaining) msg = r.string();
+  } catch {}
+  return { room, username, msg };
 }
 
 /* Browse shares — SharedFileListResponse 5 + FolderContentsResponse 37 */

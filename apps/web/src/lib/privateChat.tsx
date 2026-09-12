@@ -230,21 +230,6 @@ export function PrivateChatProvider({ children }: { children: ReactNode }) {
           next.delete(ev.username!);
           return next;
         });
-      } else if (ev.type === "private-message-acked" && (ev as unknown as { username?: string }).username) {
-        const username = (ev as unknown as { username: string }).username;
-        setConversations((prev) => {
-          if (!prev.has(username)) return prev;
-          const next = new Map(prev);
-          const arr = next.get(username)!;
-          next.delete(username);
-          next.set(username, arr);
-          try {
-            const stored = JSON.parse((localStorage.getItem("nicotineHub.privatechats") ?? localStorage.getItem("nicotine.privatechats")) || "[]");
-            const nextOrder = [username, ...stored.filter((u: string) => u !== username)].slice(0, 50);
-            localStorage.setItem("nicotineHub.privatechats", JSON.stringify(nextOrder));
-          } catch {}
-          return next;
-        });
       }
     });
     return unsub;
