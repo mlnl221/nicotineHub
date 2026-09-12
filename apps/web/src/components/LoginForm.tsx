@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSession } from "@/lib/session";
 import { useConfig } from "@/lib/config/provider";
-import { DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT } from "@/lib/config/defaults";
+import { DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, restoreServerHost, restoreServerPort } from "@/lib/config/defaults";
 import { isDemo } from "@/lib/demo";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
@@ -177,7 +177,8 @@ export function LoginForm() {
                 <span className="font-label text-xs tracking-wide text-on-surface-variant">Host</span>
                 <input
                   value={host}
-                  onChange={(e) => setHost(e.target.value)}
+                  onChange={(e) => setHost(restoreServerHost(e.target.value))}
+                  placeholder={DEFAULT_SERVER_HOST}
                   className="w-full rounded-xl bg-surface-container-lowest px-3 py-3 font-body text-sm text-on-surface ghost-border transition-all focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </label>
@@ -186,7 +187,8 @@ export function LoginForm() {
                 <input
                   inputMode="numeric"
                   value={port}
-                  onChange={(e) => setPort(e.target.value)}
+                  onChange={(e) => setPort(restoreServerPort(e.target.value))}
+                  placeholder={String(DEFAULT_SERVER_PORT)}
                   className="w-full rounded-xl bg-surface-container-lowest px-3 py-3 font-body text-sm text-on-surface ghost-border transition-all focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </label>

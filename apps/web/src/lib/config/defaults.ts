@@ -204,6 +204,16 @@ export interface Settings {
 export const DEFAULT_SERVER_HOST = "server.slsknet.org";
 export const DEFAULT_SERVER_PORT = 2242;
 
+/** Live-restore: clearing the login/advanced host field snaps back to default. */
+export function restoreServerHost(v: string): string {
+  return v.trim() ? v : DEFAULT_SERVER_HOST;
+}
+
+/** Live-restore: clearing the port field snaps back to default (kept as string for inputs). */
+export function restoreServerPort(v: string): string {
+  return v.trim() ? v : String(DEFAULT_SERVER_PORT);
+}
+
 // Mirrors pynicotine/config.py defaults (browser-relevant subset) — 60754 is VPN-forwarded default (was 62904)
 export const DEFAULT_LISTEN_PORT = 60754;
 
