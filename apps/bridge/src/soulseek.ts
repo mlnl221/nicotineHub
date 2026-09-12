@@ -512,6 +512,7 @@ export function buildEnableRoomInvitations(enabled: boolean): Buffer {
   return frameMessage(SERVER_MESSAGE_CODES.enableRoomInvitations, Buffer.from([enabled ? 1 : 0]));
 }
 export function buildCancelRoomMembership(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.cancelRoomMembership, packString(room)); }
+export function buildAddRoomMember(room: string, username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.addRoomMember, Buffer.concat([packString(room), packString(username)])); }
 export function buildCancelRoomOwnership(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.cancelRoomOwnership, packString(room)); }
 export function buildAddRoomOperator(room: string, username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.addRoomOperator, Buffer.concat([packString(room), packString(username)])); }
 export function buildRemoveRoomOperator(room: string, username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.removeRoomOperator, Buffer.concat([packString(room), packString(username)])); }

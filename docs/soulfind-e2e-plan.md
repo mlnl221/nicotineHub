@@ -10,7 +10,11 @@ is untouched by the suite — the harness starts its own container.
 ```bash
 bun run --cwd apps/bridge test:soulfind
 # verbose: SOULFIND_E2E=1 bun test src/soulfind-live.test.ts
-# keep container+db for debugging: SOULFIND_KEEP=1 ...
+# keep server+db for debugging: SOULFIND_KEEP=1 ...
+# one-time binary fetch (used instead of docker — see Harness why):
+mkdir -p ~/.cache/nicotine-hub/soulfind
+curl -sfSL -o /tmp/sf.zip https://github.com/soulfind-dev/soulfind/releases/latest/download/soulfind-linux-x86_64.zip
+unzip -o -q /tmp/sf.zip -d ~/.cache/nicotine-hub/soulfind && chmod +x ~/.cache/nicotine-hub/soulfind/soulfind
 ```
 
 Without `SOULFIND_E2E=1` the file loads but every test is `describe.skip`,
@@ -93,11 +97,16 @@ have invitations enabled (default off).
    the flag) — UI stuck on "reconnecting" after server death. Plus a 60s
    client-side login watchdog (`LOGIN_TIMEOUT_MS`) so banned/hung logins
    reject with a clear message instead of hanging ~70s+.
+7. No `AddRoomMember(134)` sender existed, so private-room invites were
+   undrivable from the app (and operators ungrantable — grants require
+   membership). Added `buildAddRoomMember` + session `addRoomMember` +
+   `chat:room addMember` WS action (+ web protocol type).
 
-Dead code noted, not changed: `private-message-acked` chat event is never
-emitted (server consumes `MessageAcked` without relaying). Product gaps
-noted, not built: no `addRoomMember(134)` sender (private-room invites
-undrivable from the app), no interests setter (`51/52`).
+Dead code noted, not changed: none remaining — `private-message-acked` was
+deleted (bridge `ChatEvent`, web `protocol.ts` + `privateChat.tsx` branch +
+unread test; the server consumes `MessageAcked` without relaying, so the
+event could never fire). Product gap noted, not built: no interests
+setter (`51/52`).
 
 ## Manual UI path (shared `:2243` server)
 

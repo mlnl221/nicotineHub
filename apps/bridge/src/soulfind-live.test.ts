@@ -23,18 +23,15 @@ import {
 } from "./session.ts";
 import { TransferManager } from "./transfers.ts";
 import {
-  buildAddRoomOperator,
   buildConnectToPeer,
   buildFileSearch,
   buildJoinRoom,
   buildLogin,
-  buildRemoveRoomOperator,
   buildSetWaitPort,
   frameMessage,
   packString,
   parseConnectToPeer,
   parseLoginResponse,
-  SERVER_MESSAGE_CODES,
 } from "./soulseek.ts";
 
 const LIVE = process.env.SOULFIND_E2E === "1";
@@ -637,24 +634,20 @@ d("soulfind live e2e", () => {
     const room2 = `privop${RID}`;
     const a = makeSession(u("oa"), PASS);
     const b = makeSession(u("ob"), PASS);
-    const o = await RawSlsk.connect();
     try {
       await a.s.login();
       await b.s.login();
-      const meO = u("oo");
-      if (!(await o.login(meO, PASS)).success) throw new Error("owner login failed");
       a.s.joinRoom(room, true);
       await waitFor(a.cols.room, (e) => e.type === "join-room" && e.room === room, 10000, "owner join");
       b.s.joinRoom(room);
       await waitFor(b.cols.room, (e) => e.type === "cant-create-room" && e.room === room, 10000, "cant-create-room");
-      // Operator dance needs a member target; the bridge has no add-member
-      // sender, so the raw owner drives membership (134 = room + username).
-      // Grants require the target to accept room invitations (server default off).
+      // Owner invites B via the app path (134). Grants require the target
+      // to accept room invitations (server default off).
+      a.s.joinRoom(room2, true);
+      await waitFor(a.cols.room, (e) => e.type === "join-room" && e.room === room2, 10000, "owner join 2");
       b.s.setEnableRoomInvitations(true);
       await Bun.sleep(500);
-      o.send(buildJoinRoom(room2, true));
-      await o.waitFor(14, 8000);
-      o.send(frameMessage(SERVER_MESSAGE_CODES.addRoomMember, Buffer.concat([packString(room2), packString(b.s.username)])));
+      a.s.addRoomMember(room2, b.s.username);
       await waitFor(
         b.cols.room,
         (e) => e.type === "membership-granted" && e.room === room2,
@@ -663,7 +656,7 @@ d("soulfind live e2e", () => {
       );
       b.s.joinRoom(room2);
       await waitFor(b.cols.room, (e) => e.type === "join-room" && e.room === room2, 10000, "member join");
-      o.send(buildAddRoomOperator(room2, b.s.username));
+      a.s.addRoomOperator(room2, b.s.username);
       await waitFor(
         b.cols.room,
         (e) => e.type === "operator-added" && JSON.stringify(e).includes(b.s.username),
@@ -676,7 +669,7 @@ d("soulfind live e2e", () => {
         10000,
         "operatorship-granted",
       );
-      o.send(buildRemoveRoomOperator(room2, b.s.username));
+      a.s.removeRoomOperator(room2, b.s.username);
       await waitFor(
         b.cols.room,
         (e) => e.type === "operator-removed" && JSON.stringify(e).includes(b.s.username),
@@ -690,7 +683,6 @@ d("soulfind live e2e", () => {
         "operatorship-revoked",
       );
     } finally {
-      o.close();
       await closeSession(a.s);
       await closeSession(b.s);
     }

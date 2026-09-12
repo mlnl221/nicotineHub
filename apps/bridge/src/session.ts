@@ -49,6 +49,7 @@ import {
   buildSendUploadSpeed,
   buildSetRoomTicker,
   buildEnableRoomInvitations,
+  buildAddRoomMember,
   buildCancelRoomMembership,
   buildCancelRoomOwnership,
   buildAddRoomOperator,
@@ -228,7 +229,9 @@ export interface UserInfoEvent {
   watchUser?: ReturnType<typeof parseWatchUser>; adminMessage?: string;
 }
 export interface ChatEvent {
-  type: "say-chatroom" | "private-message" | "private-message-acked" | "global-room-message";
+  // NOTE: no delivery-ack variant exists. The server consumes MessageAcked
+  // without relaying, so a sender-side ack event can never fire. Do not re-add.
+  type: "say-chatroom" | "private-message" | "global-room-message";
   room?: string; username?: string; message?: string; msgId?: number; timestamp?: number;
 }
 export interface RoomEvent {
@@ -3092,6 +3095,7 @@ export class SoulseekSession {
   leaveGlobalRoom() { this.serverSocket?.write(buildLeaveGlobalRoom()); }
   setRoomTicker(room: string, msg: string) { this.serverSocket?.write(buildSetRoomTicker(room, msg)); }
   setEnableRoomInvitations(enabled: boolean) { this.serverSocket?.write(buildEnableRoomInvitations(enabled)); }
+  addRoomMember(room: string, username: string) { this.serverSocket?.write(buildAddRoomMember(room, username)); }
   cancelRoomMembership(room: string) { this.serverSocket?.write(buildCancelRoomMembership(room)); }
   cancelRoomOwnership(room: string) { this.serverSocket?.write(buildCancelRoomOwnership(room)); }
   addRoomOperator(room: string, username: string) { this.serverSocket?.write(buildAddRoomOperator(room, username)); }
