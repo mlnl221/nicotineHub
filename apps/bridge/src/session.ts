@@ -254,6 +254,7 @@ const USER_ADDRESS_TTL_MS = 30 * 60 * 1000;
 const RECONNECT_BASE_MS = 5_000;
 const RECONNECT_MAX_MS = 300_000;
 const CONNECT_PEER_TIMEOUT_MS = 45_000; // downloads.py Getting status 45 s (30 s indirect + 15 s grace)
+const LOGIN_TIMEOUT_MS = 60_000; // servers omit the login response for banned users (SLSKPROTOCOL BANNED); bound the wait
 const MAX_SOCKETS_DEFAULT = Number(process.env.MAX_SOCKETS || 512);
 const PARENT_MIN_SPEED_DEFAULT = 0;
 const PARENT_SPEED_RATIO_DEFAULT = 0;
@@ -299,6 +300,7 @@ export class SoulseekSession {
   private serverPingTimer: ReturnType<typeof setInterval> | undefined;
   private distribWatchdogTimer: ReturnType<typeof setInterval> | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  private loginTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectAttempts = 0;
   private shouldReconnect = true;
   private reconnectPending = false;
@@ -1300,6 +1302,19 @@ export class SoulseekSession {
     this.serverBuffer = Buffer.alloc(0);
     this.hasReceivedLoginResponse = false;
     this.loginAttemptAt = Date.now();
+    // Client-side login watchdog: banned logins get no response at all and
+    // some servers hold the socket open ~60-75s before closing. Reject with a
+    // clear message instead of hanging; normal reconnect backoff still applies.
+    if (this.loginTimer) { clearTimeout(this.loginTimer); this.loginTimer = undefined; }
+    this.loginTimer = setTimeout(() => {
+      this.loginTimer = undefined;
+      if (this.loggedIn || this.hasReceivedLoginResponse || !this.loginReject) return;
+      logger.warn("server", "login timed out with no response", { username: this.username, timeoutMs: LOGIN_TIMEOUT_MS });
+      try { this.loginReject(new Error(`Login timed out after ${LOGIN_TIMEOUT_MS / 1000}s with no response from server.`)); } catch {}
+      this.loginReject = undefined;
+      this.loginResolve = undefined;
+      try { (this.serverSocket as unknown as { end?: () => void })?.end?.(); } catch {}
+    }, LOGIN_TIMEOUT_MS);
     logger.info("server", `connecting to ${this.opts.host || "server.slsknet.org"}:${this.opts.port || 2242}`, { username: this.username, version: `${MAJOR_VERSION}/${MINOR_VERSION}${EXPERIMENTAL_VERSION_FLAG ? " experimental" : ""}` });
     Bun.connect({
       hostname: this.opts.host || "server.slsknet.org",
@@ -1386,7 +1401,13 @@ export class SoulseekSession {
             }
           }
           // keep loggedIn false; schedule reconnect if we were logged in or still trying
-          if (wasLoggedIn) this.loggedIn = false;
+          if (wasLoggedIn) {
+            this.loggedIn = false;
+            // Auto-reconnect restores a live session — flag it so the login
+            // success path emits `reconnected` (previously only manual
+            // reconnect() did, leaving the UI stuck on "reconnecting").
+            this.reconnectPending = true;
+          }
           this.cleanupServerTimers();
           if (isSilentCloseBeforeLogin) {
             // Do NOT schedule reconnect for BANNED — require manual retry with different username/wait
@@ -1443,6 +1464,7 @@ export class SoulseekSession {
   }
 
   private cleanupServerTimers() {
+    if (this.loginTimer) { clearTimeout(this.loginTimer); this.loginTimer = undefined; }
     if (this.serverPingTimer) { clearInterval(this.serverPingTimer); this.serverPingTimer = undefined; }
     if (this.wishlistTimer) { clearInterval(this.wishlistTimer); this.wishlistTimer = undefined; }
     if (this._autoawayTimer) { clearInterval(this._autoawayTimer); this._autoawayTimer = undefined; }
@@ -1486,6 +1508,7 @@ export class SoulseekSession {
     if (code === SERVER_MESSAGE_CODES.login) {
       this.hasReceivedLoginResponse = true;
       this.consecutiveSilentCloses = 0;
+      if (this.loginTimer) { clearTimeout(this.loginTimer); this.loginTimer = undefined; }
       let resp: LoginResponse;
       try {
         resp = parseLoginResponse(payload);
@@ -2012,7 +2035,10 @@ export class SoulseekSession {
       this.emitTransfer({ type: "transfer-request", username, token: token!, file: query.slice(0, 120) });
       // respect private_search_results: if disabled, don't include private (buddy/trusted) folders for non-buddies
       // buildFileSearchResponse already gates via getFoldersForPermission, so no extra check needed beyond permission.
-      const resp = this.shareDB.buildFileSearchResponse(token!, username ?? this.username, query, true, 0, 0, this.getSharePermissionLevel(username ?? ""), this._maxResults);
+      // The response frame carries the RESPONDER name (self) — like every
+      // other buildFileSearchResponse call site. Passing the searcher here
+      // misattributes our files to whoever asked.
+      const resp = this.shareDB.buildFileSearchResponse(token!, this.username, query, true, 0, 0, this.getSharePermissionLevel(username ?? ""), this._maxResults);
       if (resp && username) {
         try { this.ensurePeerAndSend(username, "P", resp); } catch {}
       } else if (resp) {
@@ -2333,7 +2359,11 @@ export class SoulseekSession {
           socket: {
             open: (sock) => {
               this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, lastActive: Date.now(), createdAt: Date.now() });
-              (sock as Socket).write(buildPeerInit(this.username, connType));
+              // F init is owned by dialFileUpload (PeerInit + FileInit together).
+              // Writing another PeerInit here desyncs the peer: after parsing
+              // the first init the reader treats the second init's length
+              // prefix as the raw file token.
+              if (connType !== "F") (sock as Socket).write(buildPeerInit(this.username, connType));
               setTimeout(() => resolve(sock as Socket), 200);
             },
             data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
@@ -2421,6 +2451,14 @@ export class SoulseekSession {
     state.buf = Buffer.concat([state.buf, Buffer.from(bytes)]);
     while (true) {
       if (!state.initDone) {
+        // Established F channel (outbound dial or adopted upload socket):
+        // inbound bytes are FileOffset / file data, never an init frame.
+        // Parsing them as init kills fresh uploads (FileOffset 0 reads as a
+        // zero-length frame). Skip straight to the F-data branch below.
+        if (state.isFileConn && state.fileToken !== undefined) {
+          state.initDone = true;
+          continue;
+        }
         // Strict F demux: only raw token if expected (pendingFileTokens). No heuristic.
         if (state.buf.length >= 4) {
           const peekToken = state.buf.readUInt32LE(0);
@@ -3331,6 +3369,7 @@ export class SoulseekSession {
   close() {
     this.shouldReconnect = false;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
+    if (this.loginTimer) { clearTimeout(this.loginTimer); this.loginTimer = undefined; }
     // Portmapper: remove mapping on quit (like nicotine _server_disconnect portmapper.remove)
     try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}
     for (const token of [...this.searches.keys()]) { const s = this.searches.get(token); if (s?.timer) clearTimeout(s.timer); if (s) s.onEnd({ searchId: s.searchId, reason: "error" }); this.searches.delete(token); }

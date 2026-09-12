@@ -953,7 +953,15 @@ export function parsePrivileges(payload: Buffer): { username: string; timeLeft?:
 export interface RoomTickerEvent { room: string; username: string; msg: string; }
 export function parseRoomTickerEvent(payload: Buffer): RoomTickerEvent {
   const r = new SlskReader(payload);
-  return { room: r.string(), username: r.string(), msg: r.string() };
+  const room = r.string();
+  const username = r.string();
+  // RoomTickerRemoved carries only (room, username); RoomTickerAdded-style
+  // frames append the message. Never throw on the 2-string form.
+  let msg = "";
+  try {
+    if (r.remaining) msg = r.string();
+  } catch {}
+  return { room, username, msg };
 }
 
 /* Browse shares — SharedFileListResponse 5 + FolderContentsResponse 37 */

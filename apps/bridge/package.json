@@ -11,6 +11,7 @@
     "fetch:geoip": "mkdir -p src/data && curl -fsSL https://raw.githubusercontent.com/nicotine-plus/nicotine-plus/master/pynicotine/external/data/ip_country_data.csv -o src/data/ip_country_data.csv || wget -qO src/data/ip_country_data.csv https://raw.githubusercontent.com/nicotine-plus/nicotine-plus/master/pynicotine/external/data/ip_country_data.csv || echo 'fetch failed'",
     "start": "bun run dist/server.js",
     "test": "bun test",
+    "test:soulfind": "SOULFIND_E2E=1 bun test src/soulfind-live.test.ts",
     "typecheck": "bunx tsc --noEmit"
   },
   "dependencies": {
