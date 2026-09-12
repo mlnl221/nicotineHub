@@ -28,11 +28,57 @@ interface TransfersApi {
   retryDownload: (id: string) => void;
   clearTransfer: (id: string, isUpload: boolean) => void;
   cancelUpload: (id: string) => void;
+  /** Nicotine-plus parity bulk clear (list entries only). statuses null = everything in direction. */
+  clearMany: (isUpload: boolean, statuses: string[] | null) => void;
+  /** Abort: downloads -> pause, uploads -> cancel (nicotine abort semantics). */
+  abortTransfer: (id: string, isUpload: boolean) => void;
+  banUser: (username: string) => void;
+  /** Private-message every distinct user (uploads "Message All"). */
+  messageAll: (usernames: string[], message: string) => void;
 }
+
+// Nicotine-plus parity clear sets (pynicotine gtkgui/downloads.py + uploads.py).
+// "Deleted" (Finished + file missing on disk) omitted — browser cannot stat files.
+export const DOWNLOAD_CLEAR_SETS: Record<string, string[] | null> = {
+  "finished-filtered": ["Finished", "Filtered"],
+  finished: ["Finished"],
+  paused: ["Paused"],
+  filtered: ["Filtered"],
+  queued: ["Queued"],
+  all: null,
+};
+export const UPLOAD_CLEAR_SETS: Record<string, string[] | null> = {
+  "finished-cancelled-failed": ["Cancelled", "Finished", "Connection timeout", "Local file error"],
+  "finished-cancelled": ["Cancelled", "Finished"],
+  finished: ["Finished"],
+  cancelled: ["Cancelled"],
+  failed: ["Connection timeout", "Local file error"],
+  "logged-off": ["User logged off"],
+  queued: ["Queued"],
+  all: null,
+};
 
 const TransfersContext = createContext<TransfersApi | null>(null);
 
 const STORAGE_KEY = "nicotineHub.transfers.mock";
+
+// Clears that may never have reached the bridge (reload drops the in-memory
+// send queue). Flushed on reconnect; resend is a no-op for ids already gone.
+const PENDING_CLEAR_KEY = "nicotineHub.transfers.pendingClear";
+interface PendingClear { id: string; isUpload: boolean }
+function loadPendingClear(): PendingClear[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(PENDING_CLEAR_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((p) => p && typeof p.id === "string").slice(0, 100);
+  } catch { return []; }
+}
+function savePendingClear(list: PendingClear[]) {
+  try { window.localStorage.setItem(PENDING_CLEAR_KEY, JSON.stringify(list)); } catch {}
+}
 
 function loadInitial(): Transfer[] {
   if (typeof window === "undefined") return [];
@@ -246,6 +292,7 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
         // Optionally trigger browser download via hidden link (Phase 5 OPFS handling deferred)
         // We keep it non-intrusive: UI will show Finished with downloadUrl available
       } else if (msg.type === "transfer:removed") {
+        savePendingClear(loadPendingClear().filter((p) => p.id !== msg.id));
         setTransfers((prev) => prev.filter((t) => t.id !== msg.id));
       } else if (msg.type === "transfer:stats") {
         setStats(msg);
@@ -253,6 +300,20 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
     });
     return unsub;
   }, [subscribe, triggerScan]);
+
+  // Flush clears that predated a reload/reconnect. No-op for ids already gone.
+  useEffect(() => {
+    if (isDemo || state.status !== "connected") return;
+    const pending = loadPendingClear();
+    if (!pending.length) return;
+    for (const p of pending) {
+      try {
+        if (p.isUpload) send({ type: "upload:control", id: p.id, action: "clear" });
+        else send({ type: "download:control", id: p.id, action: "clear" });
+      } catch {}
+    }
+    savePendingClear([]);
+  }, [state.status, send]);
 
   const requestDownload = useCallback(
     (opts: { username: string; virtualPath: string; size: number; fileName?: string }) => {
@@ -315,6 +376,14 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
 
   const clearTransfer = useCallback(
     (id: string, isUpload: boolean) => {
+      // Durable intent: if this never reaches the bridge (offline/reload),
+      // the reconnect flush resends it so the row can't resurrect.
+      const pending = loadPendingClear();
+      if (!pending.some((p) => p.id === id)) {
+        pending.push({ id, isUpload });
+        savePendingClear(pending);
+      }
+      // Bridge denies Queued uploads on clear so the peer can't requeue them.
       if (isUpload) send({ type: "upload:control", id, action: "clear" });
       else send({ type: "download:control", id, action: "clear" });
       setTransfers((prev) => prev.filter((t) => t.id !== id));
@@ -330,12 +399,58 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
     [send],
   );
 
+  const clearMany = useCallback(
+    (isUpload: boolean, statuses: string[] | null) => {
+      send({ type: "transfer:clear-many", isUpload, statuses });
+      // optimistic: drop matching rows locally
+      setTransfers((prev) =>
+        prev.filter((t) => {
+          if (t.isUpload !== isUpload) return true;
+          if (!statuses || statuses.length === 0) return false;
+          return !statuses.includes(t.status);
+        }),
+      );
+    },
+    [send],
+  );
+
+  const abortTransfer = useCallback(
+    (id: string, isUpload: boolean) => {
+      if (isUpload) {
+        send({ type: "upload:control", id, action: "cancel" });
+        setTransfers((prev) => prev.map((t) => (t.id === id && t.isUpload ? { ...t, status: "Cancelled" as const } : t)));
+      } else {
+        send({ type: "download:control", id, action: "pause" });
+        setTransfers((prev) => prev.map((t) => (t.id === id && !t.isUpload ? { ...t, status: "Paused" as const } : t)));
+      }
+    },
+    [send],
+  );
+
+  const banUser = useCallback(
+    (username: string) => {
+      const name = username.trim();
+      if (!name) return;
+      send({ type: "ban:add", username: name });
+    },
+    [send],
+  );
+
+  const messageAll = useCallback(
+    (usernames: string[], message: string) => {
+      const msg = message.trim().slice(0, 5000);
+      if (!msg) return;
+      [...new Set(usernames.map((u) => u.trim()).filter(Boolean))].forEach((u) => send({ type: "chat:private", action: "send", username: u, message: msg }));
+    },
+    [send],
+  );
+
   const downloads = useMemo(() => transfers.filter((t) => !t.isUpload), [transfers]);
   const uploads = useMemo(() => transfers.filter((t) => t.isUpload), [transfers]);
 
   const api = useMemo<TransfersApi>(
-    () => ({ transfers, downloads, uploads, stats, requestDownload, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer, cancelUpload }),
-    [transfers, downloads, uploads, stats, requestDownload, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer, cancelUpload],
+    () => ({ transfers, downloads, uploads, stats, requestDownload, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer, cancelUpload, clearMany, abortTransfer, banUser, messageAll }),
+    [transfers, downloads, uploads, stats, requestDownload, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer, cancelUpload, clearMany, abortTransfer, banUser, messageAll],
   );
 
   return <TransfersContext.Provider value={api}>{children}</TransfersContext.Provider>;

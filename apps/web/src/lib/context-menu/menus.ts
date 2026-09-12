@@ -43,7 +43,7 @@ function navigate(path: string) {
 }
 
 // Standard UserPopupMenu per nicotine-plus pynicotine/gtkgui/widgets/popupmenu.py
-export function userMenu(username: string, tabName: string, opts?: { onBrowse?: () => void; onProfile?: () => void; onMessage?: () => void }): MenuItem[] {
+export function userMenu(username: string, tabName: string, opts?: { onBrowse?: () => void; onProfile?: () => void; onMessage?: () => void; onBan?: () => void }): MenuItem[] {
   const items: MenuItem[] = [
     { id: "user-label", label: username, icon: "person", disabled: true },
     { id: "sep1", label: "---", icon: "" },
@@ -53,8 +53,8 @@ export function userMenu(username: string, tabName: string, opts?: { onBrowse?: 
   if (tabName !== "userbrowse") items.push({ id: "browse-files", label: "Browse Shares", icon: "folder_managed", action: () => (opts?.onBrowse ? opts.onBrowse() : navigate(`/browse/${encodeURIComponent(username)}`)) });
   if (tabName !== "userlist") items.push({ id: "add-buddy", label: "Add Buddy", icon: "person_add", action: () => toast("Add buddy: use Buddies page") });
   items.push({ id: "sep2", label: "---", icon: "" });
-  // Ban/Ignore are exact labels — toast as unavailable until bridge implements
-  items.push({ id: "ban-user", label: "Ban User", icon: "block", action: () => toast("Ban user — bridge not yet implements server banlist") });
+  // Ban/Ignore are exact labels — ban wires to bridge ban:add when a handler is passed
+  items.push({ id: "ban-user", label: "Ban User", icon: "block", action: opts?.onBan ?? (() => toast("Ban user — bridge not yet implements server banlist")) });
   items.push({ id: "ignore-user", label: "Ignore User", icon: "person_off", action: () => toast("Ignore user — bridge not yet implements ignorelist") });
   items.push({ id: "sep3", label: "---", icon: "" });
   items.push({ id: "ban-ip", label: "Ban IP Address", icon: "block", action: () => toast("Ban IP — unavailable") });
@@ -118,8 +118,9 @@ export function searchTabMenu(tab: { query: string; id: string }, actions: { onC
   ];
 }
 
-export function transferMenu(t: { user: string; fileName: string; path?: string; virtualPath?: string }, isUpload: boolean, acts: { onResume?: () => void; onPause?: () => void; onRemove: () => void; onRetry?: () => void; onClear?: () => void; onAnalyzeSpectrum?: () => void; hasSpectrum?: boolean; onEditTags?: () => void; onPlay?: () => void; onScrape?: () => void; onVerify?: () => void; onAnalyze?: () => void; onMediainfo?: () => void }): MenuItem[] {
+export function transferMenu(t: { user: string; fileName: string; path?: string; virtualPath?: string }, isUpload: boolean, acts: { onResume?: () => void; onPause?: () => void; onRemove: () => void; onRetry?: () => void; onClear?: () => void; onClearMany?: (statuses: string[] | null) => void; onBan?: () => void; onAnalyzeSpectrum?: () => void; hasSpectrum?: boolean; onEditTags?: () => void; onPlay?: () => void; onScrape?: () => void; onVerify?: () => void; onAnalyze?: () => void; onMediainfo?: () => void }): MenuItem[] {
   const display = t.fileName;
+  const clearMany = acts.onClearMany ?? ((_s: string[] | null) => acts.onClear?.());
   return [
     { id: "hdr", label: "1 File Selected", icon: "description", disabled: true },
     { id: "sep", label: "---", icon: "" },
@@ -156,26 +157,25 @@ export function transferMenu(t: { user: string; fileName: string; path?: string;
     },
     {
       id: "clear-all", label: "Clear All", icon: "clear_all", submenu: isUpload ? [
-        { id: "c-finished", label: "Finished / Cancelled / Failed", icon: "done_all", action: () => toast("Clear finished") },
-        { id: "c-fin2", label: "Finished / Cancelled", icon: "done", action: () => acts.onClear?.() },
+        { id: "c-finished", label: "Finished / Cancelled / Failed", icon: "done_all", action: () => clearMany(["Cancelled", "Finished", "Connection timeout", "Local file error"]) },
+        { id: "c-fin2", label: "Finished / Cancelled", icon: "done", action: () => clearMany(["Cancelled", "Finished"]) },
         { id: "sep", label: "---", icon: "" },
-        { id: "c-f", label: "Finished", icon: "check", action: () => acts.onClear?.() },
-        { id: "c-c", label: "Cancelled", icon: "close", action: () => acts.onClear?.() },
-        { id: "c-fail", label: "Failed", icon: "error", action: () => acts.onClear?.() },
-        { id: "c-off", label: "User Logged Off", icon: "person_off", action: () => acts.onClear?.() },
-        { id: "c-q", label: "Queued…", icon: "hourglass_empty", action: () => { if (confirm("Clear queued uploads?")) acts.onClear?.(); } },
+        { id: "c-f", label: "Finished", icon: "check", action: () => clearMany(["Finished"]) },
+        { id: "c-c", label: "Cancelled", icon: "close", action: () => clearMany(["Cancelled"]) },
+        { id: "c-fail", label: "Failed", icon: "error", action: () => clearMany(["Connection timeout", "Local file error"]) },
+        { id: "c-off", label: "User Logged Off", icon: "person_off", action: () => clearMany(["User logged off"]) },
+        { id: "c-q", label: "Queued…", icon: "hourglass_empty", action: () => { if (confirm("Clear queued uploads?")) clearMany(["Queued"]); } },
         { id: "sep2", label: "---", icon: "" },
-        { id: "c-all", label: "Everything…", icon: "delete_forever", danger: true, action: () => { if (confirm("Clear all uploads?")) acts.onClear?.(); } },
+        { id: "c-all", label: "Everything…", icon: "delete_forever", danger: true, action: () => { if (confirm("Clear all uploads?")) clearMany(null); } },
       ] : [
-        { id: "c-fin", label: "Finished / Filtered", icon: "done_all", action: () => toast("Clear filtered") },
+        { id: "c-fin", label: "Finished / Filtered", icon: "done_all", action: () => clearMany(["Finished", "Filtered"]) },
         { id: "sep", label: "---", icon: "" },
-        { id: "c-f", label: "Finished", icon: "check", action: () => acts.onClear?.() },
-        { id: "c-p", label: "Paused", icon: "pause", action: () => acts.onClear?.() },
-        { id: "c-fil", label: "Filtered", icon: "filter_alt", action: () => acts.onClear?.() },
-        { id: "c-d", label: "Deleted", icon: "delete", action: () => acts.onClear?.() },
-        { id: "c-q", label: "Queued…", icon: "hourglass_empty", action: () => { if (confirm("Clear queued?")) acts.onClear?.(); } },
+        { id: "c-f", label: "Finished", icon: "check", action: () => clearMany(["Finished"]) },
+        { id: "c-p", label: "Paused", icon: "pause", action: () => clearMany(["Paused"]) },
+        { id: "c-fil", label: "Filtered", icon: "filter_alt", action: () => clearMany(["Filtered"]) },
+        { id: "c-q", label: "Queued…", icon: "hourglass_empty", action: () => { if (confirm("Clear queued?")) clearMany(["Queued"]); } },
         { id: "sep2", label: "---", icon: "" },
-        { id: "c-all", label: "Everything…", icon: "delete_forever", danger: true, action: () => { if (confirm("Clear all?")) acts.onClear?.(); } },
+        { id: "c-all", label: "Everything…", icon: "delete_forever", danger: true, action: () => { if (confirm("Clear all?")) clearMany(null); } },
       ]
     },
     {
@@ -183,7 +183,7 @@ export function transferMenu(t: { user: string; fileName: string; path?: string;
       label: "User Actions",
       icon: "person",
       submenu: [
-        ...userMenu(t.user, "transfers"),
+        ...userMenu(t.user, "transfers", acts.onBan ? { onBan: acts.onBan } : undefined),
         { id: "select-transfers", label: "Select User's Transfers", icon: "filter_alt", action: () => toast(`Select ${t.user}`) },
       ],
     },

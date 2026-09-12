@@ -233,6 +233,10 @@ export class TransferManager {
   private onFinished?: TransferFinishedCb;
   private statsTimer: Timer | null = null;
   private pollTimer: Timer | null = null;
+  // Uploads the user explicitly cleared (X) — key `${username}::${virtualPath}` → epoch ms.
+  // Peer requeues must not resurrect them as new Queued rows; answer UploadDenied instead.
+  private clearedUploads = new Map<string, number>();
+  private static readonly CLEARED_UPLOAD_TTL_MS = 60_000;
   private dataDir: string;
   private configDir: string;
   private incompleteDir: string;
@@ -408,20 +412,52 @@ export class TransferManager {
   }
 
   clearFinished(type: "downloads" | "uploads" | "all" = "all") {
+    this.clearByStatuses(type === "all" ? null : type === "downloads" ? false : true, ["Finished"]);
+  }
+
+  /** Nicotine-plus parity bulk clear (list entries only, files stay on disk).
+   * statuses null/empty = everything (honors isUpload filter).
+   * Routes each id through the per-id clear path so sockets, timers,
+   * file handles and tokens are released like a single clear. */
+  clearByStatuses(isUpload: boolean | null, statuses: string[] | null): number {
     const toDelete: string[] = [];
     for (const [id, t] of this.transfers) {
-      if (t.status !== "Finished") continue;
-      if (type === "downloads" && t.isUpload) continue;
-      if (type === "uploads" && !t.isUpload) continue;
+      if (isUpload !== null && t.isUpload !== isUpload) continue;
+      if (statuses && statuses.length && !statuses.includes(t.status)) continue;
       toDelete.push(id);
     }
     for (const id of toDelete) {
-      this.forgetTokensFor(id);
-      this.transfers.delete(id);
-      this.onRemoved(id);
+      const t = this.transfers.get(id);
+      if (!t) continue;
+      if (t.isUpload) this.controlUpload(id, "clear");
+      else this.controlDownload(id, "clear");
     }
-    if (toDelete.length) this.persist();
-    this.emitStats();
+    return toDelete.length;
+  }
+
+  /** True while a user-cleared upload id is still suppressed from peer requeue. */
+  private isUploadClearSuppressed(id: string): boolean {
+    const at = this.clearedUploads.get(id);
+    if (at === undefined) return false;
+    if (Date.now() - at > TransferManager.CLEARED_UPLOAD_TTL_MS) {
+      this.clearedUploads.delete(id);
+      return false;
+    }
+    return true;
+  }
+
+  private noteUploadCleared(id: string) {
+    this.clearedUploads.set(id, Date.now());
+    // ponytail: cap map growth; TTL expiry prunes the rest lazily on lookup
+    if (this.clearedUploads.size > 500) {
+      const cutoff = Date.now() - TransferManager.CLEARED_UPLOAD_TTL_MS;
+      for (const [k, v] of this.clearedUploads) if (v < cutoff) this.clearedUploads.delete(k);
+    }
+  }
+
+  /** User-driven requeue bypasses the cleared-upload suppression (retry/undeni). */
+  private forceRequeueUpload(username: string, virtualPath: string) {
+    this.clearedUploads.delete(`${username}::${virtualPath}`);
   }
 
   private isFilteredDownload(username: string, virtualPath: string): boolean {
@@ -899,7 +935,7 @@ export class TransferManager {
   // ---- Phase 4: upload serving (FIFO/Round Robin with buddy/privileged) ----
 
   /** Handle incoming QueueUpload from peer (they want to download from us). */
-  handleQueueUpload(username: string, virtualPath: string, peerIp?: string) {
+  handleQueueUpload(username: string, virtualPath: string, peerIp?: string, opts?: { force?: boolean }) {
     const id = `${username}::${virtualPath}`;
     // HoneyPot bait — exact basename case-insensitive, default off, buddies exempt
     const baseName = fileNameOf(virtualPath);
@@ -957,6 +993,12 @@ export class TransferManager {
       }
     }
 
+    // 0b. user explicitly cleared this upload — deny the requeue instead of
+    // resurrecting it, unless forced (user-driven retry/undeni).
+    if (!opts?.force && this.isUploadClearSuppressed(id)) {
+      try { this.session?.sendUploadDenied?.(username, virtualPath, "Denied"); } catch {}
+      return { id, username, virtualPath, fileName: fileNameOf(virtualPath), size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Cancelled", queuePosition: null, isUpload: true };
+    }
     // 1. already queued?
     if (this.transfers.has(id)) {
       const existing = this.transfers.get(id)!;
@@ -2060,11 +2102,23 @@ export class TransferManager {
       this.emitStats();
       this.persist();
     } else if (action === "clear") {
+      // Clearing a Queued upload also denies it — else the peer requeues and
+      // the row resurrects. Finished/active clears stay silent.
+      const denyPeer = t.status === "Queued";
+      if (t._timer) clearInterval(t._timer);
+      if (t._statusTimer) clearTimeout(t._statusTimer);
+      if (t._pollTimer) clearInterval(t._pollTimer);
+      if (t._retryTimer) { clearTimeout(t._retryTimer); t._retryTimer = undefined; }
+      if (t._fileHandle !== undefined) try { const { closeSync } = require("node:fs"); closeSync(t._fileHandle); } catch {}
+      this.closeTransferSockets(t);
+      clearStallTimer(t);
+      this.noteUploadCleared(id);
       this.forgetTokensFor(id);
       this.transfers.delete(id);
       this.onRemoved(id);
       this.emitStats();
       this.persist();
+      if (denyPeer) try { this.sessionGetter?.()?.sendUploadDenied?.(t.username, t.virtualPath, "Denied"); } catch {}
     }
   }
 
@@ -2076,8 +2130,11 @@ export class TransferManager {
     if (t._timer) clearInterval(t._timer);
     if (t._statusTimer) clearTimeout(t._statusTimer);
     if (t._pollTimer) clearInterval(t._pollTimer);
-    if (t._retryTimer) clearTimeout(t._retryTimer);
+    if (t._retryTimer) { clearTimeout(t._retryTimer); t._retryTimer = undefined; }
     if (t._fileHandle !== undefined) try { const { closeSync } = require("node:fs"); closeSync(t._fileHandle); } catch {}
+    this.closeTransferSockets(t);
+    clearStallTimer(t);
+    this.noteUploadCleared(id);
     this.forgetTokensFor(id);
     this.transfers.delete(id);
     this.onRemoved(id);
@@ -2091,7 +2148,7 @@ export class TransferManager {
   retryUploads(username?: string, file?: string): void {
     // ProveIt grant-path: denyUpload deletes the Queued entry, so resurrect it here.
     if (username && file && !this.transfers.has(`${username}::${file}`)) {
-      try { this.handleQueueUpload(username, file); } catch {}
+      try { this.forceRequeueUpload(username, file); this.handleQueueUpload(username, file, undefined, { force: true }); } catch {}
     }
     for (const [id, t] of this.transfers) {
       if (!t.isUpload) continue;

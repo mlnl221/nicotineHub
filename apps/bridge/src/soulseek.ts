@@ -512,6 +512,7 @@ export function buildEnableRoomInvitations(enabled: boolean): Buffer {
   return frameMessage(SERVER_MESSAGE_CODES.enableRoomInvitations, Buffer.from([enabled ? 1 : 0]));
 }
 export function buildCancelRoomMembership(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.cancelRoomMembership, packString(room)); }
+export function buildAddRoomMember(room: string, username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.addRoomMember, Buffer.concat([packString(room), packString(username)])); }
 export function buildCancelRoomOwnership(room: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.cancelRoomOwnership, packString(room)); }
 export function buildAddRoomOperator(room: string, username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.addRoomOperator, Buffer.concat([packString(room), packString(username)])); }
 export function buildRemoveRoomOperator(room: string, username: string): Buffer { return frameMessage(SERVER_MESSAGE_CODES.removeRoomOperator, Buffer.concat([packString(room), packString(username)])); }
@@ -845,6 +846,25 @@ export function parseWatchUser(payload: Buffer): { username: string; exists: boo
 
 export function buildUserInfoRequest(): Buffer { return frameMessage(PEER_MESSAGE_CODES.userInfoRequest, Buffer.alloc(0)); }
 export interface UserInfoResponseMessage { username: string; descr: string; pic: Buffer | null; totalupl: number; queuesize: number; slotsavail: boolean; uploadallowed: number; }
+/** Max base64 picture accepted from a peer for WS relay (matches server zod cap). */
+export const MAX_USERINFO_PIC_B64 = 5_000_000;
+/**
+ * WS-safe picture: peers yield Buffer|null, but JSON.stringify(Buffer) relays a
+ * truthy {type,data} object that crashes clients calling string methods.
+ * Returns base64 string, passes valid strings through, drops the rest.
+ */
+export function userInfoPicToBase64(pic: unknown): string | null {
+  try {
+    if (pic === null || pic === undefined) return null;
+    if (typeof pic === "string") return pic.length <= MAX_USERINFO_PIC_B64 ? pic : null;
+    if (typeof Buffer !== "undefined" && Buffer.isBuffer(pic)) {
+      if (pic.length === 0) return null;
+      const b64 = pic.toString("base64");
+      return b64.length <= MAX_USERINFO_PIC_B64 ? b64 : null;
+    }
+    return null;
+  } catch { return null; }
+}
 export function parseUserInfoResponse(payload: Buffer, username: string): UserInfoResponseMessage {
   const r = new SlskReader(payload);
   const descr = r.string(); const hasPic = r.bool(); const pic = hasPic ? r.bytes() : null;
@@ -934,7 +954,15 @@ export function parsePrivileges(payload: Buffer): { username: string; timeLeft?:
 export interface RoomTickerEvent { room: string; username: string; msg: string; }
 export function parseRoomTickerEvent(payload: Buffer): RoomTickerEvent {
   const r = new SlskReader(payload);
-  return { room: r.string(), username: r.string(), msg: r.string() };
+  const room = r.string();
+  const username = r.string();
+  // RoomTickerRemoved carries only (room, username); RoomTickerAdded-style
+  // frames append the message. Never throw on the 2-string form.
+  let msg = "";
+  try {
+    if (r.remaining) msg = r.string();
+  } catch {}
+  return { room, username, msg };
 }
 
 /* Browse shares — SharedFileListResponse 5 + FolderContentsResponse 37 */

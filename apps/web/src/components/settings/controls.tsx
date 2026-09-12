@@ -93,7 +93,7 @@ export function TextFieldControl({
   onReset?: () => void;
 }) {
   const inputClass =
-    "w-full rounded-xl bg-surface-container-lowest px-4 py-3 font-body text-sm text-on-surface placeholder:text-outline ghost-border transition-all focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
+    "w-full rounded-xl bg-surface-container-lowest px-4 py-3 font-body text-base text-on-surface placeholder:text-outline ghost-border md:text-sm transition-all focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
   const field = multiline ? (
     <textarea
       value={value}

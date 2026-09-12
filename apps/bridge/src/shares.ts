@@ -175,8 +175,28 @@ export class ShareDB {
   private rebuildVirtualMaps() {
     this.virtual2real.clear();
     this.real2virtual.clear();
-    // Rebuild from current folders by scanning SHARED_DIRS mapping? Best-effort: derive virtual->real via walkDir already populates during scan.
-    // For persisted loads, we lack real paths — virtual2real will be rebuilt on next scanFsShares (which walks FS and knows realPath).
+    // Rebuild folder-root mappings from custom roots (real paths known and
+    // persisted). Previously this cleared walkDir-populated maps and never
+    // rebuilt them, so virtual→real resolution failed after every
+    // setCustomShares/rescan — uploads from custom shares always ended
+    // "File not shared." File-level lookups resolve via folder-prefix walk.
+    try {
+      for (const roots of this.customRootsByLevel.values()) {
+        for (const [virtualRaw, realRaw] of roots) {
+          const vName = (virtualRaw || "").trim().replace(/[/\\]+/g, "_").replace(/^[" ]+|[" ]+$/g, "") || "Shared";
+          const rawPath = (realRaw || "").trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
+          if (!vName || !rawPath) continue;
+          const rPath = this.resolveRealPath(rawPath);
+          if (!existsSync(rPath)) {
+            this.virtual2real.set(vName, rawPath);
+            this.real2virtual.set(rawPath, vName);
+            continue;
+          }
+          this.virtual2real.set(vName, rPath);
+          this.real2virtual.set(rPath, vName);
+        }
+      }
+    } catch {}
   }
 
   private serializeCustomRoots(): Record<string, [string, string][]> {

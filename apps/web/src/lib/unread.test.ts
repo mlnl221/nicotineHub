@@ -31,8 +31,7 @@ describe("unreadKeyForMessage", () => {
   test("CTCP control rows never dot", () => {
     expect(unreadKeyForMessage({ type: "chat:event", event: { type: "private-message", username: "a", message: CTCP_TYPING } })).toBeNull();
   });
-  test("acks and empty rows never dot", () => {
-    expect(unreadKeyForMessage({ type: "chat:event", event: { type: "private-message-acked", username: "a" } })).toBeNull();
+  test("empty rows never dot", () => {
     expect(unreadKeyForMessage({ type: "chat:event", event: { type: "private-message", username: "a" } })).toBeNull();
   });
   test("completion events", () => {

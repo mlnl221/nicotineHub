@@ -18,6 +18,7 @@ import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync, chmodSync, 
 import { join, resolve, sep } from "node:path";
 import { z } from "zod";
 import { SoulseekSession, namespaceSearchId } from "./session.ts";
+import { userInfoPicToBase64 } from "./soulseek.ts";
 import { PermissionLevel } from "./shares.ts";
 import { TransferManager } from "./transfers.ts";
 import { diagClear, diagLog, diagTail, diagSubscribe, logger, type LogLevel } from "./logger.ts";
@@ -148,11 +149,17 @@ const UploadControlSchema = z.object({
   id: z.string().min(1).max(1024),
   action: z.enum(["cancel", "clear", "deny"]),
 });
+// Nicotine-plus parity bulk clear (list entries only). statuses null = everything.
+const TransferClearManySchema = z.object({
+  type: z.literal("transfer:clear-many"),
+  isUpload: z.boolean(),
+  statuses: z.array(z.string().min(1).max(64)).max(32).nullish(),
+});
 const UserInfoRequestSchema = z.object({ type: z.literal("userinfo") }).and(UserInfoMessageSchema);
 
 const ChatRoomSchema = z.object({
   type: z.literal("chat:room"),
-  action: z.enum(["join", "leave", "say", "ticker", "setTicker", "addOperator", "removeOperator", "cancelMembership", "cancelOwnership", "refreshList"]),
+  action: z.enum(["join", "leave", "say", "ticker", "setTicker", "addMember", "addOperator", "removeOperator", "cancelMembership", "cancelOwnership", "refreshList"]),
   room: z.string().min(1).max(64).optional(),
   message: z.string().max(5000).optional(),
   username: z.string().max(64).optional(),
@@ -493,6 +500,14 @@ function sharedSessionCallbacks(boundTransfers: TransferManager) {
         try { (sharedTransfers as unknown as { handlePeerAddressResolved?: (u: string, ip: string) => void })?.handlePeerAddressResolved?.(event.username ?? "", pa.ip ?? ""); } catch {}
       }
       logger.debug("server", "user event", { type: event.type, username: event.username });
+      // Peer user-info carries pic as Buffer — JSON would relay a truthy
+      // {type,data} object that crashes clients calling string methods on it.
+      if (event.type === "user-info-response") {
+        const ev = event as unknown as { info?: { pic?: unknown } };
+        if (ev.info && typeof ev.info === "object") {
+          try { ev.info.pic = userInfoPicToBase64(ev.info.pic); } catch {}
+        }
+      }
       broadcastJson({ type: "userinfo:event", event });
       if (event.type === "wishlist-interval" && typeof event.wishlistInterval === "number") {
         broadcastJson({ type: "wishlist:interval", wishlistInterval: event.wishlistInterval });
@@ -1566,6 +1581,15 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         } else sharedTransfers?.controlUpload(result.data.id, result.data.action);
         return;
       }
+      if (data.type === "transfer:clear-many") {
+        const result = TransferClearManySchema.safeParse(parsed);
+        if (!result.success) { ws.send(errorMessage(result.error.issues[0]?.message ?? "Invalid transfer clear.")); return; }
+        if (result.data.statuses === undefined) { ws.send(errorMessage("statuses is required (array or null for everything).")); return; }
+        const session = requireLogin(); if (!session) return;
+        logger.info("transfer", "clear-many", { isUpload: result.data.isUpload, statuses: result.data.statuses ?? "all" });
+        sharedTransfers?.clearByStatuses(result.data.isUpload, result.data.statuses ?? null);
+        return;
+      }
 
       if (data.type === "chat:room") {
         const result = ChatRoomSchema.safeParse(parsed);
@@ -1614,7 +1638,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             const txt = isAction ? finalMsg.replace(/^\/(me)\s+|^\*\s+/, "") : finalMsg;
             logRoomMessage(room, session.username, txt, { isAction });
           } catch {}
-        } else if (action === "setTicker" && message !== undefined) session.setRoomTicker(room, message);
+        }         else if (action === "setTicker" && message !== undefined) session.setRoomTicker(room, message);
+        else if (action === "addMember" && result.data.username) session.addRoomMember(room, result.data.username);
         else if (action === "addOperator" && result.data.username) session.addRoomOperator(room, result.data.username);
         else if (action === "removeOperator" && result.data.username) session.removeRoomOperator(room, result.data.username);
         else if (action === "cancelMembership") session.cancelRoomMembership(room);

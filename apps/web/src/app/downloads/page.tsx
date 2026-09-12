@@ -12,8 +12,9 @@ import { TransferCard } from "@/components/transfers/TransferCard";
 import { ThroughputChart } from "@/components/transfers/ThroughputChart";
 import { DownloadStats } from "@/components/transfers/StatsCards";
 import { PageHeader } from "@/components/PageHeader";
-import { useStatistics } from "@/lib/statistics";
+import { EmptyState } from "@/components/mobile/EmptyState";
 import { ContextMenu } from "@/components/ui/ContextMenu";
+import { useContextMenu } from "@/lib/context-menu/useContextMenu";
 import { transferMenu } from "@/lib/context-menu/menus";
 import { useConfig } from "@/lib/config/provider";
 import { useSearchesOptional } from "@/lib/search";
@@ -28,9 +29,10 @@ import { BulkBar } from "@/components/tag/BulkBar";
 import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
 import { AdjustTagsModal } from "@/components/tag/AdjustTagsModal";
 import { useBulkSelection, useMarqueeSelection } from "@/lib/bulkSelection";
+import { DOWNLOAD_CLEAR_SETS } from "@/lib/transfers";
 import { bulkVerify, bulkAnalyze, bulkRequestSpectrum, verifyFile, analyzeFile } from "@/lib/worker";
 import { bridgeFetchUrl } from "@/lib/bridgeHttp";
-import { humanSize, humanSpeed as _humanSpeed } from "@/lib/format";
+import { humanSpeed as _humanSpeed } from "@/lib/format";
 
 function humanSpeed(bps: number): string {
   if (!bps) return "—";
@@ -47,8 +49,7 @@ function isAudioForSpectrum(fileName: string): boolean {
 }
 
 function DownloadsInner() {
-  const { downloads, stats, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer } = useTransfers();
-  const { total } = useStatistics();
+  const { downloads, stats, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer, clearMany, abortTransfer, banUser } = useTransfers();
   const { settings, setOption } = useConfig();
   const searches = useSearchesOptional();
   const router = useRouter();
@@ -65,14 +66,17 @@ function DownloadsInner() {
   const [bulkScrape, setBulkScrape] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ title: string; rows: Array<Record<string, unknown>> } | null>(null);
   const [focusedIdx, setFocusedIdx] = useState(-1);
+  const clearMenu = useContextMenu();
+  const moreMenu = useContextMenu();
+  const openBelow = (menu: { openAt: (x: number, y: number) => void }) => (e: React.MouseEvent<HTMLButtonElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    menu.openAt(Math.min(r.left, window.innerWidth - 328), r.bottom + 4);
+  };
   const totalDown = stats?.downloadSpeed ?? downloads.filter(d => d.status==="Transferring").reduce((s,t)=>s+t.speed,0);
   const totalUp = stats?.uploadSpeed ?? 0;
   const activeCount = downloads.length;
 
   const dlCount = downloads.length;
-  const dlDone = total?.completed_downloads ?? 0;
-  const dlSize = total?.downloaded_size ?? 0;
-  const dlPeers = new Set(downloads.map((d) => d.username)).size;
 
   const groupMode = settings.transfers.groupdownloads ?? "folder_grouping";
   const expandMode = settings.transfers.expand_downloads ?? "all";
@@ -105,6 +109,11 @@ function DownloadsInner() {
   })();
 
   const transferIds = downloads.map((d) => d.id);
+  // Mobile overflow menu labels (defined after group/expand mode to avoid TDZ).
+  const groupLabel = groupMode === "folder_grouping" ? "Folder" : groupMode === "user_grouping" ? "User" : "Off";
+  const cycleGroup = () => setOption("transfers", "groupdownloads", groupMode === "folder_grouping" ? "user_grouping" : groupMode === "user_grouping" ? "ungrouped" : "folder_grouping");
+  const expandLabel = expandMode === "all" ? "All" : expandMode === "partial" ? "Partial" : "Collapse";
+  const cycleExpand = () => setOption("transfers", "expand_downloads", expandMode === "all" ? "partial" : expandMode === "partial" ? "none" : "all");
   const marquee = useMarqueeSelection(bulk.setSelection);
   // Drop picks for transfers that vanished (cleared/finished-removed) so
   // the count bar never counts ghosts. Guarded: no setState when clean.
@@ -115,21 +124,34 @@ function DownloadsInner() {
     if ([...bulk.selected].some((id) => !live.has(id))) bulk.setSelection([...bulk.selected].filter((id) => live.has(id)));
   }, [liveIds]);
   const selectedFileNames = Array.from(bulk.selected).map((id) => downloads.find((d) => d.id === id)?.fileName).filter(Boolean) as string[];
+  // Tag/verify/analyze/spectrum bulk ops stay capped at 50 files; transfer selection itself is uncapped.
+  const capTagFiles = (files: string[]) => {
+    if (files.length > 50) {
+      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Tag bulk limit", body: "First 50 files used for tag operations." } }));
+      return files.slice(0, 50);
+    }
+    return files;
+  };
   const handleBulkVerify = async () => {
     const ids = Array.from(bulk.selected);
-    const files = ids.map((id) => downloads.find((d) => d.id === id)?.fileName).filter(Boolean) as string[];
+    const files = capTagFiles(ids.map((id) => downloads.find((d) => d.id === id)?.fileName).filter(Boolean) as string[]);
     if (!files.length) return;
     try { const r = await bulkVerify(files); setBulkResult({ title: `Verify — ${files.length} files`, rows: r.results as Array<Record<string, unknown>> }); } catch (e) { setBulkResult({ title: "Verify error", rows: [{ error: e instanceof Error ? e.message : String(e) }] }); }
   };
   const handleBulkAnalyze = async () => {
     const ids = Array.from(bulk.selected);
-    const files = ids.map((id) => downloads.find((d) => d.id === id)?.fileName).filter(Boolean) as string[];
+    const files = capTagFiles(ids.map((id) => downloads.find((d) => d.id === id)?.fileName).filter(Boolean) as string[]);
     if (!files.length) return;
     try { const r = await bulkAnalyze(files); setBulkResult({ title: `Analyze (fast) — ${files.length} files`, rows: r.results as Array<Record<string, unknown>> }); } catch (e) { setBulkResult({ title: "Analyze error", rows: [{ error: e instanceof Error ? e.message : String(e) }] }); }
   };
   const handleBulkSpectrum = async () => {
     const ids = Array.from(bulk.selected);
-    const files = ids.map((id) => { const t = downloads.find((d) => d.id === id); return t ? { fileName: t.fileName, size: t.size, token: parseDownloadToken(t as unknown as { downloadUrl?: string }) } : null; }).filter(Boolean) as Array<{ fileName: string; size?: number; token?: number }>;
+    let picked = ids.map((id) => { const t = downloads.find((d) => d.id === id); return t ? { fileName: t.fileName, size: t.size, token: parseDownloadToken(t as unknown as { downloadUrl?: string }) } : null; }).filter(Boolean) as Array<{ fileName: string; size?: number; token?: number }>;
+    if (picked.length > 50) {
+      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Tag bulk limit", body: "First 50 files used for tag operations." } }));
+      picked = picked.slice(0, 50);
+    }
+    const files = picked;
     if (!files.length) return;
     setBulkResult({ title: "Spectrum queue started", rows: files.map((f) => ({ fileName: f.fileName, status: "queued" })) });
     const res = await bulkRequestSpectrum(files);
@@ -217,7 +239,7 @@ function DownloadsInner() {
     <div className="flex min-h-screen bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title="Downloads" subtitle={`${dlCount} downloading`} />
-      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-hidden max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-clip max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
         <PageHeader
           title="Downloads"
           subtitle={`${activeCount} active`}
@@ -231,28 +253,19 @@ function DownloadsInner() {
 
         <div className="p-4 md:p-10 space-y-6 md:space-y-8 max-w-screen-2xl mx-auto w-full">
           {isDemo ? (
-            <div className="rounded-xl bg-tertiary-fixed/20 dark:bg-tertiary-container/20 px-4 py-3 flex items-center gap-3 ghost-border">
-              <span className="material-symbols-outlined text-tertiary">info</span>
-              <p className="font-label text-xs font-semibold text-on-tertiary-container dark:text-tertiary-fixed">Demo preview — 1 download + 1 upload simulated below (animated). New downloads are disabled on Vercel — search, chat, profiles &amp; browse are mocked.</p>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-center gap-3 dark:border-amber-800 dark:bg-amber-950/30">
+              <span className="material-symbols-outlined text-amber-700 dark:text-amber-300">info</span>
+              <p className="font-label text-xs font-semibold text-amber-900 dark:text-amber-200">Demo preview — 1 download + 1 upload simulated below (animated). New downloads are disabled on Vercel — search, chat, profiles &amp; browse are mocked.</p>
             </div>
           ) : null}
           <ThroughputChart />
 
           <DownloadStats />
 
-          {/* Mobile download stats */}
-          <div className="flex xl:hidden rounded-xl bg-surface-container-low p-1 gap-1">
-            <div
-              data-testid="download-stats"
-              className="flex-1 min-h-11 py-2 px-2 rounded-lg bg-surface-container-lowest ghost-border flex flex-col items-center justify-center text-center"
-            >
-              <span className="font-label text-[10px] leading-none uppercase tracking-widest text-outline">All-time Downloads</span>
-              <span className="font-label text-xs font-semibold text-on-surface truncate">{dlDone} files • {humanSize(dlSize)} • {dlPeers} peers</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-6 max-w-full overflow-hidden">
-            <section data-testid="downloads-section" className="flex flex-col gap-4 bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border max-w-full overflow-hidden">
+          <div className="grid grid-cols-1 gap-6 max-w-full overflow-x-clip">
+            <section data-testid="downloads-section" className="flex flex-col gap-4 bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border max-w-full overflow-x-clip">
+              <div className="sticky top-[calc(60px+env(safe-area-inset-top,0px))] md:static z-20 bg-surface-container-low/95 backdrop-blur dark:bg-surface-container-low/80 border-b border-outline-variant/10 md:bg-transparent md:dark:bg-transparent md:backdrop-blur-none md:border-transparent">
+                <div className="px-4 py-1.5 md:px-0 md:py-0 flex flex-col gap-2 md:gap-4">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <h3 className="font-headline text-xl font-semibold flex items-center gap-2">
                   <span className="material-symbols-outlined text-primary">download</span>
@@ -260,16 +273,20 @@ function DownloadsInner() {
                 </h3>
                 <div className="flex items-center gap-1">
                   {!isDemo ? (
-                    <button onClick={() => setSelectMode((v) => !v)} className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-[10px] font-semibold ${selectMode ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant"}`}>
-                      <span className="material-symbols-outlined text-[14px]">{selectMode ? "check_box" : "check_box_outline_blank"}</span> {selectMode ? `Selecting (${bulk.size}/50)` : "Select"}
+                    <button onClick={() => setSelectMode((v) => !v)} className={`inline-flex items-center gap-1 rounded-full px-3 min-h-11 py-1 text-xs font-semibold ${selectMode ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant"}`}>
+                      <span className="material-symbols-outlined text-[14px]">{selectMode ? "check_box" : "check_box_outline_blank"}</span> {selectMode ? `Selecting (${bulk.size})` : "Select"}
                     </button>
                   ) : null}
                    {selectMode && transferIds.length ? (
                     <>
-                       <button onClick={() => bulk.selectAll(transferIds)} className="hidden sm:inline-flex rounded-full bg-surface-container-high px-2 py-1 text-[10px]">All</button>
-                      <button onClick={() => bulk.clear()} className="hidden sm:inline-flex rounded-full bg-surface-container-high px-2 py-1 text-[10px]">Clear</button>
+                      <label className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-2 min-h-11 py-1 text-xs font-semibold cursor-pointer" title="Select all">
+                        <input type="checkbox" aria-label="Select all downloads" checked={bulk.size === transferIds.length} ref={(el) => { if (el) el.indeterminate = bulk.size > 0 && bulk.size < transferIds.length; }} onChange={() => (bulk.size === transferIds.length ? bulk.clear() : bulk.selectAll(transferIds))} className="h-4 w-4 accent-primary" />
+                        All
+                      </label>
+                      <button onClick={() => bulk.clear()} className="inline-flex rounded-full bg-surface-container-high px-2 min-h-11 py-1 text-xs">Clear</button>
                     </>
                   ) : null}
+                  <span className="hidden md:flex items-center gap-1">
                   <select value={groupMode} onChange={(e) => setOption("transfers", "groupdownloads", e.target.value)} className="rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-semibold outline-none">
                     <option value="folder_grouping">By Folder</option>
                     <option value="user_grouping">By User</option>
@@ -280,14 +297,55 @@ function DownloadsInner() {
                     <option value="partial">Partial</option>
                     <option value="none">Collapse</option>
                   </select>
+                  </span>
                 </div>
               </div>
-              {selectMode ? <p className="font-body text-[10px] text-outline">Bulk edit: title+artist per-file, others uniform · Limit 50 · Shift+click / Shift+↑/↓ extends range — per-page only</p> : null}
-              {downloads.length === 0 ? (
-                <div data-testid="empty-downloads" className="py-12 text-center">
-                  <p className="font-body text-on-surface-variant">No active downloads</p>
-                  <Link href="/search" className="mt-3 inline-flex font-label text-sm font-semibold text-primary hover:underline">Search Files</Link>
+              {selectMode ? <p className="font-body text-[10px] text-outline">Select-all covers every row, any user/grouping · Tag ops use first 50 · Shift+click / Shift+↑/↓ extends range</p> : null}
+              {/* Nicotine-plus parity toolbar: always visible, touch-sized.
+                  Desktop: full row. Mobile: Resume + Remove + More overflow. */}
+              <div className="flex flex-wrap items-center gap-1.5" role="toolbar" aria-label="Download actions">
+              <div className="hidden md:flex flex-wrap items-center gap-1.5">
+                <button onClick={bulkResume} disabled={!selectedTransfers.length} title="Resume selected" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold disabled:opacity-40">
+                  <span className="material-symbols-outlined text-[16px]">play_arrow</span> Resume
+                </button>
+                <button onClick={bulkPause} disabled={!selectedTransfers.length} title="Pause selected" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold disabled:opacity-40">
+                  <span className="material-symbols-outlined text-[16px]">pause</span> Pause
+                </button>
+                <button onClick={bulkRemove} disabled={!selectedTransfers.length} title="Remove selected" className="inline-flex items-center gap-1 rounded-full bg-error-container px-3 min-h-11 py-1 text-xs font-semibold text-on-error-container disabled:opacity-40">
+                  <span className="material-symbols-outlined text-[16px]">delete</span> Remove
+                </button>
+                <button onClick={() => clearMany(false, DOWNLOAD_CLEAR_SETS["finished-filtered"] ?? null)} title="Clear all finished/filtered downloads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold">
+                  <span className="material-symbols-outlined text-[16px]">done_all</span> Clear Finished
+                </button>
+                <div className="relative">
+                  <button onClick={openBelow(clearMenu)} aria-haspopup="menu" aria-expanded={!!clearMenu.anchor} title="Clear downloads by status" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold">
+                    <span className="material-symbols-outlined text-[16px]">clear_all</span> Clear All <span className="material-symbols-outlined text-[14px]">expand_more</span>
+                  </button>
                 </div>
+              </div>
+              <div className="flex md:hidden items-center gap-1.5">
+                <button onClick={bulkResume} disabled={!selectedTransfers.length} title="Resume selected" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold disabled:opacity-40">
+                  <span className="material-symbols-outlined text-[16px]">play_arrow</span> Resume
+                </button>
+                <button onClick={bulkRemove} disabled={!selectedTransfers.length} title="Remove selected" className="inline-flex items-center gap-1 rounded-full bg-error-container px-3 min-h-11 py-1 text-xs font-semibold text-on-error-container disabled:opacity-40">
+                  <span className="material-symbols-outlined text-[16px]">delete</span> Remove
+                </button>
+                <div className="relative">
+                  <button onClick={openBelow(moreMenu)} aria-label="More download actions" aria-haspopup="menu" aria-expanded={!!moreMenu.anchor} title="More actions" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-surface-container-high text-on-surface-variant">
+                    <span className="material-symbols-outlined text-[20px]">more_vert</span>
+                  </button>
+                </div>
+              </div>
+                </div>
+                </div>
+              </div>
+              {downloads.length === 0 ? (
+                <EmptyState
+                  icon="downloading"
+                  title="No active downloads"
+                  testId="empty-downloads"
+                  action={<Link href="/search" className="mt-1 inline-flex font-label text-sm font-semibold text-primary hover:underline">Search Files</Link>}
+                />
               ) : (
                 <div className="space-y-4">
                   {downloadGroups.map(([groupKey, items]) => {
@@ -363,6 +421,8 @@ function DownloadsInner() {
               onRemove: () => menuAnchor.isUpload ? clearTransfer(menuAnchor.transfer.id, true) : cancelDownload(menuAnchor.transfer.id),
               onRetry: () => retryDownload(menuAnchor.transfer.id),
               onClear: () => clearTransfer(menuAnchor.transfer.id, menuAnchor.isUpload),
+              onClearMany: (s) => clearMany(false, s),
+              onBan: () => banUser(menuAnchor.transfer.username),
               onAnalyzeSpectrum: menuAnchor.isUpload
                 ? undefined
                 : isAudioForSpectrum(menuAnchor.transfer.fileName) && menuAnchor.transfer.status === "Finished"
@@ -396,12 +456,48 @@ function DownloadsInner() {
           onClose={() => setMenuAnchor(null)}
         />
       ) : null}
+      {clearMenu.anchor ? (
+        <ContextMenu
+          x={clearMenu.anchor.x}
+          y={clearMenu.anchor.y}
+          items={[
+            { id: "finished-filtered", label: "Finished / Filtered", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["finished-filtered"] ?? null) },
+            { id: "finished", label: "Finished", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["finished"] ?? null) },
+            { id: "paused", label: "Paused", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["paused"] ?? null) },
+            { id: "filtered", label: "Filtered", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["filtered"] ?? null) },
+            { id: "queued", label: "Queued…", action: () => { if (!window.confirm("Clear queued downloads?")) return; clearMany(false, DOWNLOAD_CLEAR_SETS["queued"] ?? null); } },
+            { id: "all", label: "Everything…", danger: true, action: () => { if (!window.confirm("Clear all downloads?")) return; clearMany(false, DOWNLOAD_CLEAR_SETS["all"] ?? null); } },
+          ]}
+          onClose={clearMenu.close}
+        />
+      ) : null}
+      {moreMenu.anchor ? (
+        <ContextMenu
+          x={moreMenu.anchor.x}
+          y={moreMenu.anchor.y}
+          items={[
+            { id: "pause", label: "Pause selected", icon: "pause", disabled: !selectedTransfers.length, action: () => bulkPause() },
+            { id: "clear-finished", label: "Clear Finished", icon: "done_all", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["finished-filtered"] ?? null) },
+            { id: "sep1", label: "---" },
+            { id: "finished-filtered", label: "Finished / Filtered", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["finished-filtered"] ?? null) },
+            { id: "finished", label: "Finished", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["finished"] ?? null) },
+            { id: "paused", label: "Paused", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["paused"] ?? null) },
+            { id: "filtered", label: "Filtered", action: () => clearMany(false, DOWNLOAD_CLEAR_SETS["filtered"] ?? null) },
+            { id: "queued", label: "Queued…", action: () => { if (!window.confirm("Clear queued downloads?")) return; clearMany(false, DOWNLOAD_CLEAR_SETS["queued"] ?? null); } },
+            { id: "all", label: "Everything…", danger: true, action: () => { if (!window.confirm("Clear all downloads?")) return; clearMany(false, DOWNLOAD_CLEAR_SETS["all"] ?? null); } },
+            { id: "sep2", label: "---" },
+            { id: "group", label: `Group: ${groupLabel}`, icon: "group_work", action: () => cycleGroup() },
+            { id: "expand", label: `Expand: ${expandLabel}`, icon: expandMode === "none" ? "unfold_less" : "unfold_more", action: () => cycleExpand() },
+          ]}
+          onClose={moreMenu.close}
+        />
+      ) : null}
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} /> : null}
       {scrapeFile ? <AdjustTagsModal open={!!scrapeFile} files={[scrapeFile]} onClose={() => setScrapeFile(null)} /> : null}
       {mediainfoFile ? <MediainfoModal filePath={mediainfoFile} onClose={() => setMediainfoFile(null)} /> : null}
        <BulkBar count={bulk.size} onClear={bulk.clear} onEdit={() => setBulkEditor(true)} onScrape={() => setBulkScrape(true)} onVerify={handleBulkVerify} onAnalyze={handleBulkAnalyze} onSpectrum={handleBulkSpectrum} onPause={bulkPause} onResume={bulkResume} onRemove={bulkRemove} />
-      {bulkEditor ? <BulkTagEditor open={bulkEditor} files={selectedFileNames} onClose={() => setBulkEditor(false)} onSaved={() => bulk.clear()} /> : null}
-      {bulkScrape ? <AdjustTagsModal open={bulkScrape} files={selectedFileNames} onClose={() => setBulkScrape(false)} /> : null}
+      {bulkEditor ? <BulkTagEditor open={bulkEditor} files={selectedFileNames.slice(0, 50)} onClose={() => setBulkEditor(false)} onSaved={() => bulk.clear()} /> : null}
+      {bulkScrape ? <AdjustTagsModal open={bulkScrape} files={selectedFileNames.slice(0, 50)} onClose={() => setBulkScrape(false)} /> : null}
       {bulkResult ? (
         <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
           <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col overflow-hidden rounded-t-2xl md:rounded-2xl bg-surface-container-lowest shadow-xl ghost-border" onClick={(e) => e.stopPropagation()}>

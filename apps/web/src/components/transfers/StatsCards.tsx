@@ -23,18 +23,18 @@ export function DownloadStats() {
     <section className="flex flex-col gap-3">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="rounded-2xl bg-surface dark:bg-surface-container-low p-5 ghost-border flex flex-col gap-1">
-          <span className="font-label text-[10px] uppercase tracking-widest text-outline">Completed Downloads</span>
+          <span className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Completed Downloads</span>
           <span className="font-headline text-2xl font-bold text-on-surface">{tCompleted}</span>
           <span className="font-label text-xs text-on-surface-variant">{tStarted} started • {sCompleted} this session • {liveCount} active</span>
           <span className="font-label text-[10px] text-outline">All-time • Session {sCompleted}</span>
         </div>
         <div className="rounded-2xl bg-surface dark:bg-surface-container-low p-5 ghost-border flex flex-col gap-1">
-          <span className="font-label text-[10px] uppercase tracking-widest text-outline">Data Downloaded</span>
+          <span className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Data Downloaded</span>
           <span className="font-headline text-2xl font-bold text-primary">{humanSize(tSize)}</span>
           <span className="font-label text-xs text-on-surface-variant">Session {humanSize(sSize)}</span>
         </div>
         <div className="rounded-2xl bg-surface dark:bg-surface-container-low p-5 ghost-border flex flex-col gap-1">
-          <span className="font-label text-[10px] uppercase tracking-widest text-outline">Peers</span>
+          <span className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Peers</span>
           <span className="font-headline text-2xl font-bold text-on-surface">{uniqueUsers}</span>
           <span className="font-label text-xs text-on-surface-variant">Unique users downloaded from</span>
         </div>
@@ -62,18 +62,18 @@ export function UploadStats() {
     <section className="flex flex-col gap-3">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="rounded-2xl bg-surface dark:bg-surface-container-low p-5 ghost-border flex flex-col gap-1">
-          <span className="font-label text-[10px] uppercase tracking-widest text-outline">Completed Uploads</span>
+          <span className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Completed Uploads</span>
           <span className="font-headline text-2xl font-bold text-on-surface">{tCompleted}</span>
           <span className="font-label text-xs text-on-surface-variant">{tStarted} started • {sCompleted} this session • {liveCount} active</span>
           <span className="font-label text-[10px] text-outline">All-time • Session {sCompleted}</span>
         </div>
         <div className="rounded-2xl bg-surface dark:bg-surface-container-low p-5 ghost-border flex flex-col gap-1">
-          <span className="font-label text-[10px] uppercase tracking-widest text-outline">Data Uploaded</span>
+          <span className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Data Uploaded</span>
           <span className="font-headline text-2xl font-bold text-tertiary">{humanSize(tSize)}</span>
           <span className="font-label text-xs text-on-surface-variant">Session {humanSize(sSize)}</span>
         </div>
         <div className="rounded-2xl bg-surface dark:bg-surface-container-low p-5 ghost-border flex flex-col gap-1">
-          <span className="font-label text-[10px] uppercase tracking-widest text-outline">Peers Served</span>
+          <span className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Peers Served</span>
           <span className="font-headline text-2xl font-bold text-on-surface">{uniqueUsers}</span>
           <span className="font-label text-xs text-on-surface-variant">Unique users uploaded to</span>
         </div>

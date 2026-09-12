@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSession } from "@/lib/session";
+import { onExternalKey } from "@/lib/storage-sync";
 import { useConfig } from "@/lib/config/provider";
 import type { ChatEvent, ChatLogRow } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
@@ -229,21 +230,6 @@ export function PrivateChatProvider({ children }: { children: ReactNode }) {
           next.delete(ev.username!);
           return next;
         });
-      } else if (ev.type === "private-message-acked" && (ev as unknown as { username?: string }).username) {
-        const username = (ev as unknown as { username: string }).username;
-        setConversations((prev) => {
-          if (!prev.has(username)) return prev;
-          const next = new Map(prev);
-          const arr = next.get(username)!;
-          next.delete(username);
-          next.set(username, arr);
-          try {
-            const stored = JSON.parse((localStorage.getItem("nicotineHub.privatechats") ?? localStorage.getItem("nicotine.privatechats")) || "[]");
-            const nextOrder = [username, ...stored.filter((u: string) => u !== username)].slice(0, 50);
-            localStorage.setItem("nicotineHub.privatechats", JSON.stringify(nextOrder));
-          } catch {}
-          return next;
-        });
       }
     });
     return unsub;
@@ -354,6 +340,27 @@ export function PrivateChatProvider({ children }: { children: ReactNode }) {
       try { send({ type: "chat:logs", scope: "private", key: u, lines }); } catch {}
     }
   }, [state.status, users, conversations, send, settings.logging.readprivatelines]);
+
+  // Cross-tab close sync: another tab closed conversations — drop them locally
+  // instead of letting our next persist effect resurrect them. Subtractive-only.
+  useEffect(() => {
+    return onExternalKey([PRIVATECHATS_KEY, ACTIVE_KEY], () => {
+      const persisted = new Set(loadPersistedUsers() ?? []);
+      const dropped = Array.from(conversationsRef.current.keys()).filter((u) => !persisted.has(u));
+      if (!dropped.length) return;
+      const ids = new Set(dropped);
+      setConversations((prev) => {
+        const next = new Map(prev);
+        for (const u of ids) next.delete(u);
+        return next;
+      });
+      for (const u of dropped) backfilledRef.current.delete(u.toLowerCase());
+      if (activeUserRef.current && ids.has(activeUserRef.current)) {
+        const remaining = Array.from(conversationsRef.current.keys()).filter((u) => !ids.has(u));
+        setActiveUser(remaining.length ? remaining[remaining.length - 1]! : null);
+      }
+    });
+  }, [setActiveUser]);
 
   const isTyping = useCallback((username: string) => {
     const exp = typingUsers.get(username);

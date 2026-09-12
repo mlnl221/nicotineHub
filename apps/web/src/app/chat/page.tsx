@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/mobile/TopBar";
 import { BottomNav } from "@/components/mobile/BottomNav";
 import { PageHeader } from "@/components/PageHeader";
+import { EmptyState, CompactEmpty } from "@/components/mobile/EmptyState";
 import { useRooms } from "@/lib/rooms";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { chatRoomMenu, userMenu } from "@/lib/context-menu/menus";
@@ -37,10 +38,12 @@ function ChatRoomsInner() {
   const [joinInput, setJoinInput] = useState("");
   const [sayInput, setSayInput] = useState("");
   const [filter, setFilter] = useState("");
-  const [isPrivate, setIsPrivate] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [tickerInput, setTickerInput] = useState("");
   const [showWall, setShowWall] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; items: import("@/components/ui/ContextMenu").MenuItem[] } | null>(null);
+  const headerLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const headerLongPressed = useRef(false);
   const [roomListW, onRoomListDown] = usePaneWidth("nicotineHub.chat.asideW");
 
   const activeMessages = activeRoom ? messages.get(activeRoom) || [] : [];
@@ -52,6 +55,20 @@ function ChatRoomsInner() {
   const chatStick = useStickToBottom(activeRoom ?? "", userMessages.length);
   const openUserMenu = (pos: { clientX: number; clientY: number }, username: string) => {
     setMenuAnchor({ x: pos.clientX, y: pos.clientY, items: userMenu(username, "chatrooms") });
+  };
+  const openHeaderRoomMenu = (x: number, y: number) => {
+    if (!activeRoom) return;
+    const room = activeRoom;
+    setMenuAnchor({
+      x,
+      y,
+      items: chatRoomMenu(room, "chat", {
+        onCopyAll: () => navigator.clipboard.writeText(userMessages.map((m) => `${m.username}: ${m.message}`).join("\n")),
+        onLeave: () => {
+          if (confirm(`Leave ${room}?`)) leaveRoom(room);
+        },
+      }),
+    });
   };
   const joinedArray = Array.from(joinedRooms.values());
   const sortedRooms = (() => {
@@ -84,10 +101,9 @@ function ChatRoomsInner() {
     if (!r) return;
     const sanitized = r.replace(/[^ -~]/g, "").replace(/\s+/g, " ").trim().slice(0, 24);
     if (!sanitized) return;
-    // private flag: nicotine shows private rooms with lock; we pass via suffix hint and setTicker path — UI only for now
     joinRoom(sanitized);
     setJoinInput("");
-    setIsPrivate(false);
+    setPickerOpen(false);
   };
 
   const handleSay = () => {
@@ -101,7 +117,7 @@ function ChatRoomsInner() {
     <div className="flex min-h-[100dvh] h-screen max-w-full overflow-hidden bg-surface-dim font-body text-on-surface antialiased dark:bg-inverse-surface">
       <Sidebar />
       <TopBar title={activeRoom || "Chat Rooms"} subtitle={activeRoom ? `${activeUsers.length} users • ${roomList.length} public rooms` : `${joinedArray.length} joined • ${roomList.length} public`} />
-      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 bg-surface-dim dark:bg-inverse-surface pt-[calc(56px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
+      <main className="md:ml-72 flex flex-1 flex-col overflow-hidden min-h-0 bg-surface-dim dark:bg-inverse-surface pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0 max-w-full overflow-x-hidden min-w-0">
         <PageHeader
           title="Chat Rooms"
           subtitle={`${activeRoom ? `${activeUsers.length} users • ${activeRoom}` : `${joinedArray.length} joined • ${roomList.length} public`} • Monitoring rooms`}
@@ -161,10 +177,6 @@ function ChatRoomsInner() {
                 <span className="material-symbols-outlined text-[18px] align-middle">refresh</span>
               </button>
               </div>
-              <label className="flex items-center gap-2 text-xs text-on-surface-variant">
-                <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} className="rounded" />
-                Private room
-              </label>
               <div className="relative">
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-outline">search</span>
                 <input
@@ -181,7 +193,7 @@ function ChatRoomsInner() {
               {joinedArray.length > 0 ? (
                 <div>
                   <div className="flex items-center justify-between px-3 py-1">
-                    <h4 className="font-label text-[10px] uppercase tracking-widest text-on-surface-variant">
+                    <h4 className="font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">
                       Joined Rooms
                     </h4>
                     <button
@@ -222,7 +234,7 @@ function ChatRoomsInner() {
 
               {/* Public */}
               <div>
-                <h4 className="px-3 py-1 font-label text-[10px] uppercase tracking-widest text-on-surface-variant">
+                <h4 className="px-3 py-1 font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">
                   Public Rooms {roomList.length ? `• ${roomList.length}` : ""}
                 </h4>
                 {filteredRooms.length === 0 ? (
@@ -263,26 +275,48 @@ function ChatRoomsInner() {
               }),
             });
           }}>
-            {/* Mobile room picker */}
+            {/* Mobile room picker — single flow: name/Join or public list */}
             <div className="border-b border-outline-variant/15 bg-surface p-3 md:hidden">
-              <select
-                value={activeRoom || ""}
-                onChange={(e) => setActiveRoom(e.target.value || null)}
-                className="w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2.5 min-h-11 text-sm"
-              >
-                <option value="">Select a room</option>
-                {joinedArray.map((r) => (
-                  <option key={r.name} value={r.name}>
-                    {r.name} ({r.users.length})
+              {activeRoom && !pickerOpen ? (
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[18px] text-outline">search</span>
+                  <button onClick={() => setPickerOpen(true)} className="flex-1 rounded-full border border-outline-variant/30 bg-surface-container-lowest px-4 py-2.5 min-h-11 text-left text-sm text-outline">
+                    Look up rooms…
+                  </button>
+                  <button onClick={() => setPickerOpen(true)} aria-label="Expand room picker" className="shrink-0 rounded-lg border border-outline-variant/30 px-3 min-h-11">
+                    <span className="material-symbols-outlined text-[18px] align-middle">expand_more</span>
+                  </button>
+                </div>
+              ) : (
+                <>
+              {joinedArray.length > 0 ? (
+                <select
+                  value={activeRoom || ""}
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      setActiveRoom(e.target.value);
+                      setPickerOpen(false);
+                    }
+                  }}
+                  aria-label="Switch active room"
+                  className="mb-2 w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2.5 min-h-11 text-base md:text-sm"
+                >
+                  <option value="" disabled={!!activeRoom}>
+                    Switch room… ({joinedArray.length} joined)
                   </option>
-                ))}
-              </select>
-              <div className="mt-2 flex gap-2">
+                  {joinedArray.map((r) => (
+                    <option key={r.name} value={r.name}>
+                      {r.name} ({r.users.length})
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+              <div className="flex gap-2">
                 <input
                   value={joinInput}
                   onChange={(e) => setJoinInput(e.target.value)}
                   placeholder="Room name"
-                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 text-sm"
+                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 text-base md:text-sm"
                 />
                 <button onClick={handleJoin} className="shrink-0 rounded-lg bg-primary px-4 py-2.5 min-h-11 text-sm text-on-primary">
                   Join
@@ -296,7 +330,7 @@ function ChatRoomsInner() {
                   const v = e.target.value;
                   if (v) setJoinInput(v);
                 }}
-                className="min-w-0 flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest dark:bg-surface-container-low dark:text-inverse-primary px-3 py-2.5 text-sm focus:border-primary outline-none"
+                className="min-w-0 flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest dark:bg-surface-container-low dark:text-inverse-primary px-3 py-2.5 min-h-11 text-base focus:border-primary outline-none md:text-sm"
               >
                 <option value="">Choose a room to join… ({sortedRooms.length})</option>
                 {sortedRooms.slice(0, 50).map((r) => (
@@ -312,26 +346,60 @@ function ChatRoomsInner() {
                 className="shrink-0 rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 min-h-11 text-on-surface-variant hover:text-primary hover:border-primary"
               >
                 <span className="material-symbols-outlined text-[18px] align-middle">refresh</span>
-              </button>
+                </button>
               </div>
-              <label className="mt-2 flex items-center gap-2 text-xs text-on-surface-variant">
-                <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} /> Private
-              </label>
+                  {activeRoom ? (
+                    <button onClick={() => setPickerOpen(false)} aria-label="Collapse room picker" className="md:hidden mt-2 inline-flex items-center gap-1 rounded-lg px-3 min-h-11 text-xs text-on-surface-variant">
+                      <span className="material-symbols-outlined text-[18px]">expand_less</span> Hide
+                    </button>
+                  ) : null}
+                </>
+              )}
             </div>
 
             {!activeRoom ? (
-              <div className="flex flex-1 items-center justify-center p-8 text-center">
-                <div>
-                  <span className="material-symbols-outlined text-5xl text-outline-variant">groups</span>
-                  <p className="mt-2 font-headline text-lg font-semibold">No room selected</p>
-                  <p className="mt-1 font-body text-sm text-on-surface-variant">Join or create a room from the sidebar.</p>
-                </div>
-              </div>
+              <EmptyState
+                icon="groups"
+                title="No room selected"
+                helper="Join or create a room above to start."
+                className="flex-1"
+              />
             ) : (
               <>
-                {/* Room header */}
+                {/* Room header — long-press name on touch opens Leave menu */}
                 <div className="flex items-center justify-between border-b border-outline-variant/15 bg-surface-container-lowest/60 px-4 md:px-6 py-3 backdrop-blur-sm max-w-full overflow-hidden gap-2">
-                  <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                  <div
+                    data-custom-menu
+                    title={activeRoom ? `${activeRoom} — long-press for options` : undefined}
+                    className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden select-none"
+                    onClickCapture={(e) => {
+                      if (headerLongPressed.current) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        headerLongPressed.current = false;
+                      }
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (headerLongPressTimer.current) clearTimeout(headerLongPressTimer.current);
+                      openHeaderRoomMenu(e.clientX, e.clientY);
+                    }}
+                    onPointerDown={(e) => {
+                      if (e.pointerType !== "touch" || !activeRoom) return;
+                      const x = e.clientX;
+                      const y = e.clientY;
+                      if (headerLongPressTimer.current) clearTimeout(headerLongPressTimer.current);
+                      headerLongPressTimer.current = setTimeout(() => {
+                        headerLongPressed.current = true;
+                        if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate?.(10);
+                        openHeaderRoomMenu(x, y);
+                      }, 500);
+                    }}
+                    onPointerUp={() => { if (headerLongPressTimer.current) clearTimeout(headerLongPressTimer.current); }}
+                    onPointerCancel={() => { if (headerLongPressTimer.current) clearTimeout(headerLongPressTimer.current); }}
+                    onPointerLeave={() => { if (headerLongPressTimer.current) clearTimeout(headerLongPressTimer.current); }}
+                  >
                     <span className="material-symbols-outlined text-primary">tag</span>
                     <h3 className="font-headline font-bold truncate min-w-0 max-w-[40vw]">{activeRoom}</h3>
                     <span className="rounded-full bg-surface-container-high px-2 py-0.5 font-label text-xs">
@@ -393,8 +461,8 @@ function ChatRoomsInner() {
                     ) : null}
                     <div ref={chatStick.ref} onScroll={chatStick.onScroll} data-testid="room-messages" className="flex-1 overflow-y-auto overscroll-contain min-h-0 p-4 md:p-6 space-y-2 max-w-full overflow-x-hidden">
                       {userMessages.length === 0 ? (
-                        <div className="py-10 text-center">
-                          <p className="font-body text-sm text-outline">No messages yet. Start the conversation.</p>
+                        <div className="py-10">
+                          <CompactEmpty>No messages yet. Start the conversation.</CompactEmpty>
                         </div>
                       ) : (
                         userMessages.map((m, idx) => {
@@ -520,7 +588,7 @@ function ChatRoomsInner() {
                           }}
                           placeholder={`Message #${activeRoom}...`}
                           rows={1}
-                          className="max-h-28 min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 text-sm placeholder:text-outline focus:outline-none"
+                          className="max-h-28 min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 text-base md:text-sm placeholder:text-outline focus:outline-none"
                         />
                         <button
                           onClick={handleSay}
@@ -576,7 +644,7 @@ function ChatRoomsInner() {
                     ) : null}
                     {(settings.ui.buddylistinchatrooms === "chatrooms" || settings.ui.buddylistinchatrooms === "always") && buddies.length > 0 ? (
                       <div className={`${showUserList ? "border-t" : ""} border-outline-variant/15 px-2 py-2`}>
-                        <h4 className="px-2 py-1 font-label text-[10px] uppercase tracking-widest text-on-surface-variant">Buddies • {buddies.length}</h4>
+                        <h4 className="px-2 py-1 font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant">Buddies • {buddies.length}</h4>
                         <div className="space-y-1 max-h-40 overflow-y-auto">
                           {buddies.slice(0, 12).map((b) => (
                             <button key={b.username} onClick={() => router.push(`/profile/${encodeURIComponent(b.username)}`)} className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left hover:bg-surface-container-low">
@@ -600,7 +668,7 @@ function ChatRoomsInner() {
       <BottomNav />
       {/* Global Room Wall — aggregates tickers from all joined rooms (roomwall.py parity) */}
       {showWall && activeRoom ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowWall(false)}>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onClick={() => setShowWall(false)}>
           <div className="w-full max-w-lg rounded-2xl bg-surface-container-lowest p-6 shadow-xl max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-headline text-lg font-bold">Room Wall — All tickers</h3>

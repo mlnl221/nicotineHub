@@ -264,8 +264,15 @@ export function FileExplorer({
     }
   };
 
+  const capTagFiles = (files: string[]) => {
+    if (files.length > 50) {
+      try { window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Tag bulk limit", body: "First 50 files used for tag operations." } })); } catch {}
+      return files.slice(0, 50);
+    }
+    return files;
+  };
   const handleBulkVerify = async () => {
-    const ids = Array.from(bulk.selected);
+    const ids = capTagFiles(Array.from(bulk.selected));
     if (!ids.length) return;
     try {
       const r = await bulkVerify(ids);
@@ -275,7 +282,7 @@ export function FileExplorer({
     }
   };
   const handleBulkAnalyze = async () => {
-    const ids = Array.from(bulk.selected);
+    const ids = capTagFiles(Array.from(bulk.selected));
     if (!ids.length) return;
     try {
       const r = await bulkAnalyze(ids);
@@ -285,7 +292,7 @@ export function FileExplorer({
     }
   };
   const handleBulkSpectrum = async () => {
-    const ids = Array.from(bulk.selected);
+    const ids = capTagFiles(Array.from(bulk.selected));
     if (!ids.length) return;
     setBulkResult({ title: "Spectrum queue started", rows: ids.map((f) => ({ fileName: f, status: "queued" })) });
     const res = await bulkRequestSpectrum(ids.map((f) => ({ fileName: f })));
@@ -413,8 +420,8 @@ export function FileExplorer({
           ) : null}
           {selectMode && audioIds.length ? (
             <>
-              <button type="button" onClick={() => bulk.selectAll(audioIds)} className="hidden sm:inline-flex rounded-full bg-surface-container-high px-2 py-1 font-label text-[11px]">All ({Math.min(50, audioIds.length)})</button>
-              <button type="button" onClick={() => bulk.clear()} className="hidden sm:inline-flex rounded-full bg-surface-container-high px-2 py-1 font-label text-[11px]">Clear</button>
+              <button type="button" onClick={() => bulk.selectAll(audioIds)} className="inline-flex rounded-full bg-surface-container-high px-2 py-1 font-label text-[11px]">All ({audioIds.length})</button>
+              <button type="button" onClick={() => bulk.clear()} className="inline-flex rounded-full bg-surface-container-high px-2 py-1 font-label text-[11px]">Clear</button>
             </>
           ) : null}
           {parent !== null && (
@@ -467,7 +474,7 @@ export function FileExplorer({
         <div className="min-w-0">
           <div className="font-mono text-xs font-medium text-amber-900 dark:text-amber-200 truncate" title={current}>{current}</div>
           <div className="font-body text-[11px] text-amber-800/80 dark:text-amber-200/70">
-            {dirs.length} folder(s){showFiles ? ` · ${files.length} file(s)` : ""}{selectMode && bulk.size ? ` · ${bulk.size} selected (max 50)` : ""} · {canSelectCurrent ? "Select current folder to share" : ""}
+            {dirs.length} folder(s){showFiles ? ` · ${files.length} file(s)` : ""}{selectMode && bulk.size ? ` · ${bulk.size} selected` : ""} · {canSelectCurrent ? "Select current folder to share" : ""}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
