@@ -2,10 +2,12 @@
  * Live bridge ↔ soulfind end-to-end suite. OPT-IN ONLY:
  *   SOULFIND_E2E=1 bun test src/soulfind-live.test.ts   (or `bun run test:soulfind`)
  * Without the env var every test is describe.skip — default `bun test` never
- * touches docker. See docs/soulfind-e2e-plan.md for the level map.
+ * touches the binary. Levels: L0 smoke (login, search relay, rooms),
+ * L1 server-relay core, L2 errors/reconnect, L3 real peer flows (search
+ * response, browse, byte-identical download).
  *
- * The harness starts its own soulfind container (port 2244, bind-mounted DB)
- * so the shared manual-test server on :2243 is never disturbed.
+ * The harness starts its own host-native soulfind binary (port 2244, fresh
+ * temp DB) so the shared manual-test server on :2243 is never disturbed.
  */
 import { afterAll, beforeAll, describe, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync } from "node:fs";

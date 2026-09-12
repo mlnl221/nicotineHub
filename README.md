@@ -180,8 +180,8 @@ bun run --cwd apps/bridge test:soulfind   # live end-to-end vs local soulfind
 ```
 
 End-to-end runs against [soulfind](https://github.com/soulfind-dev/soulfind) (local Soulseek test server — local testing only, never production),
-NOT the real `server.slsknet.org`. The suite (`apps/bridge/src/soulfind-live.test.ts`,
-plan + AI instructions in `docs/soulfind-e2e-plan.md`) spawns a host-native soulfind on `:2244`
+NOT the real `server.slsknet.org`. The suite (`apps/bridge/src/soulfind-live.test.ts`, header comment has the level map)
+spawns a host-native soulfind on `:2244`
 and verifies login, rooms, chat, PM, search relay, errors/reconnects, and real peer
 search/browse/download across all 26 tests. Without `SOULFIND_E2E=1` the file self-skips.
 
@@ -195,7 +195,7 @@ unzip -o -q /tmp/sf.zip -d ~/.cache/nicotine-hub/soulfind && chmod +x ~/.cache/n
 Manual UI testing: `docker run -d --name soulfind-e2e -v soulfind-e2e:/data -p 127.0.0.1:2243:2243 ghcr.io/soulfind-dev/soulfind soulfind -p 2243`,
 attach it to the compose network (`docker network connect nicotine_mobile_default soulfind-e2e`),
 then login at `http://localhost:3000` with host `soulfind-e2e` port `2243` (any credentials — auto-register).
-Agent workflow: read `docs/soulfind-e2e-plan.md` first, keep everything local-only (no CI/prod/compose changes),
+Agent workflow: read the header comment in `apps/bridge/src/soulfind-live.test.ts` first, keep everything local-only (no CI/prod/compose changes),
 extend the suite for new protocol surface before fixing bridge code.
 
 ---
