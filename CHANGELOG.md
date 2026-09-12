@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.36.0](https://github.com/mlnl221/nicotineHub/compare/v0.35.0...v0.36.0) (2026-09-12)
+
+
+### Features
+
+* **bridge:** delete dead PM-acked event, add private-room invites, soulfind testing docs ([8d6f364](https://github.com/mlnl221/nicotineHub/commit/8d6f364eedb04c1ee7dd463cf40300a1024d298f))
+* **bridge:** soulfind local e2e suite (L0-L3) + bugs found by it ([766ec3d](https://github.com/mlnl221/nicotineHub/commit/766ec3db3d9ea5146b2ab8a76059cc315ff7a48c))
+* **bridge:** soulfind local e2e suite (L0-L3) + bugs found by it ([9de3d47](https://github.com/mlnl221/nicotineHub/commit/9de3d47ae91e2d6572b3275917df3a94cb9939b7))
+* **chat:** mobile long-press room header to leave room ([3f553df](https://github.com/mlnl221/nicotineHub/commit/3f553dfbebe11f85c8d20daa15116479e9ef0c63))
+* **chat:** mobile long-press room header to leave room ([8612951](https://github.com/mlnl221/nicotineHub/commit/86129511f15d6d151645ec81a5344571ae130a94))
+* **chat:** right-click room header opens leave menu too ([724918c](https://github.com/mlnl221/nicotineHub/commit/724918c4b36d4e5000407de6cdffa68ad8c2a7f9))
+* **transfers:** mobile toolbar — primaries + more overflow, group/expand in menu ([a8e299e](https://github.com/mlnl221/nicotineHub/commit/a8e299e82d6dc07aa089f48c716d8e5acca8d18c))
+* **transfers:** uncap Select All, nicotine-plus clear/abort/ban/message-all parity ([05eb370](https://github.com/mlnl221/nicotineHub/commit/05eb370f1c6f24d0e5506111e8506baef1f17518))
+* **transfers:** uncap Select All, nicotine-plus clear/abort/ban/message-all parity ([6405edf](https://github.com/mlnl221/nicotineHub/commit/6405edf4676bb6a51287852b32c0a5b7e8ea75ef))
+* **web:** chat mobile single room flow — drop duplicate select, dead Private flag ([c800400](https://github.com/mlnl221/nicotineHub/commit/c800400896a2e0491f2b858db38fceb451336309))
+* **web:** login host/port snap back to server defaults on clear ([3d182ee](https://github.com/mlnl221/nicotineHub/commit/3d182ee013c8770ec89f51c6d85a653bbd1633f1))
+* **web:** mobile compact headers — flush sticky bars, collapsible scope/wishlist/lookup, info bubbles, real-pic avatar ([1f1f02a](https://github.com/mlnl221/nicotineHub/commit/1f1f02a399c947898e7cc8bb0238525bac779b26))
+* **web:** mobile unification phase 1 — shared empties, tokens, touch targets, dark parity ([d210ddc](https://github.com/mlnl221/nicotineHub/commit/d210ddce6f45fe45edd34f64a7de0cb7ee0a44bf))
+* **web:** mobile unification phase 2 — chat picker collapse, dl/up sticky toolbars, BulkBarShell ([5c3914a](https://github.com/mlnl221/nicotineHub/commit/5c3914a05e96f868005f102d247a53131e8129ff))
+* **web:** mobile unification phase 2 — chat picker collapse, dl/up sticky toolbars, BulkBarShell ([6918c19](https://github.com/mlnl221/nicotineHub/commit/6918c1974037a16e4870a16a12dff5f9bb95cfa0))
+* **web:** mobile unification phase 3 — overlay scale, ContextMenu on dl/up, amber demos ([60ed76c](https://github.com/mlnl221/nicotineHub/commit/60ed76c072411424e53074547223815d9d29ba3a))
+
+
+### Bug Fixes
+
+* explicit closes stick — rooms, tabs, upload queue no longer resurrect ([98faff7](https://github.com/mlnl221/nicotineHub/commit/98faff799fb26540f33dfa25833a205174f7a919))
+* explicit closes stick — rooms, tabs, upload queue no longer resurrect ([8e05267](https://github.com/mlnl221/nicotineHub/commit/8e05267da24a60e95f758678829f269c9b0fc56a))
+* non-string profile pic no longer blanks /profile ([c54fa8f](https://github.com/mlnl221/nicotineHub/commit/c54fa8feb37cfa7d845f9ed3e5f55082b9e75d81))
+* **transfers:** clear-all dropdown no longer clipped behind section ([d5390f4](https://github.com/mlnl221/nicotineHub/commit/d5390f4d195c352746c2df9bc65890d0249c319f))
+* **transfers:** review findings — socket cleanup, dup filenames, menu abort, id collision ([ac3be9f](https://github.com/mlnl221/nicotineHub/commit/ac3be9fa5260164eed2396323a7cbcc0333eec8c))
+* **web:** 4px breathing room above search card on mobile ([f45773d](https://github.com/mlnl221/nicotineHub/commit/f45773d5171f36c6fbde23b9009f6fcc1e5dfd17))
+* **web:** cross-tab close sync for rooms, profiles, browse, private chats ([6611980](https://github.com/mlnl221/nicotineHub/commit/6611980e237156c7700ad16c46aa1d861dc6dcc1))
+* **web:** overlay z-index + safe-area toast/player/sheet parity ([d96acb9](https://github.com/mlnl221/nicotineHub/commit/d96acb9e4eebdeb4272284878c6f84715d98d67e))
+* **web:** rebase findings — chat mains to 60px TopBar, ownPic string guard, hardened pic helper ([d24dbf7](https://github.com/mlnl221/nicotineHub/commit/d24dbf773634d4688abb0ce309f6420be6d1e4c3))
+* **web:** review findings — desktop View button restore, mobile room switcher ([9f50c20](https://github.com/mlnl221/nicotineHub/commit/9f50c20ee0001d07e474a05beea93c8a60d0433b))
+* **web:** search card flush under header on mobile (outer pt-1 to pt-0) ([f44461d](https://github.com/mlnl221/nicotineHub/commit/f44461de49d2503c962e59c381b03be2c9816161))
+* **web:** sticky bars flush — overflow-x-clip on mains/roots so top-60 is viewport-relative ([cb12963](https://github.com/mlnl221/nicotineHub/commit/cb12963f567ef25275b396971bdd6dc82c2d0ef9))
+
 ## [0.35.0](https://github.com/mlnl221/nicotineHub/compare/v0.34.0...v0.35.0) (2026-09-11)
 
 
