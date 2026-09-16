@@ -59,7 +59,10 @@ export function TransferCard({
     transfer.status === "Pending shutdown." ||
     transfer.status === "Too many files" ||
     transfer.status === "Too many megabytes";
-  const isTransferring = transfer.status === "Transferring" || transfer.status === "Getting status";
+  const isTransferring = transfer.status === "Transferring";
+  // Granted but no F connection yet — waiting on the peer, not live. No glow,
+  // no live-speed styling, so it never reads as flowing when zero bytes move.
+  const isGetting = transfer.status === "Getting status";
   const basename = (transfer.virtualPath.split(/[\\/]/).pop() ?? transfer.fileName).replace(/[/\\]/g, "_");
   const safeUser = transfer.username.replace(/[/\\]/g, "_").replace(/\.\./g, "_");
   const depth = settings.transfers.download_path_depth ?? "full";
@@ -85,9 +88,9 @@ export function TransferCard({
       : "bg-primary";
 
   const speedLabel =
-    isFinished ? "Finished" : isQueued ? "Queued" : isPaused ? "Paused" : isCancelled ? "Cancelled" : humanSpeed(transfer.speed);
+    isFinished ? "Finished" : isQueued ? "Queued" : isPaused ? "Paused" : isCancelled ? "Cancelled" : isGetting ? "Waiting for peer" : humanSpeed(transfer.speed);
   const etaLabel =
-    isFinished ? "Complete" : isQueued ? `Place ${transfer.queuePosition ?? "—"}` : isPaused ? "Paused" : isCancelled ? "Cancelled" : `ETA: ${humanETA(transfer.timeLeft)}`;
+    isFinished ? "Complete" : isQueued ? `Place ${transfer.queuePosition ?? "—"}` : isPaused ? "Paused" : isCancelled ? "Cancelled" : isGetting ? "Connecting…" : `ETA: ${humanETA(transfer.timeLeft)}`;
 
   const speedColor = transfer.isUpload ? "text-tertiary" : "text-primary";
 
@@ -168,7 +171,7 @@ export function TransferCard({
           >
             <span className="material-symbols-outlined text-[18px]">play_arrow</span>
           </button>
-        ) : isTransferring || isQueued ? (
+        ) : isTransferring || isGetting || isQueued ? (
           <button
             aria-label="Pause"
             onClick={onPause}

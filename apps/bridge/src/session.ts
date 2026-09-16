@@ -3189,6 +3189,22 @@ export class SoulseekSession {
     else this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: true, isFileConn: true, fileToken: token >>> 0, username, outbound: true, connType: "F", lastActive: Date.now(), createdAt: Date.now() } as never);
     return sock as Socket;
   }
+  /**
+   * Firewalled-downloader rescue: dial F out and pierce with the grant token
+   * so the uploader streams over our connection (their direct dial to our
+   * closed port already failed). PeerInit is NOT sent — the pierce init
+   * (code 0) takes its place, same as server-relayed pierce above.
+   */
+  async dialFilePierce(username: string, token: number): Promise<Socket> {
+    const sock = await this.connectPeer(username, "F");
+    try {
+      (sock as Socket).write(buildPierceFireWall(token));
+    } catch (e) { throw e; }
+    const st = this.peerStates.get(sock as Socket);
+    if (st) { st.isFileConn = true; st.fileToken = token >>> 0; st.initDone = true; st.username = username; st.connType = "F"; st.lastActive = Date.now(); }
+    else this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: true, isFileConn: true, fileToken: token >>> 0, username, outbound: true, connType: "F", lastActive: Date.now(), createdAt: Date.now() } as never);
+    return sock as Socket;
+  }
   /** Mark an adopted/pierced inbound socket as an upload F channel. */
   markFileUploadSocket(socket: Socket, token: number, username: string) {
     const st = this.peerStates.get(socket as Socket);

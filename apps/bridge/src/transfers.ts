@@ -241,7 +241,7 @@ export class TransferManager {
   private configDir: string;
   private incompleteDir: string;
   private downloadsDir: string;
-  private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; sendUploadDenied?: (u: string, f: string, reason?: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; sendTransferResponse?: (u: string, t: number, allowed: boolean, sizeOrReason?: number | bigint | string) => void; dialFileUpload?: (u: string, t: number) => Promise<Socket>; markFileUploadSocket?: (s: Socket, t: number, u: string) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
+  private sessionGetter?: () => { queueUpload: (u: string, f: string) => void; sendUploadDenied?: (u: string, f: string, reason?: string) => void; placeInQueueRequest: (u: string, f: string) => void; registerFileToken: (t: number) => void; unregisterFileToken: (t: number) => void; sendUploadSpeed: (s: number) => void; sendTransferResponse?: (u: string, t: number, allowed: boolean, sizeOrReason?: number | bigint | string) => void; dialFileUpload?: (u: string, t: number) => Promise<Socket>; dialFilePierce?: (u: string, t: number) => Promise<Socket>; markFileUploadSocket?: (s: Socket, t: number, u: string) => void; connectPeer: (u: string, t: string) => Promise<Socket>; getShareDB?: () => { hasVirtualPath?: (p: string) => boolean; getFolders?: () => unknown[] } } | undefined;
   private onBanlistUpdated?: (banlist: string[], byUser: string) => void;
   private tokenCounter = Math.floor(Math.random() * 900000) + 10000;
   private tokenIndex = new Map<number, string>();
@@ -823,7 +823,9 @@ export class TransferManager {
       avgSpeed: 0,
       timeLeft: null,
       status: "Queued",
-      queuePosition: Math.max(1, [...this.transfers.values()].filter((x) => !x.isUpload && x.status === "Queued").length + 1),
+      // No fake local position — the real remote place arrives via
+      // PlaceInQueueResponse (polled immediately below). UI shows "Place —" until then.
+      queuePosition: null,
       isUpload: false,
       token,
     };
@@ -921,7 +923,9 @@ export class TransferManager {
         return;
       }
       try { this.session?.placeInQueueRequest(cur.username, cur.virtualPath); } catch {}
-    }, 300_000);
+    }, 60_000);
+    // Immediate first poll so "Place —" resolves in seconds, not minutes.
+    try { this.session?.placeInQueueRequest(t.username, t.virtualPath); } catch {}
   }
 
   private pollQueuePositions() {
@@ -1264,6 +1268,8 @@ export class TransferManager {
   }
 
   handleTransferRequest(direction: number, token: number, file: string, username?: string, size?: number | bigint) {
+    // Diagnostic echo from F-data flow (session emits file:"F:<token>") — not a grant.
+    if (typeof file === "string" && file.startsWith("F:")) return;
     // Legacy direction 0 = download from peer (slskd/Museek) — treat as QueueUpload
     if (direction === 0) {
       // find or create queued upload? For interop, treat as queue-upload request from peer that wants our file
@@ -1291,7 +1297,20 @@ export class TransferManager {
       // Legacy: grant without username — exact path only, no basename guessing.
       for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) { target = t; break; }
     }
-    if (!target) return;
+    if (!target && owner) {
+      // Case/rename drift (peer normalizes separators or case): owner-scoped
+      // case-insensitive fallback. Never matches across users.
+      const lower = file.toLowerCase();
+      for (const t of this.transfers.values()) {
+        if (t.isUpload || t.username !== owner) continue;
+        if (t.virtualPath.toLowerCase() === lower || lower.endsWith(t.fileName.toLowerCase())) { target = t; break; }
+      }
+    }
+    if (!target) {
+      // Was a silent return — stuck Queued with zero signal. Now visible in diagnostics.
+      logger.warn("transfer", "grant for unknown transfer", { username: owner ?? "?", file, token });
+      return;
+    }
     // Finished transfers never restart: repeat peer grants (uploader queue
     // cycling after our finish) get denied COMPLETE, nicotine-plus parity
     // (downloads.py _transfer_request_downloads). No token mapping, no status change.
@@ -1352,11 +1371,28 @@ export class TransferManager {
     target._statusTimer = setTimeout(() => {
       const cur = this.get(target!.id);
       if (!cur || cur.status !== "Getting status") return;
+      const pt = (cur as unknown as { _pierceTimer?: Timer })._pierceTimer;
+      if (pt) { clearTimeout(pt); (cur as unknown as { _pierceTimer?: Timer })._pierceTimer = undefined; }
       cur.status = "Connection timeout";
       this.emit(cur);
       try { this.session?.unregisterFileToken(token); } catch {}
       this.scheduleRetry(target!.id, 180_000);
     }, 45_000);
+    // Firewalled-downloader rescue: no inbound F in 10 s usually means our
+    // port is closed to them (their dial died). Dial out and pierce with the
+    // grant token so they stream over our connection. If their direct F lands
+    // first, handleFileConnection clears this timer; duplicates close spare.
+    (target as unknown as { _pierceTimer?: Timer })._pierceTimer = setTimeout(() => {
+      const cur = this.get(target!.id);
+      if (!cur || cur.status !== "Getting status") return;
+      const sess = this.sessionGetter?.() as unknown as { dialFilePierce?: (u: string, t: number) => Promise<Socket> } | undefined;
+      if (!sess?.dialFilePierce) return;
+      logger.info("transfer", "no inbound F, piercing out", { id: cur.id });
+      sess.dialFilePierce(cur.username, token).then(
+        async (sock) => { try { await this.handleFileConnection(token, sock); } catch {} },
+        () => {},
+      );
+    }, 10_000);
   }
 
   // Permanent denials never succeed on retry (nicotine-plus denial categories).
@@ -1585,6 +1621,9 @@ export class TransferManager {
     // Adopt the live F token (may be an older grant racing a newer request).
     t.token = token;
     this.tokenIndex.set(token >>> 0, t.id);
+    // An F just arrived (inbound or our pierce) — stand down any pierce rescue.
+    const pierce = (t as unknown as { _pierceTimer?: Timer })._pierceTimer;
+    if (pierce) { clearTimeout(pierce); (t as unknown as { _pierceTimer?: Timer })._pierceTimer = undefined; }
     // Second F dial for a transfer that already streams: close the spare so
     // two sockets never share _onFileData/left accounting. Timed-out or
     // retried transfers (status != Transferring) still accept a fresh F.
@@ -1618,6 +1657,10 @@ export class TransferManager {
     }
     if (t._statusTimer) { clearTimeout(t._statusTimer); t._statusTimer = undefined; }
     if (t._timer) { clearInterval(t._timer); t._timer = undefined; }
+    // Drop any stale stall timer from a previous F attempt so it can't
+    // false-timeout this fresh connection.
+    const staleStall = (t as unknown as { _stallTimer?: Timer })._stallTimer;
+    if (staleStall) { clearTimeout(staleStall); (t as unknown as { _stallTimer?: Timer })._stallTimer = undefined; }
     // Real F drove progress from here (no fake progress exists anymore).
     (t as unknown as { _hadRealF?: boolean })._hadRealF = true;
     (t as unknown as { _hadRealF?: boolean })._hadRealF = true;
@@ -1689,6 +1732,12 @@ export class TransferManager {
       }
       t.current += toWrite.length;
       left -= toWrite.length;
+      // Any bytes = peer alive: re-arm the stall watchdog (throttled to 5s)
+      // so slow trickles never false-timeout on the fixed 60s window.
+      try {
+        const nowTs = Date.now();
+        if (nowTs - ((t as unknown as { _stallRearmAt?: number })._stallRearmAt ?? 0) > 5000) armStall();
+      } catch {}
       const elapsed = (Date.now() - (t._startTime ?? Date.now())) / 1000;
       const rawSpeed = elapsed > 0 ? (t.current - startOffset) / elapsed : toWrite.length * 2;
       const curr = Math.max(1024, Math.min(rawSpeed, dlLimit || rawSpeed));
@@ -1715,16 +1764,22 @@ export class TransferManager {
     }
 
     // If socket already has buffered data, process it
-    // Timeout for stalled transfer
-    const stallTimer = setTimeout(() => {
-      if (t.status === "Transferring" && left > 0) {
-        t.status = "Connection timeout";
-        this.emit(t);
-        try { socket.end(); } catch {}
-        this.scheduleRetry(t.id, 180_000);
-      }
-    }, 60_000);
-    (t as unknown as { _stallTimer?: Timer })._stallTimer = stallTimer;
+    // Idle watchdog: 60s with zero bytes = stalled. Re-armed by onData above,
+    // so this only fires on true stalls, not slow trickles.
+    const armStall = () => {
+      const old = (t as unknown as { _stallTimer?: Timer })._stallTimer;
+      if (old) clearTimeout(old);
+      (t as unknown as { _stallRearmAt?: number })._stallRearmAt = Date.now();
+      (t as unknown as { _stallTimer?: Timer })._stallTimer = setTimeout(() => {
+        if (t.status === "Transferring" && left > 0) {
+          t.status = "Connection timeout";
+          this.emit(t);
+          try { socket.end(); } catch {}
+          this.scheduleRetry(t.id, 180_000);
+        }
+      }, 60_000);
+    };
+    armStall();
   }
 
   handleFileChunk(token: number, chunk: Buffer) {

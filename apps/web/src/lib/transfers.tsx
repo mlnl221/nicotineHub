@@ -263,16 +263,30 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
         });
         if (becameFinished) triggerScan(msg.transfer);
       } else if (msg.type === "transfer:queue") {
-        setTransfers((prev) => prev.map((t) => (t.id === msg.id ? { ...t, queuePosition: msg.place, status: "Queued" as const } : t)));
+        // Upsert: queue events can arrive for rows we never saw (missed update
+        // across reconnect). Never leave "Place —" forever on a known id.
+        setTransfers((prev) => {
+          if (prev.some((t) => t.id === msg.id)) {
+            return prev.map((t) => (t.id === msg.id ? { ...t, queuePosition: msg.place, status: "Queued" as const } : t));
+          }
+          const user = msg.id.split("::")[0] ?? "";
+          const vpath = msg.id.split("::").slice(1).join("::") ?? "";
+          return [...prev, { id: msg.id, username: user, virtualPath: vpath, fileName: vpath.split("\\").pop() ?? vpath, size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Queued" as const, queuePosition: msg.place, isUpload: false }];
+        });
       } else if (msg.type === "transfer:finished") {
         const finishedUrl = (msg as { downloadUrl?: string }).downloadUrl;
-        setTransfers((prev) =>
-          prev.map((t) =>
-            t.id === msg.id
-              ? { ...t, status: "Finished" as const, current: t.size, speed: 0, timeLeft: null, queuePosition: null, ...(finishedUrl ? { downloadUrl: finishedUrl } : null) }
-              : t,
-          ),
-        );
+        setTransfers((prev) => {
+          if (prev.some((t) => t.id === msg.id)) {
+            return prev.map((t) =>
+              t.id === msg.id
+                ? { ...t, status: "Finished" as const, current: t.size, speed: 0, timeLeft: null, queuePosition: null, ...(finishedUrl ? { downloadUrl: finishedUrl } : null) }
+                : t,
+            );
+          }
+          const user = msg.id.split("::")[0] ?? "";
+          const vpath = msg.id.split("::").slice(1).join("::") ?? msg.fileName;
+          return [...prev, { id: msg.id, username: user, virtualPath: vpath, fileName: msg.fileName, size: msg.size, current: msg.size, speed: 0, avgSpeed: 0, timeLeft: null, status: "Finished" as const, queuePosition: null, isUpload: false, ...(finishedUrl ? { downloadUrl: finishedUrl } : null) }];
+        });
         // fire worker scan for finished download
         const dummy: Transfer = {
           id: msg.id,

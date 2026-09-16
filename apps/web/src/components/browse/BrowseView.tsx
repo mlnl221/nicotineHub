@@ -58,8 +58,17 @@ const FolderRow = memo(function FolderRow({ name, short, depth, hasChildren, isE
       >
         <span className="material-symbols-outlined text-[20px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>{hasChildren ? (isExpanded ? "folder_open" : "folder") : "folder"}</span>
         <div className="min-w-0 flex-1">
-          <p className="whitespace-nowrap font-body text-sm font-medium" title={name}>{short}</p>
-          <p className="truncate font-label text-[11px] text-on-surface-variant">{statsLine}</p>
+          {hasChildren ? (
+            <>
+              <p className="whitespace-nowrap font-body text-sm font-medium" title={name}>{short}</p>
+              <p className="truncate font-label text-[11px] text-on-surface-variant">{statsLine}</p>
+            </>
+          ) : (
+            <p className="whitespace-nowrap font-body text-sm" title={`${name} — ${statsLine}`}>
+              <span className="font-medium">{short}</span>
+              <span className="ml-2 font-label text-[11px] text-on-surface-variant">{statsLine}</span>
+            </p>
+          )}
         </div>
       </button>
     </div>
@@ -224,7 +233,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
       const depth = folderMeta.get(f.name)?.depth ?? 0;
       if (depth === 0) return true;
       const parts = f.name.split("\\");
-      for (let i = parts.length - 1; i > minDepth; i--) {
+      for (let i = parts.length - 1; i > 0; i--) {
         const ancestor = parts.slice(0, i).join("\\");
         if (names.has(ancestor) && !expandedPaths.has(ancestor)) return false;
       }
@@ -251,7 +260,9 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const folderSentinel = useRef<HTMLDivElement | null>(null);
   const fileSentinel = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => { setVisibleFolderCount(PAGE_SIZE); }, [visibleTreeFolders.length, filteredFolders.length, query, expandedPaths.size]);
+  // Reset paging only on new data / new filter — never on expand/collapse
+  // (resetting here shrank the list under the user and lost their scroll spot).
+  useEffect(() => { setVisibleFolderCount(PAGE_SIZE); }, [filteredFolders.length, query]);
   useEffect(() => { setVisibleFileCount(PAGE_SIZE); }, [visibleFiles.length, activeFolder?.name, fileQuery]);
   // Reset selection when folder changes (prevents stale selection across folders)
   useEffect(() => { bulk.clear(); }, [activeFolder?.name]);
@@ -351,6 +362,21 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
       if (expand) n.add(name);
       else n.delete(name);
       return n;
+    });
+    if (!expand) return;
+    // Pin the expanded folder to the top of the list so its children are
+    // visible below it — no more losing your scroll spot on expand.
+    const idx = visibleTreeFolders.findIndex((f) => f.name === name);
+    if (idx >= 0) setVisibleFolderCount((v) => Math.max(v, idx + 1 + PAGE_SIZE));
+    requestAnimationFrame(() => {
+      try {
+        const container = folderListRef.current;
+        const row = rowRefs.current.get(name);
+        if (!container || !row) return;
+        const c = container.getBoundingClientRect();
+        const r = row.getBoundingClientRect();
+        container.scrollTop += r.top - c.top - 8;
+      } catch {}
     });
   };
   const handleFolderKeyDown = (e: React.KeyboardEvent) => {
