@@ -59,7 +59,7 @@ export function Sidebar() {
     <>
       <nav className={`fixed left-0 top-0 z-50 hidden h-full ${widthClass} flex-col backdrop-blur-md dark:bg-surface-container-low/90 md:flex bg-surface-container-low/90 border-r border-outline-variant/5 ${paddingClass} transition-all duration-300`}>
         {/* Header + collapse toggle — logo area opens About like nicotine-plus Help > About */}
-        <div className={`flex items-center ${collapsed ? "justify-center" : "justify-between"} gap-2`}>
+        <div className={`flex items-center ${collapsed ? "flex-col justify-center gap-1" : "justify-between gap-2"}`}>
           {!collapsed ? (
             <button type="button" onClick={() => setAboutOpen(true)} className="text-left rounded-lg -mx-1 px-1 py-1 hover:bg-surface-container-high/60 transition-colors" aria-label={t("About") + " Nicotine Hub"} title="About Nicotine Hub">
               <div className="mb-1 font-headline text-lg font-black text-on-surface dark:text-inverse-primary">
@@ -70,14 +70,14 @@ export function Sidebar() {
               </div>
             </button>
           ) : (
-            <button type="button" onClick={() => setAboutOpen(true)} className="font-headline text-sm font-black text-on-surface dark:text-inverse-primary rounded-lg px-2 py-1 hover:bg-surface-container-high/60" aria-label={t("About") + " Nicotine Hub"} title="About Nicotine Hub">
+            <button type="button" onClick={() => setAboutOpen(true)} className="font-headline text-sm font-black leading-none text-on-surface dark:text-inverse-primary rounded-lg px-1 py-1 hover:bg-surface-container-high/60" aria-label={t("About") + " Nicotine Hub"} title="About Nicotine Hub">
               NH
             </button>
           )}
           <button
             onClick={toggle}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="hidden md:flex h-8 w-8 items-center justify-center rounded-lg bg-surface-container-high/60 hover:bg-surface-container-high text-on-surface-variant dark:text-outline transition-colors"
+            className={`hidden md:flex items-center justify-center rounded-lg bg-surface-container-high/60 hover:bg-surface-container-high text-on-surface-variant dark:text-outline transition-colors ${collapsed ? "h-7 w-7" : "h-8 w-8"}`}
             title={collapsed ? "Expand" : "Collapse"}
           >
             <span className="material-symbols-outlined text-[18px]">{collapsed ? "chevron_right" : "chevron_left"}</span>
@@ -131,7 +131,7 @@ export function Sidebar() {
       >
         <span className="material-symbols-outlined text-[18px]">search</span>
         {!collapsed ? <span>{t("Search")}</span> : null}
-        {mounted && unread.search ? <span aria-hidden="true" className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-tertiary ring-2 ring-surface-container-low" /> : null}
+        {mounted && unread.search ? <span aria-hidden="true" className="absolute top-1 right-1 h-3 w-3 rounded-full bg-tertiary ring-2 ring-surface-container-low" /> : null}
       </Link>
 
       <ul className="mt-6 flex-1 space-y-1 overflow-y-auto overflow-x-hidden hide-scrollbar">
@@ -150,8 +150,8 @@ export function Sidebar() {
                 title={collapsed ? `${item.label}${badge}` : undefined}
                 className={
                   isActive
-                    ? `flex items-center rounded-xl bg-primary-fixed/30 px-3 py-3 font-bold text-primary dark:bg-primary-container/20 dark:text-inverse-primary ${collapsed ? "justify-center" : "space-x-3"}`
-                    : `flex items-center rounded-xl px-3 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant ${collapsed ? "justify-center" : "space-x-3"}`
+                    ? `relative flex items-center rounded-xl bg-primary-fixed/30 px-3 py-3 font-bold text-primary dark:bg-primary-container/20 dark:text-inverse-primary ${collapsed ? "justify-center" : "space-x-3"}`
+                    : `relative flex items-center rounded-xl px-3 py-3 text-on-surface-variant transition-all hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant ${collapsed ? "justify-center" : "space-x-3"}`
                 }
                 style={isActive ? ({ fontVariationSettings: "'FILL' 1" } as React.CSSProperties) : undefined}
               >
@@ -167,9 +167,9 @@ export function Sidebar() {
                     {dot ? <span aria-hidden="true" className="ml-auto h-2 w-2 shrink-0 rounded-full bg-primary" /> : null}
                   </>
                 ) : dot ? (
-                  <span aria-hidden="true" className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-surface-container-low" />
+                  <span aria-hidden="true" className="absolute top-1 right-1 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-surface-container-low" />
                 ) : badge ? (
-                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 rounded-full bg-tertiary px-1 text-[9px] leading-4 text-center text-on-tertiary font-bold md:hidden">{badge.trim().replace(/[()]/g,"")}</span>
+                  <span className="absolute top-0.5 right-0.5 min-w-[16px] h-4 rounded-full bg-tertiary px-1 text-[9px] leading-4 text-center text-on-tertiary font-bold">{badge.trim().replace(/[()]/g,"")}</span>
                 ) : null}
               </Link>
             </li>
