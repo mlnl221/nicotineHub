@@ -86,7 +86,7 @@ function BrowseInner() {
     setRecent(loadRecent());
   };
 
-  if (state.status !== "connected") return null;
+  if (state.status !== "connected" && !state.reconnecting) return null;
 
   const hasTabs = tabs.length > 0;
 

@@ -71,7 +71,7 @@ function TabbedProfileInner() {
     setRecent(loadRecent());
   };
 
-  if (state.status !== "connected") return null;
+  if (state.status !== "connected" && !state.reconnecting) return null;
 
   const lookupCollapsed = !!activeTab && !lookupOpen;
   const ownAvatar = (
