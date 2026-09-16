@@ -32,12 +32,12 @@ describe("transfers — download engine (Phase 2)", () => {
   beforeEach(() => { tmp = makeTmpDir(); });
   afterEach(() => { try { rmSync(tmp, { recursive: true, force: true }); } catch {} });
 
-  test("requestDownload creates Queued with token and queuePosition", () => {
+  test("requestDownload creates Queued with token and null queuePosition until remote place arrives", () => {
     const { mgr, updates } = makeManager(tmp, undefined);
     const t = mgr.requestDownload("alice", "Music\\song.mp3", 1000);
     expect(t.status).toBe("Queued");
     expect(t.token).toBeDefined();
-    expect(t.queuePosition).toBe(1);
+    expect(t.queuePosition).toBeNull();
     expect(updates.length).toBeGreaterThanOrEqual(1);
     // dedup
     const t2 = mgr.requestDownload("alice", "Music\\song.mp3", 1000);
@@ -46,12 +46,16 @@ describe("transfers — download engine (Phase 2)", () => {
     mgr.close();
   });
 
-  test("queuePosition increments", () => {
+  test("queuePosition comes only from remote PlaceInQueueResponse", () => {
     const { mgr } = makeManager(tmp);
     const a = mgr.requestDownload("alice", "a.mp3", 100);
     const b = mgr.requestDownload("bob", "b.mp3", 200);
-    expect(a.queuePosition).toBe(1);
-    expect(b.queuePosition).toBe(2);
+    expect(a.queuePosition).toBeNull();
+    expect(b.queuePosition).toBeNull();
+    mgr.handlePlaceInQueueResponse("a.mp3", 3, "alice");
+    mgr.handlePlaceInQueueResponse("b.mp3", 7, "bob");
+    expect(mgr.get("alice::a.mp3")?.queuePosition).toBe(3);
+    expect(mgr.get("bob::b.mp3")?.queuePosition).toBe(7);
     mgr.close();
   });
 
