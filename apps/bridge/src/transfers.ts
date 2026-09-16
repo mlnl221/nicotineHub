@@ -682,8 +682,12 @@ export class TransferManager {
   }
 
   private emit(t: BridgeTransfer) {
-    const { _timer: _t, _pollTimer: _p, _statusTimer: _s, _retryTimer: _r, _fileHandle: _f, ...publicT } = t as unknown as Record<string, unknown>;
-    logger.debug("transfer", `transfer ${t.status}`, { id: t.id, username: t.username, status: t.status, current: t.current, queuePosition: t.queuePosition });
+    const { _timer: _t, _pollTimer: _p, _statusTimer: _s, _retryTimer: _r, _fileHandle: _f, _lastLogStatus: _l, ...publicT } = t as unknown as Record<string, unknown>;
+    // emit() fires per data chunk — only log status transitions, not every chunk
+    if (_l !== t.status) {
+      (t as unknown as Record<string, unknown>)._lastLogStatus = t.status;
+      logger.debug("transfer", `transfer ${t.status}`, { id: t.id, username: t.username, status: t.status, current: t.current, queuePosition: t.queuePosition });
+    }
     this.onUpdate(publicT as unknown as BridgeTransfer);
     this.persist();
   }

@@ -499,7 +499,6 @@ function sharedSessionCallbacks(boundTransfers: TransferManager) {
         pluginManager.userResolveNotification(event.username ?? "", pa.ip ?? "", pa.port ?? 0);
         try { (sharedTransfers as unknown as { handlePeerAddressResolved?: (u: string, ip: string) => void })?.handlePeerAddressResolved?.(event.username ?? "", pa.ip ?? ""); } catch {}
       }
-      logger.debug("server", "user event", { type: event.type, username: event.username });
       // Peer user-info carries pic as Buffer — JSON would relay a truthy
       // {type,data} object that crashes clients calling string methods on it.
       if (event.type === "user-info-response") {
@@ -527,7 +526,6 @@ function sharedSessionCallbacks(boundTransfers: TransferManager) {
         if (finalMsg !== undefined) event.message = finalMsg;
         pluginManager.incomingPublicChatNotification(event.room, event.username ?? "", event.message);
       }
-      logger.debug("chat", "chat event", { type: event.type, room: event.room, username: event.username });
       try {
         if (event.type === "private-message" && event.username && event.message) {
           const isAction = event.message.startsWith("/me ") || event.message.startsWith("* ");
@@ -553,11 +551,9 @@ function sharedSessionCallbacks(boundTransfers: TransferManager) {
       else if (event.type === "room-list" && event.data) {
         // ignore
       }
-      logger.debug("chat", "room event", { type: event.type, room: event.room });
       broadcastJson({ type: "room:event", event });
     },
     onBrowseEvent: (event: { type: string; username: string; folders?: unknown[]; folder?: string; token?: number; files?: unknown[]; lockedFolders?: unknown[]; error?: string }) => {
-      logger.debug("server", "browse event", { type: event.type, username: event.username, folder: event.folder });
       try {
         if (event.type === "browse-shares") {
           const seen = new Set<string>();
@@ -603,7 +599,10 @@ function sharedSessionCallbacks(boundTransfers: TransferManager) {
       else if (event.type === "transfer-response" && event.username && event.file) {
         pluginManager.uploadStartedNotification(event.username, event.file);
       }
-      logger.debug("transfer", "transfer event", { type: event.type, username: event.username, file: event.file?.slice(0, 80), token: event.token });
+      // inbound FileSearch queries arrive here as transfer-request without direction — many/sec as leaf, skip logging those
+      if (!(event.type === "transfer-request" && event.direction === undefined)) {
+        logger.debug("transfer", "transfer event", { type: event.type, username: event.username, file: event.file?.slice(0, 80), token: event.token });
+      }
       broadcastJson({ type: "peer:transfer", event });
       const tm = boundTransfers;
       if (!tm) return;
@@ -1428,7 +1427,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         logger.info("search", "search request", { searchId, query: finalQuery.slice(0,80), origQuery: query.slice(0,80) });
         const token = session.search(finalQuery, nsSearchId(searchId), {
           onResult: (p) => {
-            logger.info("search", "search result → all clients", { searchId, token: p.token, rows: p.rows?.length });
+            logger.debug("search", "search result → all clients", { searchId, token: p.token, rows: p.rows?.length });
             broadcastJson({ type: "search:result", ...p, searchId });
           },
           onEnd: (p) => {
