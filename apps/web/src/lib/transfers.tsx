@@ -76,6 +76,14 @@ export function sortTransfers<T extends { virtualPath: string; fileName: string 
 
 const TransfersContext = createContext<TransfersApi | null>(null);
 
+// Demo enqueue bus — search/browse queue simulated transfers locally (no
+// bridge). Provider registers the inserter; callers just import this.
+export interface DemoEnqueueRow { fileName: string; user: string; size?: number; virtualPath?: string }
+const demoEnqueueCbs = new Set<(row: DemoEnqueueRow) => void>();
+export function enqueueDemoTransfer(row: DemoEnqueueRow) {
+  demoEnqueueCbs.forEach((cb) => { try { cb(row); } catch {} });
+}
+
 const STORAGE_KEY = "nicotineHub.transfers.mock";
 
 // Clears that may never have reached the bridge (reload drops the in-memory
@@ -197,6 +205,24 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
     setTransfers(seeded);
   }, [state.status, transfers.length]);
 
+  // Demo: search/browse enqueue lands here as an animated Transferring row
+  // (existing interval above animates any Transferring status to Finished)
+  useEffect(() => {
+    if (!isDemo) return;
+    const cb = (row: DemoEnqueueRow) => {
+      const virtualPath = row.virtualPath ?? row.fileName;
+      const id = `${row.user}::${virtualPath}`;
+      const size = row.size && row.size > 0 ? row.size : 8_000_000;
+      const speed = 750_000 + Math.floor(Math.random() * 500_000);
+      setTransfers((prev) => {
+        if (prev.some((t) => t.id === id)) return prev;
+        return [...prev, { id, username: row.user, virtualPath, fileName: row.fileName, size, current: 0, speed, avgSpeed: speed, timeLeft: Math.ceil(size / speed), status: "Transferring" as const, queuePosition: null, isUpload: false }];
+      });
+    };
+    demoEnqueueCbs.add(cb);
+    return () => { demoEnqueueCbs.delete(cb); };
+  }, []);
+
   // Demo: animate Transferring progress so downloads/uploads look live
   useEffect(() => {
     if (!isDemo) return;
@@ -272,7 +298,8 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
           const wasFinished = idx >= 0 ? prev[idx].status === "Finished" : false;
           if (idx >= 0) {
             const next = [...prev];
-            next[idx] = msg.transfer;
+            // merge (not replace) so partial demo echoes can't clobber fields
+            next[idx] = { ...next[idx], ...msg.transfer };
             return next;
           }
           return [...prev, msg.transfer];

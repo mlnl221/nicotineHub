@@ -307,8 +307,8 @@ function UploadsInner() {
             onClear: () => clearTransfer(menuAnchor.transfer.id, true),
             onClearMany: (s) => clearMany(true, s),
             onBan: () => banUser(menuAnchor.transfer.username),
-            onEditTags: isDemo ? undefined : ["mp3","flac","ogg","m4a","wav","wma","aac","opus","aiff","aif","wv"].includes(menuAnchor.transfer.fileName.toLowerCase().split(".").pop() ?? "") ? () => setTagFile(menuAnchor.transfer.fileName) : undefined,
-            onAnalyzeSpectrum: isDemo ? undefined : ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus"].includes(menuAnchor.transfer.fileName.toLowerCase().split(".").pop() ?? "") ? () => requestSpectrum(menuAnchor.transfer.id, { fileName: menuAnchor.transfer.fileName }) : undefined,
+            onEditTags: ["mp3","flac","ogg","m4a","wav","wma","aac","opus","aiff","aif","wv"].includes(menuAnchor.transfer.fileName.toLowerCase().split(".").pop() ?? "") ? () => setTagFile(menuAnchor.transfer.fileName) : undefined,
+            onAnalyzeSpectrum: ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus"].includes(menuAnchor.transfer.fileName.toLowerCase().split(".").pop() ?? "") ? () => requestSpectrum(menuAnchor.transfer.id, { fileName: menuAnchor.transfer.fileName }) : undefined,
             hasSpectrum: false,
           })}
           onClose={() => setMenuAnchor(null)}

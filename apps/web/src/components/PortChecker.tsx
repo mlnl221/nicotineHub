@@ -130,7 +130,21 @@ export function PortChecker() {
   }, []);
 
   const check = async () => {
-    if (isDemo) return;
+    // Demo (Vercel): no bridge/network — canned triple so the UI still demonstrates the layout.
+    if (isDemo) {
+      setChecking(true);
+      setResult(null);
+      setTimeout(() => {
+        setHealth({ listenPort: 60754, upnp: { enabled: false, active: null, port: 60754, ip: null, error: null, lastSuccessAt: null } });
+        setResult({
+          bridge: { tone: "green", msg: "Demo: bridge reachable (mocked) — listen port 60754." },
+          upnp: { tone: "yellow", msg: "Demo: UPnP disabled (manual forward required)." },
+          external: { tone: "gray", msg: "Demo: external check skipped — offline mock, no network." },
+        });
+        setChecking(false);
+      }, 400);
+      return;
+    }
     setChecking(true);
     setResult(null);
     try {
@@ -250,17 +264,16 @@ export function PortChecker() {
       )}
       {isDemo ? (
         <p className="rounded-xl bg-surface-container-high px-3 py-2 text-xs text-on-surface-variant dark:bg-surface-container-highest/40">
-          Bridge check unavailable in demo (offline — no bridge).
+          Demo preview — offline mock, no network. Check returns canned results.
         </p>
-      ) : (
-        <button
-          onClick={check}
-          disabled={checking}
-          className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary disabled:opacity-50"
-        >
-          {checking ? "Checking…" : "Check bridge & port"}
-        </button>
-      )}
+      ) : null}
+      <button
+        onClick={check}
+        disabled={checking}
+        className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary disabled:opacity-50"
+      >
+        {checking ? "Checking…" : "Check bridge & port"}
+      </button>
       {result && (
         <div className="mt-3 flex flex-col gap-2">
           {(

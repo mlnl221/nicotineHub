@@ -141,7 +141,8 @@ export async function readTags(fileName: string): Promise<TagReadResult> {
 export async function writeTags(fileName: string, tags: Record<string, string | null>, removeTags: string[] = []): Promise<TagReadResult> {
   if (process.env.NEXT_PUBLIC_DEMO === "true") {
     const backend = await import("@/lib/demo/workerBackend");
-    backend.demoWriteTags(fileName);
+    const r = backend.demoWriteTags(fileName, tags, removeTags);
+    if (r) return r;
   }
   const res = await workerFetch("/tag/write", { method: "POST", body: JSON.stringify({ fileName, tags, removeTags }) });
   const body = await res.json().catch(() => ({}));
@@ -284,7 +285,8 @@ export async function renameFile(fileName: string, newName: string): Promise<{ o
 
 export async function renamePreview(files: string[], template: string): Promise<{ results: Array<{ file: string; newName: string | null; skipped?: string; suffixed?: boolean }> }> {
   if (process.env.NEXT_PUBLIC_DEMO === "true") {
-    return { results: [] };
+    const backend = await import("@/lib/demo/workerBackend");
+    return backend.demoRenamePreview(files, template);
   }
   const res = await workerFetch("/tag/rename-preview", { method: "POST", body: JSON.stringify({ files, template }) });
   const body = await res.json().catch(() => ({}));

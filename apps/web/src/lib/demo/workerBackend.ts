@@ -45,13 +45,44 @@ export function demoRequestSpectrum(opts: { fileName: string; size?: number; tok
   return null;
 }
 
+// Session-only tag overlays (demo): writeTags persists here, readTags merges
+// over fixtures. Module-level Map — survives SPA navigations, gone on reload.
+const tagOverlays = new Map<string, Record<string, string>>();
+const coverApplied = new Set<string>();
+
 export function demoReadTags(fileName: string): TagReadResult | null {
-  return demoTagResult(fileName);
+  const base = demoTagResult(fileName);
+  if (!base) return null;
+  const overlay = tagOverlays.get(fileName);
+  if (!overlay && !coverApplied.has(fileName)) return base;
+  return {
+    ...base,
+    tags: overlay ? { ...overlay } : { ...base.tags },
+    coverArtApplied: coverApplied.has(fileName) || base.coverArtApplied,
+  };
 }
 
-export function demoWriteTags(fileName: string): null {
-  if (isDemoAudioPath(fileName)) throw new Error("Tags are read-only in demo — not saved.");
-  return null;
+export function demoWriteTags(
+  fileName: string,
+  tags: Record<string, string | null> = {},
+  removeTags: string[] = [],
+): TagReadResult | null {
+  if (!isDemoAudioPath(fileName)) return null;
+  const base = demoTagResult(fileName);
+  const current: Record<string, string> = { ...(tagOverlays.get(fileName) ?? base?.tags ?? {}) };
+  for (const [k, v] of Object.entries(tags)) {
+    if (v === null || v === undefined) delete current[k];
+    else current[k] = v;
+  }
+  for (const k of removeTags) delete current[k];
+  tagOverlays.set(fileName, current);
+  return {
+    tags: { ...current },
+    info: base?.info,
+    coverArtApplied: coverApplied.has(fileName) || !!base?.coverArtApplied,
+    fileName,
+    path: fileName,
+  };
 }
 
 export function demoScrapeTags(fileName: string, url: string, apply: boolean, trackIndex?: number): TagScrapeResult | null {
@@ -61,13 +92,16 @@ export function demoScrapeTags(fileName: string, url: string, apply: boolean, tr
   return null;
 }
 
-export function demoCoverArt(_fileName: string, _url: string, _opts?: { embed?: boolean; saveFile?: boolean }): { embedded: boolean; folderJpg: boolean } {
-  return { embedded: false, folderJpg: false };
+export function demoCoverArt(fileName: string, url: string, _opts?: { embed?: boolean; saveFile?: boolean }): { embedded: boolean; folderJpg: boolean; size: number } | null {
+  if (!isDemoAudioPath(fileName)) return null;
+  // In-memory echo only — nothing fetched, nothing written to disk.
+  coverApplied.add(fileName);
+  return { embedded: true, folderJpg: false, size: url.length || 1 };
 }
 
 export function demoBulkReadTags(files: string[]): Array<{ fileName: string; tags?: Record<string, string>; info?: Record<string, unknown>; coverArtApplied?: boolean; error?: string }> | null {
   const mapped = files.map((f) => {
-    const r = demoTagResult(f);
+    const r = demoReadTags(f);
     return r ? { fileName: f, tags: r.tags, info: r.info, coverArtApplied: r.coverArtApplied } : null;
   });
   if (mapped.every(Boolean)) {
@@ -127,6 +161,56 @@ export function demoRename(
     }
   }
   return { ok: true, newPath: `${dir}${name}`, fileName: name, suffixed };
+}
+
+const RENAME_TOKENS = new Set(["track", "artist", "title"]);
+
+/**
+ * Demo rename preview — renders {track}/{artist}/{title} from overlay-merged
+ * tags, then routes through demoRename for validation + collision suffixing.
+ * Mirrors apps/worker/app.py tag_rename_preview (subset).
+ */
+export function demoRenamePreview(
+  files: string[],
+  template: string,
+): { results: Array<{ file: string; newName: string | null; skipped?: string; suffixed?: boolean }> } {
+  const tmpl = template.trim();
+  const found = new Set([...tmpl.matchAll(/\{(\w+)\}/g)].map((m) => m[1]));
+  if (!found.size) throw new Error("rename template must contain at least one of {track} {artist} {title}");
+  for (const t of found) {
+    if (!RENAME_TOKENS.has(t)) throw new Error("unknown template token — allowed: track, artist, title");
+  }
+  const siblings = files.map((f) => f.replace(/\\/g, "/").split("/").pop() ?? f);
+  const results = files.map((file) => {
+    const base = demoReadTags(file);
+    if (!base) return { file, newName: null as string | null, skipped: "file not found" };
+    const tags = base.tags ?? {};
+    const trackRaw = tags.tracknumber || tags.track || "";
+    const tm = /^\s*(\d+)/.exec(trackRaw);
+    const track = tm ? String(parseInt(tm[1], 10)).padStart(2, "0") : trackRaw.trim();
+    const artist = (tags.artist || tags.albumartist || "").replace(/[/\\]/g, "-").trim();
+    const title = (tags.title || "").replace(/[/\\]/g, "-").trim();
+    const vals: Record<string, string> = { track, artist, title };
+    for (const t of found) {
+      if (!vals[t]) return { file, newName: null as string | null, skipped: "missing track/artist/title tag for template" };
+    }
+    let desired = tmpl;
+    for (const [k, v] of Object.entries(vals)) desired = desired.split(`{${k}}`).join(v);
+    if (desired.includes("{") || desired.includes("}")) return { file, newName: null as string | null, skipped: "invalid filename from template" };
+    desired = desired.trim();
+    if (!desired) return { file, newName: null as string | null, skipped: "invalid filename from template" };
+    const rawBase = file.replace(/\\/g, "/").split("/").pop() ?? file;
+    const dot = rawBase.lastIndexOf(".");
+    const ext = dot === -1 ? "" : rawBase.slice(dot);
+    if (ext && !desired.toLowerCase().endsWith(ext.toLowerCase())) desired += ext;
+    try {
+      const r = demoRename(file, desired, siblings);
+      return { file, newName: r.fileName, suffixed: r.suffixed };
+    } catch (e) {
+      return { file, newName: null as string | null, skipped: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  return { results };
 }
 
 export function demoMediainfo(fileName: string): MediainfoResult | null {
