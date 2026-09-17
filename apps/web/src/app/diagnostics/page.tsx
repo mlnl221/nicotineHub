@@ -366,7 +366,7 @@ function DiagnosticsInner() {
       <Sidebar />
       <TopBar title="Diagnostics" />
       <main className="relative md:ml-72 flex min-h-screen flex-1 flex-col overflow-x-clip max-w-full min-w-0 pt-[calc(60px+env(safe-area-inset-top,0px))] md:pt-0 pb-[calc(64px+env(safe-area-inset-bottom,0px))] md:pb-0">
-        <div className="pointer-events-none absolute inset-0 opacity-20" style={{ background: "radial-gradient(circle at 50% 0%, rgba(51,102,204,0.12) 0%, transparent 60%)" }} />
+        <div className="pointer-events-none absolute inset-0 opacity-20" style={{ background: "radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--color-primary) 12%, transparent) 0%, transparent 60%)" }} />
         <PageHeader
           title="Diagnostics"
           subtitle="System diagnostics and connection health — live logs (500 lines, persistent)."

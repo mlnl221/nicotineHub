@@ -20,7 +20,7 @@ import { useConfig } from "@/lib/config/provider";
 import { useSearchesOptional } from "@/lib/search";
 import { isDemo } from "@/lib/demo";
 import { TagEditor } from "@/components/tag/TagEditor";
-import { useBulkSelection, useMarqueeSelection } from "@/lib/bulkSelection";
+import { useBulkSelection, useMarqueeSelection, stepSelectionKey } from "@/lib/bulkSelection";
 import { UPLOAD_CLEAR_SETS, sortTransfers } from "@/lib/transfers";
 import { useSpectrum } from "@/lib/spectrum";
 
@@ -57,6 +57,7 @@ function UploadsInner() {
   const groupMode = settings.transfers.groupuploads ?? "folder_grouping";
   const expandMode = settings.transfers.expand_uploads ?? "all";
   const sortMode = settings.transfers.sort_uploads ?? "unsorted";
+  const showOverview = settings.transfers.show_transfer_overview ?? true;
   const sortedUploads = sortTransfers(uploads, sortMode);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   useEffect(() => {
@@ -96,15 +97,7 @@ function UploadsInner() {
   }, [liveIds]);
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!selectMode) return;
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      const dir = e.key === "ArrowDown" ? 1 : -1;
-       const next = Math.max(0, Math.min(transferIds.length - 1, focusedIdx + dir));
-       setFocusedIdx(next);
-       const id = transferIds[next];
-       if (e.shiftKey && id) bulk.toggleRange(id, transferIds);
-       else if (id && !e.shiftKey) bulk.toggle(id);
-    }
+    stepSelectionKey(e, focusedIdx, transferIds, setFocusedIdx, bulk);
   };
 
   const selectedTransfers = uploads.filter((t) => bulk.has(t.id));
@@ -166,8 +159,24 @@ function UploadsInner() {
               <p className="font-label text-xs font-semibold text-amber-900 dark:text-amber-200">Demo preview — 1 download + 1 upload simulated below (animated). New downloads are disabled on Vercel — search, chat, profiles &amp; browse are mocked.</p>
             </div>
           ) : null}
-          <ThroughputChart />
-          <UploadStats />
+          <div className="flex justify-end">
+            <button
+              onClick={() => setOption("transfers", "show_transfer_overview", !showOverview)}
+              aria-expanded={showOverview}
+              aria-controls="transfer-overview"
+              title={showOverview ? "Hide bandwidth and stats" : "Show bandwidth and stats"}
+              className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold text-on-surface-variant"
+            >
+              <span className="material-symbols-outlined text-[16px]">{showOverview ? "visibility_off" : "show_chart"}</span>
+              {showOverview ? "Hide overview" : "Show overview"}
+            </button>
+          </div>
+          {showOverview ? (
+            <div id="transfer-overview" className="contents">
+              <ThroughputChart />
+              <UploadStats />
+            </div>
+          ) : null}
           <section data-testid="uploads-section" className="bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border flex flex-col gap-4 max-w-full overflow-x-clip">
             <div className="sticky top-[calc(60px+env(safe-area-inset-top,0px))] md:static z-20 bg-surface-container-low/95 backdrop-blur dark:bg-surface-container-low/80 border-b border-outline-variant/10 md:bg-transparent md:dark:bg-transparent md:backdrop-blur-none md:border-transparent">
               <div className="px-4 py-1.5 md:px-0 md:py-0 flex flex-col gap-2 md:gap-4">
@@ -315,8 +324,8 @@ function UploadsInner() {
             onClear: () => clearTransfer(menuAnchor.transfer.id, true),
             onClearMany: (s) => clearMany(true, s),
             onBan: () => banUser(menuAnchor.transfer.username),
-            onEditTags: isDemo ? undefined : ["mp3","flac","ogg","m4a","wav","wma","aac","opus","aiff","aif","wv"].includes(menuAnchor.transfer.fileName.toLowerCase().split(".").pop() ?? "") ? () => setTagFile(menuAnchor.transfer.fileName) : undefined,
-            onAnalyzeSpectrum: isDemo ? undefined : ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus"].includes(menuAnchor.transfer.fileName.toLowerCase().split(".").pop() ?? "") ? () => requestSpectrum(menuAnchor.transfer.id, { fileName: menuAnchor.transfer.fileName }) : undefined,
+            onEditTags: ["mp3","flac","ogg","m4a","wav","wma","aac","opus","aiff","aif","wv"].includes(menuAnchor.transfer.fileName.toLowerCase().split(".").pop() ?? "") ? () => setTagFile(menuAnchor.transfer.fileName) : undefined,
+            onAnalyzeSpectrum: ["flac","wav","aiff","aif","mp3","ogg","wma","m4a","wv","aac","opus"].includes(menuAnchor.transfer.fileName.toLowerCase().split(".").pop() ?? "") ? () => requestSpectrum(menuAnchor.transfer.id, { fileName: menuAnchor.transfer.fileName }) : undefined,
             hasSpectrum: false,
           })}
           onClose={() => setMenuAnchor(null)}

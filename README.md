@@ -27,6 +27,7 @@
 ## Screenshots
 
 All captures from a local demo build (`NEXT_PUBLIC_DEMO=true`, mocked data) — desktop `1280×800`, mobile `390×844`.
+Each shot names its theme — see [`docs/themes.md`](docs/themes.md) for all 22 built-in themes.
 
 | Desktop: search → filters → downloads → spectrum | Mobile: search → browse → downloads |
 |---|---|
@@ -36,21 +37,21 @@ All captures from a local demo build (`NEXT_PUBLIC_DEMO=true`, mocked data) — 
 
 | Login | Search | Filters | Release-link paste |
 |---|---|---|---|
-| [![Login — any credentials in demo](docs/screenshots/01-login.png)](docs/screenshots/01-login.png) | [![Search — tabs, scope, grouped results (dark mode)](docs/screenshots/02-search.png)](docs/screenshots/02-search.png) | [![Search filters — size/bitrate/type/slot/country (dark mode)](docs/screenshots/03-search-filters.png)](docs/screenshots/03-search-filters.png) | [![Paste a Discogs/Bandcamp/Apple link to auto-identify the release via the worker](docs/screenshots/04-search-link.png)](docs/screenshots/04-search-link.png) |
+| [![Login — any credentials in demo (Flexoki Light)](docs/screenshots/01-login.png)](docs/screenshots/01-login.png) | [![Search — tabs, scope, grouped results (Tokyo Night)](docs/screenshots/02-search.png)](docs/screenshots/02-search.png) | [![Search filters — size/bitrate/type/slot/country (Catppuccin)](docs/screenshots/03-search-filters.png)](docs/screenshots/03-search-filters.png) | [![Paste a Discogs/Bandcamp/Apple link to auto-identify the release via the worker (Nord)](docs/screenshots/04-search-link.png)](docs/screenshots/04-search-link.png) |
 
 | Downloads | Spectrum Full | Spectrum Zoom | Browse shares |
 |---|---|---|---|
-| [![Downloads — live progress, stats, SPECTRUM badge on finished audio (dark mode)](docs/screenshots/05-downloads.png)](docs/screenshots/05-downloads.png) | [![Analyze Spectrum — Full 2000×513 sox render](docs/screenshots/06-spectrum.png)](docs/screenshots/06-spectrum.png) | [![Analyze Spectrum — 2-second Zoom slice](docs/screenshots/07-spectrum-zoom.png)](docs/screenshots/07-spectrum-zoom.png) | [![Browse — shares tree, folder search, per-file actions](docs/screenshots/08-browse.png)](docs/screenshots/08-browse.png) |
+| [![Downloads — live progress, stats, SPECTRUM badge on finished audio (Gruvbox)](docs/screenshots/05-downloads.png)](docs/screenshots/05-downloads.png) | [![Analyze Spectrum — Full 2000×513 sox render (Everforest)](docs/screenshots/06-spectrum.png)](docs/screenshots/06-spectrum.png) | [![Analyze Spectrum — 2-second Zoom slice (Retro 82)](docs/screenshots/07-spectrum-zoom.png)](docs/screenshots/07-spectrum-zoom.png) | [![Browse — shares tree, folder search, per-file actions (Lumon)](docs/screenshots/08-browse.png)](docs/screenshots/08-browse.png) |
 
 | Chat rooms | Private chat |
 |---|---|
-| [![Chat rooms — room list, tickers, members](docs/screenshots/09-chat.png)](docs/screenshots/09-chat.png) | [![Private chat — 1:1 threads (dark mode)](docs/screenshots/10-private-chat.png)](docs/screenshots/10-private-chat.png) |
+| [![Chat rooms — room list, tickers, members (Kanagawa)](docs/screenshots/09-chat.png)](docs/screenshots/09-chat.png) | [![Private chat — 1:1 threads (Ristretto)](docs/screenshots/10-private-chat.png)](docs/screenshots/10-private-chat.png) |
 
 ### Mobile
 
 | Search | More sheet | Downloads | Private chat |
 |---|---|---|---|
-| [![Mobile search with bottom nav (dark mode)](docs/screenshots/m1-search.png)](docs/screenshots/m1-search.png) | [![Mobile More sheet — browse, buddies, uploads, rooms, profiles, settings](docs/screenshots/m2-more-sheet.png)](docs/screenshots/m2-more-sheet.png) | [![Mobile downloads](docs/screenshots/m3-downloads.png)](docs/screenshots/m3-downloads.png) | [![Mobile private chat](docs/screenshots/m4-chat.png)](docs/screenshots/m4-chat.png) |
+| [![Mobile search with bottom nav (Osaka Jade)](docs/screenshots/m1-search.png)](docs/screenshots/m1-search.png) | [![Mobile More sheet — browse, buddies, uploads, rooms, profiles, settings (Hackerman)](docs/screenshots/m2-more-sheet.png)](docs/screenshots/m2-more-sheet.png) | [![Mobile downloads (Matte Black)](docs/screenshots/m3-downloads.png)](docs/screenshots/m3-downloads.png) | [![Mobile private chat (Rose Pine)](docs/screenshots/m4-chat.png)](docs/screenshots/m4-chat.png) |
 
 This is an almost 1:1 port of [nicotine-plus](https://nicotine-plus.org/) ([GitHub](https://github.com/nicotine-plus/nicotine-plus)) to a modern Next.js web app. Built on `doc/SLSKPROTOCOL.md`.
 
@@ -79,6 +80,7 @@ The browser can't open raw TCP sockets, so the bridge translates JSON over WebSo
 - **Social** — buddies
 - **Profiles** — description, picture, stats, privileges
 - **Mobile shell** — `TopBar`/`BottomNav`, safe-area, PWA, diagnostics live tail
+- **Keyboard shortcuts** — `g d` nav, `/` search focus, `p`/`r` pause/resume all, `j`/`k` list stepping, `?` help (see [`docs/hotkeys.md`](docs/hotkeys.md))
 
 ### Analyze Spectrum (FLAC / audio)
 
@@ -205,7 +207,9 @@ extend the suite for new protocol surface before fixing bridge code.
 - `docs/architecture.md` — bridge, worker, search & protocol, transfers + spectrum, WS JSON, `LISTEN_PORT`/`PortMapper`, env, tests
 - `docs/spectrum.md` — Analyze Spectrum pipeline (worker `sox` + `oxipng`, HTTP, caching, UI)
 - `docs/deployment.md` — Docker & GHCR images, `TAG` pinning, promotion workflow (`stage` → `main`)
+- `docs/hotkeys.md` — keyboard shortcuts (nav, search, transfers, lists)
 - `docs/DESIGN.md` — UI tokens
+- `docs/themes.md` — all 22 built-in themes (light/dark pair, where each screenshot was taken)
 - `docs/proposals/` — future backlog (r/Soulseek improvements not yet built)
 - `AGENTS.md` — agent & worktree conventions
 

@@ -101,7 +101,7 @@ describe("packing primitives", () => {
 
 describe("buildLogin matches the documented wire layout", () => {
   // Layout from doc/SLSKPROTOCOL.md "Sending Login Example" (username=username,
-  // password=password), with our unreserved client version 185/1 (issue #181 —
+  // password=password), with our unreserved client version 165/1 (issue #181 —
   // never 160/3, reserved for Nicotine+).
   test("produces the exact wire bytes", () => {
     const raw = buildLogin("username", "password");
@@ -112,13 +112,13 @@ describe("buildLogin matches the documented wire layout", () => {
     // len == payload + 4
     expect(len).toBe(raw.length - 4);
 
-    // Full hex stream (same layout as the docs, with 185/1):
+    // Full hex stream (same layout as the docs, with 165/1):
     const expected =
       "48000000" + // message length 72
       "01000000" + // code 1 (Login)
       "08000000757365726e616d65" + // string(username)
       "0800000070617373776f7264" + // string(password)
-      "b9000000" + // major version 185
+      "a5000000" + // major version 165
       "200000006435316339613765393335333734366136303230663936303264343532393239" + // string(md5hex) = d51c9a7e...
       "01000000"; // minor version 1
 
@@ -178,6 +178,19 @@ describe("parseLoginResponse", () => {
     }
   });
 
+  test("parses a short success response (no checksum/supporter)", () => {
+    // Observed live 2026-09-17 for unlisted major versions: success + empty
+    // banner + ip + trailing 0x00, no checksum string or supporter flag.
+    const payload = Buffer.from("010000000012631a9f00", "hex");
+    const resp = parseLoginResponse(payload);
+    expect(resp.success).toBe(true);
+    if (resp.success) {
+      expect(resp.banner).toBe("");
+      expect(resp.checksum).toBe("");
+      expect(resp.isSupporter).toBe(false);
+    }
+  });
+
   test("parses a failure response with reason", () => {
     const payload = Buffer.concat([
       Buffer.from([0]),
@@ -218,7 +231,7 @@ describe("describeRejection", () => {
 
 describe("constants", () => {
   test("unreserved client version is used (never Nicotine+ 160/3)", () => {
-    expect(MAJOR_VERSION).toBe(185);
+    expect(MAJOR_VERSION).toBe(165);
     expect(MINOR_VERSION).toBe(1);
   });
 });

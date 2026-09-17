@@ -2,6 +2,7 @@
 
 import { useConfig } from "@/lib/config/provider";
 import { useTheme } from "@/components/ThemeProvider";
+import { DARK_THEMES, LIGHT_THEMES } from "@/lib/themes/themes";
 import {
   SectionCard,
   SectionSaveButton,
@@ -22,7 +23,7 @@ const LANGUAGES = [
 
 export function UiSection() {
   const { settings, setOption } = useConfig();
-  const { theme, toggle } = useTheme();
+  const { theme, toggle, previewSlot } = useTheme();
   const ui = settings.ui;
 
   return (
@@ -40,6 +41,26 @@ export function UiSection() {
           if (v !== (theme === "dark")) toggle();
           setOption("ui", "dark_mode", v);
         }}
+      />
+      <SelectControl
+        label="Light theme"
+        description="Theme used when dark mode is off. The top toggle flips between this and the dark theme."
+        value={ui.light_theme}
+        onChange={(v) => {
+          setOption("ui", "light_theme", v);
+          previewSlot("light", v);
+        }}
+        options={LIGHT_THEMES.map((t) => ({ value: t.id, label: t.label }))}
+      />
+      <SelectControl
+        label="Dark theme"
+        description="Theme used when dark mode is on."
+        value={ui.dark_theme}
+        onChange={(v) => {
+          setOption("ui", "dark_theme", v);
+          previewSlot("dark", v);
+        }}
+        options={DARK_THEMES.map((t) => ({ value: t.id, label: t.label }))}
       />
       <SelectControl
         label="Language"

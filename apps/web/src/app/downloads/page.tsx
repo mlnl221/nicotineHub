@@ -22,11 +22,12 @@ import { isDemo } from "@/lib/demo";
 import { useSpectrum, parseDownloadToken } from "@/lib/spectrum";
 import { usePlayer } from "@/lib/player/store";
 import { downloadPlayUrl, formatLabelOf, splitArtistTitle } from "@/lib/player/urls";
+import { demoAudioPublicUrl } from "@/lib/demo/fixtures";
 import { SpectrumHoverCard } from "@/components/transfers/SpectrumHoverCard";
 import { TagEditor } from "@/components/tag/TagEditor";
 import { MediainfoModal } from "@/components/files/MediainfoModal";
 import { AdjustTagsModal } from "@/components/tag/AdjustTagsModal";
-import { useBulkSelection, useMarqueeSelection } from "@/lib/bulkSelection";
+import { useBulkSelection, useMarqueeSelection, stepSelectionKey } from "@/lib/bulkSelection";
 import { DOWNLOAD_CLEAR_SETS, sortTransfers } from "@/lib/transfers";
 import { verifyFile, analyzeFile } from "@/lib/worker";
 import { bridgeFetchUrl } from "@/lib/bridgeHttp";
@@ -76,6 +77,7 @@ function DownloadsInner() {
   const groupMode = settings.transfers.groupdownloads ?? "folder_grouping";
   const expandMode = settings.transfers.expand_downloads ?? "all";
   const sortMode = settings.transfers.sort_downloads ?? "unsorted";
+  const showOverview = settings.transfers.show_transfer_overview ?? true;
   const sortedDownloads = sortTransfers(downloads, sortMode);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // sync expand -> collapsed
@@ -130,15 +132,7 @@ function DownloadsInner() {
   }, [liveIds]);
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!selectMode) return;
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      const dir = e.key === "ArrowDown" ? 1 : -1;
-       const next = Math.max(0, Math.min(transferIds.length - 1, focusedIdx + dir));
-       setFocusedIdx(next);
-       const id = transferIds[next];
-       if (e.shiftKey && id) bulk.toggleRange(id, transferIds);
-       else if (id && !e.shiftKey) bulk.toggle(id);
-    }
+    stepSelectionKey(e, focusedIdx, transferIds, setFocusedIdx, bulk);
   };
 
   const selectedTransfers = downloads.filter((t) => bulk.has(t.id));
@@ -152,39 +146,47 @@ function DownloadsInner() {
     bulk.clear();
   };
 
-  const handlePlay = (t: import("@/lib/protocol").Transfer) => {
+  // Demo: Finished fixtures carry no /files token, so fall back to a real
+  // demo ogg — Play always produces audio in demo.
+  const DEMO_FALLBACK_SRC = "/demo-audio/01-dj-satomi-waves.ogg";
+  const resolvePlayTarget = (t: import("@/lib/protocol").Transfer) => {
     const dl = (t as unknown as { downloadUrl?: string }).downloadUrl;
-    if (t.status !== "Finished" || !dl) return;
-    const target = downloadPlayUrl(dl, t.fileName);
+    if (dl) {
+      const native = downloadPlayUrl(dl, t.fileName);
+      if (native) return native;
+    }
+    if (isDemo) return { url: demoAudioPublicUrl(t.fileName) ?? DEMO_FALLBACK_SRC, viaWorker: false };
+    return null;
+  };
+
+  const handlePlay = (t: import("@/lib/protocol").Transfer) => {
+    if (t.status !== "Finished") return;
+    const target = resolvePlayTarget(t);
     if (!target) return;
     const { artist, title } = splitArtistTitle(t.fileName);
     play({ title, artist, src: target.url, formatLabel: formatLabelOf(t.fileName), transcoding: target.viaWorker, fileKey: t.fileName, size: t.size });
   };
 
-  const canPlay = (t: import("@/lib/protocol").Transfer): boolean => {
-    if (isDemo || t.status !== "Finished") return false;
-    const dl = (t as unknown as { downloadUrl?: string }).downloadUrl;
-    if (!dl) return false;
-    return !!downloadPlayUrl(dl, t.fileName);
-  };
+  const canPlay = (t: import("@/lib/protocol").Transfer): boolean =>
+    t.status === "Finished" && !!resolvePlayTarget(t);
 
   const isFinishedAudio = (t: import("@/lib/protocol").Transfer): boolean =>
-    !isDemo && t.status === "Finished" && isAudioForSpectrum(t.fileName);
+    t.status === "Finished" && isAudioForSpectrum(t.fileName);
 
   const handleSingleVerify = async (fileName: string) => {
     try {
       const r = await verifyFile(fileName);
-      setBulkResult({ title: `Verify — ${fileName.split("/").pop()}`, rows: [{ fileName, ...(r as Record<string, unknown>) }] });
+      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: `Verify — ${fileName.split("/").pop()}`, body: JSON.stringify(r) } }));
     } catch (e) {
-      setBulkResult({ title: "Verify error", rows: [{ fileName, error: e instanceof Error ? e.message : String(e) }] });
+      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Verify error", body: e instanceof Error ? e.message : String(e) } }));
     }
   };
   const handleSingleAnalyze = async (fileName: string) => {
     try {
       const r = await analyzeFile(fileName);
-      setBulkResult({ title: `Analyze — ${fileName.split("/").pop()}`, rows: [{ fileName, ...(r as Record<string, unknown>) }] });
+      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: `Analyze — ${fileName.split("/").pop()}`, body: JSON.stringify(r) } }));
     } catch (e) {
-      setBulkResult({ title: "Analyze error", rows: [{ fileName, error: e instanceof Error ? e.message : String(e) }] });
+      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Analyze error", body: e instanceof Error ? e.message : String(e) } }));
     }
   };
 
@@ -231,9 +233,24 @@ function DownloadsInner() {
               <p className="font-label text-xs font-semibold text-amber-900 dark:text-amber-200">Demo preview — 1 download + 1 upload simulated below (animated). New downloads are disabled on Vercel — search, chat, profiles &amp; browse are mocked.</p>
             </div>
           ) : null}
-          <ThroughputChart />
-
-          <DownloadStats />
+          <div className="flex justify-end">
+            <button
+              onClick={() => setOption("transfers", "show_transfer_overview", !showOverview)}
+              aria-expanded={showOverview}
+              aria-controls="transfer-overview"
+              title={showOverview ? "Hide bandwidth and stats" : "Show bandwidth and stats"}
+              className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold text-on-surface-variant"
+            >
+              <span className="material-symbols-outlined text-[16px]">{showOverview ? "visibility_off" : "show_chart"}</span>
+              {showOverview ? "Hide overview" : "Show overview"}
+            </button>
+          </div>
+          {showOverview ? (
+            <div id="transfer-overview" className="contents">
+              <ThroughputChart />
+              <DownloadStats />
+            </div>
+          ) : null}
 
           <div className="grid grid-cols-1 gap-6 max-w-full overflow-x-clip">
             <section data-testid="downloads-section" className="flex flex-col gap-4 bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border max-w-full overflow-x-clip">
@@ -278,7 +295,7 @@ function DownloadsInner() {
                   </span>
                 </div>
               </div>
-              {selectMode ? <p className="font-body text-[10px] text-outline">Select picks every row, any user/grouping · None deselects to refine · Tag ops use first 50 · Shift+click / Shift+↑/↓ extends range</p> : null}
+              {selectMode ? <p className="font-body text-[10px] text-outline">Select picks every row, any user/grouping · None deselects to refine · Tag ops use first 50 · Shift+click / Shift+↑/↓ or Shift+j/k extends range</p> : null}
               {/* Nicotine-plus parity toolbar: always visible, touch-sized.
                   Desktop: full row. Mobile: Resume + Remove + More overflow. */}
               <div className="flex flex-wrap items-center gap-1.5" role="toolbar" aria-label="Download actions">
@@ -424,7 +441,7 @@ function DownloadsInner() {
               onAnalyze: isFinishedAudio(menuAnchor.transfer)
                 ? () => handleSingleAnalyze(menuAnchor.transfer.fileName)
                 : undefined,
-              onMediainfo: !isDemo && !menuAnchor.isUpload && menuAnchor.transfer.status === "Finished"
+              onMediainfo: !menuAnchor.isUpload && menuAnchor.transfer.status === "Finished"
                 ? () => setMediainfoFile(menuAnchor.transfer.fileName)
                 : undefined,
               onPlay: !menuAnchor.isUpload && canPlay(menuAnchor.transfer)

@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useBrowseTabs } from "@/lib/browse-tabs";
 import type { BrowseTab } from "@/lib/browse-tabs";
-import { useTransfers } from "@/lib/transfers";
+import { useTransfers, enqueueDemoTransfer } from "@/lib/transfers";
 import { isDemo } from "@/lib/demo";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { browseFolderMenu, browseFileMenu } from "@/lib/context-menu/menus";
@@ -432,20 +432,24 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
     }
   };
 
-  // Download helpers — always recursive per user request
+  // Download helpers — always recursive per user request.
+  // Demo: enqueue locally (simulated, animated to Finished); else bridge.
+  const queueOrRequest = (args: { username: string; virtualPath: string; size: number; fileName: string }) => {
+    if (isDemo) enqueueDemoTransfer({ user: args.username, virtualPath: args.virtualPath, size: args.size, fileName: args.fileName });
+    else requestDownload(args);
+  };
   const downloadFolder = (folderName: string) => {
-    if (isDemo) return;
     const targetFolders = folders.filter((f) => f.name === folderName || f.name.startsWith(folderName + "\\"));
     const files = targetFolders.flatMap((f) => f.files);
     files.forEach((file, idx) => {
       const shortName = file.name.split(/[\\\/]/).pop() || file.name;
       const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : `${folderName}\\${shortName}`;
-      setTimeout(() => requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName }), idx * 150);
+      setTimeout(() => queueOrRequest({ username, virtualPath: vp, size: file.size, fileName: shortName }), idx * 150);
     });
   };
   const downloadSelected = () => {
-    if (isDemo || !bulk.selected.size) return;
-    if (bulk.selected.size > 1 && !window.confirm(`Download ${bulk.selected.size} selected files?`)) return;
+    if (!bulk.selected.size) return;
+    if (!isDemo && bulk.selected.size > 1 && !window.confirm(`Download ${bulk.selected.size} selected files?`)) return;
     const filesByPath = new Map<string, typeof visibleFiles[0]>();
     for (const f of folders) for (const file of f.files) filesByPath.set(file.name, file);
     let i = 0;
@@ -454,7 +458,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
       if (!file) continue;
       const shortName = file.name.split(/[\\\/]/).pop() || file.name;
       const vp = file.name;
-      setTimeout(() => requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName }), i++ * 150);
+      setTimeout(() => queueOrRequest({ username, virtualPath: vp, size: file.size, fileName: shortName }), i++ * 150);
     }
   };
 
@@ -733,21 +737,18 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                   <span className="font-label text-xs text-on-surface-variant hidden sm:inline">{visibleFiles.length} files</span>
                   {selectMode && bulk.size > 0 ? (
                     <button
-                      disabled={isDemo}
                       onClick={downloadSelected}
-                      className={`shrink-0 rounded-full px-3 py-1.5 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline cursor-not-allowed" : "bg-primary text-on-primary hover:bg-primary-container"}`}
+                      className="shrink-0 rounded-full px-3 py-1.5 font-label text-xs font-bold bg-primary text-on-primary hover:bg-primary-container"
                     >
                       Download {bulk.size} Selected
                     </button>
                   ) : null}
                   <button
-                    disabled={isDemo}
-                    title={isDemo ? "Disabled in demo" : `Download all ${visibleFiles.length} files (incl. subfolders)`}
+                    title={`Download all ${visibleFiles.length} files (incl. subfolders)`}
                     onClick={() => {
-                      if (isDemo) return;
                       downloadFolder(activeFolder.name);
                     }}
-                    className={`rounded-full px-3 py-1.5 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline cursor-not-allowed" : "bg-primary text-on-primary hover:bg-primary-container"}`}
+                    className="rounded-full px-3 py-1.5 font-label text-xs font-bold bg-primary text-on-primary hover:bg-primary-container"
                   >
                     Download Folder
                   </button>
@@ -829,7 +830,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                               setMenuAnchor({
                                 x: e.clientX, y: e.clientY,
                                 items: browseFileMenu(username, { path: vp, filename: shortName2 }, false, {
-                                  onDownload: () => requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName2 }),
+                                  onDownload: () => queueOrRequest({ username, virtualPath: vp, size: file.size, fileName: shortName2 }),
                                   onDownloadFolder: downloadFolder,
                                    selectedCount: bulk.has(file.name) ? bulk.size : 1,
                                    onDownloadSelected: downloadSelected,
@@ -867,17 +868,15 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                               <span className="material-symbols-outlined text-[16px]">info</span>
                             </button>
                             <button
-                              disabled={isDemo}
-                              title={isDemo ? "Downloads disabled in demo" : "Download"}
+                              title="Download"
                               onClick={() => {
-                                if (isDemo) return;
                                 const virtualPath = `${activeFolder.name}\\${shortName}`;
                                 const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : virtualPath;
-                                requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName });
+                                queueOrRequest({ username, virtualPath: vp, size: file.size, fileName: shortName });
                               }}
-                              className={`shrink-0 rounded-full px-4 py-2.5 min-h-9 md:min-h-8 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline cursor-not-allowed" : "bg-primary text-on-primary hover:bg-primary-container"}`}
+                              className="shrink-0 rounded-full px-4 py-2.5 min-h-9 md:min-h-8 font-label text-xs font-bold bg-primary text-on-primary hover:bg-primary-container"
                             >
-                              {isDemo ? "Disabled" : "Download"}
+                              Download
                             </button>
                           </li>
                         );
@@ -930,17 +929,15 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
             </div>
             <div className="mt-6 flex gap-2">
               <button
-                disabled={isDemo}
                 onClick={() => {
-                  if (isDemo) return;
                   const shortName = propsFile.name.split("\\").pop() || propsFile.name;
                   const vp = propsFile.name.includes("\\") ? propsFile.name : `${propsFile.folder}\\${shortName}`;
-                  requestDownload({ username, virtualPath: vp, size: propsFile.size, fileName: shortName });
+                  queueOrRequest({ username, virtualPath: vp, size: propsFile.size, fileName: shortName });
                   setPropsFile(null);
                 }}
-                className={`flex-1 rounded-xl py-3 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline cursor-not-allowed" : "bg-primary text-on-primary"}`}
+                className="flex-1 rounded-xl py-3 font-label text-xs font-bold bg-primary text-on-primary"
               >
-                {isDemo ? "Disabled in demo" : "Download"}
+                Download
               </button>
               <button onClick={() => setPropsFile(null)} className="rounded-xl bg-surface-container-high px-6 py-3 font-label text-xs">Close</button>
             </div>

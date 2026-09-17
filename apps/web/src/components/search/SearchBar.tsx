@@ -79,6 +79,7 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
             <span className="material-symbols-outlined text-outline shrink-0">search</span>
             <input
               list="search-history"
+              data-search-input
               value={query}
               spellCheck={settings.ui.spellcheck}
               onChange={(e) => setQuery(e.target.value)}

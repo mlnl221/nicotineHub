@@ -47,7 +47,7 @@ export function OnboardingWizard({ next }: { next: string | null }) {
       <div
         className="pointer-events-none absolute inset-0 opacity-40 dark:opacity-20"
         style={{
-          backgroundImage: "radial-gradient(circle at 50% -20%, rgba(51,102,204,0.15) 0%, transparent 60%)",
+          backgroundImage: "radial-gradient(circle at 50% -20%, color-mix(in srgb, var(--color-primary) 15%, transparent) 0%, transparent 60%)",
         }}
       />
       <div className="relative z-10 flex w-full max-w-md flex-1 flex-col">

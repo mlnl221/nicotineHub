@@ -298,6 +298,34 @@ test.describe("Transfers pages", () => {
     await expect(page.getByTestId("uploads-section")).toBeVisible();
   });
 
+  test("overview toggle hides bandwidth chart and stats together", async ({ page }) => {
+    await mockTransfersPage(page, { withTransfers: true });
+    await login(page);
+    await page.goto("/downloads");
+
+    // shown by default: chart + stats together
+    await expect(page.getByText("Real-time Bandwidth")).toBeVisible();
+    await expect(page.getByText("Completed Downloads")).toBeVisible();
+
+    // hide: both go away as one unit, toggle stays to re-show
+    await page.getByRole("button", { name: "Hide overview" }).click();
+    await expect(page.getByText("Real-time Bandwidth")).toBeHidden();
+    await expect(page.getByText("Completed Downloads")).toBeHidden();
+    await expect(page.getByRole("button", { name: "Show overview" })).toBeVisible();
+
+    // persists across reload (settings localStorage)
+    await page.reload();
+    await expect(page.getByText("Real-time Bandwidth")).toBeHidden();
+    await expect(page.getByText("Completed Downloads")).toBeHidden();
+
+    // restore: shared flag, uploads shows it again too
+    await page.getByRole("button", { name: "Show overview" }).click();
+    await expect(page.getByText("Real-time Bandwidth")).toBeVisible();
+    await page.goto("/uploads");
+    await expect(page.getByText("Real-time Bandwidth")).toBeVisible();
+    await expect(page.getByText("Completed Uploads")).toBeVisible();
+  });
+
   test("downloads empty state shows search CTA", async ({ page }) => {
     await mockTransfersPage(page, { withTransfers: false });
     await login(page);

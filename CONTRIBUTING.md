@@ -45,7 +45,7 @@ bun run build            # typecheck + prod builds (both apps)
 docker compose up --build
 ```
 
-Conventions: **Bun only** (no npm/yarn/npx), mobile-first UI with safe-area insets, Soulseek client version `185/1` (unreserved; `160/3` is reserved for Nicotine+ — never reuse). Full details in [`AGENTS.md`](./AGENTS.md) and [`docs/architecture.md`](./docs/architecture.md).
+Conventions: **Bun only** (no npm/yarn/npx), mobile-first UI with safe-area insets, Soulseek client version `165/1` (unreserved; `160/3` is reserved for Nicotine+ — never reuse). Full details in [`AGENTS.md`](./AGENTS.md) and [`docs/architecture.md`](./docs/architecture.md).
 
 ## Reporting bugs / suggesting features
 

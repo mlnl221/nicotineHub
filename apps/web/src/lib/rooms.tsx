@@ -95,6 +95,8 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
       for (const name of persisted) m.set(name, { name, users: [], tickers: [], operators: [] });
       return m;
     }
+    // Demo seed (seed.ts covers login path; this covers direct/empty-storage mounts)
+    if (isDemo) return new Map([["Jazz", { name: "Jazz", users: [], tickers: [], operators: [] }]]);
     return new Map();
   });
   const [messages, setMessages] = useState<Map<string, RoomMessage[]>>(() => new Map());

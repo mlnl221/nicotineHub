@@ -22,8 +22,12 @@ function listLocal(): Array<{ name: string; address: string; netmask: string; fa
 
 export async function GET() {
   // Demo (Vercel): no bridge exists, and the web host's NICs belong to the
-  // serverless host — never leak them into the demo UI. Return empty.
-  if (process.env.NEXT_PUBLIC_DEMO === "true") return NextResponse.json([]);
+  // serverless host — never leak them. Return one mock so Network settings renders non-empty.
+  if (process.env.NEXT_PUBLIC_DEMO === "true") {
+    return NextResponse.json([
+      { name: "eth0", address: "203.0.113.10", netmask: "255.255.255.0", family: "IPv4", internal: false, mac: "02:00:00:00:00:01", cidr: "203.0.113.10/24" },
+    ]);
+  }
   // Try bridge first (canonical – bridge's interfaces are what Soulseek binds to, especially with host network + VPN tun0)
   const candidates: string[] = [];
   // In Docker, web can reach bridge via http://bridge:8787; in dev via localhost:8787

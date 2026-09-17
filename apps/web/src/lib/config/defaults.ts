@@ -46,6 +46,8 @@ export interface Settings {
   };
   ui: {
     dark_mode: boolean;
+    light_theme: string;
+    dark_theme: string;
     language: string;
     reverse_file_paths: boolean;
     file_size_unit: "B" | "";
@@ -139,6 +141,7 @@ export interface Settings {
     expand_uploads: string;
     sort_downloads: string;
     sort_uploads: string;
+    show_transfer_overview: boolean;
     usecustomban: boolean;
     customban: string;
     usecustomgeoblock: boolean;
@@ -240,6 +243,8 @@ export const defaults: Settings = {
   },
   ui: {
     dark_mode: false,
+    light_theme: "catppuccin-latte",
+    dark_theme: "tokyo-night",
     language: "",
     reverse_file_paths: true,
     file_size_unit: "",
@@ -360,6 +365,7 @@ export const defaults: Settings = {
     expand_uploads: "all",
     sort_downloads: "unsorted",
     sort_uploads: "unsorted",
+    show_transfer_overview: true,
     usecustomban: false,
     customban: "Banned, don't bother retrying",
     usecustomgeoblock: false,

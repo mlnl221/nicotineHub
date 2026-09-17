@@ -144,6 +144,10 @@ See `AGENTS.md#git-worktrees` for per-worktree port isolation (`3000/8787/60754/
 
 The public demo ([nicotine-hub-web-phi.vercel.app](https://nicotine-hub-web-phi.vercel.app/)) hosts **only `apps/web`** — the bridge (raw TCP to `server.slsknet.org:2242`) and worker (`sox`/`oxipng`, `/data` volume) cannot run on Vercel. Demo mode (`NEXT_PUBLIC_DEMO=true`) mocks both: any login works, search/chat/profiles/browse use fixtures, link-paste identifies two sample Discogs releases, and Files rename succeeds in-memory (reverts on reload).
 
+Demo transfers are simulated, not disabled: search/browse downloads enqueue into the Downloads list as animated demo transfers (progress to Finished, no bytes move). Pause/resume/cancel/retry/clear echo locally so `p`/`r`/`Delete` hotkeys work. Finished fixtures support the full row menu — Play (falls back to a real `/demo-audio/*.ogg` sample when the fixture has no playable URL), Tag, Scrape, Verify, Analyze, Mediainfo, Spectrum.
+
+Demo mocks also cover: `search:buddies` (filtered fixture rows), `wishlist:update`/`wishlist:interval` (ack, 180s), room `setTicker`/`addOperator`/`removeOperator`/`cancelMembership`/`cancelOwnership`/`refreshList` (noop-ack with ticker/operator echo). Wishlist seeds one query (`linux iso`) and Rooms seeds one joined room (`Jazz`) when empty. Plugins render the `leech_detector` fixture read-only with in-memory toggle (install/upload/reload/uninstall disabled). Port Checker returns canned results (no network). `/api/interfaces` returns one mock NIC (`eth0` 203.0.113.10) so Network settings renders non-empty.
+
 Vercel project settings:
 
 - **Root Directory:** `apps/web` (the repo-root `vercel.json` is ignored with this setting)

@@ -1,6 +1,7 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
+import { isDemo } from "@/lib/demo";
 
 const STORAGE_KEY = "nicotineHub.wishlist";
 
@@ -59,7 +60,12 @@ interface WishlistApi {
 const WishlistContext = createContext<WishlistApi | null>(null);
 
 export function WishlistProvider({ children }: { children: React.ReactNode }) {
-  const [entries, setEntries] = useState<WishlistEntry[]>(() => readStored());
+  const [entries, setEntries] = useState<WishlistEntry[]>(() => {
+    const stored = readStored();
+    // Demo seed (seed.ts covers login path; this covers direct/empty-storage mounts)
+    if (isDemo && stored.length === 0) return [{ term: "linux iso", auto: true, ignoredUsers: [], timeAdded: Date.now() }];
+    return stored;
+  });
   const terms = useMemo(() => entries.map((e) => e.term), [entries]);
   const [interval, setIntervalSec] = useState<number | null>(null);
   const { send, subscribe, state } = useSession();
