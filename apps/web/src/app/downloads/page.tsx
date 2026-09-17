@@ -29,7 +29,7 @@ import { BulkBar } from "@/components/tag/BulkBar";
 import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
 import { AdjustTagsModal } from "@/components/tag/AdjustTagsModal";
 import { useBulkSelection, useMarqueeSelection } from "@/lib/bulkSelection";
-import { DOWNLOAD_CLEAR_SETS } from "@/lib/transfers";
+import { DOWNLOAD_CLEAR_SETS, sortTransfers } from "@/lib/transfers";
 import { bulkVerify, bulkAnalyze, bulkRequestSpectrum, verifyFile, analyzeFile } from "@/lib/worker";
 import { bridgeFetchUrl } from "@/lib/bridgeHttp";
 import { humanSpeed as _humanSpeed } from "@/lib/format";
@@ -80,13 +80,15 @@ function DownloadsInner() {
 
   const groupMode = settings.transfers.groupdownloads ?? "folder_grouping";
   const expandMode = settings.transfers.expand_downloads ?? "all";
+  const sortMode = settings.transfers.sort_downloads ?? "unsorted";
+  const sortedDownloads = sortTransfers(downloads, sortMode);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // sync expand -> collapsed
   useEffect(() => {
     if (groupMode === "ungrouped") { setCollapsed(new Set()); return; }
     const keys = (() => {
       const m = new Map<string, unknown>();
-      downloads.forEach((t) => {
+      sortedDownloads.forEach((t) => {
         const k = groupMode === "user_grouping" ? t.username : getFolder(t.virtualPath);
         m.set(k, true);
       });
@@ -98,9 +100,9 @@ function DownloadsInner() {
   }, [groupMode, expandMode, downloads.map(d=>d.id).join("|")]);
 
   const downloadGroups = (() => {
-    if (groupMode === "ungrouped") return [["ungrouped", downloads] as [string, typeof downloads]];
-    const map = new Map<string, typeof downloads>();
-    downloads.forEach((t) => {
+    if (groupMode === "ungrouped") return [["ungrouped", sortedDownloads] as [string, typeof sortedDownloads]];
+    const map = new Map<string, typeof sortedDownloads>();
+    sortedDownloads.forEach((t) => {
       const k = groupMode === "user_grouping" ? t.username : getFolder(t.virtualPath);
       const arr = map.get(k);
       if (arr) arr.push(t); else map.set(k, [t]);
@@ -108,7 +110,7 @@ function DownloadsInner() {
     return [...map.entries()];
   })();
 
-  const transferIds = downloads.map((d) => d.id);
+  const transferIds = sortedDownloads.map((d) => d.id);
   // Select enters with everything picked; Done exits and drops the selection
   // so no stale picks linger. Single source for the header toggle.
   const handleSelectToggle = () => {
@@ -120,6 +122,8 @@ function DownloadsInner() {
   const cycleGroup = () => setOption("transfers", "groupdownloads", groupMode === "folder_grouping" ? "user_grouping" : groupMode === "user_grouping" ? "ungrouped" : "folder_grouping");
   const expandLabel = expandMode === "all" ? "All" : expandMode === "partial" ? "Partial" : "Collapse";
   const cycleExpand = () => setOption("transfers", "expand_downloads", expandMode === "all" ? "partial" : expandMode === "partial" ? "none" : "all");
+  const sortLabel = sortMode === "folder_filename" ? "Folder+Name" : sortMode === "filename" ? "Name" : "Off";
+  const cycleSort = () => setOption("transfers", "sort_downloads", sortMode === "unsorted" ? "folder_filename" : sortMode === "folder_filename" ? "filename" : "unsorted");
   const marquee = useMarqueeSelection(bulk.setSelection);
   // Drop picks for transfers that vanished (cleared/finished-removed) so
   // the count bar never counts ghosts. Guarded: no setState when clean.
@@ -304,6 +308,11 @@ function DownloadsInner() {
                     <option value="all">Expand All</option>
                     <option value="partial">Partial</option>
                     <option value="none">Collapse</option>
+                  </select>
+                  <select value={sortMode} onChange={(e) => setOption("transfers", "sort_downloads", e.target.value)} className="rounded-full bg-surface-container-low px-2 py-1 text-[10px] font-semibold outline-none">
+                    <option value="unsorted">Unsorted</option>
+                    <option value="folder_filename">Folder + Name</option>
+                    <option value="filename">File Name</option>
                   </select>
                   </span>
                 </div>
@@ -497,6 +506,7 @@ function DownloadsInner() {
             { id: "sep2", label: "---" },
             { id: "group", label: `Group: ${groupLabel}`, icon: "group_work", action: () => cycleGroup() },
             { id: "expand", label: `Expand: ${expandLabel}`, icon: expandMode === "none" ? "unfold_less" : "unfold_more", action: () => cycleExpand() },
+            { id: "sort", label: `Sort: ${sortLabel}`, icon: "sort", action: () => cycleSort() },
           ]}
           onClose={moreMenu.close}
         />

@@ -58,6 +58,22 @@ export const UPLOAD_CLEAR_SETS: Record<string, string[] | null> = {
   all: null,
 };
 
+export type TransferSortMode = "unsorted" | "folder_filename" | "filename";
+
+function folderOf(virtualPath: string): string {
+  const idx = virtualPath.lastIndexOf("\\");
+  return idx >= 0 ? (virtualPath.slice(0, idx) || "(root)") : "(root)";
+}
+
+const byName = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+
+// Row sort for transfer lists. Unsorted keeps bridge arrival order.
+export function sortTransfers<T extends { virtualPath: string; fileName: string }>(items: T[], mode: string): T[] {
+  if (mode === "filename") return [...items].sort((a, b) => byName(a.fileName, b.fileName));
+  if (mode === "folder_filename") return [...items].sort((a, b) => byName(folderOf(a.virtualPath), folderOf(b.virtualPath)) || byName(a.fileName, b.fileName));
+  return items;
+}
+
 const TransfersContext = createContext<TransfersApi | null>(null);
 
 const STORAGE_KEY = "nicotineHub.transfers.mock";
