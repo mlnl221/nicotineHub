@@ -20,12 +20,8 @@ import { useConfig } from "@/lib/config/provider";
 import { useSearchesOptional } from "@/lib/search";
 import { isDemo } from "@/lib/demo";
 import { TagEditor } from "@/components/tag/TagEditor";
-import { BulkBar } from "@/components/tag/BulkBar";
-import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
-import { AdjustTagsModal } from "@/components/tag/AdjustTagsModal";
 import { useBulkSelection, useMarqueeSelection } from "@/lib/bulkSelection";
-import { UPLOAD_CLEAR_SETS } from "@/lib/transfers";
-import { bulkVerify, bulkAnalyze, bulkRequestSpectrum } from "@/lib/worker";
+import { UPLOAD_CLEAR_SETS, sortTransfers } from "@/lib/transfers";
 import { useSpectrum } from "@/lib/spectrum";
 
 function humanSpeed(bps: number): string {
@@ -50,9 +46,6 @@ function UploadsInner() {
   const [selectMode, setSelectMode] = useState(false);
   const bulk = useBulkSelection();
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [bulkEditor, setBulkEditor] = useState(false);
-  const [bulkScrape, setBulkScrape] = useState(false);
-  const [bulkResult, setBulkResult] = useState<{ title: string; rows: Array<Record<string, unknown>> } | null>(null);
   const [focusedIdx, setFocusedIdx] = useState(-1);
   const clearMenu = useContextMenu();
   const moreMenu = useContextMenu();
@@ -63,26 +56,36 @@ function UploadsInner() {
   const { requestSpectrum } = useSpectrum();
   const groupMode = settings.transfers.groupuploads ?? "folder_grouping";
   const expandMode = settings.transfers.expand_uploads ?? "all";
+  const sortMode = settings.transfers.sort_uploads ?? "unsorted";
+  const sortedUploads = sortTransfers(uploads, sortMode);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   useEffect(() => {
     if (groupMode === "ungrouped") { setCollapsed(new Set()); return; }
-    const keys = (() => { const m = new Map<string, unknown>(); uploads.forEach((t) => { const k = groupMode === "user_grouping" ? t.username : getFolder(t.virtualPath); m.set(k, true); }); return [...m.keys()]; })();
+    const keys = (() => { const m = new Map<string, unknown>(); sortedUploads.forEach((t) => { const k = groupMode === "user_grouping" ? t.username : getFolder(t.virtualPath); m.set(k, true); }); return [...m.keys()]; })();
     if (expandMode === "all") setCollapsed(new Set());
     else if (expandMode === "none") setCollapsed(new Set(keys));
     else if (expandMode === "partial") setCollapsed(new Set(keys.slice(Math.floor(keys.length/2))));
   }, [groupMode, expandMode, uploads.map(u=>u.id).join("|")]);
   const uploadGroups = (() => {
-    if (groupMode === "ungrouped") return [["ungrouped", uploads] as [string, typeof uploads]];
-    const map = new Map<string, typeof uploads>();
-    uploads.forEach((t) => { const k = groupMode === "user_grouping" ? t.username : getFolder(t.virtualPath); const arr = map.get(k); if (arr) arr.push(t); else map.set(k, [t]); });
+    if (groupMode === "ungrouped") return [["ungrouped", sortedUploads] as [string, typeof sortedUploads]];
+    const map = new Map<string, typeof sortedUploads>();
+    sortedUploads.forEach((t) => { const k = groupMode === "user_grouping" ? t.username : getFolder(t.virtualPath); const arr = map.get(k); if (arr) arr.push(t); else map.set(k, [t]); });
     return [...map.entries()];
   })();
-  const transferIds = uploads.map((u) => u.id);
+  const transferIds = sortedUploads.map((u) => u.id);
+  // Select enters with everything picked; Done exits and drops the selection
+  // so no stale picks linger. Single source for the header toggle.
+  const handleSelectToggle = () => {
+    if (selectMode) { setSelectMode(false); setFocusedIdx(-1); bulk.clear(); }
+    else { setSelectMode(true); bulk.selectAll(transferIds); }
+  };
   // Mobile overflow menu labels (defined after group/expand mode to avoid TDZ).
   const groupLabel = groupMode === "folder_grouping" ? "Folder" : groupMode === "user_grouping" ? "User" : "Off";
   const cycleGroup = () => setOption("transfers", "groupuploads", groupMode === "folder_grouping" ? "user_grouping" : groupMode === "user_grouping" ? "ungrouped" : "folder_grouping");
   const expandLabel = expandMode === "all" ? "All" : expandMode === "partial" ? "Partial" : "Collapse";
   const cycleExpand = () => setOption("transfers", "expand_uploads", expandMode === "all" ? "partial" : expandMode === "partial" ? "none" : "all");
+  const sortLabel = sortMode === "folder_filename" ? "Folder+Name" : sortMode === "filename" ? "Name" : "Off";
+  const cycleSort = () => setOption("transfers", "sort_uploads", sortMode === "unsorted" ? "folder_filename" : sortMode === "folder_filename" ? "filename" : "unsorted");
   const marquee = useMarqueeSelection(bulk.setSelection);
   // Drop picks for uploads that vanished so the count bar never counts ghosts.
   const liveIds = uploads.map((u) => u.id).join("|");
@@ -91,33 +94,6 @@ function UploadsInner() {
     const live = new Set(uploads.map((u) => u.id));
     if ([...bulk.selected].some((id) => !live.has(id))) bulk.setSelection([...bulk.selected].filter((id) => live.has(id)));
   }, [liveIds]);
-  const selectedFileNames = Array.from(bulk.selected).map((id) => uploads.find((u) => u.id === id)?.fileName).filter(Boolean) as string[];
-  // Tag/verify/analyze/spectrum bulk ops stay capped at 50 files; transfer selection itself is uncapped.
-  const capTagFiles = (files: string[]) => {
-    if (files.length > 50) {
-      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Tag bulk limit", body: "First 50 files used for tag operations." } }));
-      return files.slice(0, 50);
-    }
-    return files;
-  };
-  const handleBulkVerify = async () => {
-    const files = capTagFiles(selectedFileNames);
-    if (!files.length) return;
-    try { const r = await bulkVerify(files); setBulkResult({ title: `Verify — ${files.length} files`, rows: r.results as Array<Record<string, unknown>> }); } catch (e) { setBulkResult({ title: "Verify error", rows: [{ error: e instanceof Error ? e.message : String(e) }] }); }
-  };
-  const handleBulkAnalyze = async () => {
-    const files = capTagFiles(selectedFileNames);
-    if (!files.length) return;
-    try { const r = await bulkAnalyze(files); setBulkResult({ title: `Analyze — ${files.length} files`, rows: r.results as Array<Record<string, unknown>> }); } catch (e) { setBulkResult({ title: "Analyze error", rows: [{ error: e instanceof Error ? e.message : String(e) }] }); }
-  };
-  const handleBulkSpectrum = async () => {
-    const names = capTagFiles(Array.from(bulk.selected).map((id) => uploads.find((u) => u.id === id)?.fileName).filter(Boolean) as string[]);
-    const files = names.map((fileName) => ({ fileName }));
-    if (!files.length) return;
-    setBulkResult({ title: "Spectrum queue started", rows: files.map((f) => ({ fileName: f.fileName, status: "queued" })) });
-    const res = await bulkRequestSpectrum(files);
-    setBulkResult({ title: `Spectrum — ${files.length} files`, rows: res as unknown as Array<Record<string, unknown>> });
-  };
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!selectMode) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -201,18 +177,18 @@ function UploadsInner() {
                 Uploading ({uploads.length})
               </h3>
               <div className="flex items-center gap-1">
-                {!isDemo ? (
-                  <button onClick={() => setSelectMode((v) => !v)} className={`inline-flex items-center gap-1 rounded-full px-3 min-h-11 py-1 text-xs font-semibold ${selectMode ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant"}`}>
-                    <span className="material-symbols-outlined text-[14px]">{selectMode ? "check_box" : "check_box_outline_blank"}</span> {selectMode ? `Selecting (${bulk.size})` : "Select"}
+                {!isDemo && transferIds.length > 0 ? (
+                  <button onClick={handleSelectToggle} className={`inline-flex items-center gap-1 rounded-full px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold ${selectMode ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant"}`}>
+                    <span className="material-symbols-outlined text-[14px]">{selectMode ? "check_box" : "check_box_outline_blank"}</span> {selectMode ? `Done (${bulk.size})` : "Select"}
                   </button>
                 ) : null}
                    {selectMode && transferIds.length ? (
                   <>
-                    <label className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-2 min-h-11 py-1 text-xs font-semibold cursor-pointer" title="Select all">
+                    <label className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-2 min-h-11 md:min-h-10 py-1 text-xs font-semibold cursor-pointer" title="Select all">
                       <input type="checkbox" aria-label="Select all uploads" checked={transferIds.length > 0 && bulk.size === transferIds.length} ref={(el) => { if (el) el.indeterminate = bulk.size > 0 && bulk.size < transferIds.length; }} onChange={() => (bulk.size === transferIds.length ? bulk.clear() : bulk.selectAll(transferIds))} className="h-4 w-4 accent-primary" />
                       All
                     </label>
-                    <button onClick={() => bulk.clear()} className="inline-flex rounded-full bg-surface-container-high px-2 min-h-11 py-1 text-xs">Clear</button>
+                    <button onClick={() => bulk.clear()} title="Deselect all" className="inline-flex items-center rounded-full bg-surface-container-high px-2 min-h-11 md:min-h-10 py-1 text-xs">None</button>
                   </>
                 ) : null}
                 <span className="hidden md:flex items-center gap-1">
@@ -226,41 +202,46 @@ function UploadsInner() {
                   <option value="partial">Partial</option>
                   <option value="none">Collapse</option>
                 </select>
+                <select value={sortMode} onChange={(e) => setOption("transfers", "sort_uploads", e.target.value)} className="rounded-full bg-surface-container-low px-2 py-1 text-[10px] font-semibold outline-none">
+                  <option value="unsorted">Unsorted</option>
+                  <option value="folder_filename">Folder + Name</option>
+                  <option value="filename">File Name</option>
+                </select>
                 </span>
               </div>
             </div>
-            {selectMode ? <p className="font-body text-[10px] text-outline">Select-all covers every row, any user/grouping · Tag ops use first 50 · Shift+click / Shift+↑/↓ extends range</p> : null}
+            {selectMode ? <p className="font-body text-[10px] text-outline">Select picks every row, any user/grouping · None deselects to refine · Tag ops use first 50 · Shift+click / Shift+↑/↓ extends range</p> : null}
             {/* Nicotine-plus parity toolbar.
                 Desktop: full row. Mobile: Abort + Remove + More overflow. */}
             <div className="flex flex-wrap items-center gap-1.5" role="toolbar" aria-label="Upload actions">
             <div className="hidden md:flex flex-wrap items-center gap-1.5">
-              <button onClick={bulkAbort} disabled={!selectedTransfers.length} title="Abort selected uploads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold disabled:opacity-40">
+              <button onClick={bulkAbort} disabled={!selectedTransfers.length} title="Abort selected uploads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold disabled:opacity-40">
                 <span className="material-symbols-outlined text-[16px]">block</span> Abort
               </button>
-              <button onClick={bulkAbortUsers} disabled={!selectedTransfers.length} title="Abort every upload from the selected users" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold disabled:opacity-40">
+              <button onClick={bulkAbortUsers} disabled={!selectedTransfers.length} title="Abort every upload from the selected users" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold disabled:opacity-40">
                 <span className="material-symbols-outlined text-[16px]">group_off</span> Abort Users
               </button>
-              <button onClick={bulkRemove} disabled={!selectedTransfers.length} title="Remove selected uploads" className="inline-flex items-center gap-1 rounded-full bg-error-container px-3 min-h-11 py-1 text-xs font-semibold text-on-error-container disabled:opacity-40">
+              <button onClick={bulkRemove} disabled={!selectedTransfers.length} title="Remove selected uploads" className="inline-flex items-center gap-1 rounded-full bg-error-container px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold text-on-error-container disabled:opacity-40">
                 <span className="material-symbols-outlined text-[16px]">delete</span> Remove
               </button>
-              <button onClick={() => clearMany(true, UPLOAD_CLEAR_SETS["finished-cancelled"] ?? null)} title="Clear all finished/cancelled uploads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold">
+              <button onClick={() => clearMany(true, UPLOAD_CLEAR_SETS["finished-cancelled"] ?? null)} title="Clear all finished/cancelled uploads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold">
                 <span className="material-symbols-outlined text-[16px]">done_all</span> Clear Finished
               </button>
-              <button onClick={handleMessageAll} title="Private-message uploading users (selected, or all)" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold">
+              <button onClick={handleMessageAll} title="Private-message uploading users (selected, or all)" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold">
                 <span className="material-symbols-outlined text-[16px]">chat_bubble</span> Message All
               </button>
               <div className="relative">
-                <button onClick={openBelow(clearMenu)} aria-haspopup="menu" aria-expanded={!!clearMenu.anchor} title="Clear uploads by status" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold">
+                <button onClick={openBelow(clearMenu)} aria-haspopup="menu" aria-expanded={!!clearMenu.anchor} title="Clear uploads by status" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold">
                   <span className="material-symbols-outlined text-[16px]">clear_all</span> Clear All <span className="material-symbols-outlined text-[14px]">expand_more</span>
                 </button>
               </div>
             </div>
             <div className="flex md:hidden items-center gap-1.5">
-              <button onClick={bulkAbort} disabled={!selectedTransfers.length} title="Abort selected uploads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold disabled:opacity-40">
-                <span className="material-symbols-outlined text-[16px]">block</span> Abort
+              <button onClick={bulkAbort} disabled={!selectedTransfers.length} title="Abort selected uploads" aria-label="Abort selected uploads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold disabled:opacity-40">
+                <span className="material-symbols-outlined text-[16px]">block</span>
               </button>
-              <button onClick={bulkRemove} disabled={!selectedTransfers.length} title="Remove selected uploads" className="inline-flex items-center gap-1 rounded-full bg-error-container px-3 min-h-11 py-1 text-xs font-semibold text-on-error-container disabled:opacity-40">
-                <span className="material-symbols-outlined text-[16px]">delete</span> Remove
+              <button onClick={bulkRemove} disabled={!selectedTransfers.length} title="Remove selected uploads" aria-label="Remove selected uploads" className="inline-flex items-center gap-1 rounded-full bg-error-container px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold text-on-error-container disabled:opacity-40">
+                <span className="material-symbols-outlined text-[16px]">delete</span>
               </button>
               <div className="relative">
                 <button onClick={openBelow(moreMenu)} aria-label="More upload actions" aria-haspopup="menu" aria-expanded={!!moreMenu.anchor} title="More actions" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-surface-container-high text-on-surface-variant">
@@ -378,35 +359,12 @@ function UploadsInner() {
             { id: "sep2", label: "---" },
             { id: "group", label: `Group: ${groupLabel}`, icon: "group_work", action: () => cycleGroup() },
             { id: "expand", label: `Expand: ${expandLabel}`, icon: expandMode === "none" ? "unfold_less" : "unfold_more", action: () => cycleExpand() },
+            { id: "sort", label: `Sort: ${sortLabel}`, icon: "sort", action: () => cycleSort() },
           ]}
           onClose={moreMenu.close}
         />
       ) : null}
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} /> : null}
-       <BulkBar count={bulk.size} onClear={bulk.clear} onEdit={() => setBulkEditor(true)} onScrape={() => setBulkScrape(true)} onVerify={handleBulkVerify} onAnalyze={handleBulkAnalyze} onSpectrum={handleBulkSpectrum} onRemove={bulkRemove} />
-      {bulkEditor ? <BulkTagEditor open={bulkEditor} files={selectedFileNames.slice(0, 50)} onClose={() => setBulkEditor(false)} onSaved={() => bulk.clear()} /> : null}
-      {bulkScrape ? <AdjustTagsModal open={bulkScrape} files={selectedFileNames.slice(0, 50)} onClose={() => setBulkScrape(false)} /> : null}
-      {bulkResult ? (
-        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
-          <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col overflow-hidden rounded-t-2xl md:rounded-2xl bg-surface-container-lowest shadow-xl ghost-border" onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b border-outline-variant/10 flex justify-between gap-3">
-              <h3 className="font-headline font-bold">{bulkResult.title}</h3>
-              <button onClick={() => setBulkResult(null)} className="h-8 w-8 rounded-full bg-surface-container-high flex items-center justify-center"><span className="material-symbols-outlined text-[18px]">close</span></button>
-            </div>
-            <div className="flex-1 overflow-auto p-4 space-y-2">
-              {bulkResult.rows.map((r, i) => (
-                <div key={i} className="rounded-xl bg-surface-container-low p-3 ghost-border font-mono text-xs break-all">
-                  <div className="font-semibold truncate">{String((r as Record<string, unknown>).fileName ?? r.path ?? i)}</div>
-                  <div className="text-[11px] text-on-surface-variant">{Object.entries(r).filter(([k]) => k !== "fileName" && k !== "path").map(([k,v]) => `${k}:${String(v)}`).join(" · ") || "ok"}</div>
-                </div>
-              ))}
-            </div>
-            <div className="px-6 py-3 border-t flex justify-end">
-              <button onClick={() => setBulkResult(null)} className="rounded-full bg-primary px-5 py-2 font-label text-xs font-bold text-on-primary">Close</button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

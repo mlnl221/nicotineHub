@@ -484,7 +484,7 @@ export function FileExplorer({
             title={sessionState.status !== "connected" ? "Connect to the bridge to rescan" : "Rescan shares"}
             disabled={rescanning || sessionState.status !== "connected"}
             onClick={handleSharesRescan}
-            className="inline-flex h-11 min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-surface-container-high px-3 font-label text-xs font-semibold text-on-surface-variant shadow-sm hover:bg-surface-container-highest disabled:opacity-40 disabled:cursor-not-allowed dark:bg-surface-variant dark:text-outline"
+            className="inline-flex h-11 min-h-11 md:min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-surface-container-high px-3 font-label text-xs font-semibold text-on-surface-variant shadow-sm hover:bg-surface-container-highest disabled:opacity-40 disabled:cursor-not-allowed dark:bg-surface-variant dark:text-outline"
           >
             <span className={`material-symbols-outlined text-[18px] ${rescanning ? "animate-spin" : ""}`}>{rescanning ? "progress_activity" : "refresh"}</span>
             <span className="hidden sm:inline">{rescanning ? "Rescanning…" : "Rescan"}</span>
@@ -863,7 +863,7 @@ export function FileExplorer({
                     <h3 className="font-headline text-sm font-semibold truncate">Spectrum — {spectrumModal.file.name}</h3>
                     <p className="font-mono text-[10px] text-outline truncate">{spectrumModal.file.path}</p>
                   </div>
-                  <button onClick={() => setSpectrumModal(null)} className="ml-3 p-2 rounded-full hover:bg-surface-container-high min-h-11 min-w-11 flex items-center justify-center"><span className="material-symbols-outlined">close</span></button>
+                  <button onClick={() => setSpectrumModal(null)} className="ml-3 p-2 rounded-full hover:bg-surface-container-high min-h-11 md:min-h-10 min-w-11 flex items-center justify-center"><span className="material-symbols-outlined">close</span></button>
                 </div>
                 <div className="flex gap-1 p-2 bg-surface-container-low shrink-0">
                   <button onClick={() => setSpectrumModal({ ...spectrumModal, activeTab: "full" })} className={`flex-1 py-2.5 rounded-xl font-label text-xs font-semibold ${spectrumModal.activeTab === "full" ? "bg-primary text-on-primary shadow" : "bg-surface-container-high text-on-surface-variant"}`}>Full</button>

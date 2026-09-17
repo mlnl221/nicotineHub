@@ -215,7 +215,7 @@ export default function SettingsPage() {
                               role="tab"
                               aria-selected={active}
                               onClick={() => handleTabChange(t.id)}
-                              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 min-h-11 text-left font-label text-sm transition-all ${
+                              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 min-h-11 md:min-h-10 text-left font-label text-sm transition-all ${
                                 active
                                   ? "bg-primary text-on-primary shadow-sm"
                                   : "text-on-surface-variant hover:bg-surface-container-high dark:text-outline dark:hover:bg-surface-variant/60"

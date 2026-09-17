@@ -328,14 +328,23 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
           </div>
           <div className="flex flex-wrap items-center gap-2 shrink-0 w-full sm:w-auto">
             <button
+              onClick={() => refresh(tab.id)}
+              disabled={loading}
+              title="Refresh profile"
+              aria-label="Refresh profile"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface-container-high text-on-surface-variant transition-colors hover:bg-surface-container dark:text-outline disabled:opacity-50"
+            >
+              <span className={`material-symbols-outlined text-[20px] ${loading ? "animate-spin" : ""}`}>refresh</span>
+            </button>
+            <button
               onClick={() => router.push(`/browse?user=${encodeURIComponent(username)}`)}
-              className="flex-1 sm:flex-none rounded-xl bg-primary px-4 py-2.5 min-h-11 font-label text-xs font-semibold uppercase tracking-widest text-on-primary transition-colors hover:bg-primary-container hover:text-on-primary-container shadow-sm"
+              className="flex-1 sm:flex-none rounded-xl bg-primary px-4 py-2.5 min-h-11 md:min-h-10 font-label text-xs font-semibold uppercase tracking-widest text-on-primary transition-colors hover:bg-primary-container hover:text-on-primary-container shadow-sm"
             >
               Browse Shares
             </button>
             <button
               onClick={() => router.push(`/private-chat?user=${encodeURIComponent(username)}`)}
-              className="flex-1 sm:flex-none rounded-xl bg-surface-container-high px-4 py-2.5 min-h-11 font-label text-xs font-semibold uppercase tracking-widest text-primary transition-colors hover:bg-surface-container dark:bg-surface-container-high dark:text-primary dark:hover:bg-surface-variant"
+              className="flex-1 sm:flex-none rounded-xl bg-surface-container-high px-4 py-2.5 min-h-11 md:min-h-10 font-label text-xs font-semibold uppercase tracking-widest text-primary transition-colors hover:bg-surface-container dark:bg-surface-container-high dark:text-primary dark:hover:bg-surface-variant"
             >
               Send Message
             </button>
@@ -343,17 +352,17 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
         </div>
         {profile.info?.pic ? (
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => setShowPic((v) => !v)} className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-2.5 min-h-9 font-label text-xs hover:bg-surface-container-high">
+            <button onClick={() => setShowPic((v) => !v)} className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-2.5 min-h-9 md:min-h-8 font-label text-xs hover:bg-surface-container-high">
               <span className="material-symbols-outlined text-[16px]">{showPic ? "visibility_off" : "visibility"}</span>
               {showPic ? "Hide" : "Show"} picture
             </button>
-            <button onClick={handleCopyPic} className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-2.5 min-h-9 font-label text-xs hover:bg-surface-container-high">
+            <button onClick={handleCopyPic} className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-2.5 min-h-9 md:min-h-8 font-label text-xs hover:bg-surface-container-high">
               <span className="material-symbols-outlined text-[16px]">content_copy</span> Copy
             </button>
-            <button onClick={handleSavePic} className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-2.5 min-h-9 font-label text-xs hover:bg-surface-container-high">
+            <button onClick={handleSavePic} className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-2.5 min-h-9 md:min-h-8 font-label text-xs hover:bg-surface-container-high">
               <span className="material-symbols-outlined text-[16px]">download</span> Save
             </button>
-            <button onClick={handleSharePic} className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-2.5 min-h-9 font-label text-xs hover:bg-surface-container-high">
+            <button onClick={handleSharePic} className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-3 py-2.5 min-h-9 md:min-h-8 font-label text-xs hover:bg-surface-container-high">
               <span className="material-symbols-outlined text-[16px]">share</span> Share
             </button>
           </div>
@@ -414,7 +423,7 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
                     aria-label="Close full picture view"
                     onClick={() => setLightbox(false)}
                     autoFocus
-                    className="ml-3 p-2 rounded-full hover:bg-surface-container-high min-h-11 min-w-11 flex items-center justify-center"
+                    className="ml-3 p-2 rounded-full hover:bg-surface-container-high min-h-11 md:min-h-10 min-w-11 flex items-center justify-center"
                   >
                     <span className="material-symbols-outlined">close</span>
                   </button>
@@ -559,7 +568,6 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
             ) : (
               <button onClick={() => router.push("/settings?tab=user-profile")} className="rounded-xl bg-surface-container-high px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest text-primary hover:bg-surface-container dark:text-primary dark:hover:bg-surface-variant">Edit Profile</button>
             )}
-            <button onClick={() => refresh(tab.id)} className="rounded-xl bg-surface-container-high px-4 py-3 font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant hover:bg-surface-container dark:text-outline">Refresh</button>
           </div>
           {giftOpen ? (
             <div className="mt-6 rounded-xl bg-surface-container-high p-4">
@@ -575,7 +583,7 @@ export function ProfileView({ tab }: { tab: ProfileTab }) {
                     flash(`Gifting ${d} days to ${username}`);
                     setGiftOpen(false);
                   }}
-                  className="rounded-lg bg-primary px-4 py-2.5 min-h-9 font-label text-xs text-on-primary"
+                  className="rounded-lg bg-primary px-4 py-2.5 min-h-9 md:min-h-8 font-label text-xs text-on-primary"
                 >
                   Give
                 </button>

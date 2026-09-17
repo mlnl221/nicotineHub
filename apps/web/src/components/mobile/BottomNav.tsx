@@ -125,7 +125,7 @@ export function BottomNav() {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex flex-1 min-w-0 flex-col items-center justify-center rounded-full px-1 py-2 min-h-11 text-center transition-all active:scale-90 relative ${
+                className={`flex flex-1 min-w-0 flex-col items-center justify-center rounded-full px-1 py-2 min-h-11 md:min-h-10 text-center transition-all active:scale-90 relative ${
                   active
                     ? "bg-primary-container/20 text-primary dark:bg-primary-fixed-dim/20 dark:text-primary-fixed-dim"
                     : "text-on-surface-variant opacity-70 hover:text-primary"
@@ -148,7 +148,7 @@ export function BottomNav() {
           <button
             onClick={() => setMoreOpen((v) => !v)}
             aria-label="More navigation"
-            className={`relative flex flex-1 min-w-0 flex-col items-center justify-center rounded-full px-1 py-2 min-h-11 text-center transition-all active:scale-90 ${moreActive || moreOpen ? "bg-primary-container/20 text-primary dark:bg-primary-fixed-dim/20 dark:text-primary-fixed-dim" : "text-on-surface-variant opacity-70"}`}
+            className={`relative flex flex-1 min-w-0 flex-col items-center justify-center rounded-full px-1 py-2 min-h-11 md:min-h-10 text-center transition-all active:scale-90 ${moreActive || moreOpen ? "bg-primary-container/20 text-primary dark:bg-primary-fixed-dim/20 dark:text-primary-fixed-dim" : "text-on-surface-variant opacity-70"}`}
           >
             <span className="material-symbols-outlined text-[22px] leading-none shrink-0">{moreOpen ? "close" : "more_horiz"}</span>
             <span className={`font-label text-[8px] uppercase tracking-widest mt-0.5 leading-none truncate w-full ${moreActive ? "font-bold" : ""}`}>More</span>

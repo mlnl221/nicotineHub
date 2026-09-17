@@ -71,7 +71,7 @@ function TabbedProfileInner() {
     setRecent(loadRecent());
   };
 
-  if (state.status !== "connected") return null;
+  if (state.status !== "connected" && !state.reconnecting) return null;
 
   const lookupCollapsed = !!activeTab && !lookupOpen;
   const ownAvatar = (
@@ -108,7 +108,7 @@ function TabbedProfileInner() {
                   type="button"
                   onClick={() => setLookupOpen(true)}
                   aria-label="Look up another user"
-                  className="flex min-h-11 flex-1 items-center gap-2 rounded-xl bg-surface-container-low ghost-border px-4 font-body text-sm text-outline md:hidden"
+                  className="flex min-h-11 md:min-h-10 flex-1 items-center gap-2 rounded-xl bg-surface-container-low ghost-border px-4 font-body text-sm text-outline md:hidden"
                 >
                   <span className="material-symbols-outlined text-[18px]">search</span>
                   Look up user…
@@ -125,7 +125,7 @@ function TabbedProfileInner() {
               <button
                 onClick={go}
                 disabled={!username.trim() || tabs.length >= 10}
-                className={`${lookupCollapsed ? "hidden" : ""} shrink-0 rounded-xl bg-primary-container px-5 py-3 min-h-11 font-label text-xs font-semibold uppercase tracking-widest text-on-primary-container hover:bg-primary hover:text-on-primary disabled:opacity-50 md:inline-flex md:shrink-0`}
+                className={`${lookupCollapsed ? "hidden" : ""} shrink-0 rounded-xl bg-primary-container px-5 py-3 min-h-11 md:min-h-10 font-label text-xs font-semibold uppercase tracking-widest text-on-primary-container hover:bg-primary hover:text-on-primary disabled:opacity-50 md:inline-flex md:shrink-0`}
               >
                 View
               </button>
@@ -144,7 +144,7 @@ function TabbedProfileInner() {
                 disabled={!state.user || tabs.length >= 10}
                 aria-label="View my public profile"
                 title={state.user ? `View ${state.user}'s public profile` : "Sign in to view your profile"}
-                className="shrink-0 hidden md:inline-flex items-center gap-1.5 rounded-xl bg-surface-container-high px-5 py-3 min-h-11 font-label text-xs font-semibold uppercase tracking-widest text-primary hover:bg-surface-container disabled:opacity-50"
+                className="shrink-0 hidden md:inline-flex items-center gap-1.5 rounded-xl bg-surface-container-high px-5 py-3 min-h-11 md:min-h-10 font-label text-xs font-semibold uppercase tracking-widest text-primary hover:bg-surface-container disabled:opacity-50"
               >
                 <span className="material-symbols-outlined text-[16px]" aria-hidden>account_circle</span>
                 My profile

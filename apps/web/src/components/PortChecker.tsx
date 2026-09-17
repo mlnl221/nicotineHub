@@ -106,7 +106,9 @@ async function fetchWithCandidates(path: string, candidates: Array<{ httpBase: s
 export function PortChecker() {
   const { state } = useSession();
   const [checking, setChecking] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  type CheckTone = "green" | "yellow" | "red" | "gray";
+  type CheckBox = { tone: CheckTone; msg: string };
+  const [result, setResult] = useState<{ bridge: CheckBox; upnp: CheckBox; external: CheckBox } | null>(null);
   const [health, setHealth] = useState<HealthJson | null>(null);
 
   const fetchHealth = async (): Promise<HealthJson | null> => {
@@ -169,30 +171,51 @@ export function PortChecker() {
         } catch {}
       }
       if (!hRes.ok) {
-        setResult({ ok: false, msg: `Health check failed: ${hRes.status} at ${httpBase}` });
+        setResult({
+          bridge: { tone: "red", msg: `Bridge health check failed: ${hRes.status} at ${httpBase}` },
+          upnp: { tone: "gray", msg: "UPnP not checked — bridge unreachable." },
+          external: { tone: "gray", msg: "External check not run — bridge unreachable." },
+        });
         return;
       }
       const j = hJson;
       const port = j.listenPort ?? 60754;
       const upnpInfo = upnp ?? j.upnp;
-      let upnpMsg = "";
-      if (upnpInfo) {
-        if (!upnpInfo.enabled) upnpMsg = " UPnP disabled (manual forward required).";
-        else if (upnpInfo.active) upnpMsg = ` UPnP via ${upnpInfo.active} mapped ${upnpInfo.port} → ${upnpInfo.ip}:${upnpInfo.port} ✓`;
-        else if (upnpInfo.error) upnpMsg = ` UPnP attempted but failed: ${upnpInfo.error} — ensure router supports UPnP/NAT-PMP or forward manually. Host network required inside Docker (else container 172.x).`;
-        else upnpMsg = " UPnP enabled — waiting for mapping (or router not found).";
+      const bridge: CheckBox = { tone: "green", msg: `Bridge reachable at ${httpBase} — listen port ${port}.` };
+      let upnpBox: CheckBox;
+      if (!upnpInfo) {
+        upnpBox = { tone: "gray", msg: "UPnP status unknown." };
+      } else if (!upnpInfo.enabled) {
+        upnpBox = { tone: "yellow", msg: "UPnP disabled (manual forward required)." };
+      } else if (upnpInfo.active) {
+        upnpBox = { tone: "green", msg: `UPnP via ${upnpInfo.active} mapped ${upnpInfo.port} → ${upnpInfo.ip}:${upnpInfo.port} ✓` };
+      } else if (upnpInfo.error) {
+        upnpBox = { tone: "red", msg: `UPnP attempted but failed: ${upnpInfo.error} — ensure router supports UPnP/NAT-PMP or forward manually. Host network required inside Docker (else container 172.x).` };
+      } else {
+        upnpBox = { tone: "yellow", msg: "UPnP enabled — waiting for mapping (or router not found)." };
       }
-      let extMsg = "";
-      if (pc) {
-        if (pc.open === true) extMsg = ` External check: ${port}/tcp open ✓ (slsknet.org)`;
-        else if (pc.open === false) extMsg = ` External check: ${port}/tcp closed — forward ${port} on router/VPN or enable UPnP (slsknet.org).`;
-        else if (pc.error) extMsg = ` External check error: ${pc.error}`;
+      let extBox: CheckBox;
+      if (!pc) {
+        extBox = { tone: "gray", msg: `External check unavailable — ensure ${port} is reachable (TCP) for incoming searches.` };
+      } else if (pc.open === true) {
+        extBox = { tone: "green", msg: `External check: ${port}/tcp open ✓ (slsknet.org)` };
+      } else if (pc.open === false) {
+        extBox = { tone: "red", msg: `External check: ${port}/tcp closed — forward ${port} on router/VPN or enable UPnP (slsknet.org).` };
+      } else if (pc.error) {
+        extBox = { tone: "yellow", msg: `External check error: ${pc.error}` };
+      } else {
+        extBox = { tone: "gray", msg: `External check inconclusive for ${port}/tcp.` };
       }
       setHealth(j);
-      setResult({ ok: true, msg: `Bridge reachable at ${httpBase} — listen port ${port}.${upnpMsg}${extMsg} Ensure ${port} is reachable (TCP) for incoming searches.` });
+      setResult({ bridge, upnp: upnpBox, external: extBox });
     } catch (e) {
       const candidates = getBridgeCandidates().map((c) => c.httpBase).join(", ");
-      setResult({ ok: false, msg: `Cannot reach bridge. Tried ${candidates}. Check NEXT_PUBLIC_BRIDGE_URL / localStorage.nicotineHub.bridgeUrl and BRIDGE_TOKEN. ${(e as Error).message}` });
+      const msg = `Cannot reach bridge. Tried ${candidates}. Check NEXT_PUBLIC_BRIDGE_URL / localStorage.nicotineHub.bridgeUrl and BRIDGE_TOKEN. ${(e as Error).message}`;
+      setResult({
+        bridge: { tone: "red", msg },
+        upnp: { tone: "gray", msg: "UPnP not checked — bridge unreachable." },
+        external: { tone: "gray", msg: "External check not run — bridge unreachable." },
+      });
     } finally {
       setChecking(false);
     }
@@ -239,8 +262,30 @@ export function PortChecker() {
         </button>
       )}
       {result && (
-        <div className={`mt-3 rounded-xl px-3 py-2 text-xs ${result.ok ? "bg-green-500/10 text-green-700 dark:text-green-300" : "bg-error-container text-on-error-container"}`}>
-          {result.msg}
+        <div className="mt-3 flex flex-col gap-2">
+          {(
+            [
+              { key: "bridge", box: result.bridge, testid: "portcheck-bridge" },
+              { key: "upnp", box: result.upnp, testid: "portcheck-upnp" },
+              { key: "external", box: result.external, testid: "portcheck-external" },
+            ] as const
+          ).map(({ key, box, testid }) => (
+            <div
+              key={key}
+              data-testid={testid}
+              className={`rounded-xl px-3 py-2 text-xs ${
+                box.tone === "green"
+                  ? "bg-green-500/10 text-green-700 dark:text-green-300"
+                  : box.tone === "yellow"
+                    ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                    : box.tone === "red"
+                      ? "bg-error-container text-on-error-container"
+                      : "bg-surface-container-high text-on-surface-variant dark:bg-surface-container-highest/40"
+              }`}
+            >
+              {box.msg}
+            </div>
+          ))}
         </div>
       )}
     </div>

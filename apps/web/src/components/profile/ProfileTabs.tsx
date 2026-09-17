@@ -17,7 +17,7 @@ export function ProfileTabs() {
             key={tab.id}
             type="button"
             onClick={() => setActive(tab.id)}
-            className={`group flex shrink-0 snap-start items-center gap-1.5 rounded-full px-3 py-2.5 font-label text-xs transition-colors min-h-11 text-left cursor-pointer ${
+            className={`group flex shrink-0 snap-start items-center gap-1.5 rounded-full px-3 py-2.5 font-label text-xs transition-colors min-h-11 md:min-h-10 text-left cursor-pointer ${
               active ? "bg-primary-container text-on-primary-container" : "bg-surface-container-lowest text-on-surface-variant ghost-border hover:bg-surface-container-low dark:bg-surface-container-high dark:text-on-surface dark:hover:bg-surface-container-highest"
             }`}
           >

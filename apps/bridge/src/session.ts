@@ -1507,7 +1507,6 @@ export class SoulseekSession {
   }
 
   private dispatchServerMessage(code: number, payload: Buffer) {
-    logger.debug("server", "server message", { code, len: payload.length });
     if (code === SERVER_MESSAGE_CODES.login) {
       this.hasReceivedLoginResponse = true;
       this.consecutiveSilentCloses = 0;
@@ -2006,7 +2005,6 @@ export class SoulseekSession {
     // Server FileSearch 26 receive: string username + uint32 token + string query (see SLSKPROTOCOL 26)
     // Some paths (legacy) may be token+query without username — handle both.
     if (!this._searchEnabled) {
-      logger.debug("server", "FileSearch ignored — search_results disabled", {});
       return;
     }
     try {
@@ -2737,12 +2735,10 @@ export class SoulseekSession {
           inflated = inflateWithCap(msg.payload);
         } catch (e) { logger.warn("search", "FileSearchResponse inflate failed", { error: (e as Error).message }); continue; }
         const tokenProbe = probeTokenFromInflated(inflated);
-        logger.debug("search", "peer FileSearchResponse received", { tokenProbe, allowed: [...this.allowedSearchTokens].slice(0,5), payloadLen: msg.payload.length });
         if (tokenProbe !== null && this.allowedSearchTokens.size > 0 && !this.allowedSearchTokens.has(tokenProbe)) {
-          logger.debug("search", "FileSearchResponse dropped — token not allowed", { tokenProbe });
           continue;
         }
-        try { const resp = parseFileSearchResponseBuffer(inflated); logger.info("search", "search result", { token: resp.token, username: resp.username, results: resp.results?.length, freeSlots: resp.freeUploadSlots }); this.routeResult(resp); } catch (e) { logger.warn("search", "parseFileSearchResponse failed", { error: (e as Error).message }); }
+        try { const resp = parseFileSearchResponseBuffer(inflated); logger.debug("search", "search result", { token: resp.token, username: resp.username, results: resp.results?.length, freeSlots: resp.freeUploadSlots }); this.routeResult(resp); } catch (e) { logger.warn("search", "parseFileSearchResponse failed", { error: (e as Error).message }); }
       } else if (msg.code === PEER_MESSAGE_CODES.userInfoResponse) {
         const username = state.username ?? "";
         // gating: only accept if we requested it (mirrors nicotine allowed_message_responses)
@@ -2840,9 +2836,7 @@ export class SoulseekSession {
         if (this.shareDB.shouldThrottle(peerName2)) break;
         try { const tok = msg.payload.readUInt32LE(0); const r = new SlskReader(msg.payload); r.uint32(); const dir = r.string(); const perm = this.getSharePermissionLevel(peerName2); const resp = this.shareDB.buildFolderContentsResponse(tok, dir, perm); (peer as Socket).write(resp); } catch { try { const tok = msg.payload.readUInt32LE(0); (peer as Socket).write(emptyFolderResponse(tok)); } catch {} }
       } else if (msg.code === PEER_MESSAGE_CODES.fileSearchRequest) {
-        if (!this._searchEnabled) {
-          logger.debug("server", "peer FileSearchRequest ignored — search_results disabled", { username: state.username });
-        } else {
+        if (this._searchEnabled) {
           try {
             // peer FileSearchRequest 8: [token][query] — respond with FileSearchResponse 9 via same peer, respecting permission; per-file excluded filtering inside buildFileSearchResponse
             const r = new SlskReader(msg.payload);
@@ -2892,20 +2886,17 @@ export class SoulseekSession {
 
   private routeResult(resp: { token: number; username: string; freeUploadSlots: boolean; inQueue: number; uploadSpeed: number; results: SearchFile[] }) {
     if (this.allowedSearchTokens.size && !this.allowedSearchTokens.has(resp.token)) {
-      logger.debug("search", "routeResult dropped — token not allowed", { token: resp.token, allowed: [...this.allowedSearchTokens].slice(0,5), username: resp.username });
       return;
     }
     const search = this.searches.get(resp.token);
     if (!search) {
-      logger.debug("search", "routeResult dropped — no search for token", { token: resp.token, username: resp.username });
       return;
     }
     if (search.users.has(resp.username)) {
-      logger.debug("search", "routeResult dropped — duplicate user", { token: resp.token, username: resp.username });
       return;
     }
     search.users.add(resp.username);
-    logger.info("search", "routeResult routing", { token: resp.token, searchId: search.searchId, username: resp.username, results: resp.results.length, totalCount: search.count });
+    logger.debug("search", "routeResult routing", { token: resp.token, searchId: search.searchId, username: resp.username, results: resp.results.length, totalCount: search.count });
     const cc = this.userAddresses.get(resp.username)?.addr ? getCountryCode(this.userAddresses.get(resp.username)!.addr.ip) : "";
     // lazy request address if missing for future
     if (!this.userAddresses.has(resp.username)) {
@@ -3129,13 +3120,15 @@ export class SoulseekSession {
       clearTimeout(existing.timer);
     }
     const timer = setTimeout(() => {
-      logger.warn("browse", "browse timeout", { username });
+      const known = this.userAddresses.get(username);
+      const peerAddr = known ? `${known.addr.ip}:${known.addr.port}` : "address unknown";
+      logger.warn("browse", "browse timeout", { username, peerAddr, listenPort: this._listenPort });
       this.pendingBrowseShares.delete(key);
       this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);
       // leak fix: stale queued P/SharedFileListRequest was blocking fresh dials via reusingDial (pendingPeerMessages >0 treated as in-flight)
       try { this.pendingPeerMessages.delete(key); } catch {}
       // More helpful: peer may be offline, firewalled, or our LISTEN_PORT not forwarded
-      this.emitBrowse({ type: "browse-error", username, error: "Timed out fetching shares — peer may be offline, firewalled, or your LISTEN_PORT not port-forwarded (check Diagnostics → Network)" });
+      this.emitBrowse({ type: "browse-error", username, error: `Timed out fetching shares — peer may be offline, firewalled, or LISTEN_PORT ${this._listenPort} not port-forwarded (peer ${peerAddr}; check Diagnostics → Network)` });
     }, 30000);
     this.pendingBrowseShares.set(key, { timer, createdAt: Date.now() });
     this.addAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);
@@ -3160,6 +3153,7 @@ export class SoulseekSession {
       } else {
         this.pendingBrowseFolder.delete(tok);
         this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.folderContentsResponse);
+        try { this.pendingPeerMessages.delete(username.toLowerCase()); } catch {}
         this.emitBrowse({ type: "browse-error", username, token: tok, folder: dir, error: "Timed out fetching folder" });
       }
     };
@@ -3186,6 +3180,22 @@ export class SoulseekSession {
     } catch (e) { throw e; }
     const st = this.peerStates.get(sock as Socket);
     if (st) { st.isFileConn = true; st.fileToken = token >>> 0; }
+    else this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: true, isFileConn: true, fileToken: token >>> 0, username, outbound: true, connType: "F", lastActive: Date.now(), createdAt: Date.now() } as never);
+    return sock as Socket;
+  }
+  /**
+   * Firewalled-downloader rescue: dial F out and pierce with the grant token
+   * so the uploader streams over our connection (their direct dial to our
+   * closed port already failed). PeerInit is NOT sent — the pierce init
+   * (code 0) takes its place, same as server-relayed pierce above.
+   */
+  async dialFilePierce(username: string, token: number): Promise<Socket> {
+    const sock = await this.connectPeer(username, "F");
+    try {
+      (sock as Socket).write(buildPierceFireWall(token));
+    } catch (e) { throw e; }
+    const st = this.peerStates.get(sock as Socket);
+    if (st) { st.isFileConn = true; st.fileToken = token >>> 0; st.initDone = true; st.username = username; st.connType = "F"; st.lastActive = Date.now(); }
     else this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: true, isFileConn: true, fileToken: token >>> 0, username, outbound: true, connType: "F", lastActive: Date.now(), createdAt: Date.now() } as never);
     return sock as Socket;
   }
@@ -3260,7 +3270,18 @@ export class SoulseekSession {
       return;
     }
     logger.info("browse", "requesting peer address", { username });
-    const timer = setTimeout(() => { this.peerAddressRequests.delete(username); try { this.pendingPeerMessages.delete(username.toLowerCase()); } catch {} logger.debug("browse", "GetPeerAddress timeout cleanup", { username }); }, PEER_ADDRESS_TIMEOUT_MS);
+    // Keep browse/folder queued msgs on GetPeerAddress timeout so the indirect
+    // ConnectToPeer pierce fallback (sent above) can still flush them — same
+    // pierce-wait as requestUserInfo. Their owners (browse 30s timer, folder
+    // final timeout) clean the queue up; other callers keep old cleanup.
+    const timer = setTimeout(() => {
+      this.peerAddressRequests.delete(username);
+      const key = username.toLowerCase();
+      let owned = this.pendingBrowseShares.has(key);
+      if (!owned) for (const e of this.pendingBrowseFolder.values()) { if (e.username.toLowerCase() === key) { owned = true; break; } }
+      if (!owned) { try { this.pendingPeerMessages.delete(key); } catch {} }
+      logger.debug("browse", "GetPeerAddress timeout, waiting for pierce fallback", { username, keptQueue: owned });
+    }, PEER_ADDRESS_TIMEOUT_MS);
     const entry = { cbs: [(addr: PeerAddress) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); logger.info("browse", "peer address resolved", { username, ip: addr.ip, port: addr.port }); this.connectToPeerViaAddress(username, addr, connType, msg); }], timer, createdAt: Date.now() };
     this.peerAddressRequests.set(username, entry);
     this.serverSocket?.write(buildGetPeerAddress(username));
@@ -3268,7 +3289,7 @@ export class SoulseekSession {
   private connectToPeerViaAddress(username: string, addr: PeerAddress, connType: string, msg: Buffer) {
     logger.info("browse", "connectToPeerViaAddress", { username, ip: addr.ip, port: addr.port, connType });
     if (addr.port === 0 || addr.ip === "0.0.0.0") {
-      logger.warn("browse", "peer address invalid, aborting direct", { username, ip: addr.ip, port: addr.port });
+      logger.warn("browse", "peer address invalid, waiting for pierce fallback", { username, ip: addr.ip, port: addr.port });
       return;
     }
     if (!this.canOpenSocket()) {

@@ -21,7 +21,7 @@ export function BrowseTabs() {
             aria-current={active ? "true" : undefined}
             onClick={() => setActive(tab.id)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActive(tab.id); } }}
-            className={`group flex shrink-0 snap-start items-center gap-1.5 rounded-full px-3 py-2.5 font-label text-xs transition-colors min-h-11 text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${
+            className={`group flex shrink-0 snap-start items-center gap-1.5 rounded-full px-3 py-2.5 font-label text-xs transition-colors min-h-11 md:min-h-10 text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${
               active ? "bg-primary-container text-on-primary-container" : "bg-surface-container-lowest text-on-surface-variant ghost-border hover:bg-surface-container-low dark:bg-surface-container-high dark:text-on-surface dark:hover:bg-surface-container-highest"
             }`}
           >

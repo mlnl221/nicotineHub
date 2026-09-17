@@ -115,25 +115,19 @@ export class UPnP extends BaseImplementation {
         try {
           const text = msg.toString("utf8");
           const resp = new SSDPResponse(text);
-          logger.debug("bridge", "UPnP: M-SEARCH response", { header: text.slice(0, 400) });
           const loc = resp.headers["LOCATION"];
           if (!loc) {
-            logger.debug("bridge", "UPnP: no LOCATION header", { headers: text.slice(0, 300) });
             return;
           }
           if (locations.has(loc)) {
-            logger.debug("bridge", "UPnP: location already processed", { location: loc });
             return;
           }
           locations.add(loc);
           const { serviceType, controlUrl } = await UPnP.getServiceControlUrl(loc);
           if (!serviceType || !controlUrl) {
-            logger.debug("bridge", "UPnP: no service in response", { location: loc });
             return;
           }
-          logger.debug("bridge", `UPnP: found ${serviceType} at ${controlUrl}`);
           if (services.has(serviceType)) {
-            logger.debug("bridge", "UPnP: service already added, ignoring", { serviceType });
             return;
           }
           services.set(serviceType, { serviceType, controlUrl });

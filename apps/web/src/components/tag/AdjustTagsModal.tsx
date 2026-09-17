@@ -329,7 +329,7 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
               <h2 className="font-headline text-lg font-bold">Adjust tag information</h2>
               <p className="font-mono text-xs text-outline">{capped.length} files → positional mapping (reorder to match)</p>
             </div>
-            <button onClick={onClose} className="h-8 w-8 rounded-full bg-surface-container-high flex items-center justify-center min-h-9 min-w-9"><span className="material-symbols-outlined text-[18px]">close</span></button>
+            <button onClick={onClose} className="h-8 w-8 rounded-full bg-surface-container-high flex items-center justify-center min-h-9 md:min-h-8 min-w-9"><span className="material-symbols-outlined text-[18px]">close</span></button>
           </div>
         </div>
         <div className="flex-1 overflow-auto p-6 space-y-4 min-h-0">
@@ -337,9 +337,9 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
           {done ? <div className="rounded-xl bg-green-100 dark:bg-green-900/30 px-4 py-3 font-body text-xs text-green-800 dark:text-green-200">{done}</div> : null}
           <div className="rounded-xl bg-surface-container-low p-4 ghost-border space-y-3">
             <label className="font-label text-xs font-semibold">Release URL (Discogs/Bandcamp/MusicBrainz/Deezer/Apple/Qobuz/Tidal)</label>
-            <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://www.discogs.com/release/..." className="w-full rounded-xl bg-surface-container-lowest px-3 py-2.5 min-h-11 font-body text-sm ghost-border outline-none" />
+            <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://www.discogs.com/release/..." className="w-full rounded-xl bg-surface-container-lowest px-3 py-2.5 min-h-11 md:min-h-10 font-body text-sm ghost-border outline-none" />
             <div className="flex gap-2">
-              <button disabled={loading || !url.trim()} onClick={handlePreview} className="flex-1 rounded-xl bg-surface-container-high px-4 py-2 min-h-9 font-label text-xs font-semibold disabled:opacity-40">{loading ? "Fetching…" : "Preview"}</button>
+              <button disabled={loading || !url.trim()} onClick={handlePreview} className="flex-1 rounded-xl bg-surface-container-high px-4 py-2 min-h-9 md:min-h-8 font-label text-xs font-semibold disabled:opacity-40">{loading ? "Fetching…" : "Preview"}</button>
             </div>
             {autoRenameEnabled ? <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 px-3 py-2 font-body text-xs text-amber-900 dark:text-amber-200">Auto-rename enabled: <span className="font-mono">{renameTemplate}</span></div> : null}
           </div>
@@ -377,7 +377,7 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
                 <div className="rounded-xl bg-surface-container-low p-3 ghost-border space-y-2">
                   <h4 className="font-label text-xs font-semibold uppercase tracking-widest">Cover</h4>
                   {preview.cover_url ? <img src={preview.cover_url} alt="cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} className="w-full max-h-48 object-contain rounded-lg bg-surface-container-lowest" /> : <div className="font-body text-xs text-outline">No cover</div>}
-                  <label className="flex items-center gap-2 font-body text-xs min-h-9">
+                  <label className="flex items-center gap-2 font-body text-xs min-h-9 md:min-h-8">
                     <input type="checkbox" checked={saveCover} onChange={(e) => setSaveCover(e.target.checked)} className="h-4 w-4" />
                     Save cover
                   </label>
@@ -388,7 +388,7 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
                   <h4 className="font-label text-xs font-semibold uppercase tracking-widest">{src ? cap(src) : "Release"} tracks</h4>
                   <div className="max-h-[30vh] overflow-auto space-y-1 pr-1">
                     {tracks.map((t, i) => (
-                      <div key={i} className="flex items-center gap-2 rounded-lg bg-surface-container-lowest px-3 py-2 min-h-9">
+                      <div key={i} className="flex items-center gap-2 rounded-lg bg-surface-container-lowest px-3 py-2 min-h-9 md:min-h-8">
                         <span className="font-mono text-[10px] text-outline w-10 shrink-0">{t.pos || `#${i + 1}`}</span>
                         <span className="font-body text-xs truncate flex-1" title={t.title}>{t.title || "(untitled)"}</span>
                       </div>
@@ -399,8 +399,8 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
                   <div className="flex items-center justify-between gap-2">
                     <h4 className="font-label text-xs font-semibold uppercase tracking-widest">Local files</h4>
                     <div className="flex gap-2">
-                      <button onClick={() => moveSelected(-1)} className="rounded-full bg-surface-container-high px-3 py-1.5 min-h-9 font-label text-[11px] font-semibold">Move up</button>
-                      <button onClick={() => moveSelected(1)} className="rounded-full bg-surface-container-high px-3 py-1.5 min-h-9 font-label text-[11px] font-semibold">Move down</button>
+                      <button onClick={() => moveSelected(-1)} className="rounded-full bg-surface-container-high px-3 py-1.5 min-h-9 md:min-h-8 font-label text-[11px] font-semibold">Move up</button>
+                      <button onClick={() => moveSelected(1)} className="rounded-full bg-surface-container-high px-3 py-1.5 min-h-9 md:min-h-8 font-label text-[11px] font-semibold">Move down</button>
                     </div>
                   </div>
                   <div className="max-h-[30vh] overflow-auto space-y-1 pr-1">
@@ -412,7 +412,7 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={() => dropAt(i)}
                         onClick={() => setSelected(i)}
-                        className={`flex items-center gap-2 rounded-lg px-3 py-2 min-h-9 cursor-move ${i === selected ? "bg-surface-container-high ghost-border" : "bg-surface-container-lowest"}`}
+                        className={`flex items-center gap-2 rounded-lg px-3 py-2 min-h-9 md:min-h-8 cursor-move ${i === selected ? "bg-surface-container-high ghost-border" : "bg-surface-container-lowest"}`}
                       >
                         <span className="font-mono text-[10px] text-outline w-6 shrink-0">{i + 1}</span>
                         <span className="font-mono text-[10px] text-outline w-10 shrink-0">{durations[f] ?? "—"}</span>
@@ -420,7 +420,7 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
                       </div>
                     ))}
                     {Array.from({ length: missing }).map((_, k) => (
-                      <div key={`ph-${k}`} className="flex items-center gap-2 rounded-lg bg-surface-container-lowest px-3 py-2 min-h-9 opacity-60">
+                      <div key={`ph-${k}`} className="flex items-center gap-2 rounded-lg bg-surface-container-lowest px-3 py-2 min-h-9 md:min-h-8 opacity-60">
                         <span className="font-mono text-[10px] text-outline w-6 shrink-0">{capped.length + k + 1}</span>
                         <span className="font-body text-xs text-outline">— no file —</span>
                       </div>
@@ -430,7 +430,7 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
                     <div className="space-y-1">
                       <h5 className="font-label text-[11px] font-semibold uppercase tracking-widest">Unmapped files</h5>
                       {overflow.map((f) => (
-                        <div key={f} className="rounded-lg bg-surface-container-lowest px-3 py-2 min-h-9 font-mono text-xs truncate" title={f}>{basename(f)}</div>
+                        <div key={f} className="rounded-lg bg-surface-container-lowest px-3 py-2 min-h-9 md:min-h-8 font-mono text-xs truncate" title={f}>{basename(f)}</div>
                       ))}
                     </div>
                   ) : null}
@@ -446,7 +446,7 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
               {renameRows ? (
                 <div className="max-h-[24vh] overflow-auto space-y-1 pr-1">
                   {renameRows.map((r) => (
-                    <div key={r.file} className="flex items-center gap-2 rounded-xl bg-surface-container-lowest px-3 py-2 min-h-9">
+                    <div key={r.file} className="flex items-center gap-2 rounded-xl bg-surface-container-lowest px-3 py-2 min-h-9 md:min-h-8">
                       <span className="font-mono text-xs truncate flex-1" title={r.file}>{basename(r.file)}</span>
                       <span className="font-mono text-[10px] text-outline shrink-0">→</span>
                       {r.newName ? (
@@ -460,19 +460,19 @@ export function AdjustTagsModal({ open, files, onClose, onRenamed }: Props) {
               ) : null}
               {renameDone ? <div className="rounded-xl bg-green-100 dark:bg-green-900/30 px-3 py-2 font-body text-xs text-green-800 dark:text-green-200">{renameDone}</div> : null}
               {renameRows && !renameDone ? (
-                <button disabled={renameBusy || !renameRows.some((r) => r.newName)} onClick={handleRenameConfirm} className="w-full rounded-xl bg-surface-container-high px-4 py-2 min-h-9 font-label text-xs font-semibold disabled:opacity-40">{renameBusy ? "Renaming…" : "Confirm rename"}</button>
+                <button disabled={renameBusy || !renameRows.some((r) => r.newName)} onClick={handleRenameConfirm} className="w-full rounded-xl bg-surface-container-high px-4 py-2 min-h-9 md:min-h-8 font-label text-xs font-semibold disabled:opacity-40">{renameBusy ? "Renaming…" : "Confirm rename"}</button>
               ) : null}
             </div>
           ) : null}
         </div>
         <div className="px-6 py-4 border-t border-outline-variant/10 bg-surface-container-low/60 flex justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2">
-            <button onClick={onClose} className="rounded-full bg-surface-container-high px-5 py-2.5 min-h-9 font-label text-xs font-semibold">Cancel</button>
+            <button onClick={onClose} className="rounded-full bg-surface-container-high px-5 py-2.5 min-h-9 md:min-h-8 font-label text-xs font-semibold">Cancel</button>
             {appliedOk > 0 && !autoRenameEnabled ? (
-              <button disabled={renameLoading} onClick={handleRenamePreview} title={renameTemplate} className="rounded-xl bg-surface-container-high px-4 py-2.5 min-h-9 font-label text-xs font-semibold ghost-border disabled:opacity-40">{renameLoading ? "Loading…" : "Rename files…"}</button>
+              <button disabled={renameLoading} onClick={handleRenamePreview} title={renameTemplate} className="rounded-xl bg-surface-container-high px-4 py-2.5 min-h-9 md:min-h-8 font-label text-xs font-semibold ghost-border disabled:opacity-40">{renameLoading ? "Loading…" : "Rename files…"}</button>
             ) : null}
           </div>
-          <button disabled={loading || applying || !preview || capped.length === 0} onClick={handleApply} className="rounded-full bg-primary px-5 py-2.5 min-h-9 font-label text-xs font-bold text-on-primary disabled:opacity-40">{applying ? "Applying…" : "OK"}</button>
+          <button disabled={loading || applying || !preview || capped.length === 0} onClick={handleApply} className="rounded-full bg-primary px-5 py-2.5 min-h-9 md:min-h-8 font-label text-xs font-bold text-on-primary disabled:opacity-40">{applying ? "Applying…" : "OK"}</button>
         </div>
       </div>
     </div>

@@ -58,8 +58,17 @@ const FolderRow = memo(function FolderRow({ name, short, depth, hasChildren, isE
       >
         <span className="material-symbols-outlined text-[20px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>{hasChildren ? (isExpanded ? "folder_open" : "folder") : "folder"}</span>
         <div className="min-w-0 flex-1">
-          <p className="whitespace-nowrap font-body text-sm font-medium" title={name}>{short}</p>
-          <p className="truncate font-label text-[11px] text-on-surface-variant">{statsLine}</p>
+          {hasChildren ? (
+            <>
+              <p className="whitespace-nowrap font-body text-sm font-medium" title={name}>{short}</p>
+              <p className="truncate font-label text-[11px] text-on-surface-variant">{statsLine}</p>
+            </>
+          ) : (
+            <p className="whitespace-nowrap font-body text-sm" title={`${name} — ${statsLine}`}>
+              <span className="font-medium">{short}</span>
+              <span className="ml-2 font-label text-[11px] text-on-surface-variant">{statsLine}</span>
+            </p>
+          )}
         </div>
       </button>
     </div>
@@ -224,7 +233,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
       const depth = folderMeta.get(f.name)?.depth ?? 0;
       if (depth === 0) return true;
       const parts = f.name.split("\\");
-      for (let i = parts.length - 1; i > minDepth; i--) {
+      for (let i = parts.length - 1; i > 0; i--) {
         const ancestor = parts.slice(0, i).join("\\");
         if (names.has(ancestor) && !expandedPaths.has(ancestor)) return false;
       }
@@ -251,7 +260,9 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
   const folderSentinel = useRef<HTMLDivElement | null>(null);
   const fileSentinel = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => { setVisibleFolderCount(PAGE_SIZE); }, [visibleTreeFolders.length, filteredFolders.length, query, expandedPaths.size]);
+  // Reset paging only on new data / new filter — never on expand/collapse
+  // (resetting here shrank the list under the user and lost their scroll spot).
+  useEffect(() => { setVisibleFolderCount(PAGE_SIZE); }, [filteredFolders.length, query]);
   useEffect(() => { setVisibleFileCount(PAGE_SIZE); }, [visibleFiles.length, activeFolder?.name, fileQuery]);
   // Reset selection when folder changes (prevents stale selection across folders)
   useEffect(() => { bulk.clear(); }, [activeFolder?.name]);
@@ -351,6 +362,21 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
       if (expand) n.add(name);
       else n.delete(name);
       return n;
+    });
+    if (!expand) return;
+    // Pin the expanded folder to the top of the list so its children are
+    // visible below it — no more losing your scroll spot on expand.
+    const idx = visibleTreeFolders.findIndex((f) => f.name === name);
+    if (idx >= 0) setVisibleFolderCount((v) => Math.max(v, idx + 1 + PAGE_SIZE));
+    requestAnimationFrame(() => {
+      try {
+        const container = folderListRef.current;
+        const row = rowRefs.current.get(name);
+        if (!container || !row) return;
+        const c = container.getBoundingClientRect();
+        const r = row.getBoundingClientRect();
+        container.scrollTop += r.top - c.top - 8;
+      } catch {}
     });
   };
   const handleFolderKeyDown = (e: React.KeyboardEvent) => {
@@ -490,7 +516,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
           <div className="flex gap-2 min-w-0 flex-wrap">
             <button
               onClick={() => router.push(`/profile?user=${encodeURIComponent(username)}`)}
-              className="shrink-0 rounded-full bg-surface-container-high px-4 py-2.5 min-h-9 font-label text-xs hover:bg-surface-variant"
+              className="shrink-0 rounded-full bg-surface-container-high px-4 py-2.5 min-h-9 md:min-h-8 font-label text-xs hover:bg-surface-variant"
             >
               View Profile
             </button>
@@ -510,11 +536,11 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                 value={fileQuery}
                 onChange={(e) => setFileQuery(e.target.value)}
                 placeholder="Search files in folder..."
-                className="w-full sm:w-64 min-h-11 rounded-full bg-surface-container-low py-2.5 pl-9 pr-4 font-body text-base placeholder:text-outline-variant focus:outline-none focus:ring-2 focus:ring-primary/20 md:text-sm"
+                className="w-full sm:w-64 min-h-11 md:min-h-10 rounded-full bg-surface-container-low py-2.5 pl-9 pr-4 font-body text-base placeholder:text-outline-variant focus:outline-none focus:ring-2 focus:ring-primary/20 md:text-sm"
               />
             </div>
             {error ? (
-              <button onClick={() => retry(tab.id)} className="shrink-0 rounded-full bg-primary px-4 py-2.5 min-h-9 font-label text-xs font-bold text-on-primary">Retry</button>
+              <button onClick={() => retry(tab.id)} className="shrink-0 rounded-full bg-primary px-4 py-2.5 min-h-9 md:min-h-8 font-label text-xs font-bold text-on-primary">Retry</button>
             ) : null}
           </div>
         </div>
@@ -537,7 +563,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                   }
                 }}
                 placeholder="Search folders..."
-                className="w-full rounded-full bg-surface-container-low py-2.5 pl-9 pr-4 font-body text-base focus:outline-none focus:ring-2 focus:ring-primary/20 min-h-11 md:text-sm"
+                className="w-full rounded-full bg-surface-container-low py-2.5 pl-9 pr-4 font-body text-base focus:outline-none focus:ring-2 focus:ring-primary/20 min-h-11 md:min-h-10 md:text-sm"
               />
             </div>
             <button
@@ -652,7 +678,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                 setSelectedFolder(e.target.value);
                 openFolder(tab.id, e.target.value);
               }}
-              className="w-full rounded-lg bg-surface-container-low px-3 py-2.5 min-h-11 font-body text-sm"
+              className="w-full rounded-lg bg-surface-container-low px-3 py-2.5 min-h-11 md:min-h-10 font-body text-sm"
             >
               {selectedFolder && !pagedFolders.some((f) => f.name === selectedFolder) ? (
                 <option key={selectedFolder} value={selectedFolder}>{selectedFolder.split("\\").pop() || selectedFolder}</option>
@@ -837,7 +863,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                                 <p className="truncate font-label text-[10px] text-outline" title={shortName}>{shortName}</p>
                               ) : null}
                             </div>
-                            <button onClick={() => setPropsFile({ name: file.name, size: file.size, ext: file.ext, attrs: file.attrs, folder: activeFolder.name })} className="shrink-0 rounded-full bg-surface-container-high px-3 py-2.5 min-h-9 font-label text-xs hover:bg-surface-variant" title="Properties">
+                            <button onClick={() => setPropsFile({ name: file.name, size: file.size, ext: file.ext, attrs: file.attrs, folder: activeFolder.name })} className="shrink-0 rounded-full bg-surface-container-high px-3 py-2.5 min-h-9 md:min-h-8 font-label text-xs hover:bg-surface-variant" title="Properties">
                               <span className="material-symbols-outlined text-[16px]">info</span>
                             </button>
                             <button
@@ -849,7 +875,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                                 const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : virtualPath;
                                 requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName });
                               }}
-                              className={`shrink-0 rounded-full px-4 py-2.5 min-h-9 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline cursor-not-allowed" : "bg-primary text-on-primary hover:bg-primary-container"}`}
+                              className={`shrink-0 rounded-full px-4 py-2.5 min-h-9 md:min-h-8 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline cursor-not-allowed" : "bg-primary text-on-primary hover:bg-primary-container"}`}
                             >
                               {isDemo ? "Disabled" : "Download"}
                             </button>

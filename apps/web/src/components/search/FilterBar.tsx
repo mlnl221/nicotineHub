@@ -61,12 +61,12 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
               value={local[f.key] as string}
               onChange={(e) => setLocal((prev) => ({ ...prev, [f.key]: e.target.value }))}
               placeholder={f.placeholder}
-              className="rounded-xl bg-surface-container-lowest px-3 py-2.5 min-h-11 font-body text-base text-on-surface ghost-border transition-all focus:border-primary focus:outline-none md:text-sm"
+              className="rounded-xl bg-surface-container-lowest px-3 py-2.5 min-h-11 md:min-h-10 font-body text-base text-on-surface ghost-border transition-all focus:border-primary focus:outline-none md:text-sm"
             />
           </label>
         ))}
 
-        <label className="flex items-center justify-between rounded-xl bg-surface-container-lowest px-3 py-3 min-h-11 ghost-border">
+        <label className="flex items-center justify-between rounded-xl bg-surface-container-lowest px-3 py-3 min-h-11 md:min-h-10 ghost-border">
           <span className="font-label text-xs tracking-wide text-on-surface-variant">Free slot only</span>
           <input
             type="checkbox"
@@ -76,7 +76,7 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
           />
         </label>
 
-        <label className="flex items-center justify-between rounded-xl bg-surface-container-lowest px-3 py-3 min-h-11 ghost-border">
+        <label className="flex items-center justify-between rounded-xl bg-surface-container-lowest px-3 py-3 min-h-11 md:min-h-10 ghost-border">
           <span className="font-label text-xs tracking-wide text-on-surface-variant">Public files only</span>
           <input
             type="checkbox"
@@ -91,7 +91,7 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
         <button
           type="button"
           onClick={onClear}
-          className="rounded-full px-4 py-2.5 min-h-9 font-label text-xs text-on-surface-variant transition-colors hover:text-primary"
+          className="rounded-full px-4 py-2.5 min-h-9 md:min-h-8 font-label text-xs text-on-surface-variant transition-colors hover:text-primary"
         >
           Clear filters
         </button>

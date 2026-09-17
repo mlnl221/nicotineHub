@@ -58,6 +58,22 @@ export const UPLOAD_CLEAR_SETS: Record<string, string[] | null> = {
   all: null,
 };
 
+export type TransferSortMode = "unsorted" | "folder_filename" | "filename";
+
+function folderOf(virtualPath: string): string {
+  const idx = virtualPath.lastIndexOf("\\");
+  return idx >= 0 ? (virtualPath.slice(0, idx) || "(root)") : "(root)";
+}
+
+const byName = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+
+// Row sort for transfer lists. Unsorted keeps bridge arrival order.
+export function sortTransfers<T extends { virtualPath: string; fileName: string }>(items: T[], mode: string): T[] {
+  if (mode === "filename") return [...items].sort((a, b) => byName(a.fileName, b.fileName));
+  if (mode === "folder_filename") return [...items].sort((a, b) => byName(folderOf(a.virtualPath), folderOf(b.virtualPath)) || byName(a.fileName, b.fileName));
+  return items;
+}
+
 const TransfersContext = createContext<TransfersApi | null>(null);
 
 const STORAGE_KEY = "nicotineHub.transfers.mock";
@@ -263,16 +279,30 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
         });
         if (becameFinished) triggerScan(msg.transfer);
       } else if (msg.type === "transfer:queue") {
-        setTransfers((prev) => prev.map((t) => (t.id === msg.id ? { ...t, queuePosition: msg.place, status: "Queued" as const } : t)));
+        // Upsert: queue events can arrive for rows we never saw (missed update
+        // across reconnect). Never leave "Place —" forever on a known id.
+        setTransfers((prev) => {
+          if (prev.some((t) => t.id === msg.id)) {
+            return prev.map((t) => (t.id === msg.id ? { ...t, queuePosition: msg.place, status: "Queued" as const } : t));
+          }
+          const user = msg.id.split("::")[0] ?? "";
+          const vpath = msg.id.split("::").slice(1).join("::") ?? "";
+          return [...prev, { id: msg.id, username: user, virtualPath: vpath, fileName: vpath.split("\\").pop() ?? vpath, size: 0, current: 0, speed: 0, avgSpeed: 0, timeLeft: null, status: "Queued" as const, queuePosition: msg.place, isUpload: false }];
+        });
       } else if (msg.type === "transfer:finished") {
         const finishedUrl = (msg as { downloadUrl?: string }).downloadUrl;
-        setTransfers((prev) =>
-          prev.map((t) =>
-            t.id === msg.id
-              ? { ...t, status: "Finished" as const, current: t.size, speed: 0, timeLeft: null, queuePosition: null, ...(finishedUrl ? { downloadUrl: finishedUrl } : null) }
-              : t,
-          ),
-        );
+        setTransfers((prev) => {
+          if (prev.some((t) => t.id === msg.id)) {
+            return prev.map((t) =>
+              t.id === msg.id
+                ? { ...t, status: "Finished" as const, current: t.size, speed: 0, timeLeft: null, queuePosition: null, ...(finishedUrl ? { downloadUrl: finishedUrl } : null) }
+                : t,
+            );
+          }
+          const user = msg.id.split("::")[0] ?? "";
+          const vpath = msg.id.split("::").slice(1).join("::") ?? msg.fileName;
+          return [...prev, { id: msg.id, username: user, virtualPath: vpath, fileName: msg.fileName, size: msg.size, current: msg.size, speed: 0, avgSpeed: 0, timeLeft: null, status: "Finished" as const, queuePosition: null, isUpload: false, ...(finishedUrl ? { downloadUrl: finishedUrl } : null) }];
+        });
         // fire worker scan for finished download
         const dummy: Transfer = {
           id: msg.id,

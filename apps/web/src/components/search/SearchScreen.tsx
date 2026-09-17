@@ -265,7 +265,7 @@ export function SearchScreen() {
               aria-pressed={selectMode}
               title={selectMode ? "Exit selection — row tap opens details" : "Select rows — row tap toggles selection"}
               onClick={() => { if (selectMode) bulk.clear(); setManualSelect((v) => !(v ?? autoSelect)); }}
-              className={`rounded-full min-h-11 px-3 py-2 text-xs font-semibold outline-none ${
+              className={`rounded-full min-h-11 md:min-h-10 px-3 py-2 text-xs font-semibold outline-none ${
                 selectMode
                   ? "bg-primary text-on-primary"
                   : "bg-surface-container-high text-on-surface-variant"
@@ -278,7 +278,7 @@ export function SearchScreen() {
                 type="button"
                 title="Mark visible users as seen"
                 onClick={() => markSeen(activeTab.query, visibleUsers)}
-                className="min-h-11 rounded-full bg-surface-container-high px-3 py-2 text-xs font-semibold text-on-surface-variant outline-none active:bg-surface-container-highest"
+                className="min-h-11 md:min-h-10 rounded-full bg-surface-container-high px-3 py-2 text-xs font-semibold text-on-surface-variant outline-none active:bg-surface-container-highest"
               >
                 Dismiss new ({visibleRows.length})
               </button>
@@ -293,7 +293,7 @@ export function SearchScreen() {
                 setFilters(activeId, { publicOnly: next });
                 setOption("searches", "defilter", { ...settings.searches.defilter, publicFiles: next });
               }}
-              className={`rounded-full min-h-11 px-3 py-2 text-xs font-semibold outline-none ${
+              className={`rounded-full min-h-11 md:min-h-10 px-3 py-2 text-xs font-semibold outline-none ${
                 activeTab.filters.publicOnly
                   ? "bg-primary text-on-primary"
                   : "bg-surface-container-high text-on-surface-variant"
@@ -454,7 +454,7 @@ export function SearchScreen() {
               type="button"
               onClick={() => setWishlistOpen((v) => !v)}
               aria-expanded={wishlistOpen}
-              className="flex min-h-11 w-full items-center justify-between gap-2 rounded-2xl bg-surface-container-high px-4 py-2.5 font-label text-sm font-semibold text-on-surface md:hidden"
+              className="flex min-h-11 md:min-h-10 w-full items-center justify-between gap-2 rounded-2xl bg-surface-container-high px-4 py-2.5 font-label text-sm font-semibold text-on-surface md:hidden"
             >
               <span className="inline-flex items-center gap-2">
                 <span className="material-symbols-outlined text-[18px] text-on-surface-variant">favorite</span>
@@ -592,8 +592,8 @@ export function SearchScreen() {
           onClear={() => bulk.clear()}
           actions={
             <>
-              <button onClick={downloadSelected} disabled={isDemo} className="flex-1 min-w-[72px] rounded-full bg-primary px-3 py-2.5 min-h-11 font-label text-xs font-bold text-on-primary disabled:opacity-50">Download</button>
-              <button onClick={downloadSelectedFolders} disabled={isDemo} className="flex-1 min-w-[72px] rounded-full bg-surface-container-high px-3 py-2.5 min-h-11 font-label text-xs">Folders</button>
+              <button onClick={downloadSelected} disabled={isDemo} className="flex-1 min-w-[72px] rounded-full bg-primary px-3 py-2.5 min-h-11 md:min-h-10 font-label text-xs font-bold text-on-primary disabled:opacity-50">Download</button>
+              <button onClick={downloadSelectedFolders} disabled={isDemo} className="flex-1 min-w-[72px] rounded-full bg-surface-container-high px-3 py-2.5 min-h-11 md:min-h-10 font-label text-xs">Folders</button>
             </>
           }
         />
@@ -668,7 +668,7 @@ function SheetAction({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full min-h-11 items-center gap-3 rounded-xl px-3 py-3.5 text-left font-body text-sm transition-colors active:bg-surface-container-high"
+      className="flex w-full min-h-11 md:min-h-10 items-center gap-3 rounded-xl px-3 py-3.5 text-left font-body text-sm transition-colors active:bg-surface-container-high"
     >
       <span className={`material-symbols-outlined ${muted ? "text-outline" : "text-primary"}`}>
         {icon}

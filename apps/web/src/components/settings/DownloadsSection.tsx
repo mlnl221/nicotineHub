@@ -81,6 +81,17 @@ export function DownloadsSection() {
           ]}
         />
         <SelectControl
+          label="Sort order"
+          description="Row order within the downloads list."
+          value={t.sort_downloads ?? "unsorted"}
+          onChange={(v) => setOption("transfers", "sort_downloads", v)}
+          options={[
+            { value: "unsorted", label: "Unsorted" },
+            { value: "folder_filename", label: "Folder + file name" },
+            { value: "filename", label: "File name" },
+          ]}
+        />
+        <SelectControl
           label="Expand state"
           value={t.expand_downloads}
           onChange={(v) => setOption("transfers", "expand_downloads", v)}
