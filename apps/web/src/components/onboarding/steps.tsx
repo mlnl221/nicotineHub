@@ -6,6 +6,7 @@ import { useConfig } from "@/lib/config/provider";
 import { useSaveSection } from "@/lib/config/save";
 import { useSession } from "@/lib/session";
 import { useTheme } from "@/components/ThemeProvider";
+import { DARK_THEMES, LIGHT_THEMES } from "@/lib/themes/themes";
 import { isDemo } from "@/lib/demo";
 import { getWorkerHealth } from "@/lib/worker";
 import type { SharedFolder } from "@/lib/config/defaults";
@@ -547,7 +548,7 @@ export function CaptchaStep({ onNext, onBack, isFirst }: StepNav) {
 /* ---------- 5 — Appearance ---------- */
 
 export function AppearanceStep({ onNext, onBack, isFirst }: StepNav) {
-  const { theme, setTheme } = useTheme();
+  const { activeId, applyId } = useTheme();
   const { settings, setOption } = useConfig();
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -555,9 +556,10 @@ export function AppearanceStep({ onNext, onBack, isFirst }: StepNav) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const pick = (t: "light" | "dark") => {
-    if (t !== theme) setTheme(t);
-    setOption("ui", "dark_mode", t === "dark");
+  const pick = (id: string, mode: "light" | "dark") => {
+    applyId(id);
+    setOption("ui", mode === "dark" ? "dark_theme" : "light_theme", id);
+    setOption("ui", "dark_mode", mode === "dark");
   };
 
   const cont = async () => {
@@ -573,38 +575,49 @@ export function AppearanceStep({ onNext, onBack, isFirst }: StepNav) {
     }
   };
 
+  const groups = [
+    { mode: "light" as const, title: "Light", themes: LIGHT_THEMES },
+    { mode: "dark" as const, title: "Dark", themes: DARK_THEMES },
+  ];
+
   return (
     <div>
       <StepHead
         kicker="Step 4 of 5 · Appearance"
         title="Set the mood"
-        body="A quiet reading room for dense crates. Pick how it looks — you can change this anytime in Settings."
+        body="A quiet reading room for dense crates. Pick a light and a dark theme — the top toggle flips between them. You can change this anytime in Settings."
       />
-      <InfoTip>
-        Alexandria theme by design: serif headlines, calm surfaces, one accent blue. No custom colors or fonts — the palette stays
-        consistent everywhere on purpose.
-      </InfoTip>
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        {(["light", "dark"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => pick(t)}
-            aria-pressed={theme === t}
-            className={`rounded-2xl p-4 text-left ${
-              theme === t
-                ? "bg-primary text-on-primary"
-                : "bg-surface-container-low text-on-surface dark:bg-surface-container dark:text-inverse-on-surface"
-            }`}
-          >
-            <span className="material-symbols-outlined text-[28px]">{t === "light" ? "light_mode" : "dark_mode"}</span>
-            <div className="mt-2 font-label text-sm font-bold uppercase tracking-widest">{t}</div>
-            <div className={`font-body text-xs ${theme === t ? "opacity-80" : "text-on-surface-variant dark:text-outline"}`}>
-              {t === "light" ? "Paper-bright shelves" : "Late-night digging"}
-            </div>
-          </button>
-        ))}
-      </div>
+      {groups.map((g) => (
+        <div key={g.mode} className="mt-4">
+          <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant">{g.title}</h3>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {g.themes.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => pick(t.id, g.mode)}
+                aria-pressed={activeId === t.id}
+                className={`flex items-center gap-2 rounded-2xl p-3 text-left ${
+                  activeId === t.id
+                    ? "bg-primary text-on-primary"
+                    : "bg-surface-container-low text-on-surface dark:bg-surface-container dark:text-inverse-on-surface"
+                }`}
+              >
+                <span
+                  className="h-6 w-6 shrink-0 rounded-full border border-black/10"
+                  style={{ background: `linear-gradient(135deg, ${t.accent} 50%, ${t.bg} 50%)` }}
+                />
+                <span className="min-w-0">
+                  <span className="block truncate font-label text-xs font-bold uppercase tracking-widest">{t.label}</span>
+                  <span className={`block truncate font-body text-[11px] ${activeId === t.id ? "opacity-80" : "text-on-surface-variant dark:text-outline"}`}>
+                    {t.accent}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
       {error ? <div className="mt-2 rounded-xl bg-error-container px-3 py-2 font-body text-xs text-on-error-container">{error}</div> : null}
       <StepNavButtons onBack={onBack} onNext={cont} isFirst={isFirst} busy={busy} />
     </div>

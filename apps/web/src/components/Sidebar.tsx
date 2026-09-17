@@ -88,7 +88,7 @@ export function Sidebar() {
           <button
             type="button"
             onClick={() => setAboutOpen(true)}
-            className="shrink-0 rounded-xl bg-white p-1 shadow-sm ring-1 ring-black/5 dark:bg-white hover:bg-surface-container-high/40"
+            className="shrink-0 rounded-xl bg-surface-container-lowest p-1 shadow-sm ring-1 ring-black/5 hover:bg-surface-container-high/40"
             aria-label={t("About") + " Nicotine Hub"}
             title="About Nicotine Hub"
           >
@@ -97,7 +97,7 @@ export function Sidebar() {
               alt=""
               width={40}
               height={40}
-              className="h-10 w-10 rounded-xl object-contain bg-white p-1 shrink-0"
+              className="h-10 w-10 rounded-xl object-contain bg-surface-container-lowest p-1 shrink-0"
             />
           </button>
           {!collapsed ? (

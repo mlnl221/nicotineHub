@@ -119,7 +119,7 @@ export default function SettingsPage() {
           className="pointer-events-none absolute inset-0 opacity-20"
           style={{
             background:
-              "radial-gradient(circle at 50% 20%, rgba(51, 102, 204, 0.15) 0%, transparent 60%)",
+              "radial-gradient(circle at 50% 20%, color-mix(in srgb, var(--color-primary) 15%, transparent) 0%, transparent 60%)",
           }}
         />
 

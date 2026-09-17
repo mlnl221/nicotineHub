@@ -29,7 +29,7 @@ export function useNotifications() {
       try { document.title = `${title} — Nicotine Hub`; setTimeout(() => { document.title = "Nicotine Hub"; }, 4000); } catch {}
     }
     if (settings.notifications.notification_tab_colors) {
-      try { document.documentElement.style.setProperty("--notif-flash", "#497EC2"); setTimeout(() => document.documentElement.style.removeProperty("--notif-flash"), 1500); } catch {}
+      try { document.documentElement.style.setProperty("--notif-flash", getComputedStyle(document.documentElement).getPropertyValue("--color-primary").trim() || "#497EC2"); setTimeout(() => document.documentElement.style.removeProperty("--notif-flash"), 1500); } catch {}
     }
     try {
       if (typeof Notification !== "undefined" && Notification.permission === "granted") {
