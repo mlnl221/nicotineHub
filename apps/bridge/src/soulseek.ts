@@ -189,7 +189,6 @@ export const MINOR_VERSION = 1;
 // 160 is reserved for Nicotine+ — never send. This client is unrelated to
 // the Nicotine+ Team and logs in with unreserved 185/1 (absent from
 // SLSKPROTOCOL.md Reserved + Obsolete major-version tables; see issue #181).
-export const EXPERIMENTAL_VERSION_FLAG = false;
 
 export const DEFAULT_SERVER_HOST = "server.slsknet.org";
 export const DEFAULT_SERVER_PORT = 2242;
