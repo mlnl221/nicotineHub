@@ -295,7 +295,7 @@ function DownloadsInner() {
                         <input type="checkbox" aria-label="Select all downloads" checked={bulk.size === transferIds.length} ref={(el) => { if (el) el.indeterminate = bulk.size > 0 && bulk.size < transferIds.length; }} onChange={() => (bulk.size === transferIds.length ? bulk.clear() : bulk.selectAll(transferIds))} className="h-4 w-4 accent-primary" />
                         All
                       </label>
-                      <button onClick={() => bulk.clear()} title="Deselect all" className="inline-flex rounded-full bg-surface-container-high px-2 min-h-11 md:min-h-10 py-1 text-xs">None</button>
+                      <button onClick={() => bulk.clear()} title="Deselect all" className="inline-flex items-center rounded-full bg-surface-container-high px-2 min-h-11 md:min-h-10 py-1 text-xs">None</button>
                     </>
                   ) : null}
                   <span className="hidden md:flex items-center gap-1">
