@@ -1507,7 +1507,6 @@ export class SoulseekSession {
   }
 
   private dispatchServerMessage(code: number, payload: Buffer) {
-    logger.debug("server", "server message", { code, len: payload.length });
     if (code === SERVER_MESSAGE_CODES.login) {
       this.hasReceivedLoginResponse = true;
       this.consecutiveSilentCloses = 0;
@@ -2006,7 +2005,6 @@ export class SoulseekSession {
     // Server FileSearch 26 receive: string username + uint32 token + string query (see SLSKPROTOCOL 26)
     // Some paths (legacy) may be token+query without username — handle both.
     if (!this._searchEnabled) {
-      logger.debug("server", "FileSearch ignored — search_results disabled", {});
       return;
     }
     try {
@@ -2737,12 +2735,10 @@ export class SoulseekSession {
           inflated = inflateWithCap(msg.payload);
         } catch (e) { logger.warn("search", "FileSearchResponse inflate failed", { error: (e as Error).message }); continue; }
         const tokenProbe = probeTokenFromInflated(inflated);
-        logger.debug("search", "peer FileSearchResponse received", { tokenProbe, allowed: [...this.allowedSearchTokens].slice(0,5), payloadLen: msg.payload.length });
         if (tokenProbe !== null && this.allowedSearchTokens.size > 0 && !this.allowedSearchTokens.has(tokenProbe)) {
-          logger.debug("search", "FileSearchResponse dropped — token not allowed", { tokenProbe });
           continue;
         }
-        try { const resp = parseFileSearchResponseBuffer(inflated); logger.info("search", "search result", { token: resp.token, username: resp.username, results: resp.results?.length, freeSlots: resp.freeUploadSlots }); this.routeResult(resp); } catch (e) { logger.warn("search", "parseFileSearchResponse failed", { error: (e as Error).message }); }
+        try { const resp = parseFileSearchResponseBuffer(inflated); logger.debug("search", "search result", { token: resp.token, username: resp.username, results: resp.results?.length, freeSlots: resp.freeUploadSlots }); this.routeResult(resp); } catch (e) { logger.warn("search", "parseFileSearchResponse failed", { error: (e as Error).message }); }
       } else if (msg.code === PEER_MESSAGE_CODES.userInfoResponse) {
         const username = state.username ?? "";
         // gating: only accept if we requested it (mirrors nicotine allowed_message_responses)
@@ -2840,9 +2836,7 @@ export class SoulseekSession {
         if (this.shareDB.shouldThrottle(peerName2)) break;
         try { const tok = msg.payload.readUInt32LE(0); const r = new SlskReader(msg.payload); r.uint32(); const dir = r.string(); const perm = this.getSharePermissionLevel(peerName2); const resp = this.shareDB.buildFolderContentsResponse(tok, dir, perm); (peer as Socket).write(resp); } catch { try { const tok = msg.payload.readUInt32LE(0); (peer as Socket).write(emptyFolderResponse(tok)); } catch {} }
       } else if (msg.code === PEER_MESSAGE_CODES.fileSearchRequest) {
-        if (!this._searchEnabled) {
-          logger.debug("server", "peer FileSearchRequest ignored — search_results disabled", { username: state.username });
-        } else {
+        if (this._searchEnabled) {
           try {
             // peer FileSearchRequest 8: [token][query] — respond with FileSearchResponse 9 via same peer, respecting permission; per-file excluded filtering inside buildFileSearchResponse
             const r = new SlskReader(msg.payload);
@@ -2892,20 +2886,17 @@ export class SoulseekSession {
 
   private routeResult(resp: { token: number; username: string; freeUploadSlots: boolean; inQueue: number; uploadSpeed: number; results: SearchFile[] }) {
     if (this.allowedSearchTokens.size && !this.allowedSearchTokens.has(resp.token)) {
-      logger.debug("search", "routeResult dropped — token not allowed", { token: resp.token, allowed: [...this.allowedSearchTokens].slice(0,5), username: resp.username });
       return;
     }
     const search = this.searches.get(resp.token);
     if (!search) {
-      logger.debug("search", "routeResult dropped — no search for token", { token: resp.token, username: resp.username });
       return;
     }
     if (search.users.has(resp.username)) {
-      logger.debug("search", "routeResult dropped — duplicate user", { token: resp.token, username: resp.username });
       return;
     }
     search.users.add(resp.username);
-    logger.info("search", "routeResult routing", { token: resp.token, searchId: search.searchId, username: resp.username, results: resp.results.length, totalCount: search.count });
+    logger.debug("search", "routeResult routing", { token: resp.token, searchId: search.searchId, username: resp.username, results: resp.results.length, totalCount: search.count });
     const cc = this.userAddresses.get(resp.username)?.addr ? getCountryCode(this.userAddresses.get(resp.username)!.addr.ip) : "";
     // lazy request address if missing for future
     if (!this.userAddresses.has(resp.username)) {
