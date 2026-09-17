@@ -2144,12 +2144,8 @@ export class SoulseekSession {
         close: (peer) => {
           const st = this.peerStates.get(peer as Socket);
           logger.debug("server", "peer inbound close", { username: st?.username, connType: st?.connType, remote: (peer as unknown as { remoteAddress?: string }).remoteAddress });
-          this.peerStates.delete(peer as Socket);
-          this.closedPeers.add(peer as Socket);
+          this.handlePeerSocketClosed(peer as Socket, st);
           if (st?.username && st.connType === "D") this._removeChildPeerConnection(st.username);
-          if ((st?.isFileConn || st?.connType === "F") && st?.fileToken !== undefined) {
-            try { this.opts.onFileClosed?.(st.fileToken); } catch {}
-          }
           this.dequeuePendingSockets();
         },
       },
@@ -2169,8 +2165,7 @@ export class SoulseekSession {
         if (initTimeout || ghost || dead) {
           logger.debug("peer", "idle sweep close", { username: st.username, connType: st.connType, initDone: st.initDone, bytes: (st as unknown as { bytesReceived?: number }).bytesReceived ?? st.buf.length, msgs: (st as unknown as { msgsParsed?: number }).msgsParsed ?? 0, reason: initTimeout ? "initTimeout" : ghost ? "ghost" : "dead" });
           try { sock.end(); } catch {}
-          this.peerStates.delete(sock);
-          this.closedPeers.add(sock as Socket);
+          this.handlePeerSocketClosed(sock as Socket, st);
           if (st.username && st.connType === "D") this._removeChildPeerConnection(st.username);
           this.dequeuePendingSockets();
         }
@@ -2317,7 +2312,7 @@ export class SoulseekSession {
           if (pending) { try { pending.reject(new Error("Pierce failed")); } catch {} }
           this.dequeuePendingSockets();
         },
-        close: (sock) => { this.peerStates.delete(sock as Socket); if ((this.peerStates.get(sock as Socket)?.connType ?? ctp.connType) === "D" && ctp.username) this._removeChildPeerConnection(ctp.username); this.dequeuePendingSockets(); },
+        close: (sock) => { const st = this.peerStates.get(sock as Socket); this.handlePeerSocketClosed(sock as Socket, st); if ((st?.connType ?? ctp.connType) === "D" && ctp.username) this._removeChildPeerConnection(ctp.username); this.dequeuePendingSockets(); },
       },
     }).catch(() => {
       try { this.serverSocket?.write(buildCantConnectToPeer(ctp.token, ctp.username)); } catch {}
@@ -2384,7 +2379,7 @@ export class SoulseekSession {
             },
             data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
             error: () => reject(new Error("Direct connect failed")),
-            close: () => {},
+            close: (sock) => { this.handlePeerSocketClosed(sock as Socket, this.peerStates.get(sock as Socket)); },
           },
         }).catch(reject);
       });
@@ -2404,6 +2399,21 @@ export class SoulseekSession {
       const p = this.pendingConnects.get(token);
       if (p) { clearTimeout(p.timer); this.pendingConnects.delete(token); }
     });
+  }
+
+  /**
+   * Shared socket-close path: notify the transfer layer when an F channel
+   * dies so mid-transfer uploads/downloads fail fast ("Connection closed"
+   * + retry) instead of stalling forever. P/D sockets have no token
+   * continuity and skip the notify. Idempotent via closedPeers tombstone.
+   */
+  private handlePeerSocketClosed(sock: Socket, st: PeerState | undefined) {
+    if ((st?.isFileConn || st?.connType === "F") && st?.fileToken !== undefined) {
+      logger.debug("transfer", "F socket closed", { username: st.username, token: st.fileToken });
+      try { this.opts.onFileClosed?.(st.fileToken); } catch {}
+    }
+    this.peerStates.delete(sock);
+    this.closedPeers.add(sock);
   }
 
   /** Register an F token so incoming raw F connections are demuxed correctly. */
@@ -2515,6 +2525,13 @@ export class SoulseekSession {
             if (pi.connType === "F") state.isFileConn = true;
           } catch { logger.debug("peer", "inbound PeerInit parse failed", { bytes: initPayload.length }); }
         } else if (code === 0) {
+          // D parent dials never pierce (PossibleParents are direct dials):
+          // code 0 here is a distrib ping, not PierceFireWall. Promote it
+          // instead of parking/consuming it as an unknown-token pierce.
+          if (state.username && state.connType === "D") {
+            state.initDone = true;
+            continue;
+          }
           try {
             const pf = parsePierceFireWall(initPayload);
             const pending = this.pendingConnects.get(pf.token);
@@ -2537,6 +2554,21 @@ export class SoulseekSession {
           } catch { logger.debug("peer", "inbound PierceFireWall parse failed"); }
         } else {
           logger.debug("peer", "inbound init unknown code", { code });
+          // Parent-candidate D dials may deliver BranchLevel/Root before any
+          // PeerInit. Preserve frame: promote preset outbound D to distrib
+          // instead of consuming the handshake as unknown init (which dropped
+          // branchLevel and left parent null forever).
+          if (state.username && state.connType === "D" &&
+            (code === 3 || code === 4 || code === 5 || code === 7 || code === 93)) {
+            state.initDone = true;
+            continue;
+          }
+          // Truly unknown first frame: close fast instead of marking done
+          // with no identity and leaking to the 60s dead sweep.
+          try { peer.end(); } catch {}
+          this.peerStates.delete(peer);
+          this.closedPeers.add(peer as Socket);
+          return;
         }
         state.initDone = true;
         if (state.username && state.connType) {
@@ -3311,11 +3343,12 @@ export class SoulseekSession {
       this.enqueueOrRun(() => this.connectToPeerViaAddress(username, addr, connType, msg));
       return;
     }
+    const dialStart = Date.now();
     Bun.connect({
       hostname: addr.ip, port: addr.port,
       socket: {
         open: (sock) => {
-          logger.info("browse", "direct peer open", { username, ip: addr.ip, port: addr.port, connType });
+          logger.info("browse", "direct peer open", { username, ip: addr.ip, port: addr.port, connType, dialMs: Date.now() - dialStart });
           this.setTcpBufferSize(sock as Socket, connType as "F" | "D" | "P");
           // Outbound P: consider handshake done after we send PeerInit — don't wait for peer init
           // (nicotine sends SharedFileListRequest immediately after PeerInit; peer rarely replies with init)
@@ -3325,10 +3358,10 @@ export class SoulseekSession {
           try { (sock as Socket).write(msg); } catch {}
         },
         data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
-        error: (_sock, err) => { logger.warn("browse", "direct peer error", { username, ip: addr.ip, port: addr.port, error: (err as Error)?.message || String(err) }); this.dequeuePendingSockets(); },
-        close: (sock) => { logger.info("browse", "direct peer close", { username, ip: addr.ip, port: addr.port }); this.peerStates.delete(sock as Socket); this.dequeuePendingSockets(); },
+        error: (_sock, err) => { logger.warn("browse", "direct peer error", { username, ip: addr.ip, port: addr.port, elapsedMs: Date.now() - dialStart, error: (err as Error)?.message || String(err) }); this.dequeuePendingSockets(); },
+        close: (sock) => { const st = this.peerStates.get(sock as Socket); logger.info("browse", "direct peer close", { username, ip: addr.ip, port: addr.port, lifetimeMs: st?.createdAt ? Date.now() - st.createdAt : undefined }); this.peerStates.delete(sock as Socket); this.dequeuePendingSockets(); },
       },
-    }).catch((e) => { logger.warn("browse", "direct peer connect failed", { username, ip: addr.ip, port: addr.port, error: (e as Error).message }); this.dequeuePendingSockets(); });
+    }).catch((e) => { logger.warn("browse", "direct peer connect failed", { username, ip: addr.ip, port: addr.port, elapsedMs: Date.now() - dialStart, error: (e as Error).message }); this.dequeuePendingSockets(); });
   }
 
   requestUserInfo(username: string): Promise<UserInfoResponseMessage> {
