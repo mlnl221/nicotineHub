@@ -323,6 +323,54 @@ describe("peer TCP framing", () => {
     expect(state.buf.length).toBe(0);
   });
 
+  test("handlePeerSocketClosed notifies transfers only for F channels", () => {
+    const mk = (onFileClosed: (t: number) => void) => {
+      const session = Object.create(SoulseekSession.prototype) as SoulseekSession;
+      const peerStates = new Map<Socket, unknown>();
+      Object.assign(session as unknown as Record<string, unknown>, {
+        peerStates,
+        closedPeers: new Set<Socket>(),
+        opts: { username: "me", onTransferEvent: () => {}, onFileClosed },
+        username: "me",
+      });
+      return { session, peerStates };
+    };
+    const closeIt = (session: SoulseekSession, peer: Socket) => {
+      const st = (session as unknown as { peerStates: Map<Socket, unknown> }).peerStates.get(peer);
+      (session as unknown as { handlePeerSocketClosed: (s: Socket, st: unknown) => void }).handlePeerSocketClosed(peer, st);
+    };
+
+    // F channel with token: notify + forget, tombstoned against resurrect
+    {
+      const seen: number[] = [];
+      const { session, peerStates } = mk((t) => { seen.push(t); });
+      const peer = { end() {}, write() {} } as unknown as Socket;
+      peerStates.set(peer, { buf: Buffer.alloc(0), initDone: true, isFileConn: true, fileToken: 4242, username: "u", connType: "F", lastActive: Date.now(), createdAt: Date.now() });
+      closeIt(session, peer);
+      expect(seen).toEqual([4242]);
+      expect(peerStates.has(peer)).toBe(false);
+    }
+    // P channel: no notify, still forgotten
+    {
+      const seen: number[] = [];
+      const { session, peerStates } = mk((t) => { seen.push(t); });
+      const peer = { end() {}, write() {} } as unknown as Socket;
+      peerStates.set(peer, { buf: Buffer.alloc(0), initDone: true, username: "u", connType: "P", lastActive: Date.now(), createdAt: Date.now() });
+      closeIt(session, peer);
+      expect(seen).toEqual([]);
+      expect(peerStates.has(peer)).toBe(false);
+    }
+    // unknown socket: no notify, no throw
+    {
+      const seen: number[] = [];
+      const { session, peerStates } = mk((t) => { seen.push(t); });
+      const peer = { end() {}, write() {} } as unknown as Socket;
+      closeIt(session, peer);
+      expect(seen).toEqual([]);
+      expect(peerStates.has(peer)).toBe(false);
+    }
+  });
+
   test("handleServerData drops a bad frame without killing the read loop", () => {
     const session = Object.create(SoulseekSession.prototype) as SoulseekSession;
     const seen: string[] = [];
