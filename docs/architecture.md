@@ -24,7 +24,7 @@ Reference: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plu
 
 ## Login
 
-1. `Login` (1): `string username`, `string password`, `uint32 major=160`, `string md5_hex(username+password)`, `uint32 minor=3` (`apps/bridge/src/soulseek.ts:198`)
+1. `Login` (1): `string username`, `string password`, `uint32 major=185`, `string md5_hex(username+password)`, `uint32 minor=1` (`apps/bridge/src/soulseek.ts:187`)
 2. `SetWaitPort` (2): `uint32 port` + `SharedFoldersFiles 35` (`dirs/files` from `ShareDB`) after success (nicotine parity).  
    Response `Login` (1): `bool success` → on success `string banner`, `uint32 ip`, `string checksum`, `bool isSupporter`; on fail `string reason` ∈ {`INVALIDUSERNAME`,`EMPTYPASSWORD`,`INVALIDPASS`,`INVALIDVERSION`,`SVRFULL`,`SVRPRIVATE`} + detail.
 

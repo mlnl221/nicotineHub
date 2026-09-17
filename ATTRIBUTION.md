@@ -55,8 +55,8 @@ If Nicotine+ helped you, please consider
 [contributingupstream](https://github.com/nicotine-plus/nicotine-plus/blob/master/CONTRIBUTING.md),
 testing a release candidate, or translating the client.
 
-We commit to **coordination**: this client uses experimental major version
-`177/1` (`apps/bridge/src/soulseek.ts:191`) and will never reuse a reserved
+We commit to **coordination**: this client uses unreserved major version
+`185/1` (`apps/bridge/src/soulseek.ts:187`) and will never reuse a reserved
 major version. We do not extend the Soulseek protocol without Soulseek
 administrators’ approval (see `SLSKPROTOCOL.md` preamble).
 
