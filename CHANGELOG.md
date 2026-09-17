@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.37.1](https://github.com/mlnl221/nicotineHub/compare/v0.37.0...v0.37.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **bridge:** remove EXPERIMENTAL_VERSION_FLAG ([25a0cef](https://github.com/mlnl221/nicotineHub/commit/25a0cef5e9cc68ce8d53bbd3be352bc1d947a571))
+* **bridge:** use unreserved Soulseek client version 185/1 ([a314eca](https://github.com/mlnl221/nicotineHub/commit/a314ecab257f34f443fafa01eeed2b3a45bea4eb))
+* **bridge:** use unreserved Soulseek client version 185/1 ([35f38af](https://github.com/mlnl221/nicotineHub/commit/35f38af0673704bdf41e920dd185780e86076b41))
+
 ## [0.37.0](https://github.com/mlnl221/nicotineHub/compare/v0.36.0...v0.37.0) (2026-09-17)
 
 
