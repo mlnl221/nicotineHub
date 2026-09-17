@@ -24,6 +24,7 @@ export const HOTKEY_LIST: Array<{ keys: string; label: string }> = [
   { keys: "p", label: "Pause all active downloads" },
   { keys: "r", label: "Resume / retry all paused downloads" },
   { keys: "Delete", label: "Clear finished transfers" },
+  { keys: "j / k", label: "Move selection in Downloads / Uploads / Files" },
   { keys: "?", label: "Show / hide this help" },
 ];
 

@@ -79,6 +79,7 @@ The browser can't open raw TCP sockets, so the bridge translates JSON over WebSo
 - **Social** — buddies
 - **Profiles** — description, picture, stats, privileges
 - **Mobile shell** — `TopBar`/`BottomNav`, safe-area, PWA, diagnostics live tail
+- **Keyboard shortcuts** — `g d` nav, `/` search focus, `p`/`r` pause/resume all, `j`/`k` list stepping, `?` help (see [`docs/hotkeys.md`](docs/hotkeys.md))
 
 ### Analyze Spectrum (FLAC / audio)
 
@@ -205,6 +206,7 @@ extend the suite for new protocol surface before fixing bridge code.
 - `docs/architecture.md` — bridge, worker, search & protocol, transfers + spectrum, WS JSON, `LISTEN_PORT`/`PortMapper`, env, tests
 - `docs/spectrum.md` — Analyze Spectrum pipeline (worker `sox` + `oxipng`, HTTP, caching, UI)
 - `docs/deployment.md` — Docker & GHCR images, `TAG` pinning, promotion workflow (`stage` → `main`)
+- `docs/hotkeys.md` — keyboard shortcuts (nav, search, transfers, lists)
 - `docs/DESIGN.md` — UI tokens
 - `docs/proposals/` — future backlog (r/Soulseek improvements not yet built)
 - `AGENTS.md` — agent & worktree conventions

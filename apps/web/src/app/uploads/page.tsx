@@ -20,7 +20,7 @@ import { useConfig } from "@/lib/config/provider";
 import { useSearchesOptional } from "@/lib/search";
 import { isDemo } from "@/lib/demo";
 import { TagEditor } from "@/components/tag/TagEditor";
-import { useBulkSelection, useMarqueeSelection } from "@/lib/bulkSelection";
+import { useBulkSelection, useMarqueeSelection, stepSelectionKey } from "@/lib/bulkSelection";
 import { UPLOAD_CLEAR_SETS, sortTransfers } from "@/lib/transfers";
 import { useSpectrum } from "@/lib/spectrum";
 
@@ -96,15 +96,7 @@ function UploadsInner() {
   }, [liveIds]);
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!selectMode) return;
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      const dir = e.key === "ArrowDown" ? 1 : -1;
-       const next = Math.max(0, Math.min(transferIds.length - 1, focusedIdx + dir));
-       setFocusedIdx(next);
-       const id = transferIds[next];
-       if (e.shiftKey && id) bulk.toggleRange(id, transferIds);
-       else if (id && !e.shiftKey) bulk.toggle(id);
-    }
+    stepSelectionKey(e, focusedIdx, transferIds, setFocusedIdx, bulk);
   };
 
   const selectedTransfers = uploads.filter((t) => bulk.has(t.id));

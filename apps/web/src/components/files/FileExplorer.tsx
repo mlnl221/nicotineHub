@@ -8,7 +8,7 @@ import { TagEditor } from "@/components/tag/TagEditor";
 import { BulkBar } from "@/components/tag/BulkBar";
 import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
 import { AdjustTagsModal } from "@/components/tag/AdjustTagsModal";
-import { useBulkSelection } from "@/lib/bulkSelection";
+import { useBulkSelection, stepSelectionKey } from "@/lib/bulkSelection";
 import { bulkVerify, bulkAnalyze, bulkRequestSpectrum, verifyFile, analyzeFile, getWorkerHttpBase } from "@/lib/worker";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { fileExplorerDirMenu, fileExplorerMenu } from "@/lib/context-menu/menus";
@@ -250,18 +250,10 @@ export function FileExplorer({
 
   const canSelectCurrent = selectable === "all" || selectable === "directories";
 
-  // keyboard up/down with shift for range
+  // keyboard up/down (j/k aliases) with shift for range
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!selectMode) return;
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      const dir = e.key === "ArrowDown" ? 1 : -1;
-      const next = Math.max(0, Math.min(audioIds.length - 1, focusedIdx + dir));
-      setFocusedIdx(next);
-      const id = audioIds[next];
-      if (e.shiftKey && id) bulk.toggleRange(id, audioIds);
-      else if (id && !e.shiftKey) bulk.toggle(id);
-    }
+    stepSelectionKey(e, focusedIdx, audioIds, setFocusedIdx, bulk);
   };
 
   const capTagFiles = (files: string[]) => {
