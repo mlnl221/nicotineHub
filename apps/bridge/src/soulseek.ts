@@ -184,10 +184,10 @@ export const LOGIN_REJECT_REASONS = {
   SERVER_PRIVATE: "SVRPRIVATE",
 } as const;
 
-export const MAJOR_VERSION = 185;
+export const MAJOR_VERSION = 165;
 export const MINOR_VERSION = 1;
 // 160 is reserved for Nicotine+ — never send. This client is unrelated to
-// the Nicotine+ Team and logs in with unreserved 185/1 (absent from
+// the Nicotine+ Team and logs in with unreserved 165/1 (absent from
 // SLSKPROTOCOL.md Reserved + Obsolete major-version tables; see issue #181).
 
 export const DEFAULT_SERVER_HOST = "server.slsknet.org";
@@ -604,7 +604,22 @@ export function parseLoginResponse(payload: Buffer): LoginResponse {
   }
   const banner = r.string();
   const ipAddress = r.ip();
-  const checksum = r.string(); const isSupporter = r.bool();
+  // Trailing checksum + supporter flag are absent in legacy/short success
+  // responses (observed live for unlisted major versions: success + empty
+  // banner + ip + 1 byte). Read them only when present — nicotine+
+  // has_remaining_content() parity — instead of failing the whole login.
+  // Trailing checksum + supporter flag are absent in legacy/short success
+  // responses (observed live for unlisted major versions: success + empty
+  // banner + ip + 1 byte). Read them only when present — nicotine+
+  // has_remaining_content() parity — instead of failing the whole login.
+  let checksum = "";
+  let isSupporter = false;
+  try {
+    if (r.remaining > 0) checksum = r.string();
+    if (r.remaining > 0) isSupporter = r.bool();
+  } catch (e) {
+    if (!(e instanceof FramingError)) throw e;
+  }
   return { success: true, banner, ipAddress, checksum, isSupporter };
 }
 export function describeRejection(reason: string): string {
