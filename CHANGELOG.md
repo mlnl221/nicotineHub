@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.37.0](https://github.com/mlnl221/nicotineHub/compare/v0.36.0...v0.37.0) (2026-09-17)
+
+
+### Features
+
+* **web:** sort downloads/uploads by folder+name, name, or unsorted ([9c02792](https://github.com/mlnl221/nicotineHub/commit/9c027924aa6010b9f0c306c61ffe66c03bba053a))
+
+
+### Bug Fixes
+
+* **bridge,web:** download stall watchdog, queue place, downloader pierce ([a996e26](https://github.com/mlnl221/nicotineHub/commit/a996e26297122e6e5d776d3ac8b5cc80d5f6b588))
+* **bridge:** browse-shares waits for pierce fallback instead of failing at GetPeerAddress timeout ([76923c0](https://github.com/mlnl221/nicotineHub/commit/76923c05aaa584ce27195de59d4c6d85d5c0cd4d))
+* **bridge:** browse-shares waits for pierce fallback instead of failing at GetPeerAddress timeout ([c2cdca6](https://github.com/mlnl221/nicotineHub/commit/c2cdca69708239921b73d62cbc7e8fdff97950c8))
+* **bridge:** drop high-volume low-value diagnostic logs ([c27fd56](https://github.com/mlnl221/nicotineHub/commit/c27fd56db2e5a048cd72d947a5ca62380aace601))
+* **bridge:** drop high-volume low-value diagnostic logs ([232bd62](https://github.com/mlnl221/nicotineHub/commit/232bd624640b44ba3caf22a82705521d467b3772))
+* profile refresh, browse collapse, download stalls ([499af22](https://github.com/mlnl221/nicotineHub/commit/499af2299d1767d2ef7a37e6b623d2da08bfa8bb))
+* **web:** bulk remove clears entries outright, drop floating BulkBar on transfers pages ([41e8bfb](https://github.com/mlnl221/nicotineHub/commit/41e8bfbd6d37c90a627e912344df9fc63f8ca61f))
+* **web:** bulk remove clears entries, drop floating BulkBar, icon-only mobile toolbar ([f20d3e1](https://github.com/mlnl221/nicotineHub/commit/f20d3e16658a6e462acc04e6c7c1d8ac9245189c))
+* **web:** center None button text ([e77d08c](https://github.com/mlnl221/nicotineHub/commit/e77d08c3b007515d8828ffba352b986eb3dcaeaf))
+* **web:** collapsed sidebar overflow, profile refresh icon in header ([a6d270f](https://github.com/mlnl221/nicotineHub/commit/a6d270f771cc0e6ea4ff5e0c5b5abea777aaf156))
+* **web:** compact download rows on desktop, mobile untouched ([e0c22d7](https://github.com/mlnl221/nicotineHub/commit/e0c22d7554d6528d6310e7c3ee516ed6cd9e568d))
+* **web:** icon-only mobile toolbar buttons on downloads/uploads ([f46c523](https://github.com/mlnl221/nicotineHub/commit/f46c5237ed832fd4bb03206a83f13907dc2821c7))
+* **web:** profile refresh blank, browse parent collapse, leaf rows, expand scroll ([35bb423](https://github.com/mlnl221/nicotineHub/commit/35bb42360375a4c3169b2dfe44b06728edd27404))
+* **web:** select enters with all picked, done exits and clears, deselect renamed to none ([ab7c4e3](https://github.com/mlnl221/nicotineHub/commit/ab7c4e3ea8f84828ae5a3a2a08514ff012a175f3))
+* **web:** show bulk tag ops only when every selected download is finished ([aec6213](https://github.com/mlnl221/nicotineHub/commit/aec6213fba76d6ea7c5bba2747b6a64ed361f1c1))
+* **web:** smaller buttons on desktop, mobile touch targets untouched ([a51f66e](https://github.com/mlnl221/nicotineHub/commit/a51f66e441f12c295cc65fb643e20a2fe68e7cbd))
+* **web:** split diagnostics port check into three color-coded boxes ([4bfbb66](https://github.com/mlnl221/nicotineHub/commit/4bfbb666f8308c9d5a660aa74e8327e02a8c8a2d))
+* **web:** split diagnostics port check into three color-coded boxes ([cd71601](https://github.com/mlnl221/nicotineHub/commit/cd7160137aab7d01bffdfe563e9a61a0b0ecbcb5))
+
 ## [0.36.0](https://github.com/mlnl221/nicotineHub/compare/v0.35.0...v0.36.0) (2026-09-12)
 
 
