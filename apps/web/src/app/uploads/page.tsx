@@ -57,6 +57,7 @@ function UploadsInner() {
   const groupMode = settings.transfers.groupuploads ?? "folder_grouping";
   const expandMode = settings.transfers.expand_uploads ?? "all";
   const sortMode = settings.transfers.sort_uploads ?? "unsorted";
+  const showOverview = settings.transfers.show_transfer_overview ?? true;
   const sortedUploads = sortTransfers(uploads, sortMode);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   useEffect(() => {
@@ -158,8 +159,24 @@ function UploadsInner() {
               <p className="font-label text-xs font-semibold text-amber-900 dark:text-amber-200">Demo preview — 1 download + 1 upload simulated below (animated). New downloads are disabled on Vercel — search, chat, profiles &amp; browse are mocked.</p>
             </div>
           ) : null}
-          <ThroughputChart />
-          <UploadStats />
+          <div className="flex justify-end">
+            <button
+              onClick={() => setOption("transfers", "show_transfer_overview", !showOverview)}
+              aria-expanded={showOverview}
+              aria-controls="transfer-overview"
+              title={showOverview ? "Hide bandwidth and stats" : "Show bandwidth and stats"}
+              className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold text-on-surface-variant"
+            >
+              <span className="material-symbols-outlined text-[16px]">{showOverview ? "visibility_off" : "show_chart"}</span>
+              {showOverview ? "Hide overview" : "Show overview"}
+            </button>
+          </div>
+          {showOverview ? (
+            <div id="transfer-overview" className="contents">
+              <ThroughputChart />
+              <UploadStats />
+            </div>
+          ) : null}
           <section data-testid="uploads-section" className="bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border flex flex-col gap-4 max-w-full overflow-x-clip">
             <div className="sticky top-[calc(60px+env(safe-area-inset-top,0px))] md:static z-20 bg-surface-container-low/95 backdrop-blur dark:bg-surface-container-low/80 border-b border-outline-variant/10 md:bg-transparent md:dark:bg-transparent md:backdrop-blur-none md:border-transparent">
               <div className="px-4 py-1.5 md:px-0 md:py-0 flex flex-col gap-2 md:gap-4">
