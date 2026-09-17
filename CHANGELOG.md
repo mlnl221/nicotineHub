@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.38.1](https://github.com/mlnl221/nicotineHub/compare/v0.38.0...v0.38.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **bridge:** notify transfers when any F socket dies mid-transfer ([d9fdb8d](https://github.com/mlnl221/nicotineHub/commit/d9fdb8d928775364b05be6a081f325151862d64a))
+* **bridge:** notify transfers when any F socket dies mid-transfer ([40d7dda](https://github.com/mlnl221/nicotineHub/commit/40d7ddabe1de5c671a328e074f77469ccc83b141))
+* **bridge:** preserve distrib handshake before PeerInit on outbound D dials ([2a0460a](https://github.com/mlnl221/nicotineHub/commit/2a0460a1b3c58b11262168d0e87fe2b08ccbded3))
+* **bridge:** preserve distrib handshake before PeerInit on outbound D dials ([3758dea](https://github.com/mlnl221/nicotineHub/commit/3758dea23e409fc50efd5b0215b6caf971b2346b))
+
 ## [0.38.0](https://github.com/mlnl221/nicotineHub/compare/v0.37.1...v0.38.0) (2026-09-17)
 
 
