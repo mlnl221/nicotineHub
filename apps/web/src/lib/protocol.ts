@@ -342,6 +342,11 @@ export interface TransferClearManyRequest {
   statuses: string[] | null | undefined;
 }
 
+export interface BanControlRequest {
+  type: "ban:add" | "ban:remove" | "ignore:add" | "ignore:remove";
+  username: string;
+}
+
 /* ------------------------------------------------------------------ *
  * Chat — private + rooms
  * ------------------------------------------------------------------ */
@@ -901,6 +906,8 @@ export type BridgeInboundMessage =
   | DownloadRequest
   | DownloadControlRequest
   | UploadControlRequest
+  | TransferClearManyRequest
+  | BanControlRequest
   | ChatRoomRequest
   | ChatPrivateRequest
   | ChatGlobalRequest

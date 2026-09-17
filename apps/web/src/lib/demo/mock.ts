@@ -28,13 +28,19 @@ export function handleDemoSend(
   const anyMsg = msg as Record<string, unknown>;
 
   // Search handlers
-  if (msg.type === "search" || msg.type === "search:user" || msg.type === "search:room" || msg.type === "search:wishlist") {
+  if (msg.type === "search" || msg.type === "search:user" || msg.type === "search:room" || msg.type === "search:wishlist" || (msg as { type: string }).type === "search:buddies") {
     const searchId = (msg as { searchId: string }).searchId;
     const query = (msg as { query?: string }).query || "";
     const token = Math.floor(Math.random() * 1e9);
     // send start
     setTimeout(() => emit(listeners, { type: "search:start", searchId, token }), 80);
-    const rows = mockSearchRows(query, msg.type);
+    let rows = mockSearchRows(query, msg.type);
+    // buddies: only rows from requested buddy usernames (fallback to all when none match)
+    const wanted = ((msg as unknown as { usernames?: string[] }).usernames ?? []).map((u) => u.toLowerCase());
+    if (wanted.length) {
+      const filtered = rows.filter((r) => wanted.includes(r.user.toLowerCase()));
+      if (filtered.length) rows = filtered;
+    }
     // chunked results like real server
     const chunkSize = 10;
     let offset = 0;
@@ -114,6 +120,45 @@ export function handleDemoSend(
       return true;
     }
     if (action === "leave") {
+      return true;
+    }
+    if (action === "refreshList") {
+      emitRoomList(listeners);
+      return true;
+    }
+    // Noop-ack so demo UI never hangs waiting on a bridge echo.
+    if (action === "setTicker") {
+      const message = anyMsg.message as string | undefined;
+      const user = currentUser || "demo";
+      if (room && typeof message === "string" && message.trim()) {
+        setTimeout(() => {
+          emit(listeners, {
+            type: "room:event",
+            event: { type: "ticker-added", room, username: user, data: message },
+          });
+        }, 120);
+      }
+      return true;
+    }
+    if (action === "addOperator") {
+      const username = anyMsg.username as string | undefined;
+      if (room && username) {
+        setTimeout(() => {
+          emit(listeners, { type: "room:event", event: { type: "operator-added", room, username } });
+        }, 120);
+      }
+      return true;
+    }
+    if (action === "removeOperator") {
+      const username = anyMsg.username as string | undefined;
+      if (room && username) {
+        setTimeout(() => {
+          emit(listeners, { type: "room:event", event: { type: "operator-removed", room, username } });
+        }, 120);
+      }
+      return true;
+    }
+    if (action === "cancelMembership" || action === "cancelOwnership" || action === "ticker" || action === "addMember") {
       return true;
     }
     if (action === "say") {
@@ -201,9 +246,21 @@ export function handleDemoSend(
     }
   }
 
-  if (msg.type === "download:request" || msg.type === "download:control" || msg.type === "upload:control") {
-    // Disabled in demo — show error/quiet drop
-    setTimeout(() => emit(listeners, { type: "error", error: "Demo — downloads/uploads are disabled on Vercel." }), 100);
+  if (msg.type === "download:control" || msg.type === "upload:control") {
+    // Demo echo — transfers.tsx already flipped optimistically; confirm it so
+    // p/r/Delete hotkeys stick (no bridge on Vercel). Merged, never replaced.
+    const { id, action } = msg as unknown as { id: string; action: string };
+    if (action === "clear") {
+      setTimeout(() => emit(listeners, { type: "transfer:removed", id }), 60);
+      return true;
+    }
+    const status = action === "pause" ? "Paused" : action === "cancel" ? "Cancelled" : action === "resume" ? "Transferring" : action === "retry" ? "Queued" : null;
+    if (status) setTimeout(() => emit(listeners, { type: "transfer:update", transfer: { id, status } } as unknown as BridgeOutboundMessage), 60);
+    return true;
+  }
+
+  if (msg.type === "download:request") {
+    // Demo enqueues locally via enqueueDemoTransfer — swallow, no error.
     return true;
   }
 
@@ -275,6 +332,14 @@ export function handleDemoSend(
   }
   if (msg.type === "plugin:settings") {
     demoLeechSettings = { ...demoLeechSettings, ...((msg as { settings: Record<string, unknown> }).settings ?? {}) };
+    return true;
+  }
+
+  if ((anyMsg.type as string) === "wishlist:update" || (anyMsg.type as string) === "wishlist:interval") {
+    // Ack so wishlist sync never hangs in demo; providers listen for wishlist:interval.
+    setTimeout(() => {
+      emit(listeners, { type: "wishlist:interval", wishlistInterval: 180 } as unknown as BridgeOutboundMessage);
+    }, 100);
     return true;
   }
 

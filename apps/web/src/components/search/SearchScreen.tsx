@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { buildInitialFilters, useSearches, type SearchMode } from "@/lib/search";
 import { applyFilters } from "@/lib/filter";
 import { sortSearchRows, type SearchSortMode } from "@/lib/sort";
-import { useTransfers } from "@/lib/transfers";
+import { useTransfers, enqueueDemoTransfer } from "@/lib/transfers";
 import { type FilterState, type SearchRow } from "@/lib/protocol";
 import { isDemo } from "@/lib/demo";
 import { useConfig } from "@/lib/config/provider";
@@ -156,7 +156,8 @@ export function SearchScreen() {
 
   const downloadRow = (row: SearchRow) => {
     if (isDemo) {
-      flash("Demo — downloads are disabled on Vercel.");
+      enqueueDemoTransfer({ fileName: row.filename, user: row.user, size: row.size, virtualPath: row.path });
+      flash(`Queued "${row.filename}" (demo — simulated)`);
       return;
     }
     requestDownload({ username: row.user, virtualPath: row.path, size: row.size, fileName: row.filename });
@@ -166,13 +167,16 @@ export function SearchScreen() {
   // Client fan-out: queue every visible result sharing the row's user+folder,
   // staggered like BrowseView downloadFolder to avoid hammering the peer.
   const downloadFolderFor = (row: SearchRow) => {
-    if (isDemo) {
-      flash("Demo — downloads are disabled on Vercel.");
-      return;
-    }
     const matches = visibleRows.filter((r) => r.user === row.user && r.folder === row.folder);
     if (matches.length === 0) {
       flash("No files in this folder");
+      return;
+    }
+    if (isDemo) {
+      matches.forEach((m, idx) => {
+        setTimeout(() => enqueueDemoTransfer({ fileName: m.filename, user: m.user, size: m.size, virtualPath: m.path }), idx * 150);
+      });
+      flash(`Queued ${matches.length} file${matches.length === 1 ? "" : "s"} (demo — simulated)`);
       return;
     }
     matches.forEach((m, idx) => {
@@ -182,7 +186,12 @@ export function SearchScreen() {
   };
 
   const downloadSelected = () => {
-    if (isDemo || !selectedRows.length) return;
+    if (!selectedRows.length) return;
+    if (isDemo) {
+      selectedRows.forEach((row, idx) => setTimeout(() => enqueueDemoTransfer({ fileName: row.filename, user: row.user, size: row.size, virtualPath: row.path }), idx * 150));
+      flash(`Queued ${selectedRows.length} selected file${selectedRows.length === 1 ? "" : "s"} (demo — simulated)`);
+      return;
+    }
     if (selectedRows.length > 1 && !window.confirm(`Download ${selectedRows.length} selected files?`)) return;
     selectedRows.forEach((row, idx) => setTimeout(() => requestDownload({ username: row.user, virtualPath: row.path, size: row.size, fileName: row.filename }), idx * 150));
     flash(`Queued ${selectedRows.length} selected file${selectedRows.length === 1 ? "" : "s"}`);
@@ -495,7 +504,7 @@ export function SearchScreen() {
             </div>
              <SheetAction
               icon="download"
-              label={isDemo ? "Download (disabled in demo)" : "Download"}
+              label="Download"
               onClick={() => {
                 if (sheetRow) downloadRow(sheetRow);
                 setSheetRow(null);
@@ -592,8 +601,8 @@ export function SearchScreen() {
           onClear={() => bulk.clear()}
           actions={
             <>
-              <button onClick={downloadSelected} disabled={isDemo} className="flex-1 min-w-[72px] rounded-full bg-primary px-3 py-2.5 min-h-11 md:min-h-10 font-label text-xs font-bold text-on-primary disabled:opacity-50">Download</button>
-              <button onClick={downloadSelectedFolders} disabled={isDemo} className="flex-1 min-w-[72px] rounded-full bg-surface-container-high px-3 py-2.5 min-h-11 md:min-h-10 font-label text-xs">Folders</button>
+              <button onClick={downloadSelected} className="flex-1 min-w-[72px] rounded-full bg-primary px-3 py-2.5 min-h-11 md:min-h-10 font-label text-xs font-bold text-on-primary disabled:opacity-50">Download</button>
+              <button onClick={downloadSelectedFolders} className="flex-1 min-w-[72px] rounded-full bg-surface-container-high px-3 py-2.5 min-h-11 md:min-h-10 font-label text-xs">Folders</button>
             </>
           }
         />
@@ -623,9 +632,9 @@ export function SearchScreen() {
                   if (propsRow) downloadRow(propsRow);
                   setPropsRow(null);
                 }}
-                className={`flex-1 rounded-xl py-3 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline" : "bg-primary text-on-primary hover:bg-primary-container"}`}
+                className="flex-1 rounded-xl py-3 font-label text-xs font-bold bg-primary text-on-primary hover:bg-primary-container"
               >
-                {isDemo ? "Download disabled in demo" : "Download"}
+                Download
               </button>
               <button onClick={() => setPropsRow(null)} className="rounded-xl bg-surface-container-high px-6 py-3 font-label text-xs">Close</button>
             </div>

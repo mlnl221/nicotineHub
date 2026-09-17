@@ -14,9 +14,12 @@ const TRANSFERS_KEY = "nicotineHub.transfers.mock";
 const PRIVATE_KEY = "nicotineHub.privatechats";
 const RECENT_BROWSE_KEY = "nicotineHub.recentBrowse";
 const RECENT_PROFILES_KEY = "nicotineHub.recentProfiles";
+const WISHLIST_KEY = "nicotineHub.wishlist";
+const ROOMS_JOINED_KEY = "nicotineHub.rooms.joined";
+const ROOMS_ACTIVE_KEY = "nicotineHub.rooms.active";
 const DEMO_FLAG = "nicotineHub.demoSeeded";
 
-export const DEMO_STORAGE_KEYS = [BROWSE_KEY, PROFILE_KEY, BUDDIES_KEY, TRANSFERS_KEY, PRIVATE_KEY, RECENT_BROWSE_KEY, RECENT_PROFILES_KEY, DEMO_FLAG] as const;
+export const DEMO_STORAGE_KEYS = [BROWSE_KEY, PROFILE_KEY, BUDDIES_KEY, TRANSFERS_KEY, PRIVATE_KEY, RECENT_BROWSE_KEY, RECENT_PROFILES_KEY, WISHLIST_KEY, ROOMS_JOINED_KEY, ROOMS_ACTIVE_KEY, DEMO_FLAG] as const;
 
 export function isDemoSeeded(): boolean {
   try {
@@ -61,6 +64,20 @@ export function seedDemoStorage(): void {
     // Private chats list (provider will hydrate messages from fixtures)
     if (!(localStorage.getItem(PRIVATE_KEY) ?? localStorage.getItem(PRIVATE_KEY.replace("nicotineHub.", "nicotine.")))) {
       localStorage.setItem(PRIVATE_KEY, JSON.stringify([...DEMO_PROFILE_USERS]));
+    }
+
+    // Wishlist — one query so the Wishlist UI is non-empty in demo
+    const wishlistRaw = (localStorage.getItem(WISHLIST_KEY) ?? localStorage.getItem(WISHLIST_KEY.replace("nicotineHub.", "nicotine.")));
+    if (!wishlistRaw || wishlistRaw === "[]") {
+      localStorage.setItem(WISHLIST_KEY, JSON.stringify([{ term: "linux iso", auto: true, ignoredUsers: [], timeAdded: Date.now() }]));
+    }
+
+    // Rooms — one joined room so the Rooms UI is non-empty (join echo fills members)
+    if (!(localStorage.getItem(ROOMS_JOINED_KEY) ?? localStorage.getItem(ROOMS_JOINED_KEY.replace("nicotineHub.", "nicotine.")))) {
+      localStorage.setItem(ROOMS_JOINED_KEY, JSON.stringify(["Jazz"]));
+    }
+    if (!(localStorage.getItem(ROOMS_ACTIVE_KEY) ?? localStorage.getItem(ROOMS_ACTIVE_KEY.replace("nicotineHub.", "nicotine.")))) {
+      localStorage.setItem(ROOMS_ACTIVE_KEY, "Jazz");
     }
 
     localStorage.setItem(DEMO_FLAG, "1");

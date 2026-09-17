@@ -22,6 +22,7 @@ import { isDemo } from "@/lib/demo";
 import { useSpectrum, parseDownloadToken } from "@/lib/spectrum";
 import { usePlayer } from "@/lib/player/store";
 import { downloadPlayUrl, formatLabelOf, splitArtistTitle } from "@/lib/player/urls";
+import { demoAudioPublicUrl } from "@/lib/demo/fixtures";
 import { SpectrumHoverCard } from "@/components/transfers/SpectrumHoverCard";
 import { TagEditor } from "@/components/tag/TagEditor";
 import { MediainfoModal } from "@/components/files/MediainfoModal";
@@ -145,39 +146,47 @@ function DownloadsInner() {
     bulk.clear();
   };
 
-  const handlePlay = (t: import("@/lib/protocol").Transfer) => {
+  // Demo: Finished fixtures carry no /files token, so fall back to a real
+  // demo ogg — Play always produces audio in demo.
+  const DEMO_FALLBACK_SRC = "/demo-audio/01-dj-satomi-waves.ogg";
+  const resolvePlayTarget = (t: import("@/lib/protocol").Transfer) => {
     const dl = (t as unknown as { downloadUrl?: string }).downloadUrl;
-    if (t.status !== "Finished" || !dl) return;
-    const target = downloadPlayUrl(dl, t.fileName);
+    if (dl) {
+      const native = downloadPlayUrl(dl, t.fileName);
+      if (native) return native;
+    }
+    if (isDemo) return { url: demoAudioPublicUrl(t.fileName) ?? DEMO_FALLBACK_SRC, viaWorker: false };
+    return null;
+  };
+
+  const handlePlay = (t: import("@/lib/protocol").Transfer) => {
+    if (t.status !== "Finished") return;
+    const target = resolvePlayTarget(t);
     if (!target) return;
     const { artist, title } = splitArtistTitle(t.fileName);
     play({ title, artist, src: target.url, formatLabel: formatLabelOf(t.fileName), transcoding: target.viaWorker, fileKey: t.fileName, size: t.size });
   };
 
-  const canPlay = (t: import("@/lib/protocol").Transfer): boolean => {
-    if (isDemo || t.status !== "Finished") return false;
-    const dl = (t as unknown as { downloadUrl?: string }).downloadUrl;
-    if (!dl) return false;
-    return !!downloadPlayUrl(dl, t.fileName);
-  };
+  const canPlay = (t: import("@/lib/protocol").Transfer): boolean =>
+    t.status === "Finished" && !!resolvePlayTarget(t);
 
   const isFinishedAudio = (t: import("@/lib/protocol").Transfer): boolean =>
-    !isDemo && t.status === "Finished" && isAudioForSpectrum(t.fileName);
+    t.status === "Finished" && isAudioForSpectrum(t.fileName);
 
   const handleSingleVerify = async (fileName: string) => {
     try {
       const r = await verifyFile(fileName);
-      setBulkResult({ title: `Verify — ${fileName.split("/").pop()}`, rows: [{ fileName, ...(r as Record<string, unknown>) }] });
+      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: `Verify — ${fileName.split("/").pop()}`, body: JSON.stringify(r) } }));
     } catch (e) {
-      setBulkResult({ title: "Verify error", rows: [{ fileName, error: e instanceof Error ? e.message : String(e) }] });
+      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Verify error", body: e instanceof Error ? e.message : String(e) } }));
     }
   };
   const handleSingleAnalyze = async (fileName: string) => {
     try {
       const r = await analyzeFile(fileName);
-      setBulkResult({ title: `Analyze — ${fileName.split("/").pop()}`, rows: [{ fileName, ...(r as Record<string, unknown>) }] });
+      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: `Analyze — ${fileName.split("/").pop()}`, body: JSON.stringify(r) } }));
     } catch (e) {
-      setBulkResult({ title: "Analyze error", rows: [{ fileName, error: e instanceof Error ? e.message : String(e) }] });
+      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Analyze error", body: e instanceof Error ? e.message : String(e) } }));
     }
   };
 
@@ -432,7 +441,7 @@ function DownloadsInner() {
               onAnalyze: isFinishedAudio(menuAnchor.transfer)
                 ? () => handleSingleAnalyze(menuAnchor.transfer.fileName)
                 : undefined,
-              onMediainfo: !isDemo && !menuAnchor.isUpload && menuAnchor.transfer.status === "Finished"
+              onMediainfo: !menuAnchor.isUpload && menuAnchor.transfer.status === "Finished"
                 ? () => setMediainfoFile(menuAnchor.transfer.fileName)
                 : undefined,
               onPlay: !menuAnchor.isUpload && canPlay(menuAnchor.transfer)

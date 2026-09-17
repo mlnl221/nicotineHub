@@ -115,20 +115,17 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
   // demo helpers
   const isDemoFile = isDemo && (fileName.includes("Waves") || fileName.includes("Kernkraft"));
   const demoSuggestedUrl = fileName.includes("Waves") ? "https://www.discogs.com/release/3681871-DJ-Satomi-Waves" : fileName.includes("Kernkraft") ? "https://www.discogs.com/release/131668-Zombie-Nation-Kernkraft-400" : "";
-  const isSaveDisabled = loading || saving || (isDemo && isDemoFile);
+  const isSaveDisabled = loading || saving;
 
   if (!open) return null;
 
   const handleSave = async () => {
-    if (isDemo && isDemoFile) {
-      setError("Tags are read-only in demo — not saved (static /demo-audio). Try Scrape preview instead.");
-      return;
-    }
     setSaving(true);
     setError(null);
     try {
       await writeTags(fileName, tags);
-      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Tags saved", body: fileName } }));
+      const demo = isDemo && isDemoFile;
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: demo ? "Saved (demo — session only)" : "Tags saved", body: fileName } }));
       onSaved?.();
       onClose();
     } catch (e) {
@@ -315,7 +312,7 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
         {/* Footer */}
         <div className="px-6 py-4 border-t border-outline-variant/10 bg-surface-container-low/60 flex items-center justify-between gap-3 shrink-0">
           <button onClick={onClose} className="rounded-full bg-surface-container-high px-5 py-2.5 font-label text-xs font-semibold">Cancel</button>
-          <button disabled={isSaveDisabled} title={isDemo && isDemoFile ? "Read-only in demo — not saved (static /demo-audio). Try Scrape preview instead." : undefined} onClick={handleSave} className="rounded-full bg-primary px-6 py-2.5 font-label text-xs font-bold text-on-primary disabled:opacity-40 hover:bg-primary-container flex items-center gap-2">
+          <button disabled={isSaveDisabled} title={isDemo && isDemoFile ? "Demo — saved for this session only." : undefined} onClick={handleSave} className="rounded-full bg-primary px-6 py-2.5 font-label text-xs font-bold text-on-primary disabled:opacity-40 hover:bg-primary-container flex items-center gap-2">
             {saving ? <span className="h-3 w-3 animate-spin rounded-full border border-on-primary border-t-transparent" /> : <span className="material-symbols-outlined text-[16px]">save</span>}
             Save tags
           </button>

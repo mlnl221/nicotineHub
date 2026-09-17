@@ -34,12 +34,10 @@ export function PluginsSection() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(() => {
-    if (isDemo) return;
     send({ type: "plugin:list" });
   }, [send]);
 
   useEffect(() => {
-    if (isDemo) { setLoading(false); return; }
     const unsub = subscribe((msg) => {
       if (msg.type === "plugin:list") {
         setPlugins(msg.plugins);
@@ -59,27 +57,18 @@ export function PluginsSection() {
     return () => { unsub(); clearInterval(id); };
   }, [subscribe, refresh]);
 
-  if (isDemo) {
-    return (
-      <div className="flex flex-col gap-6">
-        <SectionCard title="Plugins" description="Demo mode — bridge plugin runtime disabled." actions={<SectionSaveButton section="plugins" />}>
-          <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs text-on-surface-variant dark:bg-surface-container-highest/40">
-            Plugins require a running bridge (DATA_DIR/plugins). In the Vercel demo, all logins are mocked and transfers disabled, so plugin install/toggle is not available. Run locally (<span className="font-mono">bun run dev</span> or <span className="font-mono">docker compose up</span>) to manage plugins.
-          </div>
-        </SectionCard>
-      </div>
-    );
-  }
-
   const handleToggle = (name: string) => {
+    // Demo: mock toggles in-memory (leech_detector fixture); no bridge needed.
     send({ type: "plugin:toggle", name });
   };
-  const handleReload = (name: string) => send({ type: "plugin:reload", name });
+  const handleReload = (name: string) => { if (isDemo) return; send({ type: "plugin:reload", name }); };
   const handleUninstall = (name: string) => {
+    if (isDemo) return;
     if (!confirm(`Uninstall plugin ${name}?`)) return;
     send({ type: "plugin:uninstall", name });
   };
   const handleFile = async (f: File) => {
+    if (isDemo) return;
     if (!f.name.endsWith(".zip")) { setError("Please upload a .zip file"); return; }
     setInstalling(true); setError(null);
     const buf = await f.arrayBuffer();
@@ -91,12 +80,14 @@ export function PluginsSection() {
     setTimeout(() => setInstalling(false), 2000);
   };
   const handleUrlInstall = () => {
+    if (isDemo) return;
     if (!urlInstall.trim()) return;
     setInstalling(true); setError(null);
     send({ type: "plugin:installUrl", url: urlInstall.trim() });
     setTimeout(() => setInstalling(false), 4000);
   };
   const handleGithubTsInstall = () => {
+    if (isDemo) return;
     const url = githubTsUrl.trim();
     if (!url) return;
     const lower = url.toLowerCase();
@@ -116,10 +107,12 @@ export function PluginsSection() {
     setEditValues({ ...(p.settings ?? {}) });
   };
   const saveSettings = (name: string) => {
+    if (isDemo) return;
     send({ type: "plugin:settings", name, settings: editValues });
     setExpandedSettings(null);
   };
   const resetSettings = (name: string) => {
+    if (isDemo) return;
     send({ type: "plugin:resetSettings", name });
     setExpandedSettings(null);
   };
@@ -194,6 +187,11 @@ export function PluginsSection() {
 
   return (
     <div className="flex flex-col gap-6">
+      {isDemo ? (
+        <div className="rounded-xl bg-surface-container-high px-4 py-3 font-body text-xs text-on-surface-variant dark:bg-surface-container-highest/40">
+          Demo preview — fixture plugin list below (read-only, toggle is in-memory only). Install/upload disabled: plugins require a running bridge (DATA_DIR/plugins). Run locally (<span className="font-mono">bun run dev</span> or <span className="font-mono">docker compose up</span>) to manage plugins.
+        </div>
+      ) : null}
       <SectionCard
         title="Plugins"
         description="TS/JS-only plugins (Python .py is blocked). Settings persist in DATA_DIR/plugins.json."
@@ -239,8 +237,8 @@ export function PluginsSection() {
             </div>
             <div className="flex gap-2">
               <input ref={fileInputRef} type="file" accept=".zip" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
-              <button onClick={() => fileInputRef.current?.click()} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary" disabled={installing}>Choose .zip</button>
-              <span className="font-body text-xs text-on-surface-variant self-center">{installing ? "Installing…" : "Zips (1 GiB, only .ts/.js)"}</span>
+              <button onClick={() => fileInputRef.current?.click()} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary" disabled={installing || isDemo} title={isDemo ? "Disabled in demo — requires a running bridge" : undefined}>Choose .zip</button>
+              <span className="font-body text-xs text-on-surface-variant self-center">{isDemo ? "Disabled in demo" : installing ? "Installing…" : "Zips (1 GiB, only .ts/.js)"}</span>
             </div>
           </div>
           <div className="border-t border-surface-container-high dark:border-surface-container-highest/40 pt-4">
@@ -256,8 +254,8 @@ export function PluginsSection() {
               />
             </div>
             <div className="flex gap-2">
-              <input value={githubTsUrl} onChange={(e) => setGithubTsUrl(e.target.value)} placeholder="https://raw.githubusercontent.com/user/repo/main/plugins/myplugin/index.ts or https://github.com/.../blob/.../index.ts" className="flex-1 rounded-xl bg-surface-container-lowest px-3 py-2 text-sm ghost-border" />
-              <button onClick={handleGithubTsInstall} disabled={!githubTsUrl.trim() || installing} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary disabled:opacity-50">Add</button>
+              <input value={githubTsUrl} onChange={(e) => setGithubTsUrl(e.target.value)} placeholder="https://raw.githubusercontent.com/user/repo/main/plugins/myplugin/index.ts or https://github.com/.../blob/.../index.ts" className="flex-1 rounded-xl bg-surface-container-lowest px-3 py-2 text-sm ghost-border" disabled={isDemo} />
+              <button onClick={handleGithubTsInstall} disabled={!githubTsUrl.trim() || installing || isDemo} title={isDemo ? "Disabled in demo — requires a running bridge" : undefined} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary disabled:opacity-50">Add</button>
             </div>
           </div>
           <div className="border-t border-surface-container-high dark:border-surface-container-highest/40 pt-4">
@@ -273,8 +271,8 @@ export function PluginsSection() {
               />
             </div>
             <div className="flex gap-2">
-              <input value={urlInstall} onChange={(e) => setUrlInstall(e.target.value)} placeholder="https://github.com/user/repo/archive/main.zip or https://raw.githubusercontent.com/.../plugin.zip" className="flex-1 rounded-xl bg-surface-container-lowest px-3 py-2 text-sm ghost-border" />
-              <button onClick={handleUrlInstall} disabled={!urlInstall.trim() || installing} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary disabled:opacity-50">Install</button>
+              <input value={urlInstall} onChange={(e) => setUrlInstall(e.target.value)} placeholder="https://github.com/user/repo/archive/main.zip or https://raw.githubusercontent.com/.../plugin.zip" className="flex-1 rounded-xl bg-surface-container-lowest px-3 py-2 text-sm ghost-border" disabled={isDemo} />
+              <button onClick={handleUrlInstall} disabled={!urlInstall.trim() || installing || isDemo} title={isDemo ? "Disabled in demo — requires a running bridge" : undefined} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary disabled:opacity-50">Install</button>
             </div>
           </div>
           {error ? <div className="rounded-xl bg-error-container px-3 py-2 text-xs text-on-error-container">{error}</div> : null}
@@ -308,8 +306,8 @@ export function PluginsSection() {
                     <div className="flex flex-col items-end gap-2 shrink-0">
                       <ToggleControl label="" checked={p.enabled} onChange={() => handleToggle(p.name)} />
                       <div className="flex gap-1">
-                        <button onClick={() => handleReload(p.name)} className="rounded-lg bg-surface-container-high px-2 py-1 font-label text-[10px] uppercase">Reload</button>
-                        {!p.isInternal ? <button onClick={() => handleUninstall(p.name)} className="rounded-lg bg-error-container px-2 py-1 font-label text-[10px] uppercase text-on-error-container">Uninstall</button> : null}
+                        <button onClick={() => handleReload(p.name)} disabled={isDemo} title={isDemo ? "Disabled in demo" : undefined} className="rounded-lg bg-surface-container-high px-2 py-1 font-label text-[10px] uppercase disabled:opacity-50">Reload</button>
+                        {!p.isInternal ? <button onClick={() => handleUninstall(p.name)} disabled={isDemo} title={isDemo ? "Disabled in demo" : undefined} className="rounded-lg bg-error-container px-2 py-1 font-label text-[10px] uppercase text-on-error-container disabled:opacity-50">Uninstall</button> : null}
                       </div>
                     </div>
                   </div>
@@ -333,8 +331,8 @@ export function PluginsSection() {
                             ));
                           })()}
                           <div className="mt-4 flex gap-2">
-                            <button onClick={() => saveSettings(p.name)} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary">Save</button>
-                            <button onClick={() => resetSettings(p.name)} className="rounded-xl bg-surface-container-high px-4 py-2 text-sm">Reset</button>
+                            <button onClick={() => saveSettings(p.name)} disabled={isDemo} title={isDemo ? "Disabled in demo" : undefined} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary disabled:opacity-50">Save</button>
+                            <button onClick={() => resetSettings(p.name)} disabled={isDemo} title={isDemo ? "Disabled in demo" : undefined} className="rounded-xl bg-surface-container-high px-4 py-2 text-sm disabled:opacity-50">Reset</button>
                           </div>
                         </div>
                       ) : null}
