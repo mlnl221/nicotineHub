@@ -31,6 +31,17 @@
 #       - /media/500SSD:/media/500SSD:ro
 # Verify: /api/files/raw?path=/media/500SSD/<file>.flac returns 206 audio/flac.
 #
+# For a VPN-forwarded port (e.g. Proton VPN gives you 59412): the Soulseek
+# server dials peers at the IP it saw on your server connection, so the
+# bridge's outbound traffic must exit via the VPN IP and the host must forward
+# the VPN port into the container. Easiest: set the port and recreate —
+#   LISTEN_PORT=59412 docker compose up -d
+# (compose.yaml interpolates LISTEN_PORT into env + host mapping, TCP+UDP).
+# No override file needed — env wins and compose.yaml maps it TCP+UDP. Turn
+# off UPnP remap reliance (Settings → Network → UPnP off — the manual forward
+# already covers it). Then verify: Diagnostics → Network shows listenPort
+# 59412, and the IP the server sees for you matches your VPN exit IP.
+#
 # For VPN with custom routing, add your own override file.
 # Host network example (UPnP works, no port remap):
 services:
