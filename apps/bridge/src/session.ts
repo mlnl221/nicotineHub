@@ -2144,12 +2144,8 @@ export class SoulseekSession {
         close: (peer) => {
           const st = this.peerStates.get(peer as Socket);
           logger.debug("server", "peer inbound close", { username: st?.username, connType: st?.connType, remote: (peer as unknown as { remoteAddress?: string }).remoteAddress });
-          this.peerStates.delete(peer as Socket);
-          this.closedPeers.add(peer as Socket);
+          this.handlePeerSocketClosed(peer as Socket, st);
           if (st?.username && st.connType === "D") this._removeChildPeerConnection(st.username);
-          if ((st?.isFileConn || st?.connType === "F") && st?.fileToken !== undefined) {
-            try { this.opts.onFileClosed?.(st.fileToken); } catch {}
-          }
           this.dequeuePendingSockets();
         },
       },
@@ -2169,8 +2165,7 @@ export class SoulseekSession {
         if (initTimeout || ghost || dead) {
           logger.debug("peer", "idle sweep close", { username: st.username, connType: st.connType, initDone: st.initDone, bytes: (st as unknown as { bytesReceived?: number }).bytesReceived ?? st.buf.length, msgs: (st as unknown as { msgsParsed?: number }).msgsParsed ?? 0, reason: initTimeout ? "initTimeout" : ghost ? "ghost" : "dead" });
           try { sock.end(); } catch {}
-          this.peerStates.delete(sock);
-          this.closedPeers.add(sock as Socket);
+          this.handlePeerSocketClosed(sock as Socket, st);
           if (st.username && st.connType === "D") this._removeChildPeerConnection(st.username);
           this.dequeuePendingSockets();
         }
@@ -2317,7 +2312,7 @@ export class SoulseekSession {
           if (pending) { try { pending.reject(new Error("Pierce failed")); } catch {} }
           this.dequeuePendingSockets();
         },
-        close: (sock) => { this.peerStates.delete(sock as Socket); if ((this.peerStates.get(sock as Socket)?.connType ?? ctp.connType) === "D" && ctp.username) this._removeChildPeerConnection(ctp.username); this.dequeuePendingSockets(); },
+        close: (sock) => { const st = this.peerStates.get(sock as Socket); this.handlePeerSocketClosed(sock as Socket, st); if ((st?.connType ?? ctp.connType) === "D" && ctp.username) this._removeChildPeerConnection(ctp.username); this.dequeuePendingSockets(); },
       },
     }).catch(() => {
       try { this.serverSocket?.write(buildCantConnectToPeer(ctp.token, ctp.username)); } catch {}
@@ -2384,7 +2379,7 @@ export class SoulseekSession {
             },
             data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
             error: () => reject(new Error("Direct connect failed")),
-            close: () => {},
+            close: (sock) => { this.handlePeerSocketClosed(sock as Socket, this.peerStates.get(sock as Socket)); },
           },
         }).catch(reject);
       });
@@ -2404,6 +2399,21 @@ export class SoulseekSession {
       const p = this.pendingConnects.get(token);
       if (p) { clearTimeout(p.timer); this.pendingConnects.delete(token); }
     });
+  }
+
+  /**
+   * Shared socket-close path: notify the transfer layer when an F channel
+   * dies so mid-transfer uploads/downloads fail fast ("Connection closed"
+   * + retry) instead of stalling forever. P/D sockets have no token
+   * continuity and skip the notify. Idempotent via closedPeers tombstone.
+   */
+  private handlePeerSocketClosed(sock: Socket, st: PeerState | undefined) {
+    if ((st?.isFileConn || st?.connType === "F") && st?.fileToken !== undefined) {
+      logger.debug("transfer", "F socket closed", { username: st.username, token: st.fileToken });
+      try { this.opts.onFileClosed?.(st.fileToken); } catch {}
+    }
+    this.peerStates.delete(sock);
+    this.closedPeers.add(sock);
   }
 
   /** Register an F token so incoming raw F connections are demuxed correctly. */
