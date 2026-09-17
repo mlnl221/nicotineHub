@@ -55,6 +55,32 @@ export function useBulkSelection() {
   return { selected, toggle, toggleRange, selectAll, setSelection, clear, remove, has, size: selected.size, lastAnchor };
 }
 
+// vim-style j/k aliases for ArrowDown/ArrowUp in select-mode lists.
+// Shift extends range, same as arrows. Returns true when key handled.
+export function stepSelectionKey(
+  e: React.KeyboardEvent,
+  focusedIdx: number,
+  allIds: string[],
+  setFocusedIdx: (n: number) => void,
+  bulk: { toggle: (id: string) => void; toggleRange: (id: string, allIds: string[]) => void },
+): boolean {
+  const dir = e.key === "ArrowDown" || e.key === "j" ? 1 : e.key === "ArrowUp" || e.key === "k" ? -1 : 0;
+  if (!dir || !allIds.length) return false;
+  // Never steal typing from text fields for j/k (arrows keep old behavior).
+  if ((e.key === "j" || e.key === "k") && e.target instanceof HTMLElement) {
+    const t = e.target;
+    if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable) return false;
+  }
+  e.preventDefault();
+  const next = Math.max(0, Math.min(allIds.length - 1, focusedIdx + dir));
+  setFocusedIdx(next);
+  const id = allIds[next];
+  if (!id) return true;
+  if (e.shiftKey) bulk.toggleRange(id, allIds);
+  else bulk.toggle(id);
+  return true;
+}
+
 export function useMarqueeSelection(onSelect: (ids: string[]) => void) {
   const elements = useRef(new Map<string, HTMLElement>());
   const drag = useRef<{ x: number; y: number; active: boolean } | null>(null);

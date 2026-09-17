@@ -26,7 +26,7 @@ import { SpectrumHoverCard } from "@/components/transfers/SpectrumHoverCard";
 import { TagEditor } from "@/components/tag/TagEditor";
 import { MediainfoModal } from "@/components/files/MediainfoModal";
 import { AdjustTagsModal } from "@/components/tag/AdjustTagsModal";
-import { useBulkSelection, useMarqueeSelection } from "@/lib/bulkSelection";
+import { useBulkSelection, useMarqueeSelection, stepSelectionKey } from "@/lib/bulkSelection";
 import { DOWNLOAD_CLEAR_SETS, sortTransfers } from "@/lib/transfers";
 import { verifyFile, analyzeFile } from "@/lib/worker";
 import { bridgeFetchUrl } from "@/lib/bridgeHttp";
@@ -130,15 +130,7 @@ function DownloadsInner() {
   }, [liveIds]);
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!selectMode) return;
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      const dir = e.key === "ArrowDown" ? 1 : -1;
-       const next = Math.max(0, Math.min(transferIds.length - 1, focusedIdx + dir));
-       setFocusedIdx(next);
-       const id = transferIds[next];
-       if (e.shiftKey && id) bulk.toggleRange(id, transferIds);
-       else if (id && !e.shiftKey) bulk.toggle(id);
-    }
+    stepSelectionKey(e, focusedIdx, transferIds, setFocusedIdx, bulk);
   };
 
   const selectedTransfers = downloads.filter((t) => bulk.has(t.id));
@@ -278,7 +270,7 @@ function DownloadsInner() {
                   </span>
                 </div>
               </div>
-              {selectMode ? <p className="font-body text-[10px] text-outline">Select picks every row, any user/grouping · None deselects to refine · Tag ops use first 50 · Shift+click / Shift+↑/↓ extends range</p> : null}
+              {selectMode ? <p className="font-body text-[10px] text-outline">Select picks every row, any user/grouping · None deselects to refine · Tag ops use first 50 · Shift+click / Shift+↑/↓ or Shift+j/k extends range</p> : null}
               {/* Nicotine-plus parity toolbar: always visible, touch-sized.
                   Desktop: full row. Mobile: Resume + Remove + More overflow. */}
               <div className="flex flex-wrap items-center gap-1.5" role="toolbar" aria-label="Download actions">

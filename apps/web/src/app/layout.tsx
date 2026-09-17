@@ -11,6 +11,7 @@ import { StatisticsProvider } from "@/lib/statistics";
 import { ToastHost } from "@/components/ToastHost";
 import { WebVitals } from "@/components/WebVitals";
 import { GlobalContextMenu } from "@/components/ui/GlobalContextMenu";
+import { Hotkeys } from "@/components/Hotkeys";
 import { SidebarProvider } from "@/components/SidebarContext";
 import { ExitDialogHandler } from "@/components/ExitDialogHandler";
 import { WindowGeometrySync } from "@/components/WindowGeometrySync";
@@ -107,6 +108,7 @@ export default function RootLayout({
                                 </PlayerProvider>
                                 <ToastHost />
                                 <GlobalContextMenu />
+                                <Hotkeys />
                               </SpectrumProvider>
                             </TransfersProvider>
                           </StatisticsProvider>
