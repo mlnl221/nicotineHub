@@ -2515,6 +2515,13 @@ export class SoulseekSession {
             if (pi.connType === "F") state.isFileConn = true;
           } catch { logger.debug("peer", "inbound PeerInit parse failed", { bytes: initPayload.length }); }
         } else if (code === 0) {
+          // D parent dials never pierce (PossibleParents are direct dials):
+          // code 0 here is a distrib ping, not PierceFireWall. Promote it
+          // instead of parking/consuming it as an unknown-token pierce.
+          if (state.username && state.connType === "D") {
+            state.initDone = true;
+            continue;
+          }
           try {
             const pf = parsePierceFireWall(initPayload);
             const pending = this.pendingConnects.get(pf.token);
@@ -2537,6 +2544,21 @@ export class SoulseekSession {
           } catch { logger.debug("peer", "inbound PierceFireWall parse failed"); }
         } else {
           logger.debug("peer", "inbound init unknown code", { code });
+          // Parent-candidate D dials may deliver BranchLevel/Root before any
+          // PeerInit. Preserve frame: promote preset outbound D to distrib
+          // instead of consuming the handshake as unknown init (which dropped
+          // branchLevel and left parent null forever).
+          if (state.username && state.connType === "D" &&
+            (code === 3 || code === 4 || code === 5 || code === 7 || code === 93)) {
+            state.initDone = true;
+            continue;
+          }
+          // Truly unknown first frame: close fast instead of marking done
+          // with no identity and leaking to the 60s dead sweep.
+          try { peer.end(); } catch {}
+          this.peerStates.delete(peer);
+          this.closedPeers.add(peer as Socket);
+          return;
         }
         state.initDone = true;
         if (state.username && state.connType) {
@@ -3311,11 +3333,12 @@ export class SoulseekSession {
       this.enqueueOrRun(() => this.connectToPeerViaAddress(username, addr, connType, msg));
       return;
     }
+    const dialStart = Date.now();
     Bun.connect({
       hostname: addr.ip, port: addr.port,
       socket: {
         open: (sock) => {
-          logger.info("browse", "direct peer open", { username, ip: addr.ip, port: addr.port, connType });
+          logger.info("browse", "direct peer open", { username, ip: addr.ip, port: addr.port, connType, dialMs: Date.now() - dialStart });
           this.setTcpBufferSize(sock as Socket, connType as "F" | "D" | "P");
           // Outbound P: consider handshake done after we send PeerInit — don't wait for peer init
           // (nicotine sends SharedFileListRequest immediately after PeerInit; peer rarely replies with init)
@@ -3325,10 +3348,10 @@ export class SoulseekSession {
           try { (sock as Socket).write(msg); } catch {}
         },
         data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
-        error: (_sock, err) => { logger.warn("browse", "direct peer error", { username, ip: addr.ip, port: addr.port, error: (err as Error)?.message || String(err) }); this.dequeuePendingSockets(); },
-        close: (sock) => { logger.info("browse", "direct peer close", { username, ip: addr.ip, port: addr.port }); this.peerStates.delete(sock as Socket); this.dequeuePendingSockets(); },
+        error: (_sock, err) => { logger.warn("browse", "direct peer error", { username, ip: addr.ip, port: addr.port, elapsedMs: Date.now() - dialStart, error: (err as Error)?.message || String(err) }); this.dequeuePendingSockets(); },
+        close: (sock) => { const st = this.peerStates.get(sock as Socket); logger.info("browse", "direct peer close", { username, ip: addr.ip, port: addr.port, lifetimeMs: st?.createdAt ? Date.now() - st.createdAt : undefined }); this.peerStates.delete(sock as Socket); this.dequeuePendingSockets(); },
       },
-    }).catch((e) => { logger.warn("browse", "direct peer connect failed", { username, ip: addr.ip, port: addr.port, error: (e as Error).message }); this.dequeuePendingSockets(); });
+    }).catch((e) => { logger.warn("browse", "direct peer connect failed", { username, ip: addr.ip, port: addr.port, elapsedMs: Date.now() - dialStart, error: (e as Error).message }); this.dequeuePendingSockets(); });
   }
 
   requestUserInfo(username: string): Promise<UserInfoResponseMessage> {
