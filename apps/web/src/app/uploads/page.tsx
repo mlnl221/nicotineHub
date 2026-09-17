@@ -271,11 +271,11 @@ function UploadsInner() {
               </div>
             </div>
             <div className="flex md:hidden items-center gap-1.5">
-              <button onClick={bulkAbort} disabled={!selectedTransfers.length} title="Abort selected uploads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold disabled:opacity-40">
-                <span className="material-symbols-outlined text-[16px]">block</span> Abort
+              <button onClick={bulkAbort} disabled={!selectedTransfers.length} title="Abort selected uploads" aria-label="Abort selected uploads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold disabled:opacity-40">
+                <span className="material-symbols-outlined text-[16px]">block</span>
               </button>
-              <button onClick={bulkRemove} disabled={!selectedTransfers.length} title="Remove selected uploads" className="inline-flex items-center gap-1 rounded-full bg-error-container px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold text-on-error-container disabled:opacity-40">
-                <span className="material-symbols-outlined text-[16px]">delete</span> Remove
+              <button onClick={bulkRemove} disabled={!selectedTransfers.length} title="Remove selected uploads" aria-label="Remove selected uploads" className="inline-flex items-center gap-1 rounded-full bg-error-container px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold text-on-error-container disabled:opacity-40">
+                <span className="material-symbols-outlined text-[16px]">delete</span>
               </button>
               <div className="relative">
                 <button onClick={openBelow(moreMenu)} aria-label="More upload actions" aria-haspopup="menu" aria-expanded={!!moreMenu.anchor} title="More actions" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-surface-container-high text-on-surface-variant">
