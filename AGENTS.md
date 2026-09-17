@@ -37,6 +37,7 @@ Bridge URL override: `NEXT_PUBLIC_BRIDGE_URL` (build-time) or `localStorage.nico
 - Shares on WSL `bun` dev vs Docker: `CONFIG_DIR` defaults to `/config` and `DATA_DIR` to `/data` but on WSL fall back to `./config`/`./data` or `/tmp/nicotine-hub-*` if not writable (see `apps/bridge/src/server.ts:205`). **WSL `bun`**: add shares with absolute WSL paths like `/home/magnus/Music` or `/mnt/c/Users/you/Music` (must `existsSync` on bridge FS) — Docker `Browse /data` (`/data/Music`) only works when host path is mounted (`-v /home/you/Music:/data/Music:ro` then share `/data/Music`). Rescan warns `unavailable: [v→p]` when path not found (1 dirs 0 files). `CONFIG_DIR` holds `worker.json` 0600, `shares.json`, `downloads.json`, `plugins.json`, `plugins/`, `statistics.json`, `diagnostics.log` etc.; `DATA_DIR` holds `downloads/`, `incomplete/`, `uploads/`.
 - Mobile-first UI: touch targets, safe-area insets, PWA `manifest.webmanifest`.
 - Verify after changes: `bun test && bun run build`.
+- **Branches: `stage` is the dev base (repo default). Branch all work off `stage`, PRs target `stage` (`gh pr create --base stage`). `main` is release-only via `stage → main` promotion — never branch off or PR into `main` (see `CONTRIBUTING.md`, `docs/deployment.md`).
 - Browser/UI testing uses the Playwright MCP server (configured in opencode). Before driving the UI, always copy the env file into place (e.g. `cp apps/web/.env.example apps/web/.env`) so the bridge/worker URLs are present for the browser session.
 
 ## Git Worktrees — per-worktree ports (avoid overlap)
