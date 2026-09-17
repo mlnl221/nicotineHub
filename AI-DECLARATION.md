@@ -45,7 +45,7 @@ The AI wrote the large majority of the bridge framing/builders/parsers, the
 `ShareDB`/`TransferManager`, the web search/filters, settings mapping
 (`docs/settings-mapping.md`, `apps/web/src/lib/config/defaults.ts`), the
 plugin system (`pluginsystem.py` → `plugins/types.ts`), and much of this
-documentation. The maintainer set the scope (mobile-first, `177/1`, leaf-only `D`,
+documentation. The maintainer set the scope (mobile-first, `185/1`, leaf-only `D`,
 `ws://host:8787/ws`, volume `DATA_DIR`), made the product decisions, ran
 `bun install`/`compose.yaml`/`Vercel` deploys, tested every WS flow, and reported
 the bugs that drove the fixes (see `mistakes.md`).
