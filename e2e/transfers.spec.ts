@@ -344,15 +344,13 @@ test.describe("Transfers pages", () => {
     const section = page.getByTestId("downloads-section");
     await expect(page.getByTestId("transfer-card").first()).toBeVisible();
 
-    // Select enters with everything picked
+    // Select enters with everything picked (count lives in header now, no BulkBar)
     await section.getByRole("button", { name: "Select", exact: true }).click();
     await expect(section.getByRole("button", { name: "Done (2)" })).toBeVisible();
-    await expect(page.getByText("2 selected")).toBeVisible();
 
     // None deselects (deselect wording, not destructive Clear)
     await section.getByRole("button", { name: "None" }).click();
     await expect(section.getByRole("button", { name: "Done (0)" })).toBeVisible();
-    await expect(page.getByText(/\d+ selected/)).toBeHidden();
 
     // All re-picks, Done exits and drops the selection
     await section.getByRole("checkbox", { name: "Select all downloads" }).click();
