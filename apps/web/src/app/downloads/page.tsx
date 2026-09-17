@@ -177,6 +177,8 @@ function DownloadsInner() {
   };
 
   const selectedTransfers = downloads.filter((t) => bulk.has(t.id));
+  // Tag/file ops need real files on disk: only when every pick is Finished.
+  const allSelectedFinished = selectedTransfers.length > 0 && selectedTransfers.every((t) => t.status === "Finished");
   const bulkPause = () => selectedTransfers.filter((t) => ["Transferring", "Getting status", "Queued"].includes(t.status)).forEach((t) => pauseDownload(t.id));
   const bulkResume = () => selectedTransfers.filter((t) => ["Paused", "Cancelled", "Connection closed", "Connection timeout"].includes(t.status)).forEach((t) => t.status === "Cancelled" ? retryDownload(t.id) : resumeDownload(t.id));
   const bulkRemove = () => {
@@ -501,7 +503,7 @@ function DownloadsInner() {
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} /> : null}
       {scrapeFile ? <AdjustTagsModal open={!!scrapeFile} files={[scrapeFile]} onClose={() => setScrapeFile(null)} /> : null}
       {mediainfoFile ? <MediainfoModal filePath={mediainfoFile} onClose={() => setMediainfoFile(null)} /> : null}
-       <BulkBar count={bulk.size} onClear={bulk.clear} onEdit={() => setBulkEditor(true)} onScrape={() => setBulkScrape(true)} onVerify={handleBulkVerify} onAnalyze={handleBulkAnalyze} onSpectrum={handleBulkSpectrum} onPause={bulkPause} onResume={bulkResume} onRemove={bulkRemove} />
+       <BulkBar count={bulk.size} onClear={bulk.clear} onEdit={allSelectedFinished ? () => setBulkEditor(true) : undefined} onScrape={allSelectedFinished ? () => setBulkScrape(true) : undefined} onVerify={allSelectedFinished ? handleBulkVerify : undefined} onAnalyze={allSelectedFinished ? handleBulkAnalyze : undefined} onSpectrum={allSelectedFinished ? handleBulkSpectrum : undefined} onPause={bulkPause} onResume={bulkResume} onRemove={bulkRemove} />
       {bulkEditor ? <BulkTagEditor open={bulkEditor} files={selectedFileNames.slice(0, 50)} onClose={() => setBulkEditor(false)} onSaved={() => bulk.clear()} /> : null}
       {bulkScrape ? <AdjustTagsModal open={bulkScrape} files={selectedFileNames.slice(0, 50)} onClose={() => setBulkScrape(false)} /> : null}
       {bulkResult ? (
