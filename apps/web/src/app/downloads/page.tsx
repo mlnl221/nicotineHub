@@ -76,6 +76,7 @@ function DownloadsInner() {
   const groupMode = settings.transfers.groupdownloads ?? "folder_grouping";
   const expandMode = settings.transfers.expand_downloads ?? "all";
   const sortMode = settings.transfers.sort_downloads ?? "unsorted";
+  const showOverview = settings.transfers.show_transfer_overview ?? true;
   const sortedDownloads = sortTransfers(downloads, sortMode);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // sync expand -> collapsed
@@ -223,9 +224,24 @@ function DownloadsInner() {
               <p className="font-label text-xs font-semibold text-amber-900 dark:text-amber-200">Demo preview — 1 download + 1 upload simulated below (animated). New downloads are disabled on Vercel — search, chat, profiles &amp; browse are mocked.</p>
             </div>
           ) : null}
-          <ThroughputChart />
-
-          <DownloadStats />
+          <div className="flex justify-end">
+            <button
+              onClick={() => setOption("transfers", "show_transfer_overview", !showOverview)}
+              aria-expanded={showOverview}
+              aria-controls="transfer-overview"
+              title={showOverview ? "Hide bandwidth and stats" : "Show bandwidth and stats"}
+              className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold text-on-surface-variant"
+            >
+              <span className="material-symbols-outlined text-[16px]">{showOverview ? "visibility_off" : "show_chart"}</span>
+              {showOverview ? "Hide overview" : "Show overview"}
+            </button>
+          </div>
+          {showOverview ? (
+            <div id="transfer-overview" className="contents">
+              <ThroughputChart />
+              <DownloadStats />
+            </div>
+          ) : null}
 
           <div className="grid grid-cols-1 gap-6 max-w-full overflow-x-clip">
             <section data-testid="downloads-section" className="flex flex-col gap-4 bg-surface dark:bg-surface-container-low rounded-xl p-4 md:p-6 ghost-border max-w-full overflow-x-clip">

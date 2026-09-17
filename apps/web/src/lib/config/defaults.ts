@@ -141,6 +141,7 @@ export interface Settings {
     expand_uploads: string;
     sort_downloads: string;
     sort_uploads: string;
+    show_transfer_overview: boolean;
     usecustomban: boolean;
     customban: string;
     usecustomgeoblock: boolean;
@@ -364,6 +365,7 @@ export const defaults: Settings = {
     expand_uploads: "all",
     sort_downloads: "unsorted",
     sort_uploads: "unsorted",
+    show_transfer_overview: true,
     usecustomban: false,
     customban: "Banned, don't bother retrying",
     usecustomgeoblock: false,
