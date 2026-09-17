@@ -41,7 +41,7 @@ export function BulkBar({ count, onClear, onEdit, onVerify, onAnalyze, onSpectru
           <button onClick={onSpectrum} className="flex-1 min-w-[72px] rounded-full bg-surface-container-high px-3 py-2.5 min-h-11 font-label text-xs font-semibold">Spectrum</button>
         </>
       }
-      note={<p className="font-body text-[10px] leading-relaxed text-outline">Bulk ops: title+artist per-file, others uniform. Tag ops use first 50. Select toggle persists per-page. Shift+click / Shift+↑/↓ extends range.</p>}
+      note={<p className="font-body text-[10px] leading-relaxed text-outline">Bulk ops: title+artist per-file, others uniform. Tag ops use first 50. Shift+click / Shift+↑/↓ extends range.</p>}
     />
   );
 }

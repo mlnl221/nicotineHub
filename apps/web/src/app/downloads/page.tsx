@@ -109,6 +109,12 @@ function DownloadsInner() {
   })();
 
   const transferIds = downloads.map((d) => d.id);
+  // Select enters with everything picked; Done exits and drops the selection
+  // so no stale picks linger. Single source for the header toggle.
+  const handleSelectToggle = () => {
+    if (selectMode) { setSelectMode(false); setFocusedIdx(-1); bulk.clear(); }
+    else { setSelectMode(true); bulk.selectAll(transferIds); }
+  };
   // Mobile overflow menu labels (defined after group/expand mode to avoid TDZ).
   const groupLabel = groupMode === "folder_grouping" ? "Folder" : groupMode === "user_grouping" ? "User" : "Off";
   const cycleGroup = () => setOption("transfers", "groupdownloads", groupMode === "folder_grouping" ? "user_grouping" : groupMode === "user_grouping" ? "ungrouped" : "folder_grouping");
@@ -272,9 +278,9 @@ function DownloadsInner() {
                   Downloading ({dlCount})
                 </h3>
                 <div className="flex items-center gap-1">
-                  {!isDemo ? (
-                    <button onClick={() => setSelectMode((v) => !v)} className={`inline-flex items-center gap-1 rounded-full px-3 min-h-11 py-1 text-xs font-semibold ${selectMode ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant"}`}>
-                      <span className="material-symbols-outlined text-[14px]">{selectMode ? "check_box" : "check_box_outline_blank"}</span> {selectMode ? `Selecting (${bulk.size})` : "Select"}
+                  {!isDemo && transferIds.length > 0 ? (
+                    <button onClick={handleSelectToggle} className={`inline-flex items-center gap-1 rounded-full px-3 min-h-11 py-1 text-xs font-semibold ${selectMode ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant"}`}>
+                      <span className="material-symbols-outlined text-[14px]">{selectMode ? "check_box" : "check_box_outline_blank"}</span> {selectMode ? `Done (${bulk.size})` : "Select"}
                     </button>
                   ) : null}
                    {selectMode && transferIds.length ? (
@@ -283,7 +289,7 @@ function DownloadsInner() {
                         <input type="checkbox" aria-label="Select all downloads" checked={bulk.size === transferIds.length} ref={(el) => { if (el) el.indeterminate = bulk.size > 0 && bulk.size < transferIds.length; }} onChange={() => (bulk.size === transferIds.length ? bulk.clear() : bulk.selectAll(transferIds))} className="h-4 w-4 accent-primary" />
                         All
                       </label>
-                      <button onClick={() => bulk.clear()} className="inline-flex rounded-full bg-surface-container-high px-2 min-h-11 py-1 text-xs">Clear</button>
+                      <button onClick={() => bulk.clear()} title="Deselect all" className="inline-flex rounded-full bg-surface-container-high px-2 min-h-11 py-1 text-xs">None</button>
                     </>
                   ) : null}
                   <span className="hidden md:flex items-center gap-1">
@@ -300,7 +306,7 @@ function DownloadsInner() {
                   </span>
                 </div>
               </div>
-              {selectMode ? <p className="font-body text-[10px] text-outline">Select-all covers every row, any user/grouping · Tag ops use first 50 · Shift+click / Shift+↑/↓ extends range</p> : null}
+              {selectMode ? <p className="font-body text-[10px] text-outline">Select picks every row, any user/grouping · None deselects to refine · Tag ops use first 50 · Shift+click / Shift+↑/↓ extends range</p> : null}
               {/* Nicotine-plus parity toolbar: always visible, touch-sized.
                   Desktop: full row. Mobile: Resume + Remove + More overflow. */}
               <div className="flex flex-wrap items-center gap-1.5" role="toolbar" aria-label="Download actions">

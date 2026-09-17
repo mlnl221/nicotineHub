@@ -14,7 +14,7 @@ export function BulkBarShell({ count, onClear, actions, note }: BulkBarShellProp
       <div className="pointer-events-auto flex max-w-[640px] w-full flex-col gap-2 rounded-2xl bg-surface-container-highest shadow-xl ghost-border p-3 dark:bg-surface-container-high">
         <div className="flex items-center justify-between gap-2">
           <span className="font-label text-xs font-bold text-on-surface-variant">{count} selected</span>
-          <button onClick={onClear} className="rounded-full bg-surface-container-high px-3 py-2 min-h-9 font-label text-xs">Clear</button>
+          <button onClick={onClear} title="Deselect all" className="rounded-full bg-surface-container-high px-3 py-2 min-h-9 font-label text-xs">None</button>
         </div>
         <div className="flex flex-wrap gap-1.5">{actions}</div>
         {note ?? null}
