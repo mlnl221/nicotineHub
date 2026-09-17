@@ -46,6 +46,8 @@ export interface Settings {
   };
   ui: {
     dark_mode: boolean;
+    light_theme: string;
+    dark_theme: string;
     language: string;
     reverse_file_paths: boolean;
     file_size_unit: "B" | "";
@@ -240,6 +242,8 @@ export const defaults: Settings = {
   },
   ui: {
     dark_mode: false,
+    light_theme: "catppuccin-latte",
+    dark_theme: "tokyo-night",
     language: "",
     reverse_file_paths: true,
     file_size_unit: "",

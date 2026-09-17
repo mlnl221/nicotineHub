@@ -49,10 +49,10 @@ export default function Home() {
         className="pointer-events-none absolute inset-0 opacity-40 dark:opacity-20"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 50% -20%, rgba(51,102,204,0.15) 0%, transparent 60%)",
+            "radial-gradient(circle at 50% -20%, color-mix(in srgb, var(--color-primary) 15%, transparent) 0%, transparent 60%)",
         }}
       />
-      <div className="pointer-events-none absolute inset-0 opacity-30 dark:opacity-10" style={{ backgroundImage: "radial-gradient(circle at 50% 120%, rgba(9,76,178,0.08) 0%, transparent 50%)" }} />
+      <div className="pointer-events-none absolute inset-0 opacity-30 dark:opacity-10" style={{ backgroundImage: "radial-gradient(circle at 50% 120%, color-mix(in srgb, var(--color-primary) 8%, transparent) 0%, transparent 50%)" }} />
 
       <main className="relative z-10 flex w-full max-w-md flex-col items-center">
         {/* Logo and header */}
@@ -62,7 +62,7 @@ export default function Home() {
             alt="Nicotine Hub"
             width={220}
             height={120}
-            className="mb-4 h-auto w-[220px] max-w-[70vw] object-contain drop-shadow-[0_4px_24px_rgba(9,76,178,0.12)]"
+            className="mb-4 h-auto w-[220px] max-w-[70vw] object-contain drop-shadow-lg"
             suppressHydrationWarning
           />
           <h1 className="sr-only">Nicotine Hub</h1>

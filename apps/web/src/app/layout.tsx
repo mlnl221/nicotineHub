@@ -77,7 +77,7 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "try{var t=localStorage.getItem('nicotineHub.theme')||localStorage.getItem('nicotine.theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}try{if(localStorage.getItem('nicotineHub.demoBannerDismissed')==='0'){document.documentElement.style.setProperty('--demo-banner-h','0px');}else{document.documentElement.style.setProperty('--demo-banner-h','0px');}}catch(e){document.documentElement.style.setProperty('--demo-banner-h','0px')}",
+              "try{var p=null;try{p=JSON.parse(localStorage.getItem('nicotineHub.themePair')||'null')}catch(e){}var l=(p&&p.light)||'catppuccin-latte',d=(p&&p.dark)||'tokyo-night',m=p&&p.mode;if(!m){try{var s=JSON.parse(localStorage.getItem('nicotineHub.settings')||'null');if(s&&s.ui){if(s.ui.light_theme)l=s.ui.light_theme;if(s.ui.dark_theme)d=s.ui.dark_theme;if(typeof s.ui.dark_mode==='boolean')m=s.ui.dark_mode?'dark':'light'}}catch(e){}if(!m){var t=localStorage.getItem('nicotineHub.theme')||localStorage.getItem('nicotine.theme');m=(t==='dark'||t==='light')?t:'light'}var dl={'flexoki-light':0,'rose-pine':0,'catppuccin-latte':0,'white':0,'lupine':0};if(m==='light'&&!dl[l])m='dark';if(m==='dark'&&dl[d])m='light'}var id=m==='dark'?d:l;document.documentElement.dataset.theme=id;if(m==='dark')document.documentElement.classList.add('dark')}catch(e){}try{if(localStorage.getItem('nicotineHub.demoBannerDismissed')==='0'){document.documentElement.style.setProperty('--demo-banner-h','0px');}else{document.documentElement.style.setProperty('--demo-banner-h','0px');}}catch(e){document.documentElement.style.setProperty('--demo-banner-h','0px')}",
           }}
         />
       </head>

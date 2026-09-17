@@ -295,6 +295,7 @@ export class SoulseekSession {
   private loginReject: ((e: Error) => void) | undefined;
   // BANNED detection: silent close with 0 buffer before any Login response → server omits BANNED response per SLSKPROTOCOL.md:124
   private hasReceivedLoginResponse = false;
+  private malformedLoginFrames = 0;
   private loginAttemptAt = 0;
   private consecutiveSilentCloses = 0;
   private idleTimer: ReturnType<typeof setInterval> | undefined;
@@ -1289,6 +1290,7 @@ export class SoulseekSession {
   login(): Promise<LoginResponse & { success: true }> {
     this.shouldReconnect = true;
     this.reconnectAttempts = 0;
+    this.malformedLoginFrames = 0;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
     const promise = new Promise<LoginResponse & { success: true }>((resolve, reject) => {
       this.loginResolve = resolve;
@@ -1513,9 +1515,23 @@ export class SoulseekSession {
       let resp: LoginResponse;
       try {
         resp = parseLoginResponse(payload);
+        this.malformedLoginFrames = 0;
       } catch (e) {
         // Malformed login frame — drop it, keep the read loop (and login promise) alive.
         logger.warn("server", "dropping malformed login frame", { error: (e as Error).message, malformed: (e as Error) instanceof FramingError });
+        // Persistent truncation (e.g. server gates the response format by client
+        // version) must not wedge the login promise forever — that leaves the
+        // bridge "already in progress" and the UI reconnect-looping with no
+        // error. Fail loudly after 3 in a row; backoff retries already happened.
+        this.malformedLoginFrames += 1;
+        if (this.malformedLoginFrames >= 3 && this.loginReject) {
+          const err = new Error(`Login failed: server login response unreadable (${(e as Error).message}).`);
+          this.loginReject(err);
+          this.loginReject = undefined;
+          this.loginResolve = undefined;
+          this.shouldReconnect = false;
+          try { this.serverSocket?.end(); } catch {}
+        }
         return;
       }
       if (resp.success) {

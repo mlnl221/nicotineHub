@@ -72,7 +72,7 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
             type="checkbox"
             checked={filters.freeSlot}
             onChange={(e) => onChange({ freeSlot: e.target.checked })}
-            className="h-6 w-6 accent-[#094cb2] shrink-0"
+            className="h-6 w-6 accent-primary shrink-0"
           />
         </label>
 
@@ -82,7 +82,7 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
             type="checkbox"
             checked={filters.publicOnly}
             onChange={(e) => onChange({ publicOnly: e.target.checked })}
-            className="h-6 w-6 accent-[#094cb2] shrink-0"
+            className="h-6 w-6 accent-primary shrink-0"
           />
         </label>
       </div>

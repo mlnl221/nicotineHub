@@ -52,7 +52,7 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
         {/* Header — icon + title + version like nicotine-plus about.py application_version_label */}
         <div className="px-6 pt-6 pb-4 border-b border-outline-variant/10 bg-surface-container-low/40">
           <div className="flex items-start gap-4">
-            <img src="/icon-512.png" alt="" width={56} height={56} className="h-14 w-14 rounded-xl bg-white p-1 shadow-sm ring-1 ring-black/5 shrink-0" />
+            <img src="/icon-512.png" alt="" width={56} height={56} className="h-14 w-14 rounded-xl bg-surface-container-lowest p-1 shadow-sm ring-1 ring-black/5 shrink-0" />
             <div className="min-w-0 flex-1">
               <h2 className="font-headline text-xl font-bold tracking-tight">Nicotine Hub</h2>
               <p className="font-mono text-xs font-semibold text-primary">{tag}</p>

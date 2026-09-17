@@ -90,23 +90,23 @@ export function ThroughputChart() {
         </div>
         {/* Center chart */}
         <div className="flex-1 relative overflow-hidden">
-          <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 20%, rgba(9,76,178,0.04) 100%)" }} />
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5" />
           <svg className="w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 100">
             {/* grid */}
             <line x1="0" y1="15" x2="100" y2="15" stroke="currentColor" className="text-outline-variant/20" strokeWidth="0.3" strokeDasharray="1 2" />
             <line x1="0" y1="50" x2="100" y2="50" stroke="currentColor" className="text-outline-variant/20" strokeWidth="0.3" strokeDasharray="1 2" />
             <line x1="0" y1="85" x2="100" y2="85" stroke="currentColor" className="text-outline-variant/20" strokeWidth="0.3" strokeDasharray="1 2" />
             {/* Up (tertiary) underneath */}
-            {hasData && upPath.area && <path d={upPath.area} fill="rgba(109,94,0,0.08)" className="dark:fill-[rgba(224,196,100,0.08)]" />}
-            {hasData && upPath.line && <path d={upPath.line} fill="none" stroke="#6d5e00" strokeWidth="0.6" strokeLinecap="round" strokeLinejoin="round" className="dark:stroke-[#dcc661]" />}
+            {hasData && upPath.area && <path d={upPath.area} fill="currentColor" opacity="0.08" className="text-tertiary" />}
+            {hasData && upPath.line && <path d={upPath.line} fill="none" stroke="currentColor" strokeWidth="0.6" strokeLinecap="round" strokeLinejoin="round" className="text-tertiary" />}
             {/* Down (primary) on top */}
-            {hasData && downPath.area && <path d={downPath.area} fill="rgba(9,76,178,0.08)" />}
-            {hasData && downPath.line && <path d={downPath.line} fill="none" stroke="#094cb2" strokeWidth="0.7" strokeLinecap="round" strokeLinejoin="round" className="dark:stroke-[#b1c5ff]" />}
+            {hasData && downPath.area && <path d={downPath.area} fill="currentColor" opacity="0.08" className="text-primary" />}
+            {hasData && downPath.line && <path d={downPath.line} fill="none" stroke="currentColor" strokeWidth="0.7" strokeLinecap="round" strokeLinejoin="round" className="text-primary" />}
             {/* Placeholder when no data */}
             {!hasData && (
               <>
-                <path d="M0,80 Q25,60 50,70 T100,40" fill="none" stroke="#094cb2" strokeWidth="0.5" opacity="0.25" />
-                <path d="M0,90 Q30,85 60,95 T100,80" fill="none" stroke="#6d5e00" strokeWidth="0.5" opacity="0.2" />
+                <path d="M0,80 Q25,60 50,70 T100,40" fill="none" stroke="currentColor" strokeWidth="0.5" opacity="0.25" className="text-primary" />
+                <path d="M0,90 Q30,85 60,95 T100,80" fill="none" stroke="currentColor" strokeWidth="0.5" opacity="0.2" className="text-tertiary" />
               </>
             )}
           </svg>
