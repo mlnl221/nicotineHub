@@ -29,6 +29,7 @@ export function TransferCard({
   onClear,
   onPlay,
   onMenu,
+  compact,
 }: {
   transfer: Transfer;
   onPause?: () => void;
@@ -38,6 +39,8 @@ export function TransferCard({
   onClear?: () => void;
   onPlay?: () => void;
   onMenu?: (x: number, y: number) => void;
+  /** Denser rows on desktop only (all overrides are md:-prefixed, mobile untouched). */
+  compact?: boolean;
 }) {
   const { settings } = useConfig();
   const reverse = settings.ui.reverse_file_paths ?? true;
@@ -93,13 +96,15 @@ export function TransferCard({
     isFinished ? "Complete" : isQueued ? `Place ${transfer.queuePosition ?? "—"}` : isPaused ? "Paused" : isCancelled ? "Cancelled" : isGetting ? "Connecting…" : `ETA: ${humanETA(transfer.timeLeft)}`;
 
   const speedColor = transfer.isUpload ? "text-tertiary" : "text-primary";
+  // Compact shrinks desktop hitboxes/padding only; base classes keep mobile intact.
+  const touch = compact ? "md:min-h-8 md:min-w-8 md:p-1" : "md:min-h-10 md:min-w-10";
 
   return (
     <div
       data-testid="transfer-card"
       data-transfer-id={transfer.id}
       data-status={transfer.status}
-      className={`flex flex-col gap-3 rounded-xl p-4 ghost-border bg-surface-container-lowest dark:bg-surface-container/50 group relative overflow-hidden ${isQueued ? "opacity-75" : ""}`}
+      className={`flex flex-col gap-3 rounded-xl p-4 ghost-border bg-surface-container-lowest dark:bg-surface-container/50 group relative overflow-hidden ${isQueued ? "opacity-75" : ""} ${compact ? "md:gap-1.5 md:p-2.5" : ""}`}
     >
       <div className="flex justify-between items-start gap-3">
         <div className="min-w-0 flex-1">
@@ -115,7 +120,7 @@ export function TransferCard({
           <p className="font-label text-[11px] text-outline mt-0.5 truncate hidden md:block" title={reverse ? transfer.virtualPath : transfer.fileName}>
             {reverse ? transfer.virtualPath : transfer.fileName}
           </p>
-          {!transfer.isUpload ? (
+          {!transfer.isUpload && !compact ? (
             <p className="font-label text-[11px] text-outline mt-0.5 truncate hidden md:block" title={savePath}>
               Expected: {savePath}
             </p>
@@ -145,7 +150,7 @@ export function TransferCard({
           <button
             aria-label="Play"
             onClick={onPlay}
-            className="inline-flex items-center gap-1.5 px-4 min-h-11 rounded-full bg-primary text-on-primary font-label text-xs font-bold hover:opacity-90 transition-opacity"
+            className={`inline-flex items-center gap-1.5 px-4 min-h-11 ${compact ? "md:min-h-8 md:px-3" : "md:min-h-10"} rounded-full bg-primary text-on-primary font-label text-xs font-bold hover:opacity-90 transition-opacity`}
             title="Play"
           >
             <span className="material-symbols-outlined text-[18px]">play_arrow</span>
@@ -156,7 +161,7 @@ export function TransferCard({
           <button
             aria-label="Retry"
             onClick={onRetry}
-            className="p-2 min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-primary transition-colors"
+            className={`p-2 min-h-11 min-w-11 ${touch} flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-primary transition-colors`}
             title="Retry"
           >
             <span className="material-symbols-outlined text-[18px]">replay</span>
@@ -166,7 +171,7 @@ export function TransferCard({
           <button
             aria-label="Resume"
             onClick={onResume}
-            className="p-2 min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-primary dark:hover:text-inverse-primary transition-colors"
+            className={`p-2 min-h-11 min-w-11 ${touch} flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-primary dark:hover:text-inverse-primary transition-colors`}
             title="Resume"
           >
             <span className="material-symbols-outlined text-[18px]">play_arrow</span>
@@ -175,7 +180,7 @@ export function TransferCard({
           <button
             aria-label="Pause"
             onClick={onPause}
-            className="p-2 min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-primary transition-colors"
+            className={`p-2 min-h-11 min-w-11 ${touch} flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-primary transition-colors`}
             title="Pause"
           >
             <span className="material-symbols-outlined text-[18px]">pause</span>
@@ -185,7 +190,7 @@ export function TransferCard({
           <button
             aria-label="Prioritize"
             onClick={onResume}
-            className="p-2 min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-tertiary transition-colors"
+            className={`p-2 min-h-11 min-w-11 ${touch} flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-tertiary transition-colors`}
             title="Prioritize"
           >
             <span className="material-symbols-outlined text-[18px]">arrow_upward</span>
@@ -195,7 +200,7 @@ export function TransferCard({
           <button
             aria-label="Clear"
             onClick={onClear}
-            className="p-2 min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-primary transition-colors"
+            className={`p-2 min-h-11 min-w-11 ${touch} flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-primary transition-colors`}
             title="Clear"
           >
             <span className="material-symbols-outlined text-[18px]">close</span>
@@ -204,7 +209,7 @@ export function TransferCard({
           <button
             aria-label="Cancel"
             onClick={onCancel}
-            className="p-2 min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-error transition-colors"
+            className={`p-2 min-h-11 min-w-11 ${touch} flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-error transition-colors`}
             title="Cancel"
           >
             <span className="material-symbols-outlined text-[18px]">close</span>
@@ -219,7 +224,7 @@ export function TransferCard({
               const r = e.currentTarget.getBoundingClientRect();
               onMenu(r.left, r.bottom + 4);
             }}
-            className="p-2 min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-primary transition-colors"
+            className={`p-2 min-h-11 min-w-11 ${touch} flex items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant hover:text-primary transition-colors`}
             title="More actions"
           >
             <span className="material-symbols-outlined text-[18px]">more_vert</span>

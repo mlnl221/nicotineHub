@@ -119,6 +119,17 @@ export function UploadsSection() {
           ]}
         />
         <SelectControl
+          label="Sort order"
+          description="Row order within the uploads list."
+          value={t.sort_uploads ?? "unsorted"}
+          onChange={(v) => setOption("transfers", "sort_uploads", v)}
+          options={[
+            { value: "unsorted", label: "Unsorted" },
+            { value: "folder_filename", label: "Folder + file name" },
+            { value: "filename", label: "File name" },
+          ]}
+        />
+        <SelectControl
           label="Expand state"
           value={t.expand_uploads}
           onChange={(v) => setOption("transfers", "expand_uploads", v)}

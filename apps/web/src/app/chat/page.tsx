@@ -280,10 +280,10 @@ function ChatRoomsInner() {
               {activeRoom && !pickerOpen ? (
                 <div className="flex items-center gap-2">
                   <span className="material-symbols-outlined text-[18px] text-outline">search</span>
-                  <button onClick={() => setPickerOpen(true)} className="flex-1 rounded-full border border-outline-variant/30 bg-surface-container-lowest px-4 py-2.5 min-h-11 text-left text-sm text-outline">
+                  <button onClick={() => setPickerOpen(true)} className="flex-1 rounded-full border border-outline-variant/30 bg-surface-container-lowest px-4 py-2.5 min-h-11 md:min-h-10 text-left text-sm text-outline">
                     Look up rooms…
                   </button>
-                  <button onClick={() => setPickerOpen(true)} aria-label="Expand room picker" className="shrink-0 rounded-lg border border-outline-variant/30 px-3 min-h-11">
+                  <button onClick={() => setPickerOpen(true)} aria-label="Expand room picker" className="shrink-0 rounded-lg border border-outline-variant/30 px-3 min-h-11 md:min-h-10">
                     <span className="material-symbols-outlined text-[18px] align-middle">expand_more</span>
                   </button>
                 </div>
@@ -299,7 +299,7 @@ function ChatRoomsInner() {
                     }
                   }}
                   aria-label="Switch active room"
-                  className="mb-2 w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2.5 min-h-11 text-base md:text-sm"
+                  className="mb-2 w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2.5 min-h-11 md:min-h-10 text-base md:text-sm"
                 >
                   <option value="" disabled={!!activeRoom}>
                     Switch room… ({joinedArray.length} joined)
@@ -316,9 +316,9 @@ function ChatRoomsInner() {
                   value={joinInput}
                   onChange={(e) => setJoinInput(e.target.value)}
                   placeholder="Room name"
-                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 text-base md:text-sm"
+                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 md:min-h-10 text-base md:text-sm"
                 />
-                <button onClick={handleJoin} className="shrink-0 rounded-lg bg-primary px-4 py-2.5 min-h-11 text-sm text-on-primary">
+                <button onClick={handleJoin} className="shrink-0 rounded-lg bg-primary px-4 py-2.5 min-h-11 md:min-h-10 text-sm text-on-primary">
                   Join
                 </button>
               </div>
@@ -330,7 +330,7 @@ function ChatRoomsInner() {
                   const v = e.target.value;
                   if (v) setJoinInput(v);
                 }}
-                className="min-w-0 flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest dark:bg-surface-container-low dark:text-inverse-primary px-3 py-2.5 min-h-11 text-base focus:border-primary outline-none md:text-sm"
+                className="min-w-0 flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest dark:bg-surface-container-low dark:text-inverse-primary px-3 py-2.5 min-h-11 md:min-h-10 text-base focus:border-primary outline-none md:text-sm"
               >
                 <option value="">Choose a room to join… ({sortedRooms.length})</option>
                 {sortedRooms.slice(0, 50).map((r) => (
@@ -343,13 +343,13 @@ function ChatRoomsInner() {
                 onClick={refreshRoomList}
                 title="Refresh room list"
                 aria-label="Refresh room list"
-                className="shrink-0 rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 min-h-11 text-on-surface-variant hover:text-primary hover:border-primary"
+                className="shrink-0 rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 min-h-11 md:min-h-10 text-on-surface-variant hover:text-primary hover:border-primary"
               >
                 <span className="material-symbols-outlined text-[18px] align-middle">refresh</span>
                 </button>
               </div>
                   {activeRoom ? (
-                    <button onClick={() => setPickerOpen(false)} aria-label="Collapse room picker" className="md:hidden mt-2 inline-flex items-center gap-1 rounded-lg px-3 min-h-11 text-xs text-on-surface-variant">
+                    <button onClick={() => setPickerOpen(false)} aria-label="Collapse room picker" className="md:hidden mt-2 inline-flex items-center gap-1 rounded-lg px-3 min-h-11 md:min-h-10 text-xs text-on-surface-variant">
                       <span className="material-symbols-outlined text-[18px]">expand_less</span> Hide
                     </button>
                   ) : null}
@@ -588,11 +588,11 @@ function ChatRoomsInner() {
                           }}
                           placeholder={`Message #${activeRoom}...`}
                           rows={1}
-                          className="max-h-28 min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 text-base md:text-sm placeholder:text-outline focus:outline-none"
+                          className="max-h-28 min-h-11 md:min-h-10 flex-1 resize-none bg-transparent px-2 py-2.5 text-base md:text-sm placeholder:text-outline focus:outline-none"
                         />
                         <button
                           onClick={handleSay}
-                          className="rounded-lg bg-primary p-3 min-h-11 min-w-11 flex items-center justify-center text-on-primary hover:bg-primary-container shrink-0"
+                          className="rounded-lg bg-primary p-3 min-h-11 md:min-h-10 min-w-11 flex items-center justify-center text-on-primary hover:bg-primary-container shrink-0"
                         >
                           <span className="material-symbols-outlined text-[20px]">send</span>
                         </button>

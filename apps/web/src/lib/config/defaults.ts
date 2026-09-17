@@ -137,6 +137,8 @@ export interface Settings {
     groupuploads: string;
     expand_downloads: string;
     expand_uploads: string;
+    sort_downloads: string;
+    sort_uploads: string;
     usecustomban: boolean;
     customban: string;
     usecustomgeoblock: boolean;
@@ -356,6 +358,8 @@ export const defaults: Settings = {
     groupuploads: "folder_grouping",
     expand_downloads: "all",
     expand_uploads: "all",
+    sort_downloads: "unsorted",
+    sort_uploads: "unsorted",
     usecustomban: false,
     customban: "Banned, don't bother retrying",
     usecustomgeoblock: false,

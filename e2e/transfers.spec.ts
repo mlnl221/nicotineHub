@@ -337,6 +337,37 @@ test.describe("Transfers pages", () => {
     await expect(page).toHaveURL(/\/uploads/);
   });
 
+  test("select picks all, none deselects, done exits and clears", async ({ page }) => {
+    await mockTransfersPage(page, { withTransfers: true });
+    await login(page);
+    await page.goto("/downloads");
+    const section = page.getByTestId("downloads-section");
+    await expect(page.getByTestId("transfer-card").first()).toBeVisible();
+
+    // Select enters with everything picked
+    await section.getByRole("button", { name: "Select", exact: true }).click();
+    await expect(section.getByRole("button", { name: "Done (2)" })).toBeVisible();
+    await expect(page.getByText("2 selected")).toBeVisible();
+
+    // None deselects (deselect wording, not destructive Clear)
+    await section.getByRole("button", { name: "None" }).click();
+    await expect(section.getByRole("button", { name: "Done (0)" })).toBeVisible();
+    await expect(page.getByText(/\d+ selected/)).toBeHidden();
+
+    // All re-picks, Done exits and drops the selection
+    await section.getByRole("checkbox", { name: "Select all downloads" }).click();
+    await expect(section.getByRole("button", { name: "Done (2)" })).toBeVisible();
+    await section.getByRole("button", { name: "Done (2)" }).click();
+    await expect(section.getByRole("button", { name: "Select", exact: true })).toBeVisible();
+    await expect(section.locator('input[type="checkbox"]')).toHaveCount(0);
+
+    // uploads mirrors the same flow
+    await page.goto("/uploads");
+    const upSection = page.getByTestId("uploads-section");
+    await upSection.getByRole("button", { name: "Select", exact: true }).click();
+    await expect(upSection.getByRole("button", { name: "Done (2)" })).toBeVisible();
+  });
+
   test("clear removes transfer card", async ({ page }) => {
     await mockTransfersPage(page, { withTransfers: true });
     await login(page);

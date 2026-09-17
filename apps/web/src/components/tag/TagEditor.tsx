@@ -221,7 +221,7 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
                       value={tags[f.key] || ""}
                       onChange={(e) => setTags((prev) => ({ ...prev, [f.key]: e.target.value }))}
                       placeholder={f.placeholder}
-                      className="w-full rounded-xl bg-surface-container-low px-3 py-2.5 min-h-11 font-body text-sm outline-none ghost-border focus:border-primary"
+                      className="w-full rounded-xl bg-surface-container-low px-3 py-2.5 min-h-11 md:min-h-10 font-body text-sm outline-none ghost-border focus:border-primary"
                     />
                   </label>
                 ))}
@@ -246,7 +246,7 @@ export function TagEditor({ open, fileName, onClose, onSaved }: Props) {
                     value={scrapeUrl}
                     onChange={(e) => setScrapeUrl(e.target.value)}
                     placeholder="https://www.discogs.com/release/..."
-                    className="flex-1 min-w-0 rounded-xl bg-surface-container-lowest px-3 py-2.5 min-h-11 font-body text-sm outline-none ghost-border focus:border-primary"
+                    className="flex-1 min-w-0 rounded-xl bg-surface-container-lowest px-3 py-2.5 min-h-11 md:min-h-10 font-body text-sm outline-none ghost-border focus:border-primary"
                   />
                 </div>
                 <div className="flex gap-2">

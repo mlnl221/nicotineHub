@@ -64,7 +64,7 @@ function BuddiesInner() {
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
                   placeholder="Filter buddies..."
-                  className="w-full sm:w-64 min-h-11 rounded-full bg-surface-container-lowest py-2.5 pl-9 pr-4 font-body text-base placeholder:text-outline-variant focus:outline-none md:text-sm focus:ring-2 focus:ring-primary/30"
+                  className="w-full sm:w-64 min-h-11 md:min-h-10 rounded-full bg-surface-container-lowest py-2.5 pl-9 pr-4 font-body text-base placeholder:text-outline-variant focus:outline-none md:text-sm focus:ring-2 focus:ring-primary/30"
                 />
               </div>
             </div>
@@ -81,12 +81,12 @@ function BuddiesInner() {
                 onChange={(e) => setAddInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleAdd()}
                 placeholder="Add buddy… (username)"
-                className="w-full rounded-xl bg-surface-container-lowest py-3 pl-10 pr-4 font-body text-base ghost-border focus:outline-none md:text-sm focus:ring-2 focus:ring-primary/20 min-h-11"
+                className="w-full rounded-xl bg-surface-container-lowest py-3 pl-10 pr-4 font-body text-base ghost-border focus:outline-none md:text-sm focus:ring-2 focus:ring-primary/20 min-h-11 md:min-h-10"
               />
             </div>
             <button
               onClick={handleAdd}
-              className="shrink-0 rounded-xl bg-primary px-6 py-3 min-h-11 font-label text-xs font-bold uppercase tracking-widest text-on-primary hover:bg-primary-container"
+              className="shrink-0 rounded-xl bg-primary px-6 py-3 min-h-11 md:min-h-10 font-label text-xs font-bold uppercase tracking-widest text-on-primary hover:bg-primary-container"
             >
               Add
             </button>
@@ -129,7 +129,7 @@ function BuddiesInner() {
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => setTrusted(b.username, !b.trusted)}
-                          className={`p-2 min-h-9 min-w-9 flex items-center justify-center rounded-full ${b.trusted ? "bg-tertiary-container text-on-tertiary-container" : "bg-surface-container-low text-outline hover:text-tertiary"}`}
+                          className={`p-2 min-h-9 md:min-h-8 min-w-9 flex items-center justify-center rounded-full ${b.trusted ? "bg-tertiary-container text-on-tertiary-container" : "bg-surface-container-low text-outline hover:text-tertiary"}`}
                           title={b.trusted ? "Trusted" : "Not trusted"}
                         >
                           <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: "'FILL' 1" }}>
@@ -138,7 +138,7 @@ function BuddiesInner() {
                         </button>
                         <button
                           onClick={() => setNotify(b.username, !b.notify)}
-                          className={`p-2 min-h-9 min-w-9 flex items-center justify-center rounded-full ${b.notify ? "bg-primary-fixed text-on-primary-fixed" : "bg-surface-container-low text-outline"}`}
+                          className={`p-2 min-h-9 md:min-h-8 min-w-9 flex items-center justify-center rounded-full ${b.notify ? "bg-primary-fixed text-on-primary-fixed" : "bg-surface-container-low text-outline"}`}
                           title={b.notify ? "Notify on status change" : "Muted"}
                         >
                           <span className="material-symbols-outlined text-[16px]">notifications</span>

@@ -316,7 +316,7 @@ export function ResultsList({ rows, onRowTap, onRowDoubleClick, selectMode = fal
                   return next;
                 })
               }
-              className="w-full min-h-11 px-4 py-3 text-left"
+              className="w-full min-h-11 md:min-h-10 px-4 py-3 text-left"
             >
               <span className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-[18px] text-on-surface-variant shrink-0">
