@@ -371,7 +371,7 @@ function DownloadsInner() {
                           </button>
                         ) : null}
                         {!isCollapsed ? (
-                          <div onKeyDown={handleKeyDown} tabIndex={selectMode ? 0 : -1} className="space-y-3 outline-none">
+                          <div onKeyDown={handleKeyDown} tabIndex={selectMode ? 0 : -1} className="space-y-3 md:space-y-1.5 outline-none">
                             {items.map((t) => {
                               const spectrumEntry = getEntry(t.id);
                               const hasSpectrum = spectrumEntry?.status === "done";
@@ -381,6 +381,7 @@ function DownloadsInner() {
                               const card = (
                                 <TransferCard
                                   transfer={t}
+                                  compact
                                   onPause={() => pauseDownload(t.id)}
                                   onCancel={() => cancelDownload(t.id)}
                                   onResume={() => resumeDownload(t.id)}
