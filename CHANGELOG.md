@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.38.0](https://github.com/mlnl221/nicotineHub/compare/v0.37.1...v0.38.0) (2026-09-17)
+
+
+### Features
+
+* **web:** custom light/dark theme pair with 22 built-in themes ([3f67abb](https://github.com/mlnl221/nicotineHub/commit/3f67abb2f827a625ce68a830251e0a2549d54607))
+* **web:** demo mirrors app — mock-enqueue downloads, tag save, plugin/port mocks ([1a850cc](https://github.com/mlnl221/nicotineHub/commit/1a850cc1c111f76a6b8023fcef9b64699e0f889d))
+* **web:** global Gmail-style hotkeys with help overlay ([d2e0db8](https://github.com/mlnl221/nicotineHub/commit/d2e0db85f04e2ab9a8c11d5d691475f089bfdcf8))
+* **web:** global Gmail-style hotkeys with help overlay ([1b92e51](https://github.com/mlnl221/nicotineHub/commit/1b92e51cfe032fc6f5c34d5d0745e4f22593bdf7))
+* **web:** j/k list stepping plus hotkeys docs ([7650693](https://github.com/mlnl221/nicotineHub/commit/765069388cbdce97ad41d12e9a959d7e89fc1616))
+* **web:** toggleable transfer overview on downloads/uploads ([2d96fd8](https://github.com/mlnl221/nicotineHub/commit/2d96fd8e5114ddeed6efbe4ba6fd16a6b871a0a1))
+* **web:** toggleable transfer overview on downloads/uploads ([5a3c55c](https://github.com/mlnl221/nicotineHub/commit/5a3c55c783272174d641d562ab0ca361278b872f))
+
+
+### Bug Fixes
+
+* **bridge:** use unreserved client version 165/1, tolerate short login responses ([c530c80](https://github.com/mlnl221/nicotineHub/commit/c530c8084621264bfb0ef70096f6e284af6a907b))
+
 ## [0.37.1](https://github.com/mlnl221/nicotineHub/compare/v0.37.0...v0.37.1) (2026-09-17)
 
 
