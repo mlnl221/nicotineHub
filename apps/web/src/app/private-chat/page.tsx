@@ -209,10 +209,10 @@ function PrivateChatInner() {
               {activeUser && !pickerOpen ? (
                 <div className="flex items-center gap-2">
                   <span className="material-symbols-outlined text-[18px] text-outline">search</span>
-                  <button onClick={() => setPickerOpen(true)} className="flex-1 rounded-full border border-outline-variant/30 bg-surface px-4 py-2.5 min-h-11 text-left text-sm text-outline">
+                  <button onClick={() => setPickerOpen(true)} className="flex-1 rounded-full border border-outline-variant/30 bg-surface px-4 py-2.5 min-h-11 md:min-h-10 text-left text-sm text-outline">
                     Look up conversations…
                   </button>
-                  <button onClick={() => setPickerOpen(true)} aria-label="Expand conversation picker" className="shrink-0 rounded-lg border border-outline-variant/30 px-3 min-h-11">
+                  <button onClick={() => setPickerOpen(true)} aria-label="Expand conversation picker" className="shrink-0 rounded-lg border border-outline-variant/30 px-3 min-h-11 md:min-h-10">
                     <span className="material-symbols-outlined text-[18px] align-middle">expand_more</span>
                   </button>
                 </div>
@@ -221,7 +221,7 @@ function PrivateChatInner() {
               <select
                 value={activeUser || ""}
                 onChange={(e) => setActiveUser(e.target.value || null)}
-                className="w-full rounded-lg border border-outline-variant/30 bg-surface px-3 py-2.5 min-h-11 text-base md:text-sm"
+                className="w-full rounded-lg border border-outline-variant/30 bg-surface px-3 py-2.5 min-h-11 md:min-h-10 text-base md:text-sm"
               >
                 <option value="">Select a conversation</option>
                 {users.map((u) => (
@@ -235,14 +235,14 @@ function PrivateChatInner() {
                   value={newChatUser}
                   onChange={(e) => setNewChatUser(e.target.value)}
                   placeholder="New chat username"
-                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 text-base md:text-sm"
+                  className="flex-1 min-w-0 rounded-lg border border-outline-variant/30 px-3 py-2.5 min-h-11 md:min-h-10 text-base md:text-sm"
                 />
-                <button onClick={startNewChat} className="shrink-0 rounded-lg bg-primary px-4 py-2.5 min-h-11 text-sm text-on-primary">
+                <button onClick={startNewChat} className="shrink-0 rounded-lg bg-primary px-4 py-2.5 min-h-11 md:min-h-10 text-sm text-on-primary">
                   Start
                 </button>
               </div>
                   {activeUser ? (
-                    <button onClick={() => setPickerOpen(false)} aria-label="Collapse conversation picker" className="md:hidden mt-2 inline-flex items-center gap-1 rounded-lg px-3 min-h-11 text-xs text-on-surface-variant">
+                    <button onClick={() => setPickerOpen(false)} aria-label="Collapse conversation picker" className="md:hidden mt-2 inline-flex items-center gap-1 rounded-lg px-3 min-h-11 md:min-h-10 text-xs text-on-surface-variant">
                       <span className="material-symbols-outlined text-[18px]">expand_less</span> Hide
                     </button>
                   ) : null}
@@ -342,11 +342,11 @@ function PrivateChatInner() {
                       }}
                       placeholder={`Message ${activeUser}...`}
                       rows={1}
-                      className="max-h-28 min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 font-body text-base md:text-sm placeholder:text-outline focus:outline-none"
+                      className="max-h-28 min-h-11 md:min-h-10 flex-1 resize-none bg-transparent px-2 py-2.5 font-body text-base md:text-sm placeholder:text-outline focus:outline-none"
                     />
                     <button
                       onClick={handleSend}
-                      className="rounded-lg bg-primary p-3 min-h-11 min-w-11 flex items-center justify-center text-on-primary hover:bg-primary-container shrink-0"
+                      className="rounded-lg bg-primary p-3 min-h-11 md:min-h-10 min-w-11 flex items-center justify-center text-on-primary hover:bg-primary-container shrink-0"
                     >
                       <span className="material-symbols-outlined text-[20px]">send</span>
                     </button>

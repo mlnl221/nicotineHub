@@ -212,17 +212,17 @@ function UploadsInner() {
               </h3>
               <div className="flex items-center gap-1">
                 {!isDemo && transferIds.length > 0 ? (
-                  <button onClick={handleSelectToggle} className={`inline-flex items-center gap-1 rounded-full px-3 min-h-11 py-1 text-xs font-semibold ${selectMode ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant"}`}>
+                  <button onClick={handleSelectToggle} className={`inline-flex items-center gap-1 rounded-full px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold ${selectMode ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant"}`}>
                     <span className="material-symbols-outlined text-[14px]">{selectMode ? "check_box" : "check_box_outline_blank"}</span> {selectMode ? `Done (${bulk.size})` : "Select"}
                   </button>
                 ) : null}
                    {selectMode && transferIds.length ? (
                   <>
-                    <label className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-2 min-h-11 py-1 text-xs font-semibold cursor-pointer" title="Select all">
+                    <label className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-2 min-h-11 md:min-h-10 py-1 text-xs font-semibold cursor-pointer" title="Select all">
                       <input type="checkbox" aria-label="Select all uploads" checked={transferIds.length > 0 && bulk.size === transferIds.length} ref={(el) => { if (el) el.indeterminate = bulk.size > 0 && bulk.size < transferIds.length; }} onChange={() => (bulk.size === transferIds.length ? bulk.clear() : bulk.selectAll(transferIds))} className="h-4 w-4 accent-primary" />
                       All
                     </label>
-                    <button onClick={() => bulk.clear()} title="Deselect all" className="inline-flex rounded-full bg-surface-container-high px-2 min-h-11 py-1 text-xs">None</button>
+                    <button onClick={() => bulk.clear()} title="Deselect all" className="inline-flex rounded-full bg-surface-container-high px-2 min-h-11 md:min-h-10 py-1 text-xs">None</button>
                   </>
                 ) : null}
                 <span className="hidden md:flex items-center gap-1">
@@ -249,32 +249,32 @@ function UploadsInner() {
                 Desktop: full row. Mobile: Abort + Remove + More overflow. */}
             <div className="flex flex-wrap items-center gap-1.5" role="toolbar" aria-label="Upload actions">
             <div className="hidden md:flex flex-wrap items-center gap-1.5">
-              <button onClick={bulkAbort} disabled={!selectedTransfers.length} title="Abort selected uploads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold disabled:opacity-40">
+              <button onClick={bulkAbort} disabled={!selectedTransfers.length} title="Abort selected uploads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold disabled:opacity-40">
                 <span className="material-symbols-outlined text-[16px]">block</span> Abort
               </button>
-              <button onClick={bulkAbortUsers} disabled={!selectedTransfers.length} title="Abort every upload from the selected users" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold disabled:opacity-40">
+              <button onClick={bulkAbortUsers} disabled={!selectedTransfers.length} title="Abort every upload from the selected users" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold disabled:opacity-40">
                 <span className="material-symbols-outlined text-[16px]">group_off</span> Abort Users
               </button>
-              <button onClick={bulkRemove} disabled={!selectedTransfers.length} title="Remove selected uploads" className="inline-flex items-center gap-1 rounded-full bg-error-container px-3 min-h-11 py-1 text-xs font-semibold text-on-error-container disabled:opacity-40">
+              <button onClick={bulkRemove} disabled={!selectedTransfers.length} title="Remove selected uploads" className="inline-flex items-center gap-1 rounded-full bg-error-container px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold text-on-error-container disabled:opacity-40">
                 <span className="material-symbols-outlined text-[16px]">delete</span> Remove
               </button>
-              <button onClick={() => clearMany(true, UPLOAD_CLEAR_SETS["finished-cancelled"] ?? null)} title="Clear all finished/cancelled uploads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold">
+              <button onClick={() => clearMany(true, UPLOAD_CLEAR_SETS["finished-cancelled"] ?? null)} title="Clear all finished/cancelled uploads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold">
                 <span className="material-symbols-outlined text-[16px]">done_all</span> Clear Finished
               </button>
-              <button onClick={handleMessageAll} title="Private-message uploading users (selected, or all)" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold">
+              <button onClick={handleMessageAll} title="Private-message uploading users (selected, or all)" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold">
                 <span className="material-symbols-outlined text-[16px]">chat_bubble</span> Message All
               </button>
               <div className="relative">
-                <button onClick={openBelow(clearMenu)} aria-haspopup="menu" aria-expanded={!!clearMenu.anchor} title="Clear uploads by status" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold">
+                <button onClick={openBelow(clearMenu)} aria-haspopup="menu" aria-expanded={!!clearMenu.anchor} title="Clear uploads by status" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold">
                   <span className="material-symbols-outlined text-[16px]">clear_all</span> Clear All <span className="material-symbols-outlined text-[14px]">expand_more</span>
                 </button>
               </div>
             </div>
             <div className="flex md:hidden items-center gap-1.5">
-              <button onClick={bulkAbort} disabled={!selectedTransfers.length} title="Abort selected uploads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 py-1 text-xs font-semibold disabled:opacity-40">
+              <button onClick={bulkAbort} disabled={!selectedTransfers.length} title="Abort selected uploads" className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold disabled:opacity-40">
                 <span className="material-symbols-outlined text-[16px]">block</span> Abort
               </button>
-              <button onClick={bulkRemove} disabled={!selectedTransfers.length} title="Remove selected uploads" className="inline-flex items-center gap-1 rounded-full bg-error-container px-3 min-h-11 py-1 text-xs font-semibold text-on-error-container disabled:opacity-40">
+              <button onClick={bulkRemove} disabled={!selectedTransfers.length} title="Remove selected uploads" className="inline-flex items-center gap-1 rounded-full bg-error-container px-3 min-h-11 md:min-h-10 py-1 text-xs font-semibold text-on-error-container disabled:opacity-40">
                 <span className="material-symbols-outlined text-[16px]">delete</span> Remove
               </button>
               <div className="relative">

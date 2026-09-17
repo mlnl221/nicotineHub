@@ -156,7 +156,7 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
             type="button"
             onClick={() => setScopeOpen(true)}
             aria-label="Change search scope"
-            className="flex min-h-11 w-full items-center gap-2 rounded-full bg-surface-container-low ghost-border px-3 font-label text-sm font-medium text-on-surface md:hidden"
+            className="flex min-h-11 md:min-h-10 w-full items-center gap-2 rounded-full bg-surface-container-low ghost-border px-3 font-label text-sm font-medium text-on-surface md:hidden"
           >
             <span className="material-symbols-outlined text-[18px] text-on-surface-variant">{current.icon}</span>
             <span className="flex-1 truncate text-left">{current.label} — {current.desc}</span>
@@ -177,7 +177,7 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
               id="search-mode"
               value={mode}
               onChange={(e) => setMode(e.target.value as SearchMode)}
-              className="w-full min-h-11 h-11 appearance-none rounded-full bg-surface-container-low ghost-border pl-9 pr-9 font-label text-sm font-medium text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full min-h-11 md:min-h-10 h-11 appearance-none rounded-full bg-surface-container-low ghost-border pl-9 pr-9 font-label text-sm font-medium text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             >
               {MODES.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -205,7 +205,7 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
         </div>
 
         {mode === "user" ? (
-          <div className="flex items-center gap-2 rounded-full bg-surface-container-low px-4 py-2.5 ghost-border focus-within:border-primary min-h-11">
+          <div className="flex items-center gap-2 rounded-full bg-surface-container-low px-4 py-2.5 ghost-border focus-within:border-primary min-h-11 md:min-h-10">
             <span className="material-symbols-outlined text-outline text-[18px] shrink-0">person</span>
             <input
               value={target}
@@ -221,7 +221,7 @@ export function SearchBar({ onSearch, onToggleFilters, activeFilterCount, search
         ) : null}
         {mode === "room" ? (
           <>
-            <div className="flex items-center gap-2 rounded-full bg-surface-container-low px-4 py-2.5 ghost-border focus-within:border-primary min-h-11">
+            <div className="flex items-center gap-2 rounded-full bg-surface-container-low px-4 py-2.5 ghost-border focus-within:border-primary min-h-11 md:min-h-10">
               <span className="material-symbols-outlined text-outline text-[18px] shrink-0">tag</span>
               <input
                 value={target}

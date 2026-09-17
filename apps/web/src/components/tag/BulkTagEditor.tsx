@@ -123,7 +123,7 @@ export function BulkTagEditor({ open, files, onClose, onSaved }: Props) {
                   ] as const).map((f) => (
                     <label key={f.k} className="flex flex-col gap-1">
                       <span className="font-label text-xs font-semibold text-on-surface-variant">{f.label} {mixed[f.k] ? <span className="text-outline font-normal">— mixed —</span> : null}</span>
-                      <input value={uniform[f.k]} onChange={(e) => setUniform((p) => ({ ...p, [f.k]: e.target.value }))} placeholder={mixed[f.k] ? "— mixed — (leave to keep)" : ""} className="w-full rounded-xl bg-surface-container-lowest px-3 py-2 min-h-11 font-body text-sm ghost-border focus:border-primary outline-none" />
+                      <input value={uniform[f.k]} onChange={(e) => setUniform((p) => ({ ...p, [f.k]: e.target.value }))} placeholder={mixed[f.k] ? "— mixed — (leave to keep)" : ""} className="w-full rounded-xl bg-surface-container-lowest px-3 py-2 min-h-11 md:min-h-10 font-body text-sm ghost-border focus:border-primary outline-none" />
                     </label>
                   ))}
                 </div>

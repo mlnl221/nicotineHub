@@ -97,7 +97,7 @@ export function TransferCard({
 
   const speedColor = transfer.isUpload ? "text-tertiary" : "text-primary";
   // Compact shrinks desktop hitboxes/padding only; base classes keep mobile intact.
-  const touch = compact ? "md:min-h-8 md:min-w-8 md:p-1" : "";
+  const touch = compact ? "md:min-h-8 md:min-w-8 md:p-1" : "md:min-h-10 md:min-w-10";
 
   return (
     <div
@@ -150,7 +150,7 @@ export function TransferCard({
           <button
             aria-label="Play"
             onClick={onPlay}
-            className={`inline-flex items-center gap-1.5 px-4 min-h-11 ${compact ? "md:min-h-8 md:px-3" : ""} rounded-full bg-primary text-on-primary font-label text-xs font-bold hover:opacity-90 transition-opacity`}
+            className={`inline-flex items-center gap-1.5 px-4 min-h-11 ${compact ? "md:min-h-8 md:px-3" : "md:min-h-10"} rounded-full bg-primary text-on-primary font-label text-xs font-bold hover:opacity-90 transition-opacity`}
             title="Play"
           >
             <span className="material-symbols-outlined text-[18px]">play_arrow</span>

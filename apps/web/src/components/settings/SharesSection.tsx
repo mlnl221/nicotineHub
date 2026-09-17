@@ -477,7 +477,7 @@ export function SharesSection() {
               type="button"
               aria-label="Browse container filesystem"
               onClick={() => setBrowseOpen(true)}
-              className="inline-flex h-11 min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-primary px-4 font-label text-xs font-semibold uppercase tracking-widest text-on-primary shadow-sm transition-colors hover:bg-primary/90 active:scale-95"
+              className="inline-flex h-11 min-h-11 md:min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-primary px-4 font-label text-xs font-semibold uppercase tracking-widest text-on-primary shadow-sm transition-colors hover:bg-primary/90 active:scale-95"
             >
               <span className="material-symbols-outlined text-[18px]">folder_open</span>
               <span className="hidden sm:inline">Browse container</span>
@@ -487,7 +487,7 @@ export function SharesSection() {
               type="button"
               aria-label="Add shared folder"
               onClick={handlePlusClick}
-              className="inline-flex h-11 min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-surface-container-high px-4 font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant shadow-sm transition-colors hover:bg-surface-container-highest active:scale-95 dark:bg-surface-variant dark:text-outline"
+              className="inline-flex h-11 min-h-11 md:min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-surface-container-high px-4 font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant shadow-sm transition-colors hover:bg-surface-container-highest active:scale-95 dark:bg-surface-variant dark:text-outline"
             >
               <span className="material-symbols-outlined text-[18px]">create_new_folder</span>
               <span className="hidden sm:inline">Add folder</span>
@@ -498,7 +498,7 @@ export function SharesSection() {
               aria-label="Rescan shares"
               onClick={handleRescanNow}
               disabled={rescanning || state.status !== "connected"}
-              className="inline-flex h-11 min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-surface-container-high px-4 font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant shadow-sm transition-colors hover:bg-surface-container-highest active:scale-95 dark:bg-surface-variant dark:text-outline disabled:opacity-50 disabled:pointer-events-none"
+              className="inline-flex h-11 min-h-11 md:min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-surface-container-high px-4 font-label text-xs font-semibold uppercase tracking-widest text-on-surface-variant shadow-sm transition-colors hover:bg-surface-container-highest active:scale-95 dark:bg-surface-variant dark:text-outline disabled:opacity-50 disabled:pointer-events-none"
             >
               <span className={`material-symbols-outlined text-[18px] ${rescanning ? "animate-spin" : ""}`}>{rescanning ? "progress_activity" : "refresh"}</span>
               <span className="hidden sm:inline">{rescanning ? "Rescanning…" : "Rescan"}</span>
@@ -920,7 +920,7 @@ export function SharesSection() {
                 setTimeout(() => setRescanning((v) => (v ? false : v)), 30_000);
               }}
               disabled={rescanning || state.status !== "connected"}
-              className="inline-flex h-11 min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-5 font-label text-xs font-semibold uppercase tracking-widest text-on-primary shadow-sm transition-colors hover:bg-primary/90 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
+              className="inline-flex h-11 min-h-11 md:min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-5 font-label text-xs font-semibold uppercase tracking-widest text-on-primary shadow-sm transition-colors hover:bg-primary/90 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
             >
               <span className={`material-symbols-outlined text-[18px] ${rescanning ? "animate-spin" : ""}`}>{rescanning ? "progress_activity" : "refresh"}</span>
               {rescanning ? "Rescanning…" : "Rescan shares"}

@@ -516,7 +516,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
           <div className="flex gap-2 min-w-0 flex-wrap">
             <button
               onClick={() => router.push(`/profile?user=${encodeURIComponent(username)}`)}
-              className="shrink-0 rounded-full bg-surface-container-high px-4 py-2.5 min-h-9 font-label text-xs hover:bg-surface-variant"
+              className="shrink-0 rounded-full bg-surface-container-high px-4 py-2.5 min-h-9 md:min-h-8 font-label text-xs hover:bg-surface-variant"
             >
               View Profile
             </button>
@@ -536,11 +536,11 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                 value={fileQuery}
                 onChange={(e) => setFileQuery(e.target.value)}
                 placeholder="Search files in folder..."
-                className="w-full sm:w-64 min-h-11 rounded-full bg-surface-container-low py-2.5 pl-9 pr-4 font-body text-base placeholder:text-outline-variant focus:outline-none focus:ring-2 focus:ring-primary/20 md:text-sm"
+                className="w-full sm:w-64 min-h-11 md:min-h-10 rounded-full bg-surface-container-low py-2.5 pl-9 pr-4 font-body text-base placeholder:text-outline-variant focus:outline-none focus:ring-2 focus:ring-primary/20 md:text-sm"
               />
             </div>
             {error ? (
-              <button onClick={() => retry(tab.id)} className="shrink-0 rounded-full bg-primary px-4 py-2.5 min-h-9 font-label text-xs font-bold text-on-primary">Retry</button>
+              <button onClick={() => retry(tab.id)} className="shrink-0 rounded-full bg-primary px-4 py-2.5 min-h-9 md:min-h-8 font-label text-xs font-bold text-on-primary">Retry</button>
             ) : null}
           </div>
         </div>
@@ -563,7 +563,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                   }
                 }}
                 placeholder="Search folders..."
-                className="w-full rounded-full bg-surface-container-low py-2.5 pl-9 pr-4 font-body text-base focus:outline-none focus:ring-2 focus:ring-primary/20 min-h-11 md:text-sm"
+                className="w-full rounded-full bg-surface-container-low py-2.5 pl-9 pr-4 font-body text-base focus:outline-none focus:ring-2 focus:ring-primary/20 min-h-11 md:min-h-10 md:text-sm"
               />
             </div>
             <button
@@ -678,7 +678,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                 setSelectedFolder(e.target.value);
                 openFolder(tab.id, e.target.value);
               }}
-              className="w-full rounded-lg bg-surface-container-low px-3 py-2.5 min-h-11 font-body text-sm"
+              className="w-full rounded-lg bg-surface-container-low px-3 py-2.5 min-h-11 md:min-h-10 font-body text-sm"
             >
               {selectedFolder && !pagedFolders.some((f) => f.name === selectedFolder) ? (
                 <option key={selectedFolder} value={selectedFolder}>{selectedFolder.split("\\").pop() || selectedFolder}</option>
@@ -863,7 +863,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                                 <p className="truncate font-label text-[10px] text-outline" title={shortName}>{shortName}</p>
                               ) : null}
                             </div>
-                            <button onClick={() => setPropsFile({ name: file.name, size: file.size, ext: file.ext, attrs: file.attrs, folder: activeFolder.name })} className="shrink-0 rounded-full bg-surface-container-high px-3 py-2.5 min-h-9 font-label text-xs hover:bg-surface-variant" title="Properties">
+                            <button onClick={() => setPropsFile({ name: file.name, size: file.size, ext: file.ext, attrs: file.attrs, folder: activeFolder.name })} className="shrink-0 rounded-full bg-surface-container-high px-3 py-2.5 min-h-9 md:min-h-8 font-label text-xs hover:bg-surface-variant" title="Properties">
                               <span className="material-symbols-outlined text-[16px]">info</span>
                             </button>
                             <button
@@ -875,7 +875,7 @@ export function BrowseView({ tab }: { tab: BrowseTab }) {
                                 const vp = file.name.includes("\\") || file.name.includes("/") ? file.name : virtualPath;
                                 requestDownload({ username, virtualPath: vp, size: file.size, fileName: shortName });
                               }}
-                              className={`shrink-0 rounded-full px-4 py-2.5 min-h-9 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline cursor-not-allowed" : "bg-primary text-on-primary hover:bg-primary-container"}`}
+                              className={`shrink-0 rounded-full px-4 py-2.5 min-h-9 md:min-h-8 font-label text-xs font-bold ${isDemo ? "bg-surface-container-high text-outline cursor-not-allowed" : "bg-primary text-on-primary hover:bg-primary-container"}`}
                             >
                               {isDemo ? "Disabled" : "Download"}
                             </button>

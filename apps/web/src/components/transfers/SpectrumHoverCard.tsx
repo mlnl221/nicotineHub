@@ -140,7 +140,7 @@ export function SpectrumHoverCard({ transferId, fileName, children }: Props) {
                   <button
                     aria-label="Close"
                     onClick={() => setModal(false)}
-                    className="ml-3 p-2 rounded-full hover:bg-surface-container-high min-h-11 min-w-11 flex items-center justify-center"
+                    className="ml-3 p-2 rounded-full hover:bg-surface-container-high min-h-11 md:min-h-10 min-w-11 flex items-center justify-center"
                   >
                     <span className="material-symbols-outlined">close</span>
                   </button>

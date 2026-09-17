@@ -113,13 +113,13 @@ function BrowseInner() {
                   onKeyDown={(e) => e.key === "Enter" && go()}
                   placeholder={tabs.length >= 10 ? "Max 10 tabs reached — close one first" : "Enter username to browse"}
                   disabled={tabs.length >= 10}
-                  className="w-full rounded-xl bg-surface-container-low pl-9 pr-4 py-3 min-h-11 font-body text-base outline-none ghost-border md:text-sm focus:border-primary disabled:opacity-50"
+                  className="w-full rounded-xl bg-surface-container-low pl-9 pr-4 py-3 min-h-11 md:min-h-10 font-body text-base outline-none ghost-border md:text-sm focus:border-primary disabled:opacity-50"
                 />
               </div>
               <button
                 onClick={go}
                 disabled={!username.trim() || tabs.length >= 10}
-                className="shrink-0 rounded-xl bg-primary px-6 py-3 min-h-11 font-label text-xs font-bold uppercase tracking-widest text-on-primary disabled:opacity-50 hover:bg-primary-container"
+                className="shrink-0 rounded-xl bg-primary px-6 py-3 min-h-11 md:min-h-10 font-label text-xs font-bold uppercase tracking-widest text-on-primary disabled:opacity-50 hover:bg-primary-container"
               >
                 Browse
               </button>

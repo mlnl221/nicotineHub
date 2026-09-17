@@ -165,7 +165,7 @@ function MenuPanel({
                 onClose();
               }}
               onMouseEnter={() => hasSub && setOpenSub(it.id)}
-              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 min-h-11 text-left font-body text-sm transition-colors ${
+              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 min-h-11 md:min-h-10 text-left font-body text-sm transition-colors ${
                 it.disabled
                   ? "opacity-40 cursor-not-allowed text-on-surface-variant"
                   : it.danger
