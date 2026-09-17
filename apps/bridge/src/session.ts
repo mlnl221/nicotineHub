@@ -121,7 +121,6 @@ import {
   SERVER_MESSAGE_CODES,
   MAJOR_VERSION,
   MINOR_VERSION,
-  EXPERIMENTAL_VERSION_FLAG,
   type BrowseFolderEntry,
   type LoginResponse,
   type PeerAddress,
@@ -1318,7 +1317,7 @@ export class SoulseekSession {
       this.loginResolve = undefined;
       try { (this.serverSocket as unknown as { end?: () => void })?.end?.(); } catch {}
     }, LOGIN_TIMEOUT_MS);
-    logger.info("server", `connecting to ${this.opts.host || "server.slsknet.org"}:${this.opts.port || 2242}`, { username: this.username, version: `${MAJOR_VERSION}/${MINOR_VERSION}${EXPERIMENTAL_VERSION_FLAG ? " experimental" : ""}` });
+    logger.info("server", `connecting to ${this.opts.host || "server.slsknet.org"}:${this.opts.port || 2242}`, { username: this.username, version: `${MAJOR_VERSION}/${MINOR_VERSION}` });
     Bun.connect({
       hostname: this.opts.host || "server.slsknet.org",
       port: this.opts.port || 2242,
