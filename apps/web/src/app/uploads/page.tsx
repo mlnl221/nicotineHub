@@ -20,12 +20,8 @@ import { useConfig } from "@/lib/config/provider";
 import { useSearchesOptional } from "@/lib/search";
 import { isDemo } from "@/lib/demo";
 import { TagEditor } from "@/components/tag/TagEditor";
-import { BulkBar } from "@/components/tag/BulkBar";
-import { BulkTagEditor } from "@/components/tag/BulkTagEditor";
-import { AdjustTagsModal } from "@/components/tag/AdjustTagsModal";
 import { useBulkSelection, useMarqueeSelection } from "@/lib/bulkSelection";
 import { UPLOAD_CLEAR_SETS, sortTransfers } from "@/lib/transfers";
-import { bulkVerify, bulkAnalyze, bulkRequestSpectrum } from "@/lib/worker";
 import { useSpectrum } from "@/lib/spectrum";
 
 function humanSpeed(bps: number): string {
@@ -50,9 +46,6 @@ function UploadsInner() {
   const [selectMode, setSelectMode] = useState(false);
   const bulk = useBulkSelection();
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [bulkEditor, setBulkEditor] = useState(false);
-  const [bulkScrape, setBulkScrape] = useState(false);
-  const [bulkResult, setBulkResult] = useState<{ title: string; rows: Array<Record<string, unknown>> } | null>(null);
   const [focusedIdx, setFocusedIdx] = useState(-1);
   const clearMenu = useContextMenu();
   const moreMenu = useContextMenu();
@@ -101,33 +94,6 @@ function UploadsInner() {
     const live = new Set(uploads.map((u) => u.id));
     if ([...bulk.selected].some((id) => !live.has(id))) bulk.setSelection([...bulk.selected].filter((id) => live.has(id)));
   }, [liveIds]);
-  const selectedFileNames = Array.from(bulk.selected).map((id) => uploads.find((u) => u.id === id)?.fileName).filter(Boolean) as string[];
-  // Tag/verify/analyze/spectrum bulk ops stay capped at 50 files; transfer selection itself is uncapped.
-  const capTagFiles = (files: string[]) => {
-    if (files.length > 50) {
-      window.dispatchEvent(new CustomEvent("nicotineHub:toast", { detail: { title: "Tag bulk limit", body: "First 50 files used for tag operations." } }));
-      return files.slice(0, 50);
-    }
-    return files;
-  };
-  const handleBulkVerify = async () => {
-    const files = capTagFiles(selectedFileNames);
-    if (!files.length) return;
-    try { const r = await bulkVerify(files); setBulkResult({ title: `Verify — ${files.length} files`, rows: r.results as Array<Record<string, unknown>> }); } catch (e) { setBulkResult({ title: "Verify error", rows: [{ error: e instanceof Error ? e.message : String(e) }] }); }
-  };
-  const handleBulkAnalyze = async () => {
-    const files = capTagFiles(selectedFileNames);
-    if (!files.length) return;
-    try { const r = await bulkAnalyze(files); setBulkResult({ title: `Analyze — ${files.length} files`, rows: r.results as Array<Record<string, unknown>> }); } catch (e) { setBulkResult({ title: "Analyze error", rows: [{ error: e instanceof Error ? e.message : String(e) }] }); }
-  };
-  const handleBulkSpectrum = async () => {
-    const names = capTagFiles(Array.from(bulk.selected).map((id) => uploads.find((u) => u.id === id)?.fileName).filter(Boolean) as string[]);
-    const files = names.map((fileName) => ({ fileName }));
-    if (!files.length) return;
-    setBulkResult({ title: "Spectrum queue started", rows: files.map((f) => ({ fileName: f.fileName, status: "queued" })) });
-    const res = await bulkRequestSpectrum(files);
-    setBulkResult({ title: `Spectrum — ${files.length} files`, rows: res as unknown as Array<Record<string, unknown>> });
-  };
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!selectMode) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -399,30 +365,6 @@ function UploadsInner() {
         />
       ) : null}
       {tagFile ? <TagEditor open={!!tagFile} fileName={tagFile} onClose={() => setTagFile(null)} /> : null}
-       <BulkBar count={bulk.size} onClear={bulk.clear} onEdit={() => setBulkEditor(true)} onScrape={() => setBulkScrape(true)} onVerify={handleBulkVerify} onAnalyze={handleBulkAnalyze} onSpectrum={handleBulkSpectrum} onRemove={bulkRemove} />
-      {bulkEditor ? <BulkTagEditor open={bulkEditor} files={selectedFileNames.slice(0, 50)} onClose={() => setBulkEditor(false)} onSaved={() => bulk.clear()} /> : null}
-      {bulkScrape ? <AdjustTagsModal open={bulkScrape} files={selectedFileNames.slice(0, 50)} onClose={() => setBulkScrape(false)} /> : null}
-      {bulkResult ? (
-        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4" onClick={() => setBulkResult(null)}>
-          <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col overflow-hidden rounded-t-2xl md:rounded-2xl bg-surface-container-lowest shadow-xl ghost-border" onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b border-outline-variant/10 flex justify-between gap-3">
-              <h3 className="font-headline font-bold">{bulkResult.title}</h3>
-              <button onClick={() => setBulkResult(null)} className="h-8 w-8 rounded-full bg-surface-container-high flex items-center justify-center"><span className="material-symbols-outlined text-[18px]">close</span></button>
-            </div>
-            <div className="flex-1 overflow-auto p-4 space-y-2">
-              {bulkResult.rows.map((r, i) => (
-                <div key={i} className="rounded-xl bg-surface-container-low p-3 ghost-border font-mono text-xs break-all">
-                  <div className="font-semibold truncate">{String((r as Record<string, unknown>).fileName ?? r.path ?? i)}</div>
-                  <div className="text-[11px] text-on-surface-variant">{Object.entries(r).filter(([k]) => k !== "fileName" && k !== "path").map(([k,v]) => `${k}:${String(v)}`).join(" · ") || "ok"}</div>
-                </div>
-              ))}
-            </div>
-            <div className="px-6 py-3 border-t flex justify-end">
-              <button onClick={() => setBulkResult(null)} className="rounded-full bg-primary px-5 py-2 font-label text-xs font-bold text-on-primary">Close</button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
