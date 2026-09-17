@@ -3120,13 +3120,15 @@ export class SoulseekSession {
       clearTimeout(existing.timer);
     }
     const timer = setTimeout(() => {
-      logger.warn("browse", "browse timeout", { username });
+      const known = this.userAddresses.get(username);
+      const peerAddr = known ? `${known.addr.ip}:${known.addr.port}` : "address unknown";
+      logger.warn("browse", "browse timeout", { username, peerAddr, listenPort: this._listenPort });
       this.pendingBrowseShares.delete(key);
       this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);
       // leak fix: stale queued P/SharedFileListRequest was blocking fresh dials via reusingDial (pendingPeerMessages >0 treated as in-flight)
       try { this.pendingPeerMessages.delete(key); } catch {}
       // More helpful: peer may be offline, firewalled, or our LISTEN_PORT not forwarded
-      this.emitBrowse({ type: "browse-error", username, error: "Timed out fetching shares — peer may be offline, firewalled, or your LISTEN_PORT not port-forwarded (check Diagnostics → Network)" });
+      this.emitBrowse({ type: "browse-error", username, error: `Timed out fetching shares — peer may be offline, firewalled, or LISTEN_PORT ${this._listenPort} not port-forwarded (peer ${peerAddr}; check Diagnostics → Network)` });
     }, 30000);
     this.pendingBrowseShares.set(key, { timer, createdAt: Date.now() });
     this.addAllowedPeerResponse(username, PEER_MESSAGE_CODES.sharedFileListResponse);
@@ -3151,6 +3153,7 @@ export class SoulseekSession {
       } else {
         this.pendingBrowseFolder.delete(tok);
         this.clearAllowedPeerResponse(username, PEER_MESSAGE_CODES.folderContentsResponse);
+        try { this.pendingPeerMessages.delete(username.toLowerCase()); } catch {}
         this.emitBrowse({ type: "browse-error", username, token: tok, folder: dir, error: "Timed out fetching folder" });
       }
     };
@@ -3267,7 +3270,18 @@ export class SoulseekSession {
       return;
     }
     logger.info("browse", "requesting peer address", { username });
-    const timer = setTimeout(() => { this.peerAddressRequests.delete(username); try { this.pendingPeerMessages.delete(username.toLowerCase()); } catch {} logger.debug("browse", "GetPeerAddress timeout cleanup", { username }); }, PEER_ADDRESS_TIMEOUT_MS);
+    // Keep browse/folder queued msgs on GetPeerAddress timeout so the indirect
+    // ConnectToPeer pierce fallback (sent above) can still flush them — same
+    // pierce-wait as requestUserInfo. Their owners (browse 30s timer, folder
+    // final timeout) clean the queue up; other callers keep old cleanup.
+    const timer = setTimeout(() => {
+      this.peerAddressRequests.delete(username);
+      const key = username.toLowerCase();
+      let owned = this.pendingBrowseShares.has(key);
+      if (!owned) for (const e of this.pendingBrowseFolder.values()) { if (e.username.toLowerCase() === key) { owned = true; break; } }
+      if (!owned) { try { this.pendingPeerMessages.delete(key); } catch {} }
+      logger.debug("browse", "GetPeerAddress timeout, waiting for pierce fallback", { username, keptQueue: owned });
+    }, PEER_ADDRESS_TIMEOUT_MS);
     const entry = { cbs: [(addr: PeerAddress) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); logger.info("browse", "peer address resolved", { username, ip: addr.ip, port: addr.port }); this.connectToPeerViaAddress(username, addr, connType, msg); }], timer, createdAt: Date.now() };
     this.peerAddressRequests.set(username, entry);
     this.serverSocket?.write(buildGetPeerAddress(username));
@@ -3275,7 +3289,7 @@ export class SoulseekSession {
   private connectToPeerViaAddress(username: string, addr: PeerAddress, connType: string, msg: Buffer) {
     logger.info("browse", "connectToPeerViaAddress", { username, ip: addr.ip, port: addr.port, connType });
     if (addr.port === 0 || addr.ip === "0.0.0.0") {
-      logger.warn("browse", "peer address invalid, aborting direct", { username, ip: addr.ip, port: addr.port });
+      logger.warn("browse", "peer address invalid, waiting for pierce fallback", { username, ip: addr.ip, port: addr.port });
       return;
     }
     if (!this.canOpenSocket()) {
