@@ -7,7 +7,7 @@
  * Requirements (hybrid spec):
  * - visible to all logged-in users
  * - persistent (survives restart) via CONFIG_DIR/diagnostics.log (JSONL)
- * - 500 lines shown (cap stored at 2000, tail 500)
+ * - 500 lines shown (cap stored at 20000, tail 500)
  * - covers everything: bridge server, Soulseek session, transfers, search, WS
  * - WS broadcast throttled, file append atomic
  */
@@ -28,8 +28,8 @@ export interface LogEntry {
 
 const LEVEL_ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 
-const MAX_MEMORY = 2000;
-const MAX_PERSIST = 2000;
+const MAX_MEMORY = 20000;
+const MAX_PERSIST = 20000;
 
 let configDir = process.env.CONFIG_DIR || "/config";
 let filePath = join(configDir, "diagnostics.log");

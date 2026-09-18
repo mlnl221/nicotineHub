@@ -383,6 +383,12 @@ export class SoulseekSession {
     }
     return e;
   }
+  // Half-open direct dials: Bun.connect has no handle until open, so the
+  // sweep can't see them — track per user+type to coalesce rapid re-clicks
+  // into one dial instead of overlapping 18s timers (peer closes P after
+  // serving, so no live socket exists between clicks).
+  private pendingDirectDials = new Map<string, number>();
+  private directDialKey(username: string, connType: string) { return `${username.toLowerCase()}:${connType}`; }
   // allowed peer responses gating (nicotine allowed_message_responses) — prevent unsolicited 448M
   private allowedPeerResponses = new Map<string, Set<number>>();
   // per-user UserInfo throttling 0.4s like nicotine shares.py:1342 + userinfo.py:188
@@ -2469,7 +2475,11 @@ export class SoulseekSession {
     });
 
     // Race direct vs relay, but prefer whichever succeeds first
+    const relayDialKey = this.directDialKey(username, connType);
+    const relayDialAt = Date.now();
+    this.pendingDirectDials.set(relayDialKey, relayDialAt);
     return Promise.race([directPromise, relayPromise]).finally(() => {
+      if (this.pendingDirectDials.get(relayDialKey) === relayDialAt) this.pendingDirectDials.delete(relayDialKey);
       const p = this.pendingConnects.get(token);
       if (p) { clearTimeout(p.timer); this.pendingConnects.delete(token); }
     });
@@ -3342,9 +3352,13 @@ export class SoulseekSession {
       for (const [, st] of this.peerStates) if (st.username?.toLowerCase() === keyLower && st.connType === connType && st.initDone) return true;
       return false;
     })());
-    // Only coalesce if there's a live GetPeerAddress in flight or a live socket for this exact user+type.
+    // Only coalesce if there's a live GetPeerAddress in flight, a live socket for this exact user+type,
+    // or a half-open direct dial (no socket yet — Bun.connect has no handle until open).
     // Stale pendingPeerMessages alone (leftover from timed-out browse) must NOT count as in-flight or dials deadlock.
-    const reusingDial = isLivePending || hasLiveSocketForUser;
+    const dialAt = this.pendingDirectDials.get(this.directDialKey(username, connType));
+    const isLiveDial = !!dialAt && (now - dialAt < DIRECT_CONNECT_TIMEOUT_MS);
+    if (!isLiveDial && dialAt) this.pendingDirectDials.delete(this.directDialKey(username, connType));
+    const reusingDial = isLivePending || hasLiveSocketForUser || isLiveDial;
     // Light dedupe log only when coalescing, not on every click
     if (reusingDial) logger.debug("browse", "ensurePeerAndSend coalesced (in-flight dial)", { username, connType, code, pendingSize: this.pendingBrowseShares.size });
     else logger.info("browse", "ensurePeerAndSend", { username, connType, code, msgLen: msg.length, hasCached: !!cachedCheck, hasPending, pendingSize: this.pendingBrowseShares.size });
@@ -3422,8 +3436,12 @@ export class SoulseekSession {
     }
     const dialStart = Date.now();
     let capped = false;
+    const dialKey = this.directDialKey(username, connType);
+    this.pendingDirectDials.set(dialKey, dialStart);
+    const clearDial = () => { if (this.pendingDirectDials.get(dialKey) === dialStart) this.pendingDirectDials.delete(dialKey); };
     const cap = setTimeout(() => {
       capped = true;
+      clearDial();
       logger.warn("browse", "direct peer connect timeout (capped, pierce fallback continues)", { username, ip: addr.ip, port: addr.port, elapsedMs: Date.now() - dialStart });
       this.dequeuePendingSockets();
     }, DIRECT_CONNECT_TIMEOUT_MS);
@@ -3433,6 +3451,7 @@ export class SoulseekSession {
         open: (sock) => {
           if (capped) { try { (sock as unknown as { end?: () => void }).end?.(); } catch {} return; }
           clearTimeout(cap);
+          clearDial();
           logger.info("browse", "direct peer open", { username, ip: addr.ip, port: addr.port, connType, dialMs: Date.now() - dialStart });
           this.setTcpBufferSize(sock as Socket, connType as "F" | "D" | "P");
           // Outbound P: consider handshake done after we send PeerInit — don't wait for peer init
@@ -3443,10 +3462,10 @@ export class SoulseekSession {
           try { (sock as Socket).write(msg); } catch {}
         },
         data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
-        error: (_sock, err) => { if (capped) return; clearTimeout(cap); logger.warn("browse", "direct peer error", { username, ip: addr.ip, port: addr.port, elapsedMs: Date.now() - dialStart, error: (err as Error)?.message || String(err) }); this.dequeuePendingSockets(); },
+        error: (_sock, err) => { if (capped) return; clearTimeout(cap); clearDial(); logger.warn("browse", "direct peer error", { username, ip: addr.ip, port: addr.port, elapsedMs: Date.now() - dialStart, error: (err as Error)?.message || String(err) }); this.dequeuePendingSockets(); },
         close: (sock) => { if (capped) return; clearTimeout(cap); const st = this.peerStates.get(sock as Socket); logger.info("browse", "direct peer close", { username, ip: addr.ip, port: addr.port, lifetimeMs: st?.createdAt ? Date.now() - st.createdAt : undefined }); this.peerStates.delete(sock as Socket); this.dequeuePendingSockets(); },
       },
-    }).catch((e) => { if (capped) return; clearTimeout(cap); logger.warn("browse", "direct peer connect failed", { username, ip: addr.ip, port: addr.port, elapsedMs: Date.now() - dialStart, error: (e as Error).message }); this.dequeuePendingSockets(); });
+    }).catch((e) => { if (capped) return; clearTimeout(cap); clearDial(); logger.warn("browse", "direct peer connect failed", { username, ip: addr.ip, port: addr.port, elapsedMs: Date.now() - dialStart, error: (e as Error).message }); this.dequeuePendingSockets(); });
   }
 
   requestUserInfo(username: string): Promise<UserInfoResponseMessage> {

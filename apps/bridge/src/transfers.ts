@@ -336,6 +336,7 @@ export class TransferManager {
       this.loadFromDisk();
       try { this.migrateFlatDownloads(); } catch {}
       try { this.migrateTrimmedDownloads(); } catch {}
+      try { this.sweepOrphanPartials(); } catch {}
     } catch {}
 
     // Keep demo uploads for UI unless real transfers exist — only when explicitly enabled to avoid masking empty state in docker prod
@@ -551,6 +552,33 @@ export class TransferManager {
         this.transfers.set(t.id, t as BridgeTransfer);
       }
     } catch {}
+  }
+
+  /** Delete 0-byte INCOMPLETE* partials no live transfer owns; log the rest.
+   * Non-zero orphans are kept as resume cache (a re-download recomputes the
+   * same path via md5(virtualPath+username)). Runs once at startup. */
+  sweepOrphanPartials(): { removed: number; orphans: number } {
+    let removed = 0;
+    let orphans = 0;
+    try {
+      if (!existsSync(this.incompleteDir)) return { removed, orphans };
+      const live = new Set<string>();
+      for (const t of this.transfers.values()) {
+        if (t.isUpload || t.status === "Finished" || t.status === "Cancelled") continue;
+        try { live.add(getIncompletePath(t.virtualPath, t.username, this.incompleteDir)); } catch {}
+      }
+      for (const f of readdirSync(this.incompleteDir)) {
+        if (!f.startsWith("INCOMPLETE")) continue;
+        const p = join(this.incompleteDir, f);
+        if (live.has(p)) continue;
+        orphans++;
+        try {
+          if (statSync(p).size === 0) { unlinkSync(p); removed++; }
+        } catch {}
+      }
+      if (removed || orphans) logger.debug("transfer", "orphan partial sweep", { removed, orphans });
+    } catch {}
+    return { removed, orphans };
   }
 
   migrateTrimmedDownloads(): { moved: number; skipped: number } {
@@ -1498,6 +1526,9 @@ export class TransferManager {
     }
     if (!hit) for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) { hit = t; break; }
     if (hit) {
+      // Terminal rows never regress: a post-finish peer message (repeat grant
+      // denied COMPLETE, stray F) must not flip Finished/Cancelled back to error.
+      if (hit.status === "Finished" || hit.status === "Cancelled") return;
       hit.status = reason as TransferStatus;
       this.emit(hit);
       if (!TransferManager.terminalDenials.has(reason)) this.scheduleRetry(hit.id, 180_000);
@@ -1515,6 +1546,7 @@ export class TransferManager {
     }
     if (!hit) for (const t of this.transfers.values()) if (t.virtualPath === file && !t.isUpload) { hit = t; break; }
     if (hit) {
+      if (hit.status === "Finished" || hit.status === "Cancelled") return;
       hit.status = "Connection closed";
       this.statsManager.recordDownloadFailed();
       this.emit(hit);
