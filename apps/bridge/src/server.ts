@@ -443,7 +443,7 @@ function createSharedTransfers(): TransferManager {
     onRemoved: (id) => broadcastJson({ type: "transfer:removed", id }),
     onStats: (stats) => broadcastJson({ type: "transfer:stats", ...stats }),
     onQueue: (id, place) => broadcastJson({ type: "transfer:queue", id, place }),
-    onFinished: (id, fileName, size, downloadUrl) => broadcastJson({ type: "transfer:finished", id, fileName, size, downloadUrl }),
+    onFinished: (id, fileName, size, downloadUrl, localPath) => broadcastJson({ type: "transfer:finished", id, fileName, size, downloadUrl, ...(localPath ? { localPath } : null) }),
     getSession: () => sharedSession as unknown as ReturnType<TransferManager["getByToken"]> extends never ? never : unknown as never,
   });
   tm.setSessionGetter(() => sharedSession as unknown as never);

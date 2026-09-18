@@ -9,6 +9,7 @@ import {
   LeechersStep,
   ScraperStep,
   SharesStep,
+  ShortcutsStep,
   WelcomeStep,
   type StepNav,
 } from "./steps";
@@ -19,6 +20,7 @@ const STEPS: { id: string; label: string; render: (nav: StepNav) => ReactNode }[
   { id: "leechers", label: "Leechers", render: (nav) => <LeechersStep {...nav} /> },
   { id: "captcha", label: "Captcha", render: (nav) => <CaptchaStep {...nav} /> },
   { id: "appearance", label: "Appearance", render: (nav) => <AppearanceStep {...nav} /> },
+  { id: "shortcuts", label: "Shortcuts", render: (nav) => <ShortcutsStep {...nav} /> },
   { id: "keys", label: "Keys", render: (nav) => <ScraperStep {...nav} /> },
 ];
 

@@ -274,14 +274,14 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
   }, [state.status]);
 
   // trigger worker media scan on finished download (fire-and-forget, tab-open only)
-  const triggerScan = useCallback((t: Transfer | { id: string; fileName: string; size: number; downloadUrl?: string; username?: string; virtualPath?: string }) => {
+  const triggerScan = useCallback((t: Transfer | { id: string; fileName: string; size: number; downloadUrl?: string; localPath?: string; username?: string; virtualPath?: string }) => {
     const id = t.id;
     const username = (t as Transfer).username ?? id.split("::")[0] ?? "";
     const virtualPath = (t as Transfer).virtualPath ?? id.split("::").slice(1).join("::") ?? "";
     const fileName = (t as Transfer).fileName ?? (t as { fileName: string }).fileName ?? virtualPath.split("\\").pop() ?? "";
     const size = (t as Transfer).size ?? (t as { size: number }).size ?? 0;
     const downloadUrl = (t as { downloadUrl?: string }).downloadUrl ?? "";
-    const destinationPath = ""; // worker will resolve via DATA_DIR if needed
+    const destinationPath = (t as { localPath?: string }).localPath ?? "";
     // Do not block — log and swallow
     workerFetch("/scan", {
       method: "POST",
@@ -318,17 +318,19 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
         });
       } else if (msg.type === "transfer:finished") {
         const finishedUrl = (msg as { downloadUrl?: string }).downloadUrl;
+        const finishedPath = (msg as { localPath?: string }).localPath;
+        const keepPath = finishedPath ? { localPath: finishedPath } : null;
         setTransfers((prev) => {
           if (prev.some((t) => t.id === msg.id)) {
             return prev.map((t) =>
               t.id === msg.id
-                ? { ...t, status: "Finished" as const, current: t.size, speed: 0, timeLeft: null, queuePosition: null, ...(finishedUrl ? { downloadUrl: finishedUrl } : null) }
+                ? { ...t, status: "Finished" as const, current: t.size, speed: 0, timeLeft: null, queuePosition: null, ...(finishedUrl ? { downloadUrl: finishedUrl } : null), ...(keepPath ?? null) }
                 : t,
             );
           }
           const user = msg.id.split("::")[0] ?? "";
           const vpath = msg.id.split("::").slice(1).join("::") ?? msg.fileName;
-          return [...prev, { id: msg.id, username: user, virtualPath: vpath, fileName: msg.fileName, size: msg.size, current: msg.size, speed: 0, avgSpeed: 0, timeLeft: null, status: "Finished" as const, queuePosition: null, isUpload: false, ...(finishedUrl ? { downloadUrl: finishedUrl } : null) }];
+          return [...prev, { id: msg.id, username: user, virtualPath: vpath, fileName: msg.fileName, size: msg.size, current: msg.size, speed: 0, avgSpeed: 0, timeLeft: null, status: "Finished" as const, queuePosition: null, isUpload: false, ...(finishedUrl ? { downloadUrl: finishedUrl } : null), ...(keepPath ?? null) }];
         });
         // fire worker scan for finished download
         const dummy: Transfer = {
@@ -345,7 +347,7 @@ export function TransfersProvider({ children }: { children: ReactNode }) {
           queuePosition: null,
           isUpload: false,
         };
-        triggerScan({ ...dummy, downloadUrl: (msg as { downloadUrl?: string }).downloadUrl } as unknown as Transfer);
+        triggerScan({ ...dummy, downloadUrl: (msg as { downloadUrl?: string }).downloadUrl, ...(keepPath ?? null) } as unknown as Transfer);
         // Optionally trigger browser download via hidden link (Phase 5 OPFS handling deferred)
         // We keep it non-intrusive: UI will show Finished with downloadUrl available
       } else if (msg.type === "transfer:removed") {

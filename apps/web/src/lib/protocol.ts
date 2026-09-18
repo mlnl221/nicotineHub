@@ -280,6 +280,8 @@ export interface Transfer {
   queuePosition: number | null;
   isUpload: boolean;
   isSlopLike?: boolean;
+  /** Absolute bridge-local path of a finished download — prefer over fileName for worker calls. */
+  localPath?: string;
 }
 
 export interface TransferUpdateMessage {
@@ -314,6 +316,7 @@ export interface TransferFinishedMessage {
   fileName: string;
   size: number;
   downloadUrl: string; // GET /files/:token
+  localPath?: string;
 }
 
 export interface DownloadRequest {
