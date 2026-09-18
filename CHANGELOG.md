@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.39.0](https://github.com/mlnl221/nicotineHub/compare/v0.38.1...v0.39.0) (2026-09-18)
+
+
+### Features
+
+* **onboarding:** theme dropdowns with live preview + shortcuts tour step ([48f14bd](https://github.com/mlnl221/nicotineHub/commit/48f14bdbd8fd217fe25f0dd8cea1afc8112c35ce))
+* **onboarding:** theme dropdowns with live preview + shortcuts tour step ([8ec5a40](https://github.com/mlnl221/nicotineHub/commit/8ec5a4015a0cee5c3756afa37a25bd78d5f756f0))
+
+
+### Bug Fixes
+
+* **downloads:** send bridge localPath to worker so tag/analyze/spectrum/mediainfo resolve finished files ([fd46f6b](https://github.com/mlnl221/nicotineHub/commit/fd46f6b60b732b0ef6c49c8d342ab0f4a1ceb95a))
+
 ## [0.38.1](https://github.com/mlnl221/nicotineHub/compare/v0.38.0...v0.38.1) (2026-09-17)
 
 
