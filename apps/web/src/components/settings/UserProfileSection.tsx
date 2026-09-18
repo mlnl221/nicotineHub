@@ -5,16 +5,11 @@ import { useConfig } from "@/lib/config/provider";
 import { SectionCard, SectionSaveButton, TextFieldControl, ToggleControl } from "@/components/settings/controls";
 import { useSession } from "@/lib/session";
 
-async function resizeToWebp(file: File, max = 512, quality = 0.8): Promise<string> {
-  // SVG: return raw data URL (no rasterize) but guard size
-  if (file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg")) {
-    return new Promise((resolve, reject) => {
-      const r = new FileReader();
-      r.onload = () => resolve(String(r.result ?? ""));
-      r.onerror = () => reject(r.error);
-      r.readAsDataURL(file);
-    });
-  }
+async function resizeAvatar(file: File, max = 512, quality = 0.8): Promise<string> {
+  // Rasterize via bitmap (handles SVG too) and encode JPEG/PNG only:
+  // remote nicotine+ clients use stock gdk-pixbuf, which cannot decode WebP
+  // (needs webp-pixbuf-loader) or SVG (needs librsvg) — those pictures fail
+  // to load on their side with "Unrecognized image file format".
   const bitmap = await createImageBitmap(file);
   let { width, height } = bitmap;
   if (width > max || height > max) {
@@ -28,15 +23,10 @@ async function resizeToWebp(file: File, max = 512, quality = 0.8): Promise<strin
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("canvas unsupported");
   ctx.drawImage(bitmap, 0, 0, width, height);
-  // try webp first, fallback to jpeg
-  let dataUrl: string;
-  try {
-    dataUrl = canvas.toDataURL("image/webp", quality);
-    // if webp not supported, it falls back to png — detect huge size
-    if (dataUrl.length > 700_000) dataUrl = canvas.toDataURL("image/jpeg", quality);
-  } catch {
-    dataUrl = canvas.toDataURL("image/jpeg", quality);
-  }
+  // PNG keeps transparency for PNG sources, JPEG otherwise; retry smaller on overflow
+  const wantPng = file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
+  let dataUrl = canvas.toDataURL(wantPng ? "image/png" : "image/jpeg", quality);
+  if (dataUrl.length > 700_000) dataUrl = canvas.toDataURL("image/jpeg", 0.6);
   bitmap.close();
   return dataUrl;
 }
@@ -71,7 +61,7 @@ export function UserProfileSection() {
         <label className="font-label text-xs uppercase tracking-widest text-on-surface-variant">Pick image</label>
         <input
           type="file"
-          accept="image/*"
+          accept="image/jpeg,image/png,image/gif"
           className="mt-2 block w-full text-sm"
           onChange={async (e) => {
             const f = e.target.files?.[0];
@@ -81,7 +71,7 @@ export function UserProfileSection() {
               return;
             }
             try {
-              const dataUrl = await resizeToWebp(f, 512, 0.8);
+              const dataUrl = await resizeAvatar(f, 512, 0.8);
               // ensure still under ~600KB base64
               if (dataUrl.length > 800_000) {
                 alert("Compressed image still too large, try a smaller file.");
@@ -89,6 +79,12 @@ export function UserProfileSection() {
               }
               setOption("userinfo", "pic", dataUrl);
             } catch {
+              // Canvas path failed (e.g. SVG rasterize): accept the raw file
+              // only if it is already JPEG/PNG/GIF, else it would break remote clients.
+              if (!/image\/(jpeg|png|gif)/.test(f.type)) {
+                alert("Could not process that image — please use a JPEG or PNG file.");
+                return;
+              }
               const reader = new FileReader();
               reader.onload = () => setOption("userinfo", "pic", String(reader.result ?? ""));
               reader.readAsDataURL(f);
