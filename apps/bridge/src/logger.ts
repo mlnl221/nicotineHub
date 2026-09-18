@@ -12,7 +12,7 @@
  * - WS broadcast throttled, file append atomic
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFile, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -75,7 +75,11 @@ function persist(entry: LogEntry) {
   if (isTestEnv()) return;
   try {
     mkdirSync(configDir, { recursive: true });
-    appendFileSync(filePath, JSON.stringify(entry) + "\n", "utf8");
+    // Async append: sync disk I/O on this hot path blocked the event loop for
+    // seconds during post-login grant bursts (35+/sec), stalling WS pong and
+    // /health past their timeouts. O_APPEND keeps lines intact; the throttled
+    // trim rewrite below stays sync (rare) and only ever drops lines still in ring.
+    appendFile(filePath, JSON.stringify(entry) + "\n", "utf8", () => {});
     // trim file if ring is full (rewrite capped) — throttled: ring.length never
     // exceeds MAX_PERSIST post-shift so `>` never fires; `>=` every line would
     // rewrite 2000 lines per log during a storm. Trim at most once per minute.
