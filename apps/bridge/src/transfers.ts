@@ -101,6 +101,12 @@ function fileNameOf(virtualPath: string): string {
   return parts[parts.length - 1] || virtualPath;
 }
 
+// Peer path drift: separators (/ vs \) and case differ between clients —
+// normalize before prefix/basename compares so grants and share checks match.
+function normVirtual(p: string): string {
+  return String(p || "").replace(/\//g, "\\").toLowerCase();
+}
+
 // ponytail: single sink for peer-controlled names; per-user dirs if stricter mapping needed
 function safeUsername(username: string): string {
   const s = username.replace(/[/\\]+/g, "_").replace(/[\x00-\x1f\x7f]/g, "").replace(/\.\./g, "_").trim().slice(0, 64);
@@ -254,6 +260,10 @@ export class TransferManager {
   private activeEnqueueCount = 0;
   private enqueueQueue: Array<() => void> = [];
   private readonly MAX_CONCURRENT_ENQUEUE = 5;
+  // Unknown-grant warn throttle: post-reconnect the server flushes queued upload
+  // backlog with no matching local entry — one warn per key per window, repeats debug.
+  private unknownGrantThrottle = new Map<string, number>();
+  private static readonly UNKNOWN_GRANT_WINDOW_MS = 10_000;
   private perUserActive = new Set<string>();
   private perUserQueues = new Map<string, Array<() => void>>();
   // Config mirrors nicotine transfers.* + slskd incompleteStrategy/destination templating — updated via setConfig
@@ -1055,9 +1065,10 @@ export class TransferManager {
         if (typeof sdb.hasVirtualPath === "function" && sdb.hasVirtualPath(virtualPath)) shared = true;
         else if (typeof sdb.getFolders === "function") {
           const folders = sdb.getFolders();
+          const normV = normVirtual(virtualPath);
           for (const fo of folders) {
-            if (fo.name === virtualPath || virtualPath.startsWith((fo.name || "") + "\\")) { shared = true; break; }
-            if (fo.files?.some((f: { name: string }) => f.name === virtualPath)) { shared = true; break; }
+            if (fo.name === virtualPath || normVirtual(fo.name || "") === normV || normV.startsWith(normVirtual(fo.name || "") + "\\")) { shared = true; break; }
+            if (fo.files?.some((f: { name: string }) => f.name === virtualPath || normVirtual(f.name) === normV)) { shared = true; break; }
           }
         }
         // also check virtual2real mapping if available
@@ -1072,10 +1083,14 @@ export class TransferManager {
           const raw = JSON.parse(readFileSync(sharesPath, "utf8")) as Record<string, unknown>;
           if (Array.isArray((raw as { folders?: unknown[] }).folders)) {
             const folders = (raw as { folders: Array<{ name?: string; files: Array<{ name?: string }> }> }).folders;
-            shared = folders.some((fo) => fo.files?.some((f) => f.name === virtualPath) || virtualPath.startsWith((fo.name || "") + "\\"));
+            const normV = normVirtual(virtualPath);
+            const hit = (fo: { name?: string; files: Array<{ name?: string }> }) =>
+              fo.files?.some((f) => f.name === virtualPath || normVirtual(f.name || "") === normV) ||
+              normV.startsWith(normVirtual(fo.name || "") + "\\");
+            shared = folders.some(hit);
             if (!shared && Array.isArray((raw as { publicFolders?: unknown[] }).publicFolders)) {
               const pub = (raw as { publicFolders: Array<{ name?: string; files: Array<{ name?: string }> }> }).publicFolders;
-              shared = pub.some((fo) => fo.files?.some((f) => f.name === virtualPath) || virtualPath.startsWith((fo.name || "") + "\\"));
+              shared = pub.some(hit);
             }
           } else if (Array.isArray(raw)) {
             shared = (raw as string[]).includes(virtualPath);
@@ -1296,9 +1311,10 @@ export class TransferManager {
     let target: BridgeTransfer | undefined;
     if (owner) target = this.transfers.get(`${owner}::${file}`);
     if (!target && owner) {
+      const normFile = normVirtual(file);
       for (const t of this.transfers.values()) {
         if (t.isUpload || t.username !== owner) continue;
-        if (t.virtualPath === file || file.endsWith(t.fileName)) { target = t; break; }
+        if (t.virtualPath === file || file.endsWith(t.fileName) || normVirtual(t.virtualPath) === normFile) { target = t; break; }
       }
     }
     if (!target) {
@@ -1307,16 +1323,29 @@ export class TransferManager {
     }
     if (!target && owner) {
       // Case/rename drift (peer normalizes separators or case): owner-scoped
-      // case-insensitive fallback. Never matches across users.
-      const lower = file.toLowerCase();
+      // case-insensitive + separator-normalized fallback. Never matches across users.
+      const lower = normVirtual(file);
       for (const t of this.transfers.values()) {
         if (t.isUpload || t.username !== owner) continue;
-        if (t.virtualPath.toLowerCase() === lower || lower.endsWith(t.fileName.toLowerCase())) { target = t; break; }
+        if (normVirtual(t.virtualPath) === lower || lower.endsWith(normVirtual(t.fileName))) { target = t; break; }
       }
     }
     if (!target) {
-      // Was a silent return — stuck Queued with zero signal. Now visible in diagnostics.
-      logger.warn("transfer", "grant for unknown transfer", { username: owner ?? "?", file, token });
+      // Post-reconnect backlog flush: many grants, no local entry. First per key warns,
+      // repeats in-window debug so a 10k storm doesn't spam diagnostics.
+      const key = `${owner ?? "?"}::${file}`;
+      const now = Date.now();
+      const last = this.unknownGrantThrottle.get(key) || 0;
+      if (now - last < TransferManager.UNKNOWN_GRANT_WINDOW_MS) {
+        logger.debug("transfer", "grant for unknown transfer (throttled)", { username: owner ?? "?", file, token });
+      } else {
+        this.unknownGrantThrottle.set(key, now);
+        if (this.unknownGrantThrottle.size > 1000) {
+          const oldest = [...this.unknownGrantThrottle.entries()].sort((a, b) => a[1] - b[1])[0]?.[0];
+          if (oldest !== undefined) this.unknownGrantThrottle.delete(oldest);
+        }
+        logger.warn("transfer", "grant for unknown transfer", { username: owner ?? "?", file, token });
+      }
       return;
     }
     // Finished transfers never restart: repeat peer grants (uploader queue
@@ -1848,7 +1877,8 @@ export class TransferManager {
           const exact = sdb.getVirtual2Real(virtualPath) as string | undefined;
           if (!exact || !use(exact)) {
             // longest mapped folder prefix + remainder (e.g. "M\Orpheus" + "song.flac")
-            const parts = virtualPath.split("\\");
+            // Tolerate / vs \ and case drift between peer request and local map.
+            const parts = String(virtualPath).split(/[\\/]/);
             for (let i = parts.length - 1; i > 0 && !realPath; i--) {
               const folderReal = sdb.getVirtual2Real(parts.slice(0, i).join("\\")) as string | undefined;
               if (folderReal) use(jp(folderReal, ...parts.slice(i)));
@@ -2092,6 +2122,24 @@ export class TransferManager {
     (t as unknown as { _uploadSocket?: Socket })._uploadSocket = undefined;
     (t as unknown as { _onFileData?: unknown })._onFileData = undefined;
     (t as unknown as { _earlyChunks?: Buffer[] })._earlyChunks = [];
+  }
+
+  /** Requeue downloads left as "User logged off" by loadFromDisk (restart/reconnect).
+   * Called after login success so persisted queue resumes instead of sitting dead
+   * while uploader grants arrive with no matching Queued entry. */
+  requeueLoggedOff(): number {
+    let n = 0;
+    for (const t of this.transfers.values()) {
+      if (t.isUpload || t.status !== "User logged off") continue;
+      t.status = "Queued";
+      t.queuePosition = Math.max(1, [...this.transfers.values()].filter((x) => !x.isUpload && x.status === "Queued").length);
+      t.speed = 0;
+      this.emit(t);
+      try { this.sendQueueUpload(t); } catch {}
+      n++;
+    }
+    if (n) this.persist();
+    return n;
   }
 
   controlDownload(id: string, action: "cancel" | "pause" | "resume" | "retry" | "clear") {

@@ -12,7 +12,7 @@
  *    per user request (unlimited, only actively joined rooms)
  */
 
-import { mkdirSync, appendFileSync, chmodSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, appendFileSync, chmodSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 function getConfigDir(): string {
@@ -31,7 +31,8 @@ function sanitizeBasename(name: string): string {
 }
 
 function ensureDir(p: string) {
-  try { mkdirSync(p, { recursive: true }); } catch {}
+  try { mkdirSync(p, { recursive: true, mode: 0o700 }); } catch {}
+  try { chmodSync(p, 0o700); } catch {}
 }
 
 function dailyPath(folderPath: string, basename: string): string {
@@ -53,10 +54,30 @@ function timestampPrefix(): string {
 
 function appendLogFile(filePath: string, line: string) {
   try {
-    const existed = existsSync(filePath);
-    appendFileSync(filePath, line + "\n", { encoding: "utf8" });
-    if (!existed) {
-      try { chmodSync(filePath, 0o600); } catch {}
+    appendFileSync(filePath, line + "\n", { encoding: "utf8", mode: 0o600 });
+    try { chmodSync(filePath, 0o600); } catch {}
+  } catch {}
+}
+
+/** One-time repair: existing dirs/files created before the 0700/0600 fix. */
+export function repairChatLogPerms() {
+  try {
+    const base = join(getConfigDir(), "logs");
+    for (const scope of ["rooms", "private"]) {
+      const root = join(base, scope);
+      let entries: string[] = [];
+      try { entries = readdirSync(root); } catch { continue; }
+      try { chmodSync(root, 0o700); } catch {}
+      for (const e of entries) {
+        const dir = join(root, e);
+        try { chmodSync(dir, 0o700); } catch {}
+        let files: string[] = [];
+        try { files = readdirSync(dir); } catch { continue; }
+        for (const f of files) {
+          if (!/^\d{4}-\d{2}-\d{2}\.log$/.test(f)) continue;
+          try { chmodSync(join(dir, f), 0o600); } catch {}
+        }
+      }
     }
   } catch {}
 }

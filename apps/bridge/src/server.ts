@@ -21,7 +21,7 @@ import { SoulseekSession, namespaceSearchId } from "./session.ts";
 import { userInfoPicToBase64 } from "./soulseek.ts";
 import { PermissionLevel } from "./shares.ts";
 import { TransferManager } from "./transfers.ts";
-import { diagClear, diagLog, diagTail, diagSubscribe, logger, type LogLevel } from "./logger.ts";
+import { diagClear, diagLog, diagTail, diagSubscribe, diagLevelAllowed, logger, type LogLevel } from "./logger.ts";
 import { PluginManager } from "./plugins/manager.ts";
 import { Plugin as CoreCommandsPlugin, manifest as coreCommandsManifest } from "./plugins/builtin/core_commands.ts";
 import { Plugin as SpamfilterPlugin, manifest as spamManifest } from "./plugins/builtin/spamfilter.ts";
@@ -37,7 +37,7 @@ import {
   envListenPort,
   getSelfContainerId,
 } from "./docker.ts";
-import { logPrivateMessage, logRoomMessage, logRoomSystem, readChatLogTail } from "./chatLogger.ts";
+import { logPrivateMessage, logRoomMessage, logRoomSystem, readChatLogTail, repairChatLogPerms } from "./chatLogger.ts";
 import { clearVault, loadVault, resolveLoginIntent, saveVault, type StoredCreds } from "./shared-session.ts";
 
 /* Schemas */
@@ -693,6 +693,11 @@ async function establishSharedSession(creds: StoredCreds): Promise<{ ok: boolean
         logger.warn("auth", "vault persist failed", { error: (e as Error).message });
       }
       broadcastJson({ type: "login:result", ok: true, data: sharedLoginOutcome });
+      // Resume persisted downloads left as "User logged off" by restart/reconnect.
+      try {
+        const n = (sharedTransfers as unknown as { requeueLoggedOff?: () => number })?.requeueLoggedOff?.() ?? 0;
+        if (n) logger.info("transfer", "requeued logged-off downloads after login", { count: n });
+      } catch {}
       // Push fresh transfer state to late attachers' UIs (empty right after login).
       try {
         for (const t of sharedTransfers.list()) broadcastJson({ type: "transfer:update", transfer: t });
@@ -742,6 +747,8 @@ pluginManager.start().catch((e) => logger.warn("bridge", "plugin manager start f
 // Singleton session wiring (must run after pluginManager exists).
 sharedTransfers = createSharedTransfers();
 try { pluginManager.setSessionGetter(() => sharedSession as unknown as ReturnType<PluginManager["setSessionGetter"]> extends never ? never : unknown as never); } catch {}
+// Repair pre-existing chat log perms (dirs 0700, files 0600) once at startup.
+try { repairChatLogPerms(); } catch {}
 
 // ── 5-minute in-memory caches (per-process, ephemeral) ──
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -977,7 +984,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       // Simple auth check via token param/header (mirror /ws)
       { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const tail = Math.min(Math.max(Number(url.searchParams.get("tail") || "500"), 1), 2000);
-      const level = (url.searchParams.get("level") as LogLevel) || "debug";
+      const level = (url.searchParams.get("level") as LogLevel) || "info";
       const scope = url.searchParams.get("scope") || undefined;
       let entries = diagTail(2000, level as LogLevel);
       if (scope) entries = entries.filter((e) => e.scope === scope);
@@ -987,7 +994,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     if (url.pathname === "/diagnostics" && req.method === "GET") {
       { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const tail = Math.min(Math.max(Number(url.searchParams.get("tail") || "500"), 1), 2000);
-      const level = (url.searchParams.get("level") as LogLevel) || "debug";
+      const level = (url.searchParams.get("level") as LogLevel) || "info";
       let entries = diagTail(2000, level as LogLevel);
       entries = entries.slice(-tail);
       const _upnpDiag = getGlobalPortMapperStatus();
@@ -1325,13 +1332,19 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         try { ws.send(JSON.stringify(sessionStatusPayload())); } catch {}
       }, 50);
       // Subscribe this socket to live diagnostics logs (all logged-in users OK — ws is already the auth boundary)
+      // Default info: debug stays persisted + opt-in via diagnostics:subscribe level.
+      (ws.data as unknown as { logLevel?: LogLevel }).logLevel = "info";
       const unsub = diagSubscribe((entry) => {
-        try { ws.send(JSON.stringify({ type: "diagnostics:log", entry })); } catch {}
+        try {
+          const min = (ws.data as unknown as { logLevel?: LogLevel }).logLevel || "info";
+          if (!diagLevelAllowed(entry.level, min)) return;
+          ws.send(JSON.stringify({ type: "diagnostics:log", entry }));
+        } catch {}
       });
       (ws.data as unknown as { logUnsub?: () => void }).logUnsub = unsub;
       // Send initial tail (500)
       try {
-        const tail = diagTail(500, "debug");
+        const tail = diagTail(500, "info");
         ws.send(JSON.stringify({ type: "diagnostics:init", entries: tail }));
       } catch {}
       // Send initial diagnostics health
@@ -1808,7 +1821,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           const secretHits = sdb.getSecretHits(20);
           if (unavailable.length) logger.warn("bridge", "rescan: some shares unavailable on bridge FS", { unavailable, counts });
           if (secretHits.length) logger.warn("bridge", "rescan: secret-like files exposed", { secretHits });
-          ws.send(JSON.stringify({ type: "shares:rescanned", folders, counts, unavailable, secretHits }));
+          broadcastJson({ type: "shares:rescanned", folders, counts, unavailable, secretHits });
         }).catch((e: Error) => ws.send(errorMessage(e.message)));
         return;
       }
@@ -2147,9 +2160,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       }
       if (data.type === "diagnostics:subscribe") {
         const { level } = parsed as { level?: LogLevel };
-        logger.info("system", "diagnostics subscribe", { level: level || "debug" });
+        const min = (level as LogLevel) || "info";
+        try { (ws.data as unknown as { logLevel?: LogLevel }).logLevel = min; } catch {}
+        logger.info("system", "diagnostics subscribe", { level: min });
         try {
-          const tail = diagTail(500, (level as LogLevel) || "debug");
+          const tail = diagTail(500, min);
           ws.send(JSON.stringify({ type: "diagnostics:init", entries: tail }));
         } catch {}
         return;

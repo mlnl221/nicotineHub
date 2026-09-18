@@ -256,6 +256,7 @@ const USER_ADDRESS_TTL_MS = 30 * 60 * 1000;
 const RECONNECT_BASE_MS = 5_000;
 const RECONNECT_MAX_MS = 300_000;
 const CONNECT_PEER_TIMEOUT_MS = 45_000; // downloads.py Getting status 45 s (30 s indirect + 15 s grace)
+const DIRECT_CONNECT_TIMEOUT_MS = 18_000; // direct TCP dial cap — OS timeout is minutes, pierce fallback already covers indirect
 const LOGIN_TIMEOUT_MS = 60_000; // servers omit the login response for banned users (SLSKPROTOCOL BANNED); bound the wait
 const MAX_SOCKETS_DEFAULT = Number(process.env.MAX_SOCKETS || 512);
 const PARENT_MIN_SPEED_DEFAULT = 0;
@@ -303,6 +304,7 @@ export class SoulseekSession {
   private serverPingTimer: ReturnType<typeof setInterval> | undefined;
   private distribWatchdogTimer: ReturnType<typeof setInterval> | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  private reconnectDelayTimer: ReturnType<typeof setTimeout> | undefined;
   private loginTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectAttempts = 0;
   private shouldReconnect = true;
@@ -355,6 +357,32 @@ export class SoulseekSession {
   private closedPeers = new WeakSet<object>();
   // user status cache for offline check (P1 hardening)
   private userStatusCache = new Map<string, { status: number; privileged: boolean; updated: number }>();
+  // Peer address cache is keyed lowercase — Soulseek usernames are case-insensitive and
+  // raw-keyed entries split ("User" vs "user") into duplicate GetPeerAddress + dials.
+  private addrKey(username: string) { return username.toLowerCase(); }
+  private static isValidPeerAddr(addr: PeerAddress) { return addr.ip !== "0.0.0.0" && addr.port !== 0; }
+  private cachePeerAddress(username: string, addr: PeerAddress): boolean {
+    const key = this.addrKey(username);
+    if (!SoulseekSession.isValidPeerAddr(addr)) {
+      this.userAddresses.delete(key);
+      if (key !== username) this.userAddresses.delete(username);
+      return false;
+    }
+    this.userAddresses.set(key, { addr, updated: Date.now() });
+    if (key !== username) this.userAddresses.delete(username);
+    return true;
+  }
+  private getCachedPeerAddress(username: string) {
+    const key = this.addrKey(username);
+    const e = this.userAddresses.get(key) ?? this.userAddresses.get(username);
+    if (!e) return undefined;
+    if (!SoulseekSession.isValidPeerAddr(e.addr) || Date.now() - e.updated > USER_ADDRESS_TTL_MS) {
+      this.userAddresses.delete(key);
+      if (key !== username) this.userAddresses.delete(username);
+      return undefined;
+    }
+    return e;
+  }
   // allowed peer responses gating (nicotine allowed_message_responses) — prevent unsolicited 448M
   private allowedPeerResponses = new Map<string, Set<number>>();
   // per-user UserInfo throttling 0.4s like nicotine shares.py:1342 + userinfo.py:188
@@ -1206,6 +1234,14 @@ export class SoulseekSession {
       throw new Error(`Invalid listen port ${newPort}: must be 1024-65535`);
     }
     if (port === this._listenPort) return;
+    if (this.reconnectPending) {
+      // Debounce — config sync burst after login can fire portrange + interface together
+      const oldPort = this._listenPort;
+      this._listenPort = port;
+      try { this.portMapper.setPort(port, this._localIpAddress); } catch {}
+      logger.debug("server", "listen port change debounced (reconnect pending)", { oldPort, newPort: port });
+      return;
+    }
     const oldPort = this._listenPort;
     this._listenPort = port;
     logger.info("server", "listen port change", { oldPort, newPort: port, username: this.username, loggedIn: this.loggedIn });
@@ -1260,6 +1296,7 @@ export class SoulseekSession {
     this.reconnectAttempts = 0;
     this.reconnectPending = true;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
+    if (this.reconnectDelayTimer) { clearTimeout(this.reconnectDelayTimer); this.reconnectDelayTimer = undefined; }
     // Portmapper: remove before reconnect (nicotine _server_disconnect)
     try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}
     // Distributed teardown mirrors _server_disconnect
@@ -1284,7 +1321,7 @@ export class SoulseekSession {
     this.cleanupServerTimers();
     if (sock) { try { (sock as unknown as { end: () => void }).end(); } catch {} }
     this.emitServer({ type: "reconnect", attempt: 1, delay: 0 });
-    setTimeout(() => { if (this.shouldReconnect) this.connectServer(); }, 200);
+    this.reconnectDelayTimer = setTimeout(() => { this.reconnectDelayTimer = undefined; if (this.shouldReconnect) this.connectServer(); }, 200);
   }
 
   login(): Promise<LoginResponse & { success: true }> {
@@ -1292,6 +1329,7 @@ export class SoulseekSession {
     this.reconnectAttempts = 0;
     this.malformedLoginFrames = 0;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
+    if (this.reconnectDelayTimer) { clearTimeout(this.reconnectDelayTimer); this.reconnectDelayTimer = undefined; }
     const promise = new Promise<LoginResponse & { success: true }>((resolve, reject) => {
       this.loginResolve = resolve;
       this.loginReject = reject;
@@ -1383,8 +1421,10 @@ export class SoulseekSession {
           const bufferedBeforeClear = this.serverBuffer.length;
           this.serverBuffer = Buffer.alloc(0);
           if (!this.loggedIn && this.loginReject) {
-            if (isSilentCloseBeforeLogin) {
+            if (isSilentCloseBeforeLogin && this.consecutiveSilentCloses >= 2) {
               // BANNED — server omits response per SLSKPROTOCOL.md Obsolete BANNED. Stop auto-retry.
+              // Requires 2 consecutive silent closes: a single transient close (server restart,
+              // NAT blip, ECONNRESET 80ms after open) must not permanently stop reconnects.
               this.shouldReconnect = false;
               const bannedMsg = `Banned — Server closed connection without response (SLSKPROTOCOL.md BANNED: server omits login response instead). Try a different username or wait before retrying. Auto-reconnect stopped. [elapsed ${elapsed}ms]`;
               const err = new Error(bannedMsg);
@@ -1413,10 +1453,10 @@ export class SoulseekSession {
             this.reconnectPending = true;
           }
           this.cleanupServerTimers();
-          if (isSilentCloseBeforeLogin) {
+          if (isSilentCloseBeforeLogin && this.consecutiveSilentCloses >= 2) {
             // Do NOT schedule reconnect for BANNED — require manual retry with different username/wait
             this.close();
-          } else if (this.shouldReconnect) this.scheduleReconnect("Server closed");
+          } else if (this.shouldReconnect) this.scheduleReconnect(isSilentCloseBeforeLogin ? "transient silent close (retrying, BANNED needs 2x)" : "Server closed");
           else this.close();
         },
       },
@@ -1546,7 +1586,14 @@ export class SoulseekSession {
           const { dirs, files } = this.shareDB.getSharedCounts();
           this.serverSocket?.write(buildSharedFoldersFiles(dirs, files));
         } catch {}
-        try { this.startListener(); } catch (e) { logger.warn("server", "peer listener bind failed (will retry on next port change)", { error: (e as Error).message, port: this._listenPort }); }
+        try { this.startListener(); } catch (e) {
+          logger.warn("server", "peer listener bind failed (will retry on next login/reconnect)", { error: (e as Error).message, port: this._listenPort });
+          // In-session retry: logged-in session otherwise never rebinds until next reconnect.
+          setTimeout(() => {
+            if (!this.loggedIn || this.listener) return;
+            try { this.startListener(); } catch (err) { logger.debug("server", "peer listener retry still failing", { error: (err as Error).message }); }
+          }, 15_000);
+        }
         this.startIdleSweep();
         this.startServerPing();
         this.startDistribWatchdog();
@@ -1646,20 +1693,24 @@ export class SoulseekSession {
     if (code === SERVER_MESSAGE_CODES.getPeerAddress) {
       try {
         const addr = parsePeerAddress(payload);
-        // handle offline 0.0.0.0 — clear stale and don't cache
-        if (addr.ip === "0.0.0.0" || addr.port === 0) {
-          this.userAddresses.delete(addr.username);
+        const key = this.addrKey(addr.username);
+        // handle offline 0.0.0.0 — clear stale and don't cache (never re-cache invalid)
+        if (!SoulseekSession.isValidPeerAddr(addr)) {
+          this.userAddresses.delete(key);
+          if (key !== addr.username) this.userAddresses.delete(addr.username);
         } else {
-          this.userAddresses.set(addr.username, { addr, updated: Date.now() });
+          this.userAddresses.set(key, { addr, updated: Date.now() });
+          if (key !== addr.username) this.userAddresses.delete(addr.username);
           // populate geo cache lazily via bisect
           try { getCountryCode(addr.ip); } catch {}
           // update ip lists if ip changed (mirrors _update_saved_user_ip_addresses)
           // keep placeholder handling minimal
         }
-        const pending = this.peerAddressRequests.get(addr.username);
+        const pending = this.peerAddressRequests.get(key) ?? this.peerAddressRequests.get(addr.username);
         if (pending) {
           clearTimeout(pending.timer);
-          this.peerAddressRequests.delete(addr.username);
+          this.peerAddressRequests.delete(key);
+          if (key !== addr.username) this.peerAddressRequests.delete(addr.username);
           this.emit({ type: "peer-address", username: addr.username, peerAddress: addr });
           for (const cb of pending.cbs) try { cb(addr); } catch {}
         } else {
@@ -2323,8 +2374,8 @@ export class SoulseekSession {
 
   /** Phase 1: connect to peer with 45 s race (direct vs server-relayed). */
   async connectPeer(username: string, connType: string): Promise<Socket> {
-    const cached = this.userAddresses.get(username);
-    if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) {
+    const cached = this.getCachedPeerAddress(username);
+    if (cached) {
       // Try direct first, but also trigger server relay
       return this.connectPeerWithRelay(username, connType, cached.addr);
     }
@@ -2334,22 +2385,36 @@ export class SoulseekSession {
   }
 
   private fetchPeerAddress(username: string): Promise<PeerAddress> {
-    const cached = this.userAddresses.get(username);
-    if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) return Promise.resolve(cached.addr);
+    const key = this.addrKey(username);
+    const cached = this.getCachedPeerAddress(username);
+    if (cached) return Promise.resolve(cached.addr);
+    const existingPending = this.peerAddressRequests.get(key) ?? this.peerAddressRequests.get(username);
+    if (existingPending) {
+      return new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error("GetPeerAddress timeout")), PEER_ADDRESS_TIMEOUT_MS);
+        existingPending.cbs.push((addr: PeerAddress) => {
+          clearTimeout(t);
+          if (!SoulseekSession.isValidPeerAddr(addr)) { reject(new Error("Peer offline")); return; }
+          resolve(addr);
+        });
+      });
+    }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.peerAddressRequests.delete(username);
+        this.peerAddressRequests.delete(key);
+        if (key !== username) this.peerAddressRequests.delete(username);
         reject(new Error("GetPeerAddress timeout"));
       }, PEER_ADDRESS_TIMEOUT_MS);
-      this.peerAddressRequests.set(username, {
+      this.peerAddressRequests.set(key, {
         cbs: [(addr: PeerAddress) => {
           clearTimeout(timer);
-          this.userAddresses.set(username, { addr, updated: Date.now() });
+          if (!this.cachePeerAddress(username, addr)) { reject(new Error("Peer offline")); return; }
           resolve(addr);
         }],
         timer,
         createdAt: Date.now(),
       });
+      if (key !== username) this.peerAddressRequests.delete(username);
       this.serverSocket?.write(buildGetPeerAddress(username));
     });
   }
@@ -2361,14 +2426,23 @@ export class SoulseekSession {
     // Send server relay
     try { this.serverSocket?.write(buildConnectToPeer(token, username, connType)); } catch {}
 
-    // Attempt direct
+    // Attempt direct (capped: OS TCP timeout is minutes, pierce relay covers indirect)
     const directPromise = (async (): Promise<Socket> => {
-      if (addr.port === 0 || addr.ip === "0.0.0.0") throw new Error("Peer offline");
+      if (!SoulseekSession.isValidPeerAddr(addr)) throw new Error("Peer offline");
       return new Promise<Socket>((resolve, reject) => {
+        let done = false;
+        const cap = setTimeout(() => {
+          if (done) return;
+          done = true;
+          reject(new Error("Direct connect timeout 18s"));
+        }, DIRECT_CONNECT_TIMEOUT_MS);
         Bun.connect({
           hostname: addr.ip, port: addr.port,
           socket: {
             open: (sock) => {
+              if (done) { try { (sock as unknown as { end?: () => void }).end?.(); } catch {} return; }
+              done = true;
+              clearTimeout(cap);
               this.peerStates.set(sock as Socket, { buf: Buffer.alloc(0), initDone: false, username, outbound: true, connType, lastActive: Date.now(), createdAt: Date.now() });
               // F init is owned by dialFileUpload (PeerInit + FileInit together).
               // Writing another PeerInit here desyncs the peer: after parsing
@@ -2378,10 +2452,10 @@ export class SoulseekSession {
               setTimeout(() => resolve(sock as Socket), 200);
             },
             data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
-            error: () => reject(new Error("Direct connect failed")),
+            error: () => { if (done) return; done = true; clearTimeout(cap); reject(new Error("Direct connect failed")); },
             close: (sock) => { this.handlePeerSocketClosed(sock as Socket, this.peerStates.get(sock as Socket)); },
           },
-        }).catch(reject);
+        }).catch((e) => { if (done) return; done = true; clearTimeout(cap); reject(e); });
       });
     })();
 
@@ -3254,13 +3328,13 @@ export class SoulseekSession {
   }
 
   private ensurePeerAndSend(username: string, connType: string, msg: Buffer) {
-    const hasPending = this.peerAddressRequests.has(username);
-    const cachedCheck = this.userAddresses.get(username);
+    const keyLower = this.addrKey(username);
+    const hasPending = this.peerAddressRequests.has(keyLower) || this.peerAddressRequests.has(username);
+    const cachedCheck = this.getCachedPeerAddress(username);
     const code = msg.length >= 8 ? msg.readUInt32LE(4) : -1;
     // Coalesce rapid re-clicks: one pending dial per user, extra messages just queue
-    const keyLower = username.toLowerCase();
     const now = Date.now();
-    const pendingReq = this.peerAddressRequests.get(username);
+    const pendingReq = this.peerAddressRequests.get(keyLower) ?? this.peerAddressRequests.get(username);
     const isLivePending = !!pendingReq && (now - (pendingReq.createdAt ?? 0) < PEER_ADDRESS_TIMEOUT_MS);
     const hasLiveSocketForUser = !!(cachedCheck && now - cachedCheck.updated < USER_ADDRESS_TTL_MS && (() => {
       // Only fully-initialized sockets count: coalescing behind a half-open
@@ -3284,8 +3358,8 @@ export class SoulseekSession {
     logger.debug("browse", "queued pending peer message", { username, connType, code, queueLen: (this.pendingPeerMessages.get(username.toLowerCase())?.length ?? 0) });
     // Indirect + direct: only emit fresh ConnectToPeer/GetPeerAddress on first dial, not on coalesced clicks
     if (queuedNow || !reusingDial) this.sendConnectToPeerFallback(username, connType);
-    const cached = this.userAddresses.get(username);
-    if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) {
+    const cached = this.getCachedPeerAddress(username);
+    if (cached) {
       // Reuse path still needs to flush the newly-queued message to the existing/new socket
       if (reusingDial) {
         const peer = (() => {
@@ -3302,11 +3376,12 @@ export class SoulseekSession {
       }
       return;
     }
-    const existing = this.peerAddressRequests.get(username);
+    const existing = this.peerAddressRequests.get(keyLower) ?? this.peerAddressRequests.get(username);
     if (existing) {
       logger.debug("browse", "reusing pending GetPeerAddress", { username });
       // coalesced: just attach the new msg, the pending GetPeerAddress already covers this user
       existing.cbs.push((addr) => {
+        if (!SoulseekSession.isValidPeerAddr(addr)) return;
         this.connectToPeerViaAddress(username, addr, connType, msg);
       });
       return;
@@ -3322,20 +3397,22 @@ export class SoulseekSession {
     // pierce-wait as requestUserInfo. Their owners (browse 30s timer, folder
     // final timeout) clean the queue up; other callers keep old cleanup.
     const timer = setTimeout(() => {
-      this.peerAddressRequests.delete(username);
-      const key = username.toLowerCase();
+      this.peerAddressRequests.delete(keyLower);
+      if (keyLower !== username) this.peerAddressRequests.delete(username);
+      const key = keyLower;
       let owned = this.pendingBrowseShares.has(key);
       if (!owned) for (const e of this.pendingBrowseFolder.values()) { if (e.username.toLowerCase() === key) { owned = true; break; } }
       if (!owned) { try { this.pendingPeerMessages.delete(key); } catch {} }
       logger.debug("browse", "GetPeerAddress timeout, waiting for pierce fallback", { username, keptQueue: owned });
     }, PEER_ADDRESS_TIMEOUT_MS);
-    const entry = { cbs: [(addr: PeerAddress) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); logger.info("browse", "peer address resolved", { username, ip: addr.ip, port: addr.port }); this.connectToPeerViaAddress(username, addr, connType, msg); }], timer, createdAt: Date.now() };
-    this.peerAddressRequests.set(username, entry);
+    const entry = { cbs: [(addr: PeerAddress) => { clearTimeout(timer); if (!this.cachePeerAddress(username, addr)) { logger.debug("browse", "peer address invalid, waiting for pierce fallback", { username }); return; } logger.info("browse", "peer address resolved", { username, ip: addr.ip, port: addr.port }); this.connectToPeerViaAddress(username, addr, connType, msg); }], timer, createdAt: Date.now() };
+    this.peerAddressRequests.set(keyLower, entry);
+    if (keyLower !== username) this.peerAddressRequests.delete(username);
     this.serverSocket?.write(buildGetPeerAddress(username));
   }
   private connectToPeerViaAddress(username: string, addr: PeerAddress, connType: string, msg: Buffer) {
     logger.info("browse", "connectToPeerViaAddress", { username, ip: addr.ip, port: addr.port, connType });
-    if (addr.port === 0 || addr.ip === "0.0.0.0") {
+    if (!SoulseekSession.isValidPeerAddr(addr)) {
       logger.warn("browse", "peer address invalid, waiting for pierce fallback", { username, ip: addr.ip, port: addr.port });
       return;
     }
@@ -3344,10 +3421,18 @@ export class SoulseekSession {
       return;
     }
     const dialStart = Date.now();
+    let capped = false;
+    const cap = setTimeout(() => {
+      capped = true;
+      logger.warn("browse", "direct peer connect timeout (capped, pierce fallback continues)", { username, ip: addr.ip, port: addr.port, elapsedMs: Date.now() - dialStart });
+      this.dequeuePendingSockets();
+    }, DIRECT_CONNECT_TIMEOUT_MS);
     Bun.connect({
       hostname: addr.ip, port: addr.port,
       socket: {
         open: (sock) => {
+          if (capped) { try { (sock as unknown as { end?: () => void }).end?.(); } catch {} return; }
+          clearTimeout(cap);
           logger.info("browse", "direct peer open", { username, ip: addr.ip, port: addr.port, connType, dialMs: Date.now() - dialStart });
           this.setTcpBufferSize(sock as Socket, connType as "F" | "D" | "P");
           // Outbound P: consider handshake done after we send PeerInit — don't wait for peer init
@@ -3358,10 +3443,10 @@ export class SoulseekSession {
           try { (sock as Socket).write(msg); } catch {}
         },
         data: (sock, chunk) => this.processPeer(sock as Socket, chunk, false),
-        error: (_sock, err) => { logger.warn("browse", "direct peer error", { username, ip: addr.ip, port: addr.port, elapsedMs: Date.now() - dialStart, error: (err as Error)?.message || String(err) }); this.dequeuePendingSockets(); },
-        close: (sock) => { const st = this.peerStates.get(sock as Socket); logger.info("browse", "direct peer close", { username, ip: addr.ip, port: addr.port, lifetimeMs: st?.createdAt ? Date.now() - st.createdAt : undefined }); this.peerStates.delete(sock as Socket); this.dequeuePendingSockets(); },
+        error: (_sock, err) => { if (capped) return; clearTimeout(cap); logger.warn("browse", "direct peer error", { username, ip: addr.ip, port: addr.port, elapsedMs: Date.now() - dialStart, error: (err as Error)?.message || String(err) }); this.dequeuePendingSockets(); },
+        close: (sock) => { if (capped) return; clearTimeout(cap); const st = this.peerStates.get(sock as Socket); logger.info("browse", "direct peer close", { username, ip: addr.ip, port: addr.port, lifetimeMs: st?.createdAt ? Date.now() - st.createdAt : undefined }); this.peerStates.delete(sock as Socket); this.dequeuePendingSockets(); },
       },
-    }).catch((e) => { logger.warn("browse", "direct peer connect failed", { username, ip: addr.ip, port: addr.port, elapsedMs: Date.now() - dialStart, error: (e as Error).message }); this.dequeuePendingSockets(); });
+    }).catch((e) => { if (capped) return; clearTimeout(cap); logger.warn("browse", "direct peer connect failed", { username, ip: addr.ip, port: addr.port, elapsedMs: Date.now() - dialStart, error: (e as Error).message }); this.dequeuePendingSockets(); });
   }
 
   requestUserInfo(username: string): Promise<UserInfoResponseMessage> {
@@ -3405,7 +3490,7 @@ export class SoulseekSession {
       this.sendConnectToPeerFallback(username, "P");
 
       const doConnect = (addr: PeerAddress) => {
-        if (addr.port === 0 || addr.ip === "0.0.0.0") {
+        if (!SoulseekSession.isValidPeerAddr(addr)) {
           // Don't fail immediately — wait for indirect pierce (fallback already sent)
           // Only fail if no fallback pending and timeout will fire
           logger.debug("browse", "peer address 0.0.0.0 for userInfo, waiting for pierce", { username });
@@ -3413,23 +3498,26 @@ export class SoulseekSession {
         }
         this.connectToPeerViaAddress(username, addr, "P", buildUserInfoRequest());
       };
-      const cached = this.userAddresses.get(username);
-      if (cached && Date.now() - cached.updated < USER_ADDRESS_TTL_MS) { doConnect(cached.addr); }
+      const cached = this.getCachedPeerAddress(username);
+      if (cached) { doConnect(cached.addr); }
       else {
-        const existing = this.peerAddressRequests.get(username);
+        const key = this.addrKey(username);
+        const existing = this.peerAddressRequests.get(key) ?? this.peerAddressRequests.get(username);
         if (existing) {
-          existing.cbs.push((addr) => { this.userAddresses.set(username, { addr, updated: Date.now() }); doConnect(addr); });
+          existing.cbs.push((addr) => { if (!SoulseekSession.isValidPeerAddr(addr)) { doConnect(addr); return; } this.cachePeerAddress(username, addr); doConnect(addr); });
         } else {
           const timer = setTimeout(() => {
-            this.peerAddressRequests.delete(username);
+            this.peerAddressRequests.delete(key);
+            if (key !== username) this.peerAddressRequests.delete(username);
             // don't reject yet — indirect may still succeed, let overallTimer handle
             logger.debug("browse", "GetPeerAddress timeout for userInfo, waiting for pierce fallback", { username });
           }, PEER_ADDRESS_TIMEOUT_MS);
-          this.peerAddressRequests.set(username, {
-            cbs: [(addr) => { clearTimeout(timer); this.userAddresses.set(username, { addr, updated: Date.now() }); doConnect(addr); }],
+          this.peerAddressRequests.set(key, {
+            cbs: [(addr) => { clearTimeout(timer); if (!SoulseekSession.isValidPeerAddr(addr)) { doConnect(addr); return; } this.cachePeerAddress(username, addr); doConnect(addr); }],
             timer,
             createdAt: Date.now(),
           });
+          if (key !== username) this.peerAddressRequests.delete(username);
           this.serverSocket?.write(buildGetPeerAddress(username));
         }
       }
@@ -3442,6 +3530,7 @@ export class SoulseekSession {
   close() {
     this.shouldReconnect = false;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; }
+    if (this.reconnectDelayTimer) { clearTimeout(this.reconnectDelayTimer); this.reconnectDelayTimer = undefined; }
     if (this.loginTimer) { clearTimeout(this.loginTimer); this.loginTimer = undefined; }
     // Portmapper: remove mapping on quit (like nicotine _server_disconnect portmapper.remove)
     try { this.portMapper.removePortMapping(false).catch(() => {}); } catch {}

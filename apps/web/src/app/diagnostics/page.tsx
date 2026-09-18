@@ -171,7 +171,7 @@ function DiagnosticsInner() {
   const [worker, setWorker] = useState<WorkerHealth | null>(null);
   const [workerLatency, setWorkerLatency] = useState<number | null>(null);
   const [logs, setLogs] = useState<DiagEntry[]>([]);
-  const [levelFilter, setLevelFilter] = useState<DiagLevel>("debug");
+  const [levelFilter, setLevelFilter] = useState<DiagLevel>("info");
   const [scopeFilter, setScopeFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [paused, setPaused] = useState(false);
