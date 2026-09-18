@@ -154,7 +154,9 @@ def _label(body: SpectrumIn) -> str:
 async def spectrum_request(body: SpectrumIn):
     if not spectrals.is_audio_file(body.fileName):
         return JSONResponse({"detail": "not an audio file"}, status_code=422)
-    path = spectrals.resolve_audio(body.fileName)
+    # Same full resolver as /tag /analyze /mediainfo (not the shallow
+    # basename-only one) so nested finished downloads resolve identically.
+    path = _resolve_any(body.fileName)
     if path is None:
         return JSONResponse({"detail": "file not found"}, status_code=404)
     try:

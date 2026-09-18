@@ -69,6 +69,8 @@ export interface BridgeTransfer {
   isSlopLike?: boolean;
   token?: number;
   finishedAt?: number; // ms epoch when status became Finished — bounds /files/:token age (24h)
+  /** Absolute on-disk path of a finished download (deriveDestination dest). Web prefers this over fileName for worker calls. */
+  localPath?: string;
   // internal
   _timer?: Timer;
   _pollTimer?: Timer;
@@ -92,7 +94,7 @@ export type TransferStatsCb = (stats: {
   queuedUploads: number;
 }) => void;
 export type TransferQueueCb = (id: string, place: number) => void;
-export type TransferFinishedCb = (id: string, fileName: string, size: number, downloadUrl: string) => void;
+export type TransferFinishedCb = (id: string, fileName: string, size: number, downloadUrl: string, localPath?: string) => void;
 
 function fileNameOf(virtualPath: string): string {
   const parts = virtualPath.split(/[\\/]/);
@@ -578,6 +580,7 @@ export class TransferManager {
           try { mkdirSync(dirname(eRes), { recursive: true }); } catch {}
           renameSync(sRes, eRes);
           (t as unknown as { _incompletePath?: string })._incompletePath = eRes;
+          t.localPath = eRes;
           this.pruneEmptyDirs(sRes, root);
           moved++;
         } catch { skipped++; continue; }
@@ -634,6 +637,7 @@ export class TransferManager {
           try { mkdirSync(dirname(eRes), { recursive: true }); } catch {}
           renameSync(sRes, eRes);
           (t as unknown as { _incompletePath?: string })._incompletePath = eRes;
+          t.localPath = eRes;
           moved++;
         } catch { skipped++; continue; }
       }
@@ -702,7 +706,7 @@ export class TransferManager {
 
   private emitFinished(t: BridgeTransfer) {
     const url = t._downloadUrl || `/files/${t.token}`;
-    this.onFinished?.(t.id, t.fileName, t.size, url);
+    this.onFinished?.(t.id, t.fileName, t.size, url, t.localPath);
   }
 
   list(): BridgeTransfer[] {
@@ -2041,6 +2045,7 @@ export class TransferManager {
       renameSync(t._incompletePath!, dest);
       t._downloadUrl = `/files/${t.token}`;
       t._incompletePath = dest;
+      t.localPath = dest;
     } catch {
       t.status = "Download folder error";
       this.emit(t);

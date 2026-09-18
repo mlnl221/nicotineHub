@@ -125,13 +125,14 @@ export function WelcomeStep({ onNext, onBack, isFirst }: StepNav) {
       <StepHead
         kicker="Setup guide"
         title="Build your music library"
-        body="Five short stops and you're sharing. Soulseek runs on give and take — hosts who share get faster queues and fewer blocks."
+        body="Six short stops and you're sharing. Soulseek runs on give and take — hosts who share get faster queues and fewer blocks."
       />
       <ul className="space-y-2">
         {[
           ["folder", "Share", "Point the app at your music folder"],
           ["shield", "Community", "Fair-share guards and human checks"],
           ["palette", "Appearance", "Light or dark reading room"],
+          ["keyboard", "Shortcuts", "Hop between screens with a key or two"],
           ["memory", "Metadata", "Optional keys for richer lookups"],
         ].map(([icon, title, sub]) => (
           <li key={title} className="flex items-center gap-3 rounded-xl bg-surface-container-low px-4 py-3 dark:bg-surface-container">
@@ -263,7 +264,7 @@ export function SharesStep({ onNext, onBack, isFirst }: StepNav) {
   return (
     <div>
       <StepHead
-        kicker="Step 1 of 5 · Share"
+        kicker="Step 1 of 6 · Share"
         title="Share your music"
         body="No shares, no network. Other users can only download from you — and many will only upload to you — when you share."
       />
@@ -449,7 +450,7 @@ export function LeechersStep({ onNext, onBack, isFirst }: StepNav) {
   return (
     <div>
       <StepHead
-        kicker="Step 2 of 5 · Community"
+        kicker="Step 2 of 6 · Community"
         title="Keep leechers out"
         body="Some users download everything and share nothing. Flag accounts sharing too little so your uploads go to real sharers."
       />
@@ -508,7 +509,7 @@ export function CaptchaStep({ onNext, onBack, isFirst }: StepNav) {
   return (
     <div>
       <StepHead
-        kicker="Step 3 of 5 · Human check"
+        kicker="Step 3 of 6 · Human check"
         title="Prove they're human"
         body="Before a stranger's queue continues, ask them to type one word in chat. Bots fail, humans pass, verified users never see it again."
       />
@@ -548,7 +549,7 @@ export function CaptchaStep({ onNext, onBack, isFirst }: StepNav) {
 /* ---------- 5 — Appearance ---------- */
 
 export function AppearanceStep({ onNext, onBack, isFirst }: StepNav) {
-  const { activeId, applyId } = useTheme();
+  const { lightId, darkId, previewSlot } = useTheme();
   const { settings, setOption } = useConfig();
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -556,10 +557,14 @@ export function AppearanceStep({ onNext, onBack, isFirst }: StepNav) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const pick = (id: string, mode: "light" | "dark") => {
-    applyId(id);
-    setOption("ui", mode === "dark" ? "dark_theme" : "light_theme", id);
-    setOption("ui", "dark_mode", mode === "dark");
+  const light = settings.ui.light_theme || lightId;
+  const dark = settings.ui.dark_theme || darkId;
+
+  const pick = (slot: "light" | "dark", id: string) => {
+    // Live preview: edited slot becomes active so the user sees each theme.
+    previewSlot(slot, id);
+    setOption("ui", slot === "dark" ? "dark_theme" : "light_theme", id);
+    setOption("ui", "dark_mode", slot === "dark");
   };
 
   const cont = async () => {
@@ -575,51 +580,105 @@ export function AppearanceStep({ onNext, onBack, isFirst }: StepNav) {
     }
   };
 
-  const groups = [
-    { mode: "light" as const, title: "Light", themes: LIGHT_THEMES },
-    { mode: "dark" as const, title: "Dark", themes: DARK_THEMES },
-  ];
+  const selectClass = `${inputClass} min-h-11 md:min-h-10 cursor-pointer`;
 
   return (
     <div>
       <StepHead
-        kicker="Step 4 of 5 · Appearance"
+        kicker="Step 4 of 6 · Appearance"
         title="Set the mood"
-        body="A quiet reading room for dense crates. Pick a light and a dark theme — the top toggle flips between them. You can change this anytime in Settings."
+        body="A quiet reading room for dense crates. Choose a light and a dark theme from the drop-downs — picking one previews it live. The top toggle flips between them. You can change this anytime in Settings."
       />
-      {groups.map((g) => (
-        <div key={g.mode} className="mt-4">
-          <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant">{g.title}</h3>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            {g.themes.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => pick(t.id, g.mode)}
-                aria-pressed={activeId === t.id}
-                className={`flex items-center gap-2 rounded-2xl p-3 text-left ${
-                  activeId === t.id
-                    ? "bg-primary text-on-primary"
-                    : "bg-surface-container-low text-on-surface dark:bg-surface-container dark:text-inverse-on-surface"
-                }`}
-              >
-                <span
-                  className="h-6 w-6 shrink-0 rounded-full border border-black/10"
-                  style={{ background: `linear-gradient(135deg, ${t.accent} 50%, ${t.bg} 50%)` }}
-                />
-                <span className="min-w-0">
-                  <span className="block truncate font-label text-xs font-bold uppercase tracking-widest">{t.label}</span>
-                  <span className={`block truncate font-body text-[11px] ${activeId === t.id ? "opacity-80" : "text-on-surface-variant dark:text-outline"}`}>
-                    {t.accent}
-                  </span>
-                </span>
-              </button>
+      <div className="mt-4 space-y-3">
+        <div>
+          <label htmlFor="ob-light-theme" className="font-label text-sm font-medium text-on-surface dark:text-inverse-on-surface">
+            Light theme
+          </label>
+          <div className="mb-1 font-body text-xs text-on-surface-variant dark:text-outline">Used when dark mode is off.</div>
+          <select id="ob-light-theme" value={light} onChange={(e) => pick("light", e.target.value)} className={selectClass}>
+            {LIGHT_THEMES.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
             ))}
-          </div>
+          </select>
         </div>
-      ))}
+        <div>
+          <label htmlFor="ob-dark-theme" className="font-label text-sm font-medium text-on-surface dark:text-inverse-on-surface">
+            Dark theme
+          </label>
+          <div className="mb-1 font-body text-xs text-on-surface-variant dark:text-outline">Used when dark mode is on.</div>
+          <select id="ob-dark-theme" value={dark} onChange={(e) => pick("dark", e.target.value)} className={selectClass}>
+            {DARK_THEMES.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
       {error ? <div className="mt-2 rounded-xl bg-error-container px-3 py-2 font-body text-xs text-on-error-container">{error}</div> : null}
       <StepNavButtons onBack={onBack} onNext={cont} isFirst={isFirst} busy={busy} />
+    </div>
+  );
+}
+
+/* ---------- 6 — Shortcuts (intro tutorial) ---------- */
+
+const SHORTCUT_GROUPS: { title: string; rows: { keys: string; label: string }[] }[] = [
+  {
+    title: "Move between screens",
+    rows: [
+      { keys: "g then s", label: "Search" },
+      { keys: "g then d", label: "Downloads" },
+      { keys: "g then u", label: "Uploads" },
+      { keys: "g then b", label: "Browse" },
+      { keys: "g then r", label: "Chat Rooms" },
+      { keys: "Alt+1…5", label: "Jump to Search / Downloads / Uploads / Files / Chat" },
+    ],
+  },
+  {
+    title: "Search faster",
+    rows: [
+      { keys: "/", label: "Focus the search field" },
+      { keys: "Ctrl+K", label: "Focus search from anywhere" },
+      { keys: "s", label: "Stop the active search" },
+    ],
+  },
+  {
+    title: "Remember one more",
+    rows: [{ keys: "?", label: "Show all shortcuts anytime" }],
+  },
+];
+
+export function ShortcutsStep({ onNext, onBack, isFirst }: StepNav) {
+  return (
+    <div>
+      <StepHead
+        kicker="Step 5 of 6 · Shortcuts"
+        title="Fly around the app"
+        body="A tiny tutorial for your keyboard. Press g, then a letter to hop screens — try g then s for Search. Keys rest while you type."
+      />
+      <InfoTip>
+        Press the second key within ~1s of <span className="font-mono">g</span>. On touch screens the bottom nav covers the same
+        destinations — shortcuts are a desktop speed-up, never required.
+      </InfoTip>
+      {SHORTCUT_GROUPS.map((g) => (
+        <div key={g.title} className="mt-4">
+          <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant">{g.title}</h3>
+          <ul className="mt-2 space-y-1 rounded-xl bg-surface-container-low px-4 py-2 dark:bg-surface-container">
+            {g.rows.map((r) => (
+              <li key={r.keys} className="flex items-center justify-between gap-3 py-1.5">
+                <span className="font-body text-sm text-on-surface dark:text-inverse-on-surface">{r.label}</span>
+                <kbd className="shrink-0 rounded-md bg-surface-container-high px-2 py-1 font-label text-xs font-semibold text-on-surface dark:bg-surface-container-highest/60 dark:text-inverse-on-surface">
+                  {r.keys}
+                </kbd>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      <StepNavButtons onBack={onBack} onNext={onNext} isFirst={isFirst} />
     </div>
   );
 }
@@ -697,7 +756,7 @@ export function ScraperStep({ onNext, onBack, isFirst }: StepNav) {
   return (
     <div>
       <StepHead
-        kicker="Step 5 of 5 · Metadata (optional)"
+        kicker="Step 6 of 6 · Metadata (optional)"
         title="Richer record cards"
         body="Paste-link lookups work out of the box. Keys unlock authenticated sources — skip freely, add later in Settings → Worker."
       />

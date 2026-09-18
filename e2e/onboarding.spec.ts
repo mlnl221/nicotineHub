@@ -128,8 +128,15 @@ test.describe("Onboarding wizard", () => {
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(page.getByText("Set the mood")).toBeVisible({ timeout: 8000 });
 
-    // appearance -> keys (dark persists)
-    await page.getByRole("button", { name: /late-night digging/i }).click();
+    // appearance -> shortcuts (dark persists, live preview flips to edited slot)
+    await page.locator("#ob-dark-theme").selectOption("solitude");
+    await page.locator("#ob-light-theme").selectOption("lupine");
+    await page.locator("#ob-dark-theme").selectOption("solitude");
+    await page.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByText("Fly around the app")).toBeVisible({ timeout: 8000 });
+    await expect(page.getByText("Move between screens")).toBeVisible();
+
+    // shortcuts -> keys
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(page.getByText("Richer record cards")).toBeVisible({ timeout: 8000 });
     expect(await page.evaluate(() => localStorage.getItem("nicotineHub.theme"))).toBe("dark");

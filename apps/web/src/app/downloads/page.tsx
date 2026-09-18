@@ -46,6 +46,12 @@ function isAudioForSpectrum(fileName: string): boolean {
   const ext = fileName.toLowerCase().split(".").pop() ?? "";
   return ["flac", "wav", "aiff", "aif", "mp3", "ogg", "wma", "m4a", "wv", "aac", "opus"].includes(ext);
 }
+// Worker resolves absolute bridge-local paths directly; bare Soulseek names
+// only via depth-limited basename search (misses nested/collision-renamed
+// finished downloads → 404). Finished rows carry localPath from the bridge.
+function workerFile(t: { fileName: string; localPath?: string }): string {
+  return t.localPath || t.fileName;
+}
 
 function DownloadsInner() {
   const { downloads, stats, cancelDownload, pauseDownload, resumeDownload, retryDownload, clearTransfer, clearMany, abortTransfer, banUser } = useTransfers();
@@ -423,26 +429,26 @@ function DownloadsInner() {
                 ? undefined
                 : isAudioForSpectrum(menuAnchor.transfer.fileName) && menuAnchor.transfer.status === "Finished"
                   ? () => requestSpectrum(menuAnchor.transfer.id, {
-                      fileName: menuAnchor.transfer.fileName,
+                      fileName: workerFile(menuAnchor.transfer),
                       size: menuAnchor.transfer.size,
                       token: parseDownloadToken(menuAnchor.transfer as unknown as { downloadUrl?: string }),
                     })
                   : undefined,
               hasSpectrum: !!getEntry(menuAnchor.transfer.id) && getEntry(menuAnchor.transfer.id)?.status === "done",
               onEditTags: isFinishedAudio(menuAnchor.transfer)
-                ? () => setTagFile(menuAnchor.transfer.fileName)
+                ? () => setTagFile(workerFile(menuAnchor.transfer))
                 : undefined,
               onScrape: isFinishedAudio(menuAnchor.transfer)
-                ? () => setScrapeFile(menuAnchor.transfer.fileName)
+                ? () => setScrapeFile(workerFile(menuAnchor.transfer))
                 : undefined,
               onVerify: isFinishedAudio(menuAnchor.transfer)
-                ? () => handleSingleVerify(menuAnchor.transfer.fileName)
+                ? () => handleSingleVerify(workerFile(menuAnchor.transfer))
                 : undefined,
               onAnalyze: isFinishedAudio(menuAnchor.transfer)
-                ? () => handleSingleAnalyze(menuAnchor.transfer.fileName)
+                ? () => handleSingleAnalyze(workerFile(menuAnchor.transfer))
                 : undefined,
               onMediainfo: !menuAnchor.isUpload && menuAnchor.transfer.status === "Finished"
-                ? () => setMediainfoFile(menuAnchor.transfer.fileName)
+                ? () => setMediainfoFile(workerFile(menuAnchor.transfer))
                 : undefined,
               onPlay: !menuAnchor.isUpload && canPlay(menuAnchor.transfer)
                 ? () => handlePlay(menuAnchor.transfer)

@@ -21,7 +21,7 @@ function makeManager(tmp: string, sessionMock?: any) {
     onRemoved: (id) => removed.push(id),
     onStats: (s) => stats.push(s),
     onQueue: (id, place) => queues.push({ id, place }),
-    onFinished: (id, fileName, size, url) => finished.push({ id, fileName, size, url }),
+    onFinished: (id, fileName, size, url, localPath) => finished.push({ id, fileName, size, url, localPath }),
     getSession: () => sessionMock,
   });
   return { mgr, updates, removed, stats, queues, finished };
@@ -463,7 +463,7 @@ describe("transfers — download engine (Phase 2)", () => {
       placeInQueueRequest: () => {},
       sendUploadSpeed: () => {},
     };
-    const { mgr } = makeManager(tmp, mockSession);
+    const { mgr, updates, finished } = makeManager(tmp, mockSession);
     (mgr as any).transfers.clear();
     // safeUsername preserves case/space, so "Donald Trump" stays as-is
     const t = mgr.requestDownload("Donald Trump", "Music\\Album 1\\01 Flak.mp3", 16);
@@ -472,6 +472,12 @@ describe("transfers — download engine (Phase 2)", () => {
     (mgr as any).handleFileChunk(t.token!, Buffer.alloc(16, 0x41));
     expect(existsSync(join(tmp, "downloads", "Donald Trump", "Album 1", "01 Flak.mp3"))).toBe(true);
     expect(existsSync(join(tmp, "downloads", "Music"))).toBe(false);
+    // finished rows expose the absolute on-disk path so web worker calls
+    // (tag/analyze/spectrum/mediainfo) don't rely on basename search
+    const dest = join(tmp, "downloads", "Donald Trump", "Album 1", "01 Flak.mp3");
+    expect(mgr.get(t.id)?.localPath).toBe(dest);
+    expect(finished.find((f) => f.id === t.id)?.localPath).toBe(dest);
+    expect(updates.some((u) => u.id === t.id && u.localPath === dest)).toBe(true);
     mgr.close();
   });
 
@@ -498,6 +504,7 @@ describe("transfers — download engine (Phase 2)", () => {
     expect(existsSync(nested)).toBe(true);
     expect(existsSync(flatFile)).toBe(false);
     expect((mgr.get(entry.id) as any)?._incompletePath).toBe(nested);
+    expect(mgr.get(entry.id)?.localPath).toBe(nested);
     const raw = JSON.parse(readFileSync(join(tmp, "downloads.json"), "utf8")) as any[];
     expect(raw.find((r) => r.id === entry.id)?._incompletePath).toBe(nested);
     const second = mgr.migrateFlatDownloads();
