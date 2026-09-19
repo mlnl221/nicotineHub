@@ -407,6 +407,17 @@ export class TransferManager {
     return { downloadSpeed, uploadSpeed, activeDownloads, activeUploads, queuedDownloads, queuedUploads };
   }
 
+  /** Max concurrent uploads (single source for checkUploadQueue + slot reporting). */
+  getMaxUploadSlots(): number {
+    return this.config.useupslots ? Math.max(1, this.config.uploadslots || 3) : Math.max(1, Math.ceil(this.config.uploadbandwidth / 30));
+  }
+
+  /** Live slot stats for peer UserInfo/search responses (session reads via getTransferStats). */
+  getUploadSlotStats(): { queuedUploads: number; activeUploads: number; maxSlots: number; uploadSpeed: number } {
+    const live = this.getLiveStats();
+    return { queuedUploads: live.queuedUploads, activeUploads: live.activeUploads, maxSlots: this.getMaxUploadSlots(), uploadSpeed: live.uploadSpeed };
+  }
+
   resetStats() {
     this.statsManager.reset();
     this.emitStats();
@@ -1167,7 +1178,7 @@ export class TransferManager {
 
   private checkUploadQueue() {
     // Determine max active uploads: useupslots ? uploadslots fixed, else auto via bandwidth (simplified to 2*uploadslots/3 fixed)
-    const maxActive = this.config.useupslots ? Math.max(1, this.config.uploadslots || 3) : Math.max(1, Math.ceil(this.config.uploadbandwidth / 30));
+    const maxActive = this.getMaxUploadSlots();
     const activeUploads = [...this.transfers.values()].filter((t) => t.isUpload && t.status === "Transferring").length;
     if (activeUploads >= maxActive) return;
 

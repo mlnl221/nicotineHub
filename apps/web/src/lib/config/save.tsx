@@ -37,8 +37,11 @@ export function buildSectionMessages(section: Section, s: Settings): BridgeInbou
       const pic = s.userinfo.pic;
       let picB64: string | undefined;
       if (pic) {
-        picB64 = pic.startsWith("data:") ? pic.slice(pic.indexOf(",") + 1) : pic;
-        if (picB64.startsWith("/") || picB64.startsWith("C:") || picB64.length > 5_000_000) picB64 = undefined;
+        const isDataUrl = pic.startsWith("data:");
+        picB64 = isDataUrl ? pic.slice(pic.indexOf(",") + 1) : pic;
+        // Filesystem paths are never data: URLs — but JPEG base64 starts with
+        // "/9j/", so the path-drop must not apply to data: payloads.
+        if ((!isDataUrl && (picB64.startsWith("/") || picB64.startsWith("C:"))) || picB64.length > 5_000_000) picB64 = undefined;
       }
       return [
         {
