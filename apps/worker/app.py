@@ -5,7 +5,8 @@
 Endpoints: GET /health, POST /scrape, POST /spectrum/request,
 GET /spectrum/{stem}/full|zoom,
 POST /tag, POST /tag/write, POST /tag/scrape, POST /tag/bulk,
-POST /verify, POST /analyze, POST /analyze/bulk, POST /mediainfo, POST /rename.
+POST /verify, POST /analyze, POST /analyze/bulk, POST /mediainfo, POST /rename,
+POST /avatar.
 """
 
 from __future__ import annotations
@@ -65,7 +66,8 @@ app.add_middleware(
 @app.middleware("http")
 async def cap_body(request: Request, call_next):
     try:
-        if int(request.headers.get("content-length", "0")) > MAX_JSON:
+        # /avatar takes raw image uploads up to 5MB (enforced in-handler)
+        if request.url.path != "/avatar" and int(request.headers.get("content-length", "0")) > MAX_JSON:
             return JSONResponse({"detail": "body too large"}, status_code=413)
     except ValueError:
         pass
@@ -1358,6 +1360,66 @@ async def mediainfo(body: FileIn):
         "summary": summary,
         "raw": raw_text or raw_out[:MEDIAINFO_CAP],
     }
+
+
+# ---- avatar: any image upload -> ≤512px JPEG data URL (ffmpeg, no new deps) ----
+# Remote nicotine+ clients use stock gdk-pixbuf (JPEG/PNG/GIF only), so every
+# avatar is normalized to JPEG here. Raw-body POST (no multipart dep): the web
+# picker sends the File bytes directly; the 1MB cap_body middleware is carved
+# out for this path and enforced here at 5MB instead.
+AVATAR_MAX_IN = 5_000_000
+AVATAR_MAX_B64 = 256_000  # bridge only persists pics under 256KB to settings.json
+AVATAR_ATTEMPTS = [(512, 3), (512, 6), (512, 10), (384, 6), (256, 6)]  # (max px, jpeg q)
+
+
+def _avatar_convert(data: bytes) -> bytes | None:
+    """ffmpeg bytes -> JPEG bytes (b64 ≤ AVATAR_MAX_B64), shrinking until small."""
+    import base64 as _b64
+    import shutil as _shutil
+
+    if not _shutil.which("ffmpeg"):
+        return None
+    for size, q in AVATAR_ATTEMPTS:
+        try:
+            r = subprocess.run(
+                ["ffmpeg", "-v", "error", "-y", "-i", "pipe:0",
+                 "-frames:v", "1", "-vf", f"scale={size}:{size}:force_original_aspect_ratio=decrease",
+                 "-q:v", str(q), "-f", "mjpeg", "pipe:1"],
+                input=data, capture_output=True, timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        # nonzero exit (e.g. undecodable input) fails all attempts the same way
+        if r.returncode != 0:
+            return None
+        if r.stdout and r.stdout[:3] == b"\xff\xd8\xff" and len(_b64.b64encode(r.stdout)) <= AVATAR_MAX_B64:
+            return r.stdout
+    return None
+
+
+@app.post("/avatar", dependencies=[Depends(require_auth)])
+async def avatar(request: Request):
+    """Convert an uploaded image to a ≤512px JPEG data URL for Soulseek avatars."""
+    try:
+        data = await request.body()
+    except Exception:
+        return JSONResponse({"detail": "could not read upload"}, status_code=400)
+    if not data:
+        return JSONResponse({"detail": "empty upload"}, status_code=422)
+    if len(data) > AVATAR_MAX_IN:
+        return JSONResponse({"detail": "image too large (max 5MB)"}, status_code=413)
+    try:
+        out = await asyncio.to_thread(_avatar_convert, data)
+    except Exception as e:
+        return JSONResponse({"detail": f"conversion failed: {e}"[:300]}, status_code=500)
+    if out is None:
+        return JSONResponse({"detail": "could not decode that image — use JPEG, PNG, GIF, WebP or SVG"}, status_code=422)
+    import base64 as _b64
+
+    b64 = _b64.b64encode(out).decode("ascii")
+    if len(b64) > AVATAR_MAX_B64:
+        return JSONResponse({"detail": "converted image still too large"}, status_code=422)
+    return {"dataUrl": f"data:image/jpeg;base64,{b64}"}
 
 
 # ---- in-browser audio: direct serve for native formats, ffmpeg→opus for exotic ----
