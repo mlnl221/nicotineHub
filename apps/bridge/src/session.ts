@@ -12,7 +12,7 @@
 import type { Socket, TCPSocketListener } from "bun";
 import { deflateSync, inflateSync } from "node:zlib";
 import { ShareDB, PermissionLevel, type ShareFolder } from "./shares.ts";
-import { logger } from "./logger.ts";
+import { logger, shouldLogTransferChatter } from "./logger.ts";
 import { isUserBanned, shouldBlockUser, shouldIgnoreUser, getCountryCode, setCountryForIp } from "./networkfilter.ts";
 import { PortMapper } from "./portmapper.ts";
 import {
@@ -2556,7 +2556,9 @@ export class SoulseekSession {
               state.connType = pending.connType;
               setTimeout(() => this.flushPendingPeerMessages(pending.username, pending.connType), 10);
             } else {
-              logger.debug("peer", "inbound PierceFireWall unknown token, parking", { token: pf.token });
+              if (shouldLogTransferChatter()) {
+                logger.debug("peer", "inbound PierceFireWall unknown token, parking", { token: pf.token });
+              }
               try {
                 if (this.parkedPierce.size > 64) {
                   const oldest = [...this.parkedPierce.entries()].sort((a, b) => a[1].at - b[1].at)[0]?.[0];

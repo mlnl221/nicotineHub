@@ -187,6 +187,7 @@ export interface Settings {
     readprivatelines: number;
     logcollapsed: boolean;
     debug: boolean;
+    verbose_transfers: boolean;
   };
   privatechat: {
     store: boolean;
@@ -419,6 +420,7 @@ export const defaults: Settings = {
     readprivatelines: 200,
     logcollapsed: true,
     debug: false,
+    verbose_transfers: false,
   },
   privatechat: {
     store: true,

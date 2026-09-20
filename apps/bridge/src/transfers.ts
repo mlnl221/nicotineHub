@@ -29,7 +29,7 @@ import {
   frameMessage,
   packUint32,
 } from "./soulseek.ts";
-import { logger } from "./logger.ts";
+import { logger, shouldLogTransferChatter } from "./logger.ts";
 import { shouldBlockUser, getCountryCode } from "./networkfilter.ts";
 import { StatsManager } from "./statistics.ts";
 
@@ -1333,10 +1333,11 @@ export class TransferManager {
     }
     if (!target) {
       // Routine interop chatter (stale/duplicate grant after clear+cancel+
-      // autoclear, uploader queue cycling) — debug + per-key throttle so a
-      // retry storm can't fill diagnostics. Was warn since a996e26 (stuck
-      // Queued with zero signal); demoted — same shape as the F-connection
-      // unknown-token debug below. No TransferResponse deny (log-only fix).
+      // autoclear, uploader queue cycling) — quiet by default. Only logs when
+      // Settings → Logging → Debug mode + Verbose transfer debug are both on
+      // (see logger.shouldLogTransferChatter). Suppressed-storm accounting in
+      // unknownGrantLog is kept either way so enabling verbose later still
+      // reports repeats. No TransferResponse deny (log-only fix).
       const key = `${owner ?? "?"}::${file}`;
       const now = Date.now();
       const prev = this.unknownGrantLog.get(key);
@@ -1355,21 +1356,25 @@ export class TransferManager {
         for (const t of this.transfers.values()) if (!t.isUpload && t.username === owner) ownerTransferCount += 1;
       }
       this.unknownGrantLog.set(key, { suppressed: 0, lastTs: now });
-      logger.debug("transfer", "grant for unknown transfer", {
-        username: owner ?? "?",
-        file,
-        token,
-        repeats,
-        ownerTransferCount,
-        transfersTotal: this.transfers.size,
-      });
+      if (shouldLogTransferChatter()) {
+        logger.debug("transfer", "grant for unknown transfer", {
+          username: owner ?? "?",
+          file,
+          token,
+          repeats,
+          ownerTransferCount,
+          transfersTotal: this.transfers.size,
+        });
+      }
       return;
     }
     // Finished transfers never restart: repeat peer grants (uploader queue
     // cycling after our finish) get denied COMPLETE, nicotine-plus parity
     // (downloads.py _transfer_request_downloads). No token mapping, no status change.
     if (!target.isUpload && target.status === "Finished") {
-      logger.debug("transfer", "repeat grant for finished transfer denied", { id: target.id, token });
+      if (shouldLogTransferChatter()) {
+        logger.debug("transfer", "repeat grant for finished transfer denied", { id: target.id, token });
+      }
       try { this.session?.unregisterFileToken(token); } catch {}
       try {
         const peer = owner || target.username;
@@ -1660,7 +1665,9 @@ export class TransferManager {
   async handleFileConnection(token: number, socket: Socket) {
     const t = this.getByToken(token);
     if (!t) {
-      logger.debug("transfer", "F connection unknown token, closing", { token });
+      if (shouldLogTransferChatter()) {
+        logger.debug("transfer", "F connection unknown token, closing", { token });
+      }
       try { socket.end(); } catch {}
       return;
     }
@@ -1668,7 +1675,9 @@ export class TransferManager {
     // here instead of re-downloading from offset 0 (partial was moved away
     // at finish, so resume would restart at 0). Deny went out in handleTransferRequest.
     if (!t.isUpload && t.status === "Finished") {
-      logger.debug("transfer", "F for finished transfer ignored", { id: t.id, token });
+      if (shouldLogTransferChatter()) {
+        logger.debug("transfer", "F for finished transfer ignored", { id: t.id, token });
+      }
       try { socket.end(); } catch {}
       return;
     }
@@ -1682,7 +1691,9 @@ export class TransferManager {
     // two sockets never share _onFileData/left accounting. Timed-out or
     // retried transfers (status != Transferring) still accept a fresh F.
     if (!t.isUpload && t.status === "Transferring" && (t as unknown as { _hadRealF?: boolean })._hadRealF && (t as unknown as { _onFileData?: unknown })._onFileData) {
-      logger.debug("transfer", "duplicate F ignored", { id: t.id, token });
+      if (shouldLogTransferChatter()) {
+        logger.debug("transfer", "duplicate F ignored", { id: t.id, token });
+      }
       try { socket.end(); } catch {}
       return;
     }

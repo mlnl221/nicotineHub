@@ -21,7 +21,7 @@ import { SoulseekSession, namespaceSearchId } from "./session.ts";
 import { detectAvatarFormat, userInfoPicToBase64 } from "./soulseek.ts";
 import { PermissionLevel } from "./shares.ts";
 import { TransferManager } from "./transfers.ts";
-import { diagClear, diagLog, diagTail, diagSubscribe, logger, type LogLevel } from "./logger.ts";
+import { diagClear, diagLog, diagTail, diagSubscribe, logger, setLogConfig, LEVEL_ORDER, type LogLevel } from "./logger.ts";
 import { PluginManager } from "./plugins/manager.ts";
 import { Plugin as CoreCommandsPlugin, manifest as coreCommandsManifest } from "./plugins/builtin/core_commands.ts";
 import { Plugin as SpamfilterPlugin, manifest as spamManifest } from "./plugins/builtin/spamfilter.ts";
@@ -370,6 +370,20 @@ function persistSetting(section: string, key: string, value: unknown) {
     logger.warn("server", "settings.json persist failed", { section, key, error: (e as Error).message });
   }
 }
+// Master verbose gate — Settings → Logging → Debug mode (+ Verbose transfer
+// debug) controls whether debug entries are stored/broadcast at all.
+// Defaults to quiet (debug:false) so diagnostics isn't flooded; the web UI
+// opts back in by saving logging.debug=true.
+function syncLogConfigFromPersisted(): void {
+  try {
+    const logging = PERSISTED_SETTINGS?.logging as Record<string, unknown> | undefined;
+    setLogConfig({
+      debug: logging?.debug === true,
+      verboseTransfers: logging?.verbose_transfers === true,
+    });
+  } catch {}
+}
+syncLogConfigFromPersisted();
 // One-time migration: drop a stored avatar in a format remote nicotine+
 // clients can't decode (WebP/SVG era) so boot stops serving bad bytes.
 // The user re-uploads a JPEG/PNG via Settings → User profile.
@@ -993,7 +1007,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       // Simple auth check via token param/header (mirror /ws)
       { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const tail = Math.min(Math.max(Number(url.searchParams.get("tail") || "500"), 1), 2000);
-      const level = (url.searchParams.get("level") as LogLevel) || "debug";
+      const level = (url.searchParams.get("level") as LogLevel) || "info";
       const scope = url.searchParams.get("scope") || undefined;
       let entries = diagTail(2000, level as LogLevel);
       if (scope) entries = entries.filter((e) => e.scope === scope);
@@ -1003,7 +1017,7 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
     if (url.pathname === "/diagnostics" && req.method === "GET") {
       { const _auth = requireAuth(req, cors); if (_auth) return _auth; }
       const tail = Math.min(Math.max(Number(url.searchParams.get("tail") || "500"), 1), 2000);
-      const level = (url.searchParams.get("level") as LogLevel) || "debug";
+      const level = (url.searchParams.get("level") as LogLevel) || "info";
       let entries = diagTail(2000, level as LogLevel);
       entries = entries.slice(-tail);
       const _upnpDiag = getGlobalPortMapperStatus();
@@ -1340,14 +1354,22 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
         // client auto-attaches — no per-client cookie needed).
         try { ws.send(JSON.stringify(sessionStatusPayload())); } catch {}
       }, 50);
-      // Subscribe this socket to live diagnostics logs (all logged-in users OK — ws is already the auth boundary)
+      // Subscribe this socket to live diagnostics logs (all logged-in users OK — ws is already the auth boundary).
+      // Quiet by default: live stream + init tail are filtered to the socket's
+      // subscribed level (default info). The Diagnostics page sends
+      // diagnostics:subscribe {level} to opt into debug.
+      (ws.data as unknown as Record<string, unknown>).diagLevel = "info" as LogLevel;
       const unsub = diagSubscribe((entry) => {
-        try { ws.send(JSON.stringify({ type: "diagnostics:log", entry })); } catch {}
+        try {
+          const want = ((ws.data as unknown as Record<string, unknown>).diagLevel as LogLevel) || "info";
+          if (LEVEL_ORDER[entry.level] < LEVEL_ORDER[want]) return;
+          ws.send(JSON.stringify({ type: "diagnostics:log", entry }));
+        } catch {}
       });
       (ws.data as unknown as { logUnsub?: () => void }).logUnsub = unsub;
-      // Send initial tail (500)
+      // Send initial tail (500, info by default — quiet)
       try {
-        const tail = diagTail(500, "debug");
+        const tail = diagTail(500, "info");
         ws.send(JSON.stringify({ type: "diagnostics:init", entries: tail }));
       } catch {}
       // Send initial diagnostics health
@@ -2008,6 +2030,16 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
           } else if (section === "chatrooms" || section === "userbrowse") {
             (session as unknown as { setChatroomsConfig?: (o:Record<string,unknown>)=>void; setUserbrowseConfig?: (o:Record<string,unknown>)=>void })?.setChatroomsConfig?.({ [key]: value });
             (session as unknown as { setUserbrowseConfig?: (o:Record<string,unknown>)=>void })?.setUserbrowseConfig?.({ [key]: value });
+          } else if (section === "logging" && ["debug", "verbose_transfers"].includes(key)) {
+            // Master verbose gate — applied immediately + persisted below.
+            try {
+              const logging = (PERSISTED_SETTINGS?.logging as Record<string, unknown> | undefined) ?? {};
+              setLogConfig({
+                debug: key === "debug" ? value === true : logging?.debug === true,
+                verboseTransfers: key === "verbose_transfers" ? value === true : logging?.verbose_transfers === true,
+              });
+            } catch {}
+            logger.info("bridge", "logging verbosity updated", { key, value: Boolean(value) });
           } else if (section === "logging" && ["readroomlines", "readprivatelines", "rooms_timestamp", "private_timestamp"].includes(key)) {
             // logging caps are web-only, but acknowledge
             void value;
@@ -2163,9 +2195,11 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
       }
       if (data.type === "diagnostics:subscribe") {
         const { level } = parsed as { level?: LogLevel };
-        logger.info("system", "diagnostics subscribe", { level: level || "debug" });
+        const want: LogLevel = level === "debug" || level === "info" || level === "warn" || level === "error" ? level : "info";
+        (ws.data as unknown as Record<string, unknown>).diagLevel = want;
+        logger.info("system", "diagnostics subscribe", { level: want });
         try {
-          const tail = diagTail(500, (level as LogLevel) || "debug");
+          const tail = diagTail(500, want);
           ws.send(JSON.stringify({ type: "diagnostics:init", entries: tail }));
         } catch {}
         return;

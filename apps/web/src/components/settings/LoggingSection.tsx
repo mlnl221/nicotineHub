@@ -71,9 +71,15 @@ export function LoggingSection() {
       <SectionCard title="Debug & display" actions={<SectionSaveButton section="logging" />}>
         <ToggleControl
           label="Debug mode"
-          description="Verbose debug logging."
+          description="Verbose debug logging. Off (default) hides debug entries in Diagnostics — info and above only."
           checked={l.debug}
           onChange={(v) => setOption("logging", "debug", v)}
+        />
+        <ToggleControl
+          label="Verbose transfer debug"
+          description="Noisy interop chatter (grant for unknown transfer, stray F / pierce tokens). Only applies when Debug mode is on."
+          checked={l.verbose_transfers}
+          onChange={(v) => setOption("logging", "verbose_transfers", v)}
         />
         <ToggleControl
           label="Collapse logs"
