@@ -4,6 +4,7 @@ import { join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { TransferManager } from "./transfers.ts";
+import { diagSubscribe } from "./logger.ts";
 
 function makeTmpDir() {
   return mkdtempSync(join(tmpdir(), "nicotine-transfers-test-"));
@@ -181,6 +182,43 @@ describe("transfers — download engine (Phase 2)", () => {
     expect(mgr.get("alice::Music\\same.mp3")?.status).toBe("Queued");
     expect(mgr.get("bob::Music\\same.mp3")?.status).toBe("Getting status");
     expect(mgr.get("bob::Music\\same.mp3")?.token).toBe(777);
+    mgr.close();
+  });
+
+  test("unknown grant logs debug once per key, sends no deny", () => {
+    const responses: Array<{ u: string; t: number; allowed: boolean; size?: unknown }> = [];
+    const mockSession = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendTransferResponse: (u: string, t: number, allowed: boolean, s?: unknown) => { responses.push({ u, t, allowed, size: s }); },
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    const seen: Array<{ level: string; msg: string; meta?: Record<string, unknown> }> = [];
+    const unsub = diagSubscribe((entry) => {
+      if (entry.scope === "transfer" && entry.msg === "grant for unknown transfer") {
+        seen.push({ level: entry.level, msg: entry.msg, meta: entry.meta });
+      }
+    });
+    try {
+      // Retry storm: same unknown grant 3x — only the first logs (throttled).
+      mgr.handleTransferRequest(1, 901, "Music\\ghost.mp3", "ghost-user", 100);
+      mgr.handleTransferRequest(1, 902, "Music\\ghost.mp3", "ghost-user", 100);
+      mgr.handleTransferRequest(1, 903, "Music\\ghost.mp3", "ghost-user", 100);
+      expect(seen.length).toBe(1);
+      expect(seen[0].level).toBe("debug");
+      expect(seen[0].meta?.repeats).toBe(0);
+      // Log-only fix: no TransferResponse deny, no token mapping, no row created.
+      expect(responses.length).toBe(0);
+      expect(mgr.getByToken(901)).toBeUndefined();
+      expect(mgr.get("ghost-user::Music\\ghost.mp3")).toBeUndefined();
+      // Different key logs separately.
+      mgr.handleTransferRequest(1, 904, "Music\\other.mp3", "ghost-user", 100);
+      expect(seen.length).toBe(2);
+    } finally {
+      unsub();
+    }
     mgr.close();
   });
 

@@ -239,6 +239,12 @@ export class TransferManager {
   // Peer requeues must not resurrect them as new Queued rows; answer UploadDenied instead.
   private clearedUploads = new Map<string, number>();
   private static readonly CLEARED_UPLOAD_TTL_MS = 60_000;
+  // Unknown-grant log throttle — key `${username}::${file}` → { suppressed, lastTs }.
+  // Uploader queue-cycling / late grants after clear+autoclear can re-fire per
+  // grant; log first occurrence + at most 1 per TTL with repeats:N in meta.
+  private unknownGrantLog = new Map<string, { suppressed: number; lastTs: number }>();
+  private static readonly UNKNOWN_GRANT_LOG_TTL_MS = 5 * 60_000;
+  private static readonly UNKNOWN_GRANT_LOG_MAX_KEYS = 500;
   private dataDir: string;
   private configDir: string;
   private incompleteDir: string;
@@ -1326,8 +1332,37 @@ export class TransferManager {
       }
     }
     if (!target) {
-      // Was a silent return — stuck Queued with zero signal. Now visible in diagnostics.
-      logger.warn("transfer", "grant for unknown transfer", { username: owner ?? "?", file, token });
+      // Routine interop chatter (stale/duplicate grant after clear+cancel+
+      // autoclear, uploader queue cycling) — debug + per-key throttle so a
+      // retry storm can't fill diagnostics. Was warn since a996e26 (stuck
+      // Queued with zero signal); demoted — same shape as the F-connection
+      // unknown-token debug below. No TransferResponse deny (log-only fix).
+      const key = `${owner ?? "?"}::${file}`;
+      const now = Date.now();
+      const prev = this.unknownGrantLog.get(key);
+      if (prev && now - prev.lastTs < TransferManager.UNKNOWN_GRANT_LOG_TTL_MS) {
+        prev.suppressed += 1;
+        return;
+      }
+      if (this.unknownGrantLog.size >= TransferManager.UNKNOWN_GRANT_LOG_MAX_KEYS) {
+        for (const [k, v] of this.unknownGrantLog) {
+          if (now - v.lastTs >= TransferManager.UNKNOWN_GRANT_LOG_TTL_MS) this.unknownGrantLog.delete(k);
+        }
+      }
+      const repeats = prev?.suppressed ?? 0;
+      let ownerTransferCount = 0;
+      if (owner) {
+        for (const t of this.transfers.values()) if (!t.isUpload && t.username === owner) ownerTransferCount += 1;
+      }
+      this.unknownGrantLog.set(key, { suppressed: 0, lastTs: now });
+      logger.debug("transfer", "grant for unknown transfer", {
+        username: owner ?? "?",
+        file,
+        token,
+        repeats,
+        ownerTransferCount,
+        transfersTotal: this.transfers.size,
+      });
       return;
     }
     // Finished transfers never restart: repeat peer grants (uploader queue
