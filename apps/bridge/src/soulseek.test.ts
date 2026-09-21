@@ -72,6 +72,7 @@ import {
   FramingError,
   parseSharedFileListResponse,
   parseFolderContentsResponse,
+  detectAvatarFormat,
 } from "./soulseek.ts";
 import { ShareDB, PermissionLevel } from "./shares.ts";
 
@@ -903,5 +904,20 @@ describe("audit Batch 1+3 — framing hardening", () => {
     ]);
     const parsed = parseSharedFileListResponse(deflateSync(inner));
     expect(parsed.folders[0].files[0].size).toBe(big);
+  });
+});
+
+describe("detectAvatarFormat", () => {
+  test("accepts jpeg/png/gif, rejects webp/svg/garbage", () => {
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(20)]);
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(20)]);
+    const gif = Buffer.concat([Buffer.from("GIF89a", "ascii"), Buffer.alloc(20)]);
+    const webp = Buffer.concat([Buffer.from("RIFF____WEBP", "ascii"), Buffer.alloc(20)]);
+    expect(detectAvatarFormat(jpeg)).toBe("jpeg");
+    expect(detectAvatarFormat(png)).toBe("png");
+    expect(detectAvatarFormat(gif)).toBe("gif");
+    expect(detectAvatarFormat(webp)).toBeNull();
+    expect(detectAvatarFormat(Buffer.from("<svg", "utf8"))).toBeNull();
+    expect(detectAvatarFormat(Buffer.alloc(0))).toBeNull();
   });
 });

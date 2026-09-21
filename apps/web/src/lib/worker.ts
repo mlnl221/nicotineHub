@@ -126,6 +126,32 @@ export interface TagReadResult {
   path?: string;
 }
 
+/**
+ * Convert any image file to a ≤512px JPEG data URL via the worker (ffmpeg).
+ * Raw-body POST (no multipart): the File goes as the body with its own
+ * content-type; workerFetch can't be used (it forces JSON Content-Type).
+ * Throws with the worker's {detail} message; callers fall back to canvas.
+ */
+export async function convertAvatarViaWorker(file: File): Promise<string> {
+  const base = getWorkerHttpBase();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const res = await fetch(`${base}/avatar`, {
+      method: "POST",
+      headers: { ...workerFetchHeaders(), "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+      signal: ctrl.signal,
+    });
+    const body = (await res.json().catch(() => ({}))) as { dataUrl?: string; detail?: string };
+    if (!res.ok) throw new Error(body.detail || `Avatar conversion failed (${res.status})`);
+    if (!body.dataUrl) throw new Error("Avatar conversion returned no image");
+    return body.dataUrl;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function readTags(fileName: string): Promise<TagReadResult> {
   if (process.env.NEXT_PUBLIC_DEMO === "true") {
     const backend = await import("@/lib/demo/workerBackend");

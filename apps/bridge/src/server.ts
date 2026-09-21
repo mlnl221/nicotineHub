@@ -18,7 +18,7 @@ import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync, chmodSync, 
 import { join, resolve, sep } from "node:path";
 import { z } from "zod";
 import { SoulseekSession, namespaceSearchId } from "./session.ts";
-import { userInfoPicToBase64 } from "./soulseek.ts";
+import { detectAvatarFormat, userInfoPicToBase64 } from "./soulseek.ts";
 import { PermissionLevel } from "./shares.ts";
 import { TransferManager } from "./transfers.ts";
 import { diagClear, diagLog, diagTail, diagSubscribe, logger, type LogLevel } from "./logger.ts";
@@ -370,6 +370,19 @@ function persistSetting(section: string, key: string, value: unknown) {
     logger.warn("server", "settings.json persist failed", { section, key, error: (e as Error).message });
   }
 }
+// One-time migration: drop a stored avatar in a format remote nicotine+
+// clients can't decode (WebP/SVG era) so boot stops serving bad bytes.
+// The user re-uploads a JPEG/PNG via Settings → User profile.
+try {
+  const storedPic = (PERSISTED_SETTINGS as Record<string, Record<string, unknown>>)?.userinfo?.pic;
+  if (typeof storedPic === "string" && storedPic.length > 0) {
+    const raw = storedPic.startsWith("data:") ? storedPic.slice(storedPic.indexOf(",") + 1) : storedPic;
+    if (!detectAvatarFormat(Buffer.from(raw, "base64"))) {
+      persistSetting("userinfo", "pic", "");
+      logger.warn("auth", "cleared stored profile picture with unsupported format (re-upload a JPEG or PNG)", {});
+    }
+  }
+} catch {}
 
 // Helper to collect current PortMapper status from active sessions (or global defaults)
 function getGlobalPortMapperStatus(): { enabled: boolean; active: string | null; port: number | null; ip: string | null; error: string | null; lastSuccessAt: number | null; hasPort: boolean } {
@@ -481,6 +494,9 @@ function sharedSessionCallbacks(boundTransfers: TransferManager) {
     },
     getQueuePlace: (file: string) => {
       try { return (boundTransfers as unknown as { getQueuePlace: (f: string) => number })?.getQueuePlace(file) ?? 1; } catch { return 1; }
+    },
+    getTransferStats: () => {
+      try { return (boundTransfers as unknown as { getUploadSlotStats: () => { queuedUploads: number; activeUploads: number; maxSlots: number; uploadSpeed: number } })?.getUploadSlotStats() ?? { queuedUploads: 0, activeUploads: 0, maxSlots: 3, uploadSpeed: 0 }; } catch { return { queuedUploads: 0, activeUploads: 0, maxSlots: 3, uploadSpeed: 0 }; }
     },
     filterWishlistTerm: (t: string): string | null => {
       const out = pluginManager.outgoingWishlistSearchEvent(t);
@@ -2178,8 +2194,8 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
                 let queuesize = p.queuesize;
                 let slotsavail = p.slotsavail;
                 try {
-                  const getter = (session as unknown as { opts?: { getTransferStats?: () => { queuedUploads: number; activeUploads: number } } }).opts?.getTransferStats;
-                  if (getter) { const st = getter(); queuesize = st.queuedUploads; slotsavail = st.activeUploads < 3; }
+                  const getter = (session as unknown as { opts?: { getTransferStats?: () => { queuedUploads: number; activeUploads: number; maxSlots: number } } }).opts?.getTransferStats;
+                  if (getter) { const st = getter(); queuesize = st.queuedUploads; slotsavail = st.activeUploads < st.maxSlots; }
                 } catch {}
                 const payload = { type: "user-info-response" as const, username: p.username, descr: p.descr, pic: p.pic ? p.pic.toString("base64") : null, totalupl: p.totalupl, queuesize, slotsavail, uploadallowed: p.uploadallowed };
                 setUserInfoCache(msg.username.toLowerCase(), { data: payload, ts: Date.now() });
@@ -2214,12 +2230,23 @@ export const server = Bun.serve<{ session?: SoulseekSession; transfers?: Transfe
             if (sessAny.requestPeerAddress) sessAny.requestPeerAddress(msg.username);
             break;
           }
-          case "setProfile":
-            session.setProfile({ username: session.username, descr: msg.profile.descr, pic: msg.profile.pic ? Buffer.from(msg.profile.pic, "base64") : null, totalupl: msg.profile.totalupl, queuesize: msg.profile.queuesize, slotsavail: msg.profile.slotsavail, uploadallowed: msg.profile.uploadallowed });
+          case "setProfile": {
+            let picBuf: Buffer | null = null;
+            try { picBuf = msg.profile.pic ? Buffer.from(msg.profile.pic, "base64") : null; } catch { picBuf = null; }
+            // Reject formats remote nicotine+ clients can't decode (stock
+            // gdk-pixbuf reads JPEG/PNG/GIF; WebP/SVG fail on their side).
+            // Surface to the UI instead of silently serving bad bytes.
+            if (picBuf && !detectAvatarFormat(picBuf)) {
+              ws.send(errorMessage("Picture must be JPEG, PNG or GIF — other formats (e.g. WebP, SVG) fail to load on other clients and were not saved."));
+              logger.warn("auth", "rejected profile picture with unsupported format", { username: session.username, bytes: picBuf.length });
+              break;
+            }
+            session.setProfile({ username: session.username, descr: msg.profile.descr, pic: picBuf, totalupl: msg.profile.totalupl, queuesize: msg.profile.queuesize, slotsavail: msg.profile.slotsavail, uploadallowed: msg.profile.uploadallowed });
             persistSetting("userinfo", "descr", msg.profile.descr);
             // ponytail: skip huge embedded pictures in settings.json (re-pushed by web on connect), cap 256KB
             if (typeof msg.profile.pic === "string" && msg.profile.pic.length <= 256_000) persistSetting("userinfo", "pic", msg.profile.pic);
             break;
+          }
         }
         return;
       }

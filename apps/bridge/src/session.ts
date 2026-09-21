@@ -215,6 +215,9 @@ export interface SessionOptions {
   onFileClosed?: (token: number) => void;
   onUploadPierce?: (username: string, socket: Socket) => void;
   getQueuePlace?: (file: string) => number;
+  // Live upload-slot stats (wired by server.ts to TransferManager); drives
+  // peer UserInfoResponse queuesize/slotsavail and FileSearchResponse slots.
+  getTransferStats?: () => { queuedUploads: number; activeUploads: number; maxSlots: number; uploadSpeed: number };
 }
 export interface UserInfoEvent {
   type: "user-status" | "user-stats" | "user-interests" | "peer-address"
@@ -526,6 +529,15 @@ export class SoulseekSession {
     if (this._userlist.some(u => u.toLowerCase() === lower)) return PermissionLevel.BUDDY;
     // Also check privileged users from transfers? fallback to PUBLIC
     return PermissionLevel.PUBLIC;
+  }
+
+  /** Live slot/speed/queue for FileSearchResponse (wired via getTransferStats; static fallback). */
+  private searchSlotStats(): { freeSlots: boolean; speed: number; inQueue: number } {
+    try {
+      const st = this.opts.getTransferStats?.();
+      if (st) return { freeSlots: st.activeUploads < st.maxSlots, speed: Math.max(0, Math.floor(st.uploadSpeed)), inQueue: st.queuedUploads };
+    } catch {}
+    return { freeSlots: true, speed: 0, inQueue: 0 };
   }
 
   setNetworkFilters(opts: Partial<{
@@ -1841,7 +1853,8 @@ export class SoulseekSession {
               const user = r2.string(); const token = r2.uint32(); const query = r2.string();
               {
                 // per-file excluded filtering inside buildFileSearchResponse (not query-level)
-                const resp = this.shareDB.buildFileSearchResponse(token, this.username, query);
+                const slots = this.searchSlotStats();
+                const resp = this.shareDB.buildFileSearchResponse(token, this.username, query, slots.freeSlots, slots.speed, slots.inQueue);
                 if (resp) {
                   // need to route to requester via peer — we will queue send
                   this.emitTransfer({ type: "transfer-request", username: user, token, file: query.slice(0, 120) });
@@ -2054,7 +2067,8 @@ export class SoulseekSession {
       // The response frame carries the RESPONDER name (self) — like every
       // other buildFileSearchResponse call site. Passing the searcher here
       // misattributes our files to whoever asked.
-      const resp = this.shareDB.buildFileSearchResponse(token!, this.username, query, true, 0, 0, this.getSharePermissionLevel(username ?? ""), this._maxResults);
+      const slots = this.searchSlotStats();
+      const resp = this.shareDB.buildFileSearchResponse(token!, this.username, query, slots.freeSlots, slots.speed, slots.inQueue, this.getSharePermissionLevel(username ?? ""), this._maxResults);
       if (resp && username) {
         try { this.ensurePeerAndSend(username, "P", resp); } catch {}
       } else if (resp) {
@@ -2661,7 +2675,8 @@ export class SoulseekSession {
                 this._sendMessageToChildPeers(payload, 3);
                 if (this._searchEnabled) {
                   // local shares search — filtered per-file via isFileExcluded inside buildFileSearchResponse
-                  const resp = this.shareDB.buildFileSearchResponse(ds.token, this.username, ds.query, true, 0, 0, this.getSharePermissionLevel(ds.username), this._maxResults);
+                  const slots = this.searchSlotStats();
+                  const resp = this.shareDB.buildFileSearchResponse(ds.token, this.username, ds.query, slots.freeSlots, slots.speed, slots.inQueue, this.getSharePermissionLevel(ds.username), this._maxResults);
                   if (resp) {
                     // send response to distributor requester via peer if possible
                     try { this.ensurePeerAndSend(ds.username, "P", resp); } catch {}
@@ -2859,12 +2874,12 @@ export class SoulseekSession {
           let slotsavail = this.profile.slotsavail;
           let uploadallowed = this.profile.uploadallowed;
           try {
-            const getter: any = (this.opts as unknown as { getQueuePlace?: (f: string) => number; getTransferStats?: () => { queuedUploads: number; activeUploads: number } });
-            // Try to get real stats if session wired to TransferManager via server.ts (not directly in session, but we can approximate)
-            if (getter.getTransferStats) {
-              const st = getter.getTransferStats();
+            const getter = this.opts.getTransferStats;
+            // Real stats wired via server.ts sharedSessionCallbacks; fallback is profile static
+            if (getter) {
+              const st = getter();
               queuesize = st.queuedUploads;
-              slotsavail = st.activeUploads < 3; // uploadslots 3 default, like transfers.ts
+              slotsavail = st.activeUploads < st.maxSlots;
             }
           } catch {}
           try { (peer as Socket).write(buildUserInfoResponse({ descr: this.profile.descr, pic: this.profile.pic, totalupl: this.profile.totalupl, queuesize, slotsavail, uploadallowed })); } catch {}
@@ -2891,7 +2906,8 @@ export class SoulseekSession {
             const peerName = state.username || "unknown";
             const perm = this.getSharePermissionLevel(peerName);
             // if private_search_results false, downgrade BUDDY/TRUSTED to PUBLIC for non-buddies (getSharePermissionLevel already PUBLIC for strangers)
-            const resp = this.shareDB.buildFileSearchResponse(token, this.username, query, true, 0, 0, perm, this._maxResults);
+            const slots = this.searchSlotStats();
+            const resp = this.shareDB.buildFileSearchResponse(token, this.username, query, slots.freeSlots, slots.speed, slots.inQueue, perm, this._maxResults);
             if (resp) (peer as Socket).write(resp);
           } catch {}
         }
@@ -3371,8 +3387,8 @@ export class SoulseekSession {
         let queuesize = this.profile.queuesize;
         let slotsavail = this.profile.slotsavail;
         try {
-          const getter = (this.opts as unknown as { getTransferStats?: () => { queuedUploads: number; activeUploads: number } }).getTransferStats;
-          if (getter) { const st = getter(); queuesize = st.queuedUploads; slotsavail = st.activeUploads < 3; }
+          const getter = this.opts.getTransferStats;
+          if (getter) { const st = getter(); queuesize = st.queuedUploads; slotsavail = st.activeUploads < st.maxSlots; }
         } catch {}
         return Promise.resolve({ ...this.profile, queuesize, slotsavail });
       } catch {}

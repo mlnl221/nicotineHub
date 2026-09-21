@@ -624,3 +624,40 @@ def test_tag_rename_preview_invalid(client):
     assert r.status_code == 422
     r = client.post("/tag/rename-preview", json={"files": [], "template": "{title}"})
     assert r.status_code == 422
+
+
+def _tiny_png() -> bytes:
+    import struct
+    import zlib
+
+    def chunk(typ: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + typ + data + struct.pack(">I", zlib.crc32(typ + data))
+    ihdr = struct.pack(">IIBBBBB", 4, 4, 8, 2, 0, 0, 0)
+    raw = b"".join(b"\x00" + b"\x80\x00\x00" * 4 for _ in range(4))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+def test_avatar_converts_png_to_jpeg(client):
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg not installed")
+    r = client.post("/avatar", content=_tiny_png(), headers={"Content-Type": "image/png"})
+    assert r.status_code == 200, r.text
+    url = r.json()["dataUrl"]
+    assert url.startswith("data:image/jpeg;base64,")
+    import base64
+
+    raw = base64.b64decode(url.split(",", 1)[1])
+    assert raw[:3] == b"\xff\xd8\xff"
+
+
+def test_avatar_rejects_garbage_and_empty(client):
+    r = client.post("/avatar", content=b"not an image at all" * 10, headers={"Content-Type": "image/png"})
+    assert r.status_code == 422
+    r = client.post("/avatar", content=b"", headers={"Content-Type": "image/png"})
+    assert r.status_code == 422
+
+
+def test_avatar_rejects_oversize(client):
+    r = client.post("/avatar", content=b"x" * (5_000_001,), headers={"Content-Type": "image/png"})
+    assert r.status_code == 413

@@ -878,6 +878,19 @@ export function userInfoPicToBase64(pic: unknown): string | null {
     return null;
   } catch { return null; }
 }
+/** Avatar formats stock gdk-pixbuf (remote nicotine+ clients) can decode.
+ * WebP needs webp-pixbuf-loader and SVG needs librsvg — often absent, and
+ * then the peer shows "Unrecognized image file format". Returns null otherwise. */
+export function detectAvatarFormat(buf: Buffer): "jpeg" | "png" | "gif" | null {
+  try {
+    if (!buf || buf.length < 12) return null;
+    if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "jpeg";
+    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "png";
+    const head = buf.subarray(0, 6).toString("ascii");
+    if (head === "GIF87a" || head === "GIF89a") return "gif";
+    return null;
+  } catch { return null; }
+}
 export function parseUserInfoResponse(payload: Buffer, username: string): UserInfoResponseMessage {
   const r = new SlskReader(payload);
   const descr = r.string(); const hasPic = r.bool(); const pic = hasPic ? r.bytes() : null;
