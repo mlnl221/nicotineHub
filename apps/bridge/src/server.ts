@@ -625,8 +625,12 @@ function sharedSessionCallbacks(boundTransfers: TransferManager) {
       try {
         if (event.type === "place-in-queue" && event.file && event.place !== undefined) {
           (tm as unknown as { handlePlaceInQueueResponse: (f: string, p: number, u?: string) => void }).handlePlaceInQueueResponse(event.file, event.place, event.username);
-        } else if (event.type === "transfer-request" && event.file && event.token !== undefined) {
-          (tm as unknown as { handleTransferRequest: (d: number, t: number, f: string, u?: string, s?: number | bigint) => void }).handleTransferRequest(event.direction ?? 1, event.token, event.file, event.username, event.size);
+        } else if (event.type === "transfer-request" && event.file && event.token !== undefined && event.direction !== undefined) {
+          // Real peer TransferRequest (code 40) always carries direction 0/1.
+          // Diagnostic echoes (FileSearch queries, peer:connect, F:<token>) reuse
+          // this event type without direction — keep them on the broadcast above,
+          // never feed them into grant matching (unknown-transfer warn spam).
+          (tm as unknown as { handleTransferRequest: (d: number, t: number, f: string, u?: string, s?: number | bigint) => void }).handleTransferRequest(event.direction, event.token, event.file, event.username, event.size);
         } else if (event.type === "transfer-response" && event.token !== undefined && event.username) {
           if (event.allowed) {
             (tm as unknown as { handleUploadGranted: (u: string, t: number) => void }).handleUploadGranted(event.username, event.token);

@@ -157,7 +157,7 @@ function makeNode(username: string, password: string, cols: Cols = emptyCols()) 
       cols.transfer.push(e);
       try {
         if (e.type === "place-in-queue" && e.file && e.place !== undefined) tm.handlePlaceInQueueResponse(e.file, e.place, e.username);
-        else if (e.type === "transfer-request" && e.file && e.token !== undefined) tm.handleTransferRequest(e.direction ?? 1, e.token, e.file, e.username, e.size);
+        else if (e.type === "transfer-request" && e.file && e.token !== undefined && e.direction !== undefined) tm.handleTransferRequest(e.direction, e.token, e.file, e.username, e.size);
         else if (e.type === "transfer-response" && e.token !== undefined && e.username) {
           if (e.allowed) void tm.handleUploadGranted(e.username, e.token);
           else tm.handleUploadRejected(e.username, e.token, e.reason || "Cancelled");

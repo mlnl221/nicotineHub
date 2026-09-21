@@ -184,6 +184,84 @@ describe("transfers — download engine (Phase 2)", () => {
     mgr.close();
   });
 
+  test("grant matches across separator/case/username-case drift (owner-scoped)", () => {
+    const mockSession = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendTransferResponse: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    mgr.requestDownload("Alice", "Music\\Album\\Song.mp3", 100);
+    // peer normalizes to forward slashes + different case
+    mgr.handleTransferRequest(1, 888, "music/album/song.mp3", "alice", 100);
+    const t = mgr.get("Alice::Music\\Album\\Song.mp3");
+    expect(t?.status).toBe("Getting status");
+    expect(t?.token).toBe(888);
+    mgr.close();
+  });
+
+  test("repeat grant with known token matches despite drifted path", () => {
+    const mockSession = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendTransferResponse: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    mgr.requestDownload("alice", "Music\\song.mp3", 5000);
+    mgr.handleTransferRequest(1, 111, "Music\\song.mp3", "alice", 5000);
+    // same token, drifted separators — token lookup must win, no unknown warn path
+    mgr.handleTransferRequest(1, 111, "music/song.mp3", "alice", 5000);
+    expect(mgr.get("alice::Music\\song.mp3")?.token).toBe(111);
+    mgr.close();
+  });
+
+  test("grant after finish+clear denies COMPLETE via tombstone (no unknown)", async () => {
+    const responses: Array<{ u: string; t: number; allowed: boolean; size?: unknown }> = [];
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+      sendTransferResponse: (u: string, t: number, allowed: boolean, s?: unknown) => { responses.push({ u, t, allowed, size: s }); },
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    const user = "alice";
+    const virtual = "Music\\album\\tomb.mp3";
+    const t = mgr.requestDownload(user, virtual, 512, "tomb.mp3");
+    mgr.handleTransferRequest(1, t.token!, virtual, user, 512);
+    const sock: any = { write: () => {}, end: () => {} };
+    await (mgr as any).handleFileConnection(t.token!, sock);
+    (mgr as any).handleFileChunk(t.token!, Buffer.alloc(512, 0x41));
+    expect(mgr.get(t.id)?.status).toBe("Finished");
+    mgr.controlDownload(t.id, "clear");
+    expect(mgr.get(t.id)).toBeUndefined();
+    mgr.handleTransferRequest(1, 99991, virtual, user, 512);
+    expect(mgr.get(t.id)).toBeUndefined();
+    expect(responses[responses.length - 1]).toEqual({ u: user, t: 99991, allowed: false, size: "Complete" });
+    mgr.close();
+  });
+
+  test("genuine unknown grant is rate-limited, creates nothing", () => {
+    const mockSession = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendTransferResponse: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    mgr.handleTransferRequest(1, 1, "Music\\never-queued.mp3", "ghost", 100);
+    mgr.handleTransferRequest(1, 2, "Music\\never-queued.mp3", "ghost", 100);
+    expect(mgr.get("ghost::Music\\never-queued.mp3")).toBeUndefined();
+    expect(mgr.list().length).toBe(0);
+    mgr.close();
+  });
+
   test("permanent denial does not schedule retry", () => {
     const { mgr } = makeManager(tmp);
     mgr.requestDownload("alice", "Music\\x.mp3", 100);
