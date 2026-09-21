@@ -279,6 +279,7 @@ export class SoulseekSession {
   readonly username: string;
   private serverSocket: Socket | undefined;
   private listener: TCPSocketListener | undefined;
+  private listenBoundKey: string | undefined; // "hostname:port" of the live listener, if any
   private serverBuffer = Buffer.alloc(0);
   private peerStates = new Map<Socket, PeerState>();
   private searches = new Map<number, ActiveSearch>();
@@ -715,8 +716,7 @@ export class SoulseekSession {
     this._localIpAddress = newIp;
     this.portMapper.setPort(this._listenPort, newIp);
     // Restart listener on new hostname
-    try { this.listener?.stop(); } catch {}
-    this.listener = undefined;
+    this.stopListener();
     try {
       this.startListener();
     } catch (e) {
@@ -1228,8 +1228,7 @@ export class SoulseekSession {
     this.portMapper.setPort(port, newIp);
     if (!this.loggedIn) {
       // Listener only exists when logged in; next login will bind new port
-      try { this.listener?.stop(); } catch {}
-      this.listener = undefined;
+      this.stopListener();
       // Remove old mapping if UPnP was active
       if (this._upnpEnabled) {
         try { await this.portMapper.removePortMapping(true); } catch {}
@@ -1243,8 +1242,7 @@ export class SoulseekSession {
       // setPort already updated to new port above
     }
     // Restart peer listener on new port
-    try { this.listener?.stop(); } catch {}
-    this.listener = undefined;
+    this.stopListener();
     try {
       this.startListener();
     } catch (e) {
@@ -1288,8 +1286,7 @@ export class SoulseekSession {
     // Clear serverBuffer — stale bytes from prior conn would desync framing (privilegedUsers 69 misparse)
     this.serverBuffer = Buffer.alloc(0);
     // Peer listener will be rebound on next login success; stop old now to free port for immediate retry
-    try { this.listener?.stop(); } catch {}
-    this.listener = undefined;
+    this.stopListener();
     const sock = this.serverSocket;
     this.serverSocket = undefined;
     this.loggedIn = false;
@@ -2120,6 +2117,14 @@ export class SoulseekSession {
 
   private startListener() {
     const hostname = this.getListenHostname();
+    const key = `${hostname}:${this._listenPort}`;
+    if (this.listener && this.listenBoundKey === key) {
+      // Already bound here (e.g. login success after an auto-reconnect that
+      // never tore the listener down) — reusing avoids EADDRINUSE self-collision.
+      logger.debug("server", "peer listener already bound, reusing", { port: this._listenPort, hostname });
+      return;
+    }
+    this.stopListener();
     logger.info("server", "peer listener listening", { port: this._listenPort, hostname });
     this.listener = Bun.listen({
       port: this._listenPort, hostname,
@@ -2165,6 +2170,13 @@ export class SoulseekSession {
       },
     });
     // Bun.listen keepalive is implicit via OS; ServerPing is fallback
+    this.listenBoundKey = key;
+  }
+
+  private stopListener() {
+    try { this.listener?.stop(); } catch {}
+    this.listener = undefined;
+    this.listenBoundKey = undefined;
   }
   private startIdleSweep() {
     this.idleTimer = setInterval(() => {
@@ -3484,8 +3496,8 @@ export class SoulseekSession {
     for (const peer of this.peerStates.keys()) { try { peer.end(); } catch {} }
     this.peerStates.clear();
     try { this.serverSocket?.end(); } catch {}
-    try { this.listener?.stop(); } catch {}
-    this.serverSocket = undefined; this.listener = undefined; this.loggedIn = false;
+    this.stopListener();
+    this.serverSocket = undefined; this.loggedIn = false;
     this.reconnectAttempts = 0;
   }
 }
