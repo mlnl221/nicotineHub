@@ -4,6 +4,7 @@ import { join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { TransferManager } from "./transfers.ts";
+import { diagSubscribe, setLogConfig } from "./logger.ts";
 
 function makeTmpDir() {
   return mkdtempSync(join(tmpdir(), "nicotine-transfers-test-"));
@@ -29,8 +30,8 @@ function makeManager(tmp: string, sessionMock?: any) {
 
 describe("transfers — download engine (Phase 2)", () => {
   let tmp: string;
-  beforeEach(() => { tmp = makeTmpDir(); });
-  afterEach(() => { try { rmSync(tmp, { recursive: true, force: true }); } catch {} });
+  beforeEach(() => { tmp = makeTmpDir(); setLogConfig({ debug: true, verboseTransfers: true }); });
+  afterEach(() => { try { rmSync(tmp, { recursive: true, force: true }); } catch {} setLogConfig({ debug: true, verboseTransfers: true }); });
 
   test("requestDownload creates Queued with token and null queuePosition until remote place arrives", () => {
     const { mgr, updates } = makeManager(tmp, undefined);
@@ -181,6 +182,175 @@ describe("transfers — download engine (Phase 2)", () => {
     expect(mgr.get("alice::Music\\same.mp3")?.status).toBe("Queued");
     expect(mgr.get("bob::Music\\same.mp3")?.status).toBe("Getting status");
     expect(mgr.get("bob::Music\\same.mp3")?.token).toBe(777);
+    mgr.close();
+  });
+
+  test("grant matches across separator/case/username-case drift (owner-scoped)", () => {
+    const mockSession = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendTransferResponse: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    mgr.requestDownload("Alice", "Music\\Album\\Song.mp3", 100);
+    // peer normalizes to forward slashes + different case
+    mgr.handleTransferRequest(1, 888, "music/album/song.mp3", "alice", 100);
+    const t = mgr.get("Alice::Music\\Album\\Song.mp3");
+    expect(t?.status).toBe("Getting status");
+    expect(t?.token).toBe(888);
+    mgr.close();
+  });
+
+  test("repeat grant with known token matches despite drifted path", () => {
+    const mockSession = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendTransferResponse: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    mgr.requestDownload("alice", "Music\\song.mp3", 5000);
+    mgr.handleTransferRequest(1, 111, "Music\\song.mp3", "alice", 5000);
+    // same token, drifted separators — token lookup must win, no unknown warn path
+    mgr.handleTransferRequest(1, 111, "music/song.mp3", "alice", 5000);
+    expect(mgr.get("alice::Music\\song.mp3")?.token).toBe(111);
+    mgr.close();
+  });
+
+  test("grant after finish+clear denies COMPLETE via tombstone (no unknown)", async () => {
+    const responses: Array<{ u: string; t: number; allowed: boolean; size?: unknown }> = [];
+    const mockSession: any = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendUploadSpeed: () => {},
+      sendTransferResponse: (u: string, t: number, allowed: boolean, s?: unknown) => { responses.push({ u, t, allowed, size: s }); },
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    const user = "alice";
+    const virtual = "Music\\album\\tomb.mp3";
+    const t = mgr.requestDownload(user, virtual, 512, "tomb.mp3");
+    mgr.handleTransferRequest(1, t.token!, virtual, user, 512);
+    const sock: any = { write: () => {}, end: () => {} };
+    await (mgr as any).handleFileConnection(t.token!, sock);
+    (mgr as any).handleFileChunk(t.token!, Buffer.alloc(512, 0x41));
+    expect(mgr.get(t.id)?.status).toBe("Finished");
+    mgr.controlDownload(t.id, "clear");
+    expect(mgr.get(t.id)).toBeUndefined();
+    mgr.handleTransferRequest(1, 99991, virtual, user, 512);
+    expect(mgr.get(t.id)).toBeUndefined();
+    expect(responses[responses.length - 1]).toEqual({ u: user, t: 99991, allowed: false, size: "Complete" });
+    mgr.close();
+  });
+
+  test("genuine unknown grant is rate-limited, creates nothing", () => {
+    const mockSession = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendTransferResponse: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    mgr.handleTransferRequest(1, 1, "Music\\never-queued.mp3", "ghost", 100);
+    mgr.handleTransferRequest(1, 2, "Music\\never-queued.mp3", "ghost", 100);
+    expect(mgr.get("ghost::Music\\never-queued.mp3")).toBeUndefined();
+    expect(mgr.list().length).toBe(0);
+    mgr.close();
+  });
+
+  test("unknown grant logs debug once per key, sends no deny", () => {
+    setLogConfig({ debug: true, verboseTransfers: true });
+    const responses: Array<{ u: string; t: number; allowed: boolean; size?: unknown }> = [];
+    const mockSession = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendTransferResponse: (u: string, t: number, allowed: boolean, s?: unknown) => { responses.push({ u, t, allowed, size: s }); },
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    const seen: Array<{ level: string; msg: string; meta?: Record<string, unknown> }> = [];
+    const unsub = diagSubscribe((entry) => {
+      if (entry.scope === "transfer" && entry.msg === "grant for unknown transfer") {
+        seen.push({ level: entry.level, msg: entry.msg, meta: entry.meta });
+      }
+    });
+    try {
+      // Retry storm: same unknown grant 3x — only the first logs (throttled).
+      mgr.handleTransferRequest(1, 901, "Music\\ghost.mp3", "ghost-user", 100);
+      mgr.handleTransferRequest(1, 902, "Music\\ghost.mp3", "ghost-user", 100);
+      mgr.handleTransferRequest(1, 903, "Music\\ghost.mp3", "ghost-user", 100);
+      expect(seen.length).toBe(1);
+      expect(seen[0].level).toBe("debug");
+      expect(seen[0].meta?.repeats).toBe(0);
+      // Log-only fix: no TransferResponse deny, no token mapping, no row created.
+      expect(responses.length).toBe(0);
+      expect(mgr.getByToken(901)).toBeUndefined();
+      expect(mgr.get("ghost-user::Music\\ghost.mp3")).toBeUndefined();
+      // Different key logs separately.
+      mgr.handleTransferRequest(1, 904, "Music\\other.mp3", "ghost-user", 100);
+      expect(seen.length).toBe(2);
+    } finally {
+      unsub();
+      setLogConfig({ debug: true, verboseTransfers: true });
+    }
+    mgr.close();
+  });
+
+  test("unknown grant quiet by default (debug off), still no deny", () => {
+    setLogConfig({ debug: false, verboseTransfers: false });
+    const responses: Array<{ u: string; t: number; allowed: boolean }> = [];
+    const mockSession = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendTransferResponse: (u: string, t: number, allowed: boolean) => { responses.push({ u, t, allowed }); },
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    const seen: string[] = [];
+    const unsub = diagSubscribe((entry) => {
+      if (entry.scope === "transfer" && entry.msg === "grant for unknown transfer") seen.push(entry.msg);
+    });
+    try {
+      mgr.handleTransferRequest(1, 911, "Music\\quiet.mp3", "quiet-user", 100);
+      mgr.handleTransferRequest(1, 912, "Music\\quiet.mp3", "quiet-user", 100);
+      expect(seen.length).toBe(0);
+      expect(responses.length).toBe(0);
+      expect(mgr.getByToken(911)).toBeUndefined();
+    } finally {
+      unsub();
+      setLogConfig({ debug: true, verboseTransfers: true });
+    }
+    mgr.close();
+  });
+
+  test("unknown grant quiet when verbose off but debug on", () => {
+    setLogConfig({ debug: true, verboseTransfers: false });
+    const mockSession = {
+      registerFileToken: () => {},
+      unregisterFileToken: () => {},
+      queueUpload: () => {},
+      placeInQueueRequest: () => {},
+      sendTransferResponse: () => {},
+    };
+    const { mgr } = makeManager(tmp, mockSession);
+    const seen: string[] = [];
+    const unsub = diagSubscribe((entry) => {
+      if (entry.scope === "transfer" && entry.msg === "grant for unknown transfer") seen.push(entry.msg);
+    });
+    try {
+      mgr.handleTransferRequest(1, 921, "Music\\hush.mp3", "hush-user", 100);
+      expect(seen.length).toBe(0);
+    } finally {
+      unsub();
+      setLogConfig({ debug: true, verboseTransfers: true });
+    }
     mgr.close();
   });
 

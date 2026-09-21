@@ -1,70 +1,45 @@
 # AGENTS.md — nicotine-hub
 
-> **Before starting ANY task, read `mistakes.md` in the repo root. After any mistake or user correction, append an entry to `mistakes.md` immediately using the format inside it. Never repeat a recorded mistake.**
+> **Before starting ANY task, read `mistakes.md` in the repo root (local-only, gitignored — never commit it). After any mistake or user correction, append an entry to `mistakes.md` immediately using the format inside it. Never repeat a recorded mistake.**
 
-This file is for AI coding agents working in this repo. See https://agents.md for the spec.
+Mobile-first Soulseek web client. Monorepo (Bun workspaces `apps/*`):
 
-## Project
-
-Mobile-first / browser-first Soulseek web client (beyond MVP — full 1:1 bridge). Monorepo with Bun workspaces.
-
-- `apps/bridge` — Bun: Soulseek 1:1 bridge over raw TCP (`server.slsknet.org:2242`, P/F/D leaf) + WebSocket via web same-origin `/ws` (piped to internal `bridge:8787`; direct `ws://host:8787/ws` only in bare dev / direct mode) + `/health` + `/files/:token` + volumes `CONFIG_DIR` (`/config`, autobrr parity) + `DATA_DIR` (`/data`)
-- `apps/web` — Next.js 15 (App Router) + Tailwind v4 PWA, mobile shell `TopBar`/`BottomNav`, pages for search (multi-mode), downloads/uploads (F streaming), browse, chat, buddies, profiles
-- `compose.yaml` — `web:3000` is the sole browser entrypoint (same-origin `/ws` + `/api/bridge/*` + `/api/worker/*` proxied to internal `bridge:8787`/`worker:8789`, neither published) + peer `LISTEN_PORT` (default 60754, editable in Settings → Network)
-
-Reference protocol: [nicotine-plus `doc/SLSKPROTOCOL.md`](https://github.com/nicotine-plus/nicotine-plus) and `apps/bridge/src/soulseek.ts` (framing: `[uint32 len][uint32 code][payload]`).
+- `apps/bridge` — Bun: Soulseek TCP client (`server.slsknet.org:2242`) + WS `/ws` + `/health` + `/files/:token`. Entrypoint `src/server.ts`, protocol framing in `src/soulseek.ts` (`[uint32 len][uint32 code][payload]`).
+- `apps/web` — Next.js 15 (App Router) + Tailwind v4 PWA. Dev/prod run behind `proxy-server.js`: same-origin `/ws` piped raw to bridge, `/api/bridge/*` + `/api/worker/*` proxied. Browsers never touch `:8787`/`:8789` directly.
+- `apps/worker` — Python FastAPI (scrape/spectrum/tag; `app.py`). Keeps CPU/IO-heavy work off the SLSK event loop.
+- `compose.yaml` — only `web:3000` + peer `LISTEN_PORT` published; bridge/worker stay on the compose network.
 
 ## Commands
 
 ```bash
-bun install                          # install workspace deps
-bun run dev                          # run bridge + web concurrently
-bun run --cwd apps/bridge dev        # bridge only -> ws://localhost:8787/ws
-bun run --cwd apps/web dev           # web only -> http://localhost:3000
-bun test                             # bridge unit tests (hex vs protocol doc)
-bun run build                        # typecheck + prod builds (both apps)
-docker compose up --build            # full stack: localhost:3000 + localhost:8787
+bun install
+bun run dev [OFFSET] [LISTEN_PORT]  # web:3000+N, bridge:8787+N, listen:62904+N (e.g. `bun run dev 3`)
+make dev OFFSET=3                   # same via Makefile; make verify = typecheck + test + build
+bun test                            # bridge unit tests only (e2e/ excluded in bunfig.toml)
+bun run build                       # typecheck + prod builds (both apps)
+docker compose up --build           # full stack
 ```
 
-Bridge URL override: `NEXT_PUBLIC_BRIDGE_URL` (build-time) or `localStorage.nicotineHub.bridgeUrl` (runtime).
+Worker (optional): run from `apps/worker` — `PORT=8789 CONFIG_DIR=./config DATA_DIR=./data uvicorn app:app --host 0.0.0.0 --port 8789`.
+Single bridge test: `bun test src/<name>.test.ts` (from `apps/bridge`).
+Live protocol e2e: `bun run --cwd apps/bridge test:soulfind` — needs `SOULFIND_E2E=1` + soulfind binary (see `README.md` Testing); without the env var the file self-skips. Local-only test server, never production.
+Playwright UI e2e: `e2e/` runs via `playwright.config.ts` (spawns bridge+web itself).
+
+Bridge URL override: `NEXT_PUBLIC_BRIDGE_URL` (build-time) or `localStorage.nicotineHub.bridgeUrl` (runtime). Same pattern for worker (`...workerUrl`, tokens `...bridgeToken`/`...workerToken`).
 
 ## Conventions
 
-- **Bun only** — use `bun`, not `npm`/`yarn`/`npx`. `bun.lock` is committed.
-- No password persistence (`README` security note). Search results require a reachable inbound peer listener; `LISTEN_PORT` (default 60754, `server.portrange`) must be port-forwarded TCP+UDP on the homelab. Changing via Settings → Network triggers bridge reconnect and writes `CONFIG_DIR/listen_port` (`CONFIG_DIR` autobrr-style, default `/config`); Docker host mapping uses `${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` for both env and ports (interpolated — never hardcode env, it would discard the UI port on recreate). With the opt-in socket (`/var/run/docker.sock` + `ALLOW_CONTAINER_RESTART=1`, see `compose.yaml`) the bridge self-recreates with the new mapping; otherwise also `LISTEN_PORT=... docker compose up -d`.
-- Client version is `165/1` (unreserved major; `160/3` is reserved for Nicotine+ — never reuse; this project is unrelated to the Nicotine+ Team, see issue #181).
-- Nicotine-plus reference is local checkout `~/projects/nicotine-plus` (code + `doc/SLSKPROTOCOL.md`). Do not web-search or fetch nicotine-plus code/docs from the web. Local checkout is authoritative (pinned `nicotine-plus@8d81e66`, see `ATTRIBUTION.md`).
-- Shares on WSL `bun` dev vs Docker: `CONFIG_DIR` defaults to `/config` and `DATA_DIR` to `/data` but on WSL fall back to `./config`/`./data` or `/tmp/nicotine-hub-*` if not writable (see `apps/bridge/src/server.ts:205`). **WSL `bun`**: add shares with absolute WSL paths like `/home/magnus/Music` or `/mnt/c/Users/you/Music` (must `existsSync` on bridge FS) — Docker `Browse /data` (`/data/Music`) only works when host path is mounted (`-v /home/you/Music:/data/Music:ro` then share `/data/Music`). Rescan warns `unavailable: [v→p]` when path not found (1 dirs 0 files). `CONFIG_DIR` holds `worker.json` 0600, `shares.json`, `downloads.json`, `plugins.json`, `plugins/`, `statistics.json`, `diagnostics.log` etc.; `DATA_DIR` holds `downloads/`, `incomplete/`, `uploads/`.
+- **Bun only** — `bun`, never `npm`/`yarn`/`npx`. `bun.lock` committed, `packageManager: bun@1.4.0`.
+- **Branches: `stage` is the dev base (repo default).** Branch off `stage`, PRs target `stage` (`gh pr create --base stage`). `main` is release-only via `stage → main` promotion. Conventional Commits (`feat:`, `fix:` …) — they drive the changelog.
+- **Worktrees/ports:** always use an `OFFSET` (`bun run dev 3` → web:3003/bridge:8790) so worktrees never collide. Never commit port changes; for docker use untracked `compose.override.yaml`.
+- **Stop dev servers before `bun run build`/`make clean`** — a running dev server corrupts `.next` (Makefile warns).
+- Verify before pushing: `bun test && bun run build` (CONTRIBUTING.md requires it; CI also runs `docker compose config --quiet`).
 - Mobile-first UI: touch targets, safe-area insets, PWA `manifest.webmanifest`.
-- Verify after changes: `bun test && bun run build`.
-- **Branches: `stage` is the dev base (repo default). Branch all work off `stage`, PRs target `stage` (`gh pr create --base stage`). `main` is release-only via `stage → main` promotion — never branch off or PR into `main` (see `CONTRIBUTING.md`, `docs/deployment.md`).
-- Browser/UI testing uses the Playwright MCP server (configured in opencode). Before driving the UI, always copy the env file into place (e.g. `cp apps/web/.env.example apps/web/.env`) so the bridge/worker URLs are present for the browser session.
 
-## Git Worktrees — per-worktree ports (avoid overlap)
+## Soulseek gotchas
 
-Every `git worktree` must run on its own ports so it never collides with `main` or other worktrees (see `mistakes.md 2026-08-28 — Port conflict`). Do not commit port changes.
-
-- **Defaults (main):** `web:3000`, `bridge:8787` (`PORT`), peer `LISTEN_PORT:60754`, `worker:8789` — see `compose.yaml` / `apps/bridge/src/server.ts:185` / `apps/web/package.json:6` (`portrange` `[60754,60754]`).
-- **On `git worktree add`:** pick the next free quad (e.g. `3001/8788/60755/8789`, `3002/8790/60756/8791`, … — bridge even, worker odd, never reuse). Check availability first: `ss -tlnp | grep -E '3000|8787|8789|60754'` or `lsof -i :3000 -i :8787 -i :8789 -i :60754` and `curl -sf http://localhost:<port>/health`.
-- **Override locally only (gitignored, never commit `compose.yaml`/`package.json` port edits):**
-  ```bash
-  # bridge (Bun) — PORT and LISTEN_PORT are read from env in apps/bridge/src/server.ts:185
-  PORT=8788 LISTEN_PORT=60755 bun run --cwd apps/bridge dev   # -> ws://localhost:8788/ws
-
-  # web (Next.js) — PORT env overrides the -p 3000 in apps/web/package.json:6
-  # NOTE: web dev runs behind proxy-server.js (same-origin /ws + /api/* proxy).
-  # INNER_PORT (outer PORT+1) must also be free — set it explicitly per worktree.
-  PORT=3001 INNER_PORT=3101 NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws NEXT_PUBLIC_WORKER_URL=http://localhost:8789 BRIDGE_INTERNAL_URL=http://localhost:8788 WORKER_INTERNAL_URL=http://localhost:8789 bun run --cwd apps/web dev  # -> http://localhost:3001
-  # or: echo "NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8788/ws" > apps/web/.env  (.env is gitignored)
-
-  # worker (Python) — run from apps/worker with system python + PYTHONPATH, or docker
-  PORT=8789 CONFIG_DIR=./config DATA_DIR=./data uvicorn app:app --host 0.0.0.0 --port 8789  # run with workdir apps/worker
-
-  # docker — use an untracked compose.override.yaml instead of editing compose.yaml
-  # compose.override.yaml (gitignored):
-  # services:
-  #   bridge: { ports: ["8788:8788", "60755:60755", "60755:60755/udp"], environment: { PORT: "8788", LISTEN_PORT: "60755" } }
-  #   web: { ports: ["3001:3000"], environment: { PORT: "3000", NEXT_PUBLIC_BRIDGE_URL: "ws://localhost:8788/ws", NEXT_PUBLIC_WORKER_URL: "http://localhost:8789" } }
-  #   worker: { ports: ["8789:8789"] }
-  ```
-- **Verify before starting worktree services:** `ps aux | grep -E "next|bun"` + `curl -sf http://localho
+- Client version `165/1` (unreserved). `160/3` belongs to Nicotine+ — never reuse (unrelated project; see issue #181, `ATTRIBUTION.md` pins `nicotine-plus@8d81e66`).
+- No password persistence: plaintext protocol, one shared login encrypted in `CONFIG_DIR/session.vault` (`0600`), cleared on sign-out.
+- Search needs a reachable inbound peer port: `LISTEN_PORT` TCP+UDP forwarded on the router. Docker mapping must stay interpolated (`${LISTEN_PORT:-60754}:${LISTEN_PORT:-60754}` in `compose.yaml`) — never hardcode the env value or the UI-chosen port is discarded on recreate. Changing it in Settings → Network hot-swaps `Bun.listen` + reconnects (SetWaitPort); host mapping needs socket self-recreate (`/var/run/docker.sock` + `ALLOW_CONTAINER_RESTART=1`) or `LISTEN_PORT=NEW docker compose up -d`.
+- `CONFIG_DIR` (`/config`: `worker.json` 0600, `shares.json`, `downloads.json`, …) vs `DATA_DIR` (`/data`: `downloads/`, `incomplete/`, `uploads/`). In dev they fall back to `./config`/`./data` when `/config` isn't writable. Share paths must `existsSync` on the bridge FS; Docker shares need the host path mounted first.
+- Protocol reference: `apps/bridge/src/soulseek.ts` + `ATTRIBUTION.md` (upstream `doc/SLSKPROTOCOL.md`).

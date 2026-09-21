@@ -398,4 +398,39 @@ describe("peer TCP framing", () => {
     expect(() => handleServerData(goodPriv.subarray(0, 5))).not.toThrow();
     expect(seen.length).toBe(before);
   });
+
+  test("startListener reuses live bind on repeat login success (auto-reconnect safe)", () => {
+    const session = Object.create(SoulseekSession.prototype) as SoulseekSession;
+    let binds = 0;
+    let stops = 0;
+    const origListen = Bun.listen;
+    (Bun as unknown as { listen: (opts: unknown) => unknown }).listen = () => {
+      binds++;
+      return { stop: () => { stops++; } };
+    };
+    try {
+      Object.assign(session as unknown as Record<string, unknown>, {
+        _interface: "",
+        _listenPort: 62904,
+        listener: undefined,
+        listenBoundKey: undefined,
+        peerStates: new Map(),
+        pendingFileTokens: new Set<number>(),
+        opts: { username: "me" },
+        username: "me",
+      });
+      const start = (session as unknown as { startListener: () => void }).startListener.bind(session);
+      start(); // initial login
+      start(); // login success after auto-reconnect (old listener never stopped) — must reuse, not EADDRINUSE
+      expect(binds).toBe(1);
+      expect(stops).toBe(0);
+      // port change must rebind
+      (session as unknown as Record<string, unknown>)._listenPort = 62905;
+      start();
+      expect(binds).toBe(2);
+      expect(stops).toBe(1);
+    } finally {
+      (Bun as unknown as { listen: (opts: unknown) => unknown }).listen = origListen;
+    }
+  });
 });
