@@ -171,6 +171,8 @@ function DiagnosticsInner() {
   const [worker, setWorker] = useState<WorkerHealth | null>(null);
   const [workerLatency, setWorkerLatency] = useState<number | null>(null);
   const [logs, setLogs] = useState<DiagEntry[]>([]);
+  // Quiet by default: info+ only. Debug (incl. unknown-grant chatter) requires
+  // Settings → Logging → Debug mode on the bridge + selecting Debug here.
   const [levelFilter, setLevelFilter] = useState<DiagLevel>("info");
   const [scopeFilter, setScopeFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
@@ -211,7 +213,7 @@ function DiagnosticsInner() {
     if (state.status !== "connected") return;
     let cancelled = false;
     const fetchLogs = async () => {
-      const bridgeHttpUrl = `${bridgeHttpBase()}/logs?tail=500`;
+      const bridgeHttpUrl = `${bridgeHttpBase()}/logs?tail=500&level=${levelFilter}`;
       try {
         const res = await fetch(bridgeHttpUrl, { cache: "no-store" });
         if (!res.ok) return;
@@ -225,7 +227,7 @@ function DiagnosticsInner() {
     fetchLogs();
     const id = setInterval(fetchLogs, 5000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [state.status]);
+  }, [state.status, levelFilter]);
 
   // poll health via HTTP if WS doesn't supply
   useEffect(() => {
@@ -455,6 +457,11 @@ function DiagnosticsInner() {
                 <input type="checkbox" checked={autoScroll} onChange={(e)=>setAutoScroll(e.target.checked)} className="accent-primary" /> autoscroll
               </label>
             </div>
+            {levelFilter === "debug" && !settings.logging.debug && (
+              <p className="mb-2 font-body text-[11px] text-on-surface-variant dark:text-outline">
+                Debug is off on the bridge — enable Settings → Logging → Debug mode to see debug entries (Verbose transfer debug for unknown-grant chatter).
+              </p>
+            )}
 
             <div
               ref={logRef}

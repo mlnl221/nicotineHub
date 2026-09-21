@@ -1,9 +1,10 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { diagLog, diagTail, diagClear, diagSubscribe } from "./logger.ts";
+import { diagLog, diagTail, diagClear, diagSubscribe, setLogConfig, shouldLogTransferChatter } from "./logger.ts";
 
 describe("diagnostics logger", () => {
   beforeEach(() => {
     diagClear();
+    setLogConfig({ debug: true, verboseTransfers: true });
   });
 
   test("tail returns last 500 and preserves order", () => {
@@ -61,5 +62,30 @@ describe("diagnostics logger", () => {
     const long = "y".repeat(600);
     diagLog("info", "system", "hi", { big: long });
     expect((diagTail(1)[0].meta?.big as string).length).toBe(501);
+  });
+
+  test("debug dropped at source when debug disabled", () => {
+    setLogConfig({ debug: false });
+    const received: string[] = [];
+    const unsub = diagSubscribe((entry) => received.push(entry.msg));
+    try {
+      diagLog("debug", "transfer", "grant for unknown transfer", { token: 1 });
+      diagLog("info", "transfer", "kept", {});
+      expect(received).toEqual(["kept"]);
+      expect(diagTail(10, "debug").map((e) => e.msg)).toEqual(["kept"]);
+    } finally {
+      unsub();
+      setLogConfig({ debug: true });
+    }
+  });
+
+  test("transfer chatter requires debug + verbose", () => {
+    setLogConfig({ debug: true, verboseTransfers: false });
+    expect(shouldLogTransferChatter()).toBe(false);
+    setLogConfig({ debug: true, verboseTransfers: true });
+    expect(shouldLogTransferChatter()).toBe(true);
+    setLogConfig({ debug: false, verboseTransfers: true });
+    expect(shouldLogTransferChatter()).toBe(false);
+    setLogConfig({ debug: true, verboseTransfers: true });
   });
 });

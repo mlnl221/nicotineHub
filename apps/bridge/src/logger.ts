@@ -27,9 +27,36 @@ export interface LogEntry {
 }
 
 const LEVEL_ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+export { LEVEL_ORDER };
 
 const MAX_MEMORY = 2000;
 const MAX_PERSIST = 2000;
+
+// Verbose gates — wired to settings logging.debug / logging.verbose_transfers
+// via setLogConfig() in server.ts. Defaults are permissive so unit tests that
+// log without configuring still see debug; production boot calls setLogConfig
+// with stored values (debug:false by default → quiet).
+let debugEnabled = true;
+let verboseTransfers = true;
+
+export function setLogConfig(opts: { debug?: boolean; verboseTransfers?: boolean }): void {
+  if (typeof opts.debug === "boolean") debugEnabled = opts.debug;
+  if (typeof opts.verboseTransfers === "boolean") verboseTransfers = opts.verboseTransfers;
+}
+
+export function isDebugEnabled(): boolean {
+  return debugEnabled;
+}
+
+/**
+ * Noisy interop chatter (unknown-grant / stray F / pierce unknown-token)
+ * only logs when master debug is on AND the transfer-verbose opt-in is on.
+ * Call sites check this before logger.debug; diagLog's master gate is the
+ * second layer (drops all debug when debugEnabled is false).
+ */
+export function shouldLogTransferChatter(): boolean {
+  return debugEnabled && verboseTransfers;
+}
 
 let configDir = process.env.CONFIG_DIR || "/config";
 let filePath = join(configDir, "diagnostics.log");
@@ -106,6 +133,9 @@ function truncateMsg(msg: string): string {
 
 export function diagLog(level: LogLevel, scope: LogScope, msg: string, meta?: Record<string, unknown>) {
   ensureLoaded();
+  // Master verbose gate: drop debug at source when Settings → Logging →
+  // Debug mode is off. info/warn/error always pass.
+  if (level === "debug" && !debugEnabled) return;
   const entry: LogEntry = {
     ts: new Date().toISOString(),
     level,

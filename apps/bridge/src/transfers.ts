@@ -29,7 +29,7 @@ import {
   frameMessage,
   packUint32,
 } from "./soulseek.ts";
-import { logger } from "./logger.ts";
+import { logger, shouldLogTransferChatter } from "./logger.ts";
 import { shouldBlockUser, getCountryCode } from "./networkfilter.ts";
 import { StatsManager } from "./statistics.ts";
 
@@ -239,6 +239,12 @@ export class TransferManager {
   // Peer requeues must not resurrect them as new Queued rows; answer UploadDenied instead.
   private clearedUploads = new Map<string, number>();
   private static readonly CLEARED_UPLOAD_TTL_MS = 60_000;
+  // Unknown-grant log throttle — key `${username}::${file}` → { suppressed, lastTs }.
+  // Uploader queue-cycling / late grants after clear+autoclear can re-fire per
+  // grant; log first occurrence + at most 1 per TTL with repeats:N in meta.
+  private unknownGrantLog = new Map<string, { suppressed: number; lastTs: number }>();
+  private static readonly UNKNOWN_GRANT_LOG_TTL_MS = 5 * 60_000;
+  private static readonly UNKNOWN_GRANT_LOG_MAX_KEYS = 500;
   private dataDir: string;
   private configDir: string;
   private incompleteDir: string;
@@ -251,9 +257,6 @@ export class TransferManager {
   // (uploader queue cycling) deny COMPLETE instead of warning unknown.
   private finishedDownloadTombstones = new Map<string, number>();
   private static readonly FINISHED_TOMBSTONE_TTL_MS = 10 * 60_000;
-  // Rate-limit for genuine unknown-grant warns (rogue/stale peers).
-  private unknownGrantLog = new Map<string, { at: number; suppressed: number }>();
-  private static readonly UNKNOWN_GRANT_COOLDOWN_MS = 5 * 60_000;
   private statsManager: StatsManager;
   private userUpdateCounter = new Map<string, number>();
   private globalUpdateCounter = 0;
@@ -779,27 +782,6 @@ export class TransferManager {
       }
       return true;
     } catch { return false; }
-  }
-
-  private logUnknownGrantThrottled(username: string, file: string, token: number) {
-    try {
-      const key = `${username.toLowerCase()}::${TransferManager.normalizeTransferPath(file)}`;
-      const now = Date.now();
-      const prev = this.unknownGrantLog.get(key);
-      if (prev && now - prev.at < TransferManager.UNKNOWN_GRANT_COOLDOWN_MS) {
-        prev.suppressed += 1;
-        logger.debug("transfer", "grant for unknown transfer (suppressed duplicate)", { username, file, suppressed: prev.suppressed });
-        return;
-      }
-      this.unknownGrantLog.set(key, { at: now, suppressed: 0 });
-      if (this.unknownGrantLog.size > 2000) {
-        const cutoff = now - TransferManager.UNKNOWN_GRANT_COOLDOWN_MS;
-        for (const [k, v] of this.unknownGrantLog) if (v.at < cutoff) this.unknownGrantLog.delete(k);
-      }
-      logger.warn("transfer", "grant for unknown transfer", { username, file, token });
-    } catch {
-      logger.warn("transfer", "grant for unknown transfer", { username, file, token });
-    }
   }
 
   // Downloads root for containment checks (honors DOWNLOADS_DIR override).
@@ -1391,24 +1373,60 @@ export class TransferManager {
     }
     if (!target) {
       // Delayed duplicate grant after finish+autoclear/clear: deny COMPLETE
-      // (nicotine-plus parity) instead of warning unknown.
+      // (nicotine-plus parity) instead of logging unknown.
       if (owner && this.consumeFinishedTombstone(owner, file)) {
-        logger.debug("transfer", "repeat grant for finished transfer denied (tombstone)", { username: owner, file, token });
+        if (shouldLogTransferChatter()) {
+          logger.debug("transfer", "repeat grant for finished transfer denied (tombstone)", { username: owner, file, token });
+        }
         try { this.session?.unregisterFileToken(token); } catch {}
         try {
           if (this.session?.sendTransferResponse) this.session.sendTransferResponse(owner, token, false, "Complete");
         } catch {}
         return;
       }
-      // Genuine unknown (rogue/stale peer, never queued): rate-limited warn.
-      this.logUnknownGrantThrottled(owner ?? "?", file, token);
+      // Routine interop chatter (stale/duplicate grant after clear+cancel+
+      // autoclear, uploader queue cycling) — quiet by default. Only logs when
+      // Settings → Logging → Debug mode + Verbose transfer debug are both on
+      // (see logger.shouldLogTransferChatter). Suppressed-storm accounting in
+      // unknownGrantLog is kept either way so enabling verbose later still
+      // reports repeats. No TransferResponse deny (log-only fix).
+      const key = `${(owner ?? "?").toLowerCase()}::${TransferManager.normalizeTransferPath(file)}`;
+      const now = Date.now();
+      const prev = this.unknownGrantLog.get(key);
+      if (prev && now - prev.lastTs < TransferManager.UNKNOWN_GRANT_LOG_TTL_MS) {
+        prev.suppressed += 1;
+        return;
+      }
+      if (this.unknownGrantLog.size >= TransferManager.UNKNOWN_GRANT_LOG_MAX_KEYS) {
+        for (const [k, v] of this.unknownGrantLog) {
+          if (now - v.lastTs >= TransferManager.UNKNOWN_GRANT_LOG_TTL_MS) this.unknownGrantLog.delete(k);
+        }
+      }
+      const repeats = prev?.suppressed ?? 0;
+      let ownerTransferCount = 0;
+      if (owner) {
+        for (const t of this.transfers.values()) if (!t.isUpload && t.username === owner) ownerTransferCount += 1;
+      }
+      this.unknownGrantLog.set(key, { suppressed: 0, lastTs: now });
+      if (shouldLogTransferChatter()) {
+        logger.debug("transfer", "grant for unknown transfer", {
+          username: owner ?? "?",
+          file,
+          token,
+          repeats,
+          ownerTransferCount,
+          transfersTotal: this.transfers.size,
+        });
+      }
       return;
     }
     // Finished transfers never restart: repeat peer grants (uploader queue
     // cycling after our finish) get denied COMPLETE, nicotine-plus parity
     // (downloads.py _transfer_request_downloads). No token mapping, no status change.
     if (!target.isUpload && target.status === "Finished") {
-      logger.debug("transfer", "repeat grant for finished transfer denied", { id: target.id, token });
+      if (shouldLogTransferChatter()) {
+        logger.debug("transfer", "repeat grant for finished transfer denied", { id: target.id, token });
+      }
       try { this.session?.unregisterFileToken(token); } catch {}
       try {
         const peer = owner || target.username;
@@ -1699,7 +1717,9 @@ export class TransferManager {
   async handleFileConnection(token: number, socket: Socket) {
     const t = this.getByToken(token);
     if (!t) {
-      logger.debug("transfer", "F connection unknown token, closing", { token });
+      if (shouldLogTransferChatter()) {
+        logger.debug("transfer", "F connection unknown token, closing", { token });
+      }
       try { socket.end(); } catch {}
       return;
     }
@@ -1707,7 +1727,9 @@ export class TransferManager {
     // here instead of re-downloading from offset 0 (partial was moved away
     // at finish, so resume would restart at 0). Deny went out in handleTransferRequest.
     if (!t.isUpload && t.status === "Finished") {
-      logger.debug("transfer", "F for finished transfer ignored", { id: t.id, token });
+      if (shouldLogTransferChatter()) {
+        logger.debug("transfer", "F for finished transfer ignored", { id: t.id, token });
+      }
       try { socket.end(); } catch {}
       return;
     }
@@ -1721,7 +1743,9 @@ export class TransferManager {
     // two sockets never share _onFileData/left accounting. Timed-out or
     // retried transfers (status != Transferring) still accept a fresh F.
     if (!t.isUpload && t.status === "Transferring" && (t as unknown as { _hadRealF?: boolean })._hadRealF && (t as unknown as { _onFileData?: unknown })._onFileData) {
-      logger.debug("transfer", "duplicate F ignored", { id: t.id, token });
+      if (shouldLogTransferChatter()) {
+        logger.debug("transfer", "duplicate F ignored", { id: t.id, token });
+      }
       try { socket.end(); } catch {}
       return;
     }
