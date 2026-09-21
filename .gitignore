@@ -10,7 +10,7 @@ dist/
 out/
 apps/web/.next/
 
-# env (per-worktree overrides — see AGENTS.md Git Worktrees)
+# env (per-worktree overrides — never commit port changes, see AGENTS.md)
 .env
 .env.local
 *.local
