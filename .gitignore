@@ -9,6 +9,8 @@ dist/
 .next/
 out/
 apps/web/.next/
+target/
+third_party/soulseek-rs/target/
 
 # env (per-worktree overrides — see AGENTS.md Git Worktrees)
 .env
