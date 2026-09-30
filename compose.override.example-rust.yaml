@@ -1,0 +1,39 @@
+# Example override — swap the Bun bridge for the Rust bridge (bridge-rs).
+#   cp compose.override.example-rust.yaml compose.override.yaml
+#   docker compose up -d --build
+#
+# Differences from compose.yaml: peer port is 2234 (soulseek-rs default, not
+# 60754 — republish TCP+UDP and port-forward 2234 on the homelab); the daemon
+# RPC bind (127.0.0.1:5030) stays internal, never published. Volumes match
+# compose.yaml (config:/config, data:/data). Run once after switching:
+#   docker compose exec bridge nicotine-shim migrate
+# (idempotent via /config/slsk-rs/.migrated; worker.json untouched).
+services:
+  bridge:
+    build:
+      context: .
+      dockerfile: apps/bridge-rs/Dockerfile
+    image: ghcr.io/mlnl221/nicotinehub-bridge-rs:${TAG:-latest}
+    environment:
+      PORT: "8787"
+      # Interpolated (not hardcoded) so env and the host mapping below agree.
+      LISTEN_PORT: "${LISTEN_PORT:-2234}"
+      CONFIG_DIR: "/config"
+      DATA_DIR: "/data"
+      BRIDGE_TOKEN: "${BRIDGE_TOKEN:-}"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
+    ports:
+      - "${LISTEN_PORT:-2234}:${LISTEN_PORT:-2234}"
+      - "${LISTEN_PORT:-2234}:${LISTEN_PORT:-2234}/udp"
+    volumes:
+      - config:/config
+      - data:/data
+      # Example host mounts for real file sharing (uncomment and adjust):
+      # - /home/user/Music:/data/Music:ro
+    # Note: curl-based healthcheck needs curl in the image (see Dockerfile
+    # runner); the in-image default is `nicotine-shim healthcheck` instead.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8787/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5

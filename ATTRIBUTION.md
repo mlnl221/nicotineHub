@@ -63,6 +63,18 @@ administrators’ approval (see `SLSKPROTOCOL.md` preamble).
 Repo pinned at `nicotine-plus@8d81e66` (2026-08-28). Source:
 `https://github.com/nicotine-plus/nicotine-plus` — `LICENSE` (GPL-3.0-or-later).
 
+### 2a. soulseek-rs (Rust bridge replacement, `feat/bridge-rust-replacement`)
+
+The `apps/bridge-rs` image replaces the Bun bridge with
+[`michel/soulseek-rs`](https://github.com/michel/soulseek-rs) (MIT,
+Copyright 2026 Michel de Graaf) plus a local axum shim (`nicotine-shim`).
+Vendored as a git submodule at `third_party/soulseek-rs`, pinned at
+`20bd676` (`v19.1.0`, RPC `protocol:2`). MIT-in-GPL-3.0 is compatible for
+the combined work; the pin, the `176/x` client identity (replacing our
+`165/1`), and the `server.slsknet.org:2416` default are tracked in
+`docs/proposals/bridge-rust-replacement.md`. No code changes were made
+inside the submodule.
+
 ---
 
 ## 3. Soulseek
