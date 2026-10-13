@@ -149,13 +149,21 @@ export class StatsManager {
 
 // Older statistics.json files predate the failed/cancelled counters.
 function normalize(raw: Statistics): Statistics {
+  const started_downloads = raw.started_downloads ?? 0;
+  const started_uploads = raw.started_uploads ?? 0;
+  let completed_downloads = raw.completed_downloads ?? 0;
+  let completed_uploads = raw.completed_uploads ?? 0;
+  // Clamp stale/corrupt files where completed > started (live logic holds
+  // completed <= started via requestDownload dedup + Finished deny).
+  if (started_downloads > 0 && completed_downloads > started_downloads) completed_downloads = started_downloads;
+  if (started_uploads > 0 && completed_uploads > started_uploads) completed_uploads = started_uploads;
   return {
     since_timestamp: raw.since_timestamp,
-    started_downloads: raw.started_downloads ?? 0,
-    completed_downloads: raw.completed_downloads ?? 0,
+    started_downloads,
+    completed_downloads,
     downloaded_size: raw.downloaded_size ?? 0,
-    started_uploads: raw.started_uploads ?? 0,
-    completed_uploads: raw.completed_uploads ?? 0,
+    started_uploads,
+    completed_uploads,
     uploaded_size: raw.uploaded_size ?? 0,
     failed_downloads: (raw as Partial<Statistics>).failed_downloads ?? 0,
     cancelled_downloads: (raw as Partial<Statistics>).cancelled_downloads ?? 0,

@@ -7,12 +7,12 @@
  * Requirements (hybrid spec):
  * - visible to all logged-in users
  * - persistent (survives restart) via CONFIG_DIR/diagnostics.log (JSONL)
- * - 500 lines shown (cap stored at 2000, tail 500)
+ * - 500 lines shown (cap stored at 20000, tail 500)
  * - covers everything: bridge server, Soulseek session, transfers, search, WS
  * - WS broadcast throttled, file append atomic
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFile, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -28,14 +28,16 @@ export interface LogEntry {
 
 const LEVEL_ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 
-const MAX_MEMORY = 2000;
-const MAX_PERSIST = 2000;
+const MAX_MEMORY = 20000;
+const MAX_PERSIST = 20000;
 
 let configDir = process.env.CONFIG_DIR || "/config";
 let filePath = join(configDir, "diagnostics.log");
 
 const ring: LogEntry[] = [];
 const listeners = new Set<(entry: LogEntry) => void>();
+let lastTrim = 0;
+const TRIM_INTERVAL_MS = 60_000;
 
 let loaded = false;
 
@@ -73,12 +75,23 @@ function persist(entry: LogEntry) {
   if (isTestEnv()) return;
   try {
     mkdirSync(configDir, { recursive: true });
-    appendFileSync(filePath, JSON.stringify(entry) + "\n", "utf8");
-    // trim file if > MAX_PERSIST (rewrite)
-    // cheap: check ring length, if exceeds, rewrite file from ring
-    if (ring.length > MAX_PERSIST) {
-      const tail = ring.slice(-MAX_PERSIST);
-      writeFileSync(filePath, tail.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
+    // Async append: sync disk I/O on this hot path blocked the event loop for
+    // seconds during post-login grant bursts (35+/sec), stalling WS pong and
+    // /health past their timeouts. O_APPEND keeps lines intact; the throttled
+    // trim rewrite below stays sync (rare) and only ever drops lines still in ring.
+    appendFile(filePath, JSON.stringify(entry) + "\n", "utf8", () => {});
+    // trim file if ring is full (rewrite capped) — throttled: ring.length never
+    // exceeds MAX_PERSIST post-shift so `>` never fires; `>=` every line would
+    // rewrite 2000 lines per log during a storm. Trim at most once per minute.
+    if (ring.length >= MAX_PERSIST) {
+      const now = Date.now();
+      if (now - lastTrim > TRIM_INTERVAL_MS) {
+        lastTrim = now;
+        try {
+          const tail = ring.slice(-MAX_PERSIST);
+          writeFileSync(filePath, tail.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
+        } catch {}
+      }
     }
   } catch {}
 }
@@ -138,7 +151,11 @@ export function diagSubscribe(cb: (entry: LogEntry) => void): () => void {
   return () => listeners.delete(cb);
 }
 
-export function diagTail(n = 500, minLevel: LogLevel = "debug"): LogEntry[] {
+export function diagLevelAllowed(level: LogLevel, min: LogLevel): boolean {
+  return LEVEL_ORDER[level] >= LEVEL_ORDER[min];
+}
+
+export function diagTail(n = 500, minLevel: LogLevel = "info"): LogEntry[] {
   ensureLoaded();
   const threshold = LEVEL_ORDER[minLevel];
   const filtered = ring.filter((e) => LEVEL_ORDER[e.level] >= threshold);

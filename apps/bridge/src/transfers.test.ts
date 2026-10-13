@@ -1033,3 +1033,37 @@ describe("transfers — explicit clear sticks (no resurrect)", () => {
     mgr.close();
   });
 });
+
+describe("transfers — terminal status guard", () => {
+  let tmp: string;
+  beforeEach(() => { tmp = makeTmpDir(); });
+  afterEach(() => { try { rmSync(tmp, { recursive: true, force: true }); } catch {} });
+
+  test("post-finish peer messages never resurrect a Finished download", () => {
+    const { mgr } = makeManager(tmp);
+    const t = mgr.requestDownload("alice", "Music\\done.mp3", 1000);
+    (mgr as any).transfers.get(t.id).status = "Finished";
+    mgr.handleUploadFailed("Music\\done.mp3", "alice");
+    expect(mgr.get(t.id)?.status).toBe("Finished");
+    mgr.handleUploadDenied("Music\\done.mp3", "Denied", "alice");
+    expect(mgr.get(t.id)?.status).toBe("Finished");
+    mgr.close();
+  });
+
+  test("orphan sweep removes only unowned 0-byte partials", () => {
+    const { mgr } = makeManager(tmp);
+    const live = mgr.requestDownload("alice", "Music\\live.mp3", 100);
+    const inc = join(tmp, "incomplete");
+    const partialFor = (v: string, u: string, base: string) =>
+      join(inc, `INCOMPLETE${createHash("md5").update(v + u).digest("hex")}${base}`);
+    writeFileSync(partialFor("Music\\live.mp3", "alice", "live.mp3"), Buffer.alloc(10));
+    writeFileSync(join(inc, "INCOMPLETEdeadbeefzero.mp3"), Buffer.alloc(0));
+    writeFileSync(join(inc, "INCOMPLETEdeadbeefkeep.mp3"), Buffer.alloc(5));
+    const res = mgr.sweepOrphanPartials();
+    expect(res.removed).toBe(1);
+    expect(existsSync(partialFor("Music\\live.mp3", "alice", "live.mp3"))).toBe(true);
+    expect(existsSync(join(inc, "INCOMPLETEdeadbeefkeep.mp3"))).toBe(true);
+    expect(mgr.get(live.id)?.status).toBe("Queued");
+    mgr.close();
+  });
+});
